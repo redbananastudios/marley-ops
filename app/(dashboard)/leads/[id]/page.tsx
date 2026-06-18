@@ -1,9 +1,13 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { Button } from "@/components/ui/button";
 import { CHANNEL_LABELS } from "@/lib/leads/schema";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MessageButton } from "@/components/comms/message-button";
 import { StatusChanger } from "./status-changer";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +70,20 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         ? supabase.from("profiles").select("full_name").eq("id", lead.estimator_id).single()
         : Promise.resolve({ data: null }),
     ]);
+
+  const { data: comms } = await supabase
+    .from("communications")
+    .select("id, channel, to_address, subject, body, status, send_count, last_sent_at, created_at")
+    .eq("lead_id", id)
+    .order("created_at", { ascending: false });
+  const commsRows = comms ?? [];
+
+  const { data: quotes } = await supabase
+    .from("quotes")
+    .select("id, quote_ref, grand_total, status, email_send_count, created_at")
+    .eq("lead_id", id)
+    .order("created_at", { ascending: false });
+  const quoteRows = quotes ?? [];
 
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
@@ -190,7 +208,40 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         {/* Quotes */}
         <TabsContent value="quotes" className="mt-5">
           <Card className="p-0">
-            <EmptyState>No quotes yet.</EmptyState>
+            <div className="flex items-center justify-between border-b px-5 py-3.5">
+              <h2 className="font-display text-lg text-foreground">Quotes</h2>
+              <Button asChild size="sm">
+                <Link href={`/quotes/new?leadId=${lead.id}`}>
+                  <Plus strokeWidth={1.75} />
+                  New quote
+                </Link>
+              </Button>
+            </div>
+            {quoteRows.length === 0 ? (
+              <EmptyState>No quotes yet.</EmptyState>
+            ) : (
+              <ul className="divide-y">
+                {quoteRows.map((qr) => (
+                  <li key={qr.id}>
+                    <Link
+                      href={`/quotes/${qr.id}`}
+                      className="flex items-center justify-between px-5 py-3.5 hover:bg-muted"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{qr.quote_ref}</p>
+                        <p className="text-xs text-mist-400">
+                          {qr.status}
+                          {qr.email_send_count > 0 ? ` · emailed ×${qr.email_send_count}` : ""}
+                        </p>
+                      </div>
+                      <span className="tabular text-sm font-semibold text-foreground">
+                        {qr.grand_total != null ? `£${Number(qr.grand_total).toLocaleString("en-GB")}` : "—"}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </TabsContent>
 
@@ -230,7 +281,45 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         {/* Comms */}
         <TabsContent value="comms" className="mt-5">
           <Card className="p-0">
-            <EmptyState>No messages yet.</EmptyState>
+            <div className="flex items-center justify-between border-b px-5 py-3.5">
+              <h2 className="font-display text-lg text-foreground">Messages</h2>
+              <MessageButton
+                leadId={lead.id}
+                clientId={lead.client_id ?? undefined}
+                defaultEmail={client?.email ?? lead.email ?? undefined}
+                defaultPhone={client?.phone_e164 ?? lead.phone ?? undefined}
+              />
+            </div>
+            {commsRows.length === 0 ? (
+              <EmptyState>No messages sent yet.</EmptyState>
+            ) : (
+              <ul className="divide-y">
+                {commsRows.map((c) => (
+                  <li key={c.id} className="px-5 py-3.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-foreground">
+                        <span className="uppercase text-mist-400">{c.channel}</span> · {c.to_address}
+                        {c.send_count > 1 ? <span className="text-mist-400"> ×{c.send_count}</span> : null}
+                      </p>
+                      <span
+                        className={
+                          c.status === "sent"
+                            ? "text-xs text-success"
+                            : c.status === "failed"
+                              ? "text-xs text-danger"
+                              : "text-xs text-mist-400"
+                        }
+                      >
+                        {c.status}
+                      </span>
+                    </div>
+                    {c.subject ? <p className="mt-0.5 text-sm text-foreground">{c.subject}</p> : null}
+                    <p className="mt-0.5 line-clamp-2 text-xs text-mist-400">{c.body}</p>
+                    <p className="mt-1 text-xs text-mist-400">{fmtShort(c.last_sent_at ?? c.created_at)}</p>
+                  </li>
+                ))}
+              </ul>
+            )}
           </Card>
         </TabsContent>
       </Tabs>
