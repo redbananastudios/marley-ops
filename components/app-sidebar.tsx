@@ -26,18 +26,18 @@ const NAV: NavGroup[] = [
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, live: true },
       { href: "/leads", label: "Leads", icon: Users, live: true },
-      { href: "/board", label: "Board", icon: KanbanSquare, live: false },
+      { href: "/board", label: "Board", icon: KanbanSquare, live: true },
     ],
   },
   {
     group: "Schedule",
     items: [
-      { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: false },
-      { href: "/schedule/removals", label: "Removals", icon: Truck, live: false },
-      { href: "/schedule/overlap", label: "Overlap", icon: CalendarRange, live: false },
+      { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
+      { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
+      { href: "/schedule/overlap", label: "Overlap", icon: CalendarRange, live: true },
     ],
   },
-  { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: false }] },
+  { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: true }] },
   { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: false }] },
 ];
 

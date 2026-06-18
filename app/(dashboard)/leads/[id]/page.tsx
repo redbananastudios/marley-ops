@@ -8,6 +8,7 @@ import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
+import { SurveyPanel } from "@/components/survey/survey-panel";
 import { StatusChanger } from "./status-changer";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +85,26 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
+
+  const { data: survey } = await supabase
+    .from("surveys")
+    .select("id, survey_data")
+    .eq("lead_id", id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const { data: surveyPhotos } = survey
+    ? await supabase
+        .from("survey_photos")
+        .select("id, category, storage_path")
+        .eq("survey_id", survey.id)
+        .order("created_at", { ascending: true })
+    : { data: [] };
+  const surveyData = (survey?.survey_data ?? {}) as {
+    items?: Record<string, number>;
+    accessNotes?: string;
+    largeItemsNotes?: string;
+  };
 
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
@@ -247,9 +268,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         {/* Survey */}
         <TabsContent value="survey" className="mt-5">
-          <Card className="p-0">
-            <EmptyState>No survey booked yet.</EmptyState>
-          </Card>
+          <SurveyPanel
+            leadId={lead.id}
+            surveyId={survey?.id ?? null}
+            initialData={{
+              items: surveyData.items,
+              accessNotes: surveyData.accessNotes,
+              largeItemsNotes: surveyData.largeItemsNotes,
+            }}
+            initialPhotos={(surveyPhotos ?? []) as { id: string; category: "access" | "large_items"; storage_path: string }[]}
+          />
         </TabsContent>
 
         {/* Activity */}
