@@ -1,0 +1,38 @@
+import { z } from "zod";
+
+/** Lead entry channels selectable in the Add-lead form (web is sync-only, not here). */
+export const MANUAL_ENTRY_CHANNELS = [
+  { value: "phone_google", label: "Phone — Google" },
+  { value: "phone_facebook", label: "Phone — Facebook" },
+  { value: "phone_referral", label: "Phone — Referral" },
+  { value: "manual", label: "Manual / walk-in" },
+  { value: "referral", label: "Referral" },
+] as const;
+
+export const CHANNEL_LABELS: Record<string, string> = {
+  web: "Website",
+  phone_google: "Phone — Google",
+  phone_facebook: "Phone — Facebook",
+  phone_referral: "Phone — Referral",
+  manual: "Manual / walk-in",
+  referral: "Referral",
+};
+
+export const newLeadSchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  phone: z.string().trim().optional().or(z.literal("")),
+  email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
+  entry_channel: z.enum(["phone_google", "phone_facebook", "phone_referral", "manual", "referral"]),
+  referrer_answer: z.string().trim().optional().or(z.literal("")),
+  from_postcode: z.string().trim().optional().or(z.literal("")),
+  to_postcode: z.string().trim().optional().or(z.literal("")),
+  property_size: z.string().trim().optional().or(z.literal("")),
+  preferred_date: z.string().trim().optional().or(z.literal("")),
+  notes: z.string().trim().optional().or(z.literal("")),
+})
+  .refine((v) => (v.phone && v.phone.length > 0) || (v.email && v.email.length > 0), {
+    message: "Provide a phone or an email",
+    path: ["phone"],
+  });
+
+export type NewLeadInput = z.infer<typeof newLeadSchema>;

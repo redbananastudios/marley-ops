@@ -1,0 +1,239 @@
+import { notFound } from "next/navigation";
+import { createClient } from "@/lib/supabase/server";
+import { CHANNEL_LABELS } from "@/lib/leads/schema";
+import { LeadStatusBadge } from "@/components/lead-status-badge";
+import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { StatusChanger } from "./status-changer";
+
+export const dynamic = "force-dynamic";
+
+function fmtDate(value: string | null | undefined) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function fmtShort(value: string | null | undefined) {
+  if (!value) return "—";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Fact({ label, value, mono = false }: { label: string; value?: string | null; mono?: boolean }) {
+  return (
+    <div>
+      <p className="eyebrow">{label}</p>
+      <p className={mono ? "mt-0.5 break-all font-mono text-xs text-foreground" : "mt-0.5 text-sm text-foreground"}>
+        {value && String(value).trim() ? value : "—"}
+      </p>
+    </div>
+  );
+}
+
+function EmptyState({ children }: { children: React.ReactNode }) {
+  return <p className="px-5 py-12 text-center text-sm text-mist-400">{children}</p>;
+}
+
+export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const supabase = await createClient();
+
+  const { data: lead } = await supabase.from("leads").select("*").eq("id", id).single();
+  if (!lead) notFound();
+
+  const [{ data: client }, { data: activities }, { count: clientLeadCount }, { data: estimator }] =
+    await Promise.all([
+      lead.client_id
+        ? supabase.from("clients").select("*").eq("id", lead.client_id).single()
+        : Promise.resolve({ data: null }),
+      supabase
+        .from("activities")
+        .select("*")
+        .eq("lead_id", id)
+        .order("created_at", { ascending: false }),
+      lead.client_id
+        ? supabase.from("leads").select("id", { count: "exact", head: true }).eq("client_id", lead.client_id)
+        : Promise.resolve({ count: 0 }),
+      lead.estimator_id
+        ? supabase.from("profiles").select("full_name").eq("id", lead.estimator_id).single()
+        : Promise.resolve({ data: null }),
+    ]);
+
+  const activityRows = activities ?? [];
+  const previousCount = (clientLeadCount ?? 1) - 1;
+
+  const hasAttribution = Boolean(
+    lead.gclid ||
+      lead.gbraid ||
+      lead.wbraid ||
+      lead.fbclid ||
+      lead.msclkid ||
+      lead.utm_source ||
+      lead.utm_medium ||
+      lead.utm_campaign ||
+      lead.utm_content ||
+      lead.utm_term ||
+      lead.landing_url ||
+      lead.landing_referrer ||
+      lead.campaign ||
+      lead.variant_key,
+  );
+
+  const services = Array.isArray(lead.services) ? lead.services.filter(Boolean) : [];
+
+  return (
+    <main className="flex-1 p-6 md:p-8">
+      {/* Header card */}
+      <Card className="mb-6 p-0">
+        <div className="flex flex-wrap items-start justify-between gap-4 p-5">
+          <div className="min-w-0">
+            <p className="eyebrow">Lead</p>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <h1 className="font-display text-2xl text-foreground">{lead.name ?? "Unnamed lead"}</h1>
+              <LeadStatusBadge status={lead.status} />
+            </div>
+          </div>
+          <StatusChanger leadId={lead.id} status={lead.status} />
+        </div>
+
+        <div className="flex flex-wrap gap-x-10 gap-y-4 border-t px-5 py-4">
+          <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
+          <Fact label="Owner" value={estimator?.full_name || "Unassigned"} />
+          <Fact label="Submitted" value={fmtDate(lead.submitted_at ?? lead.created_at)} />
+          {previousCount > 0 ? (
+            <div>
+              <p className="eyebrow">History</p>
+              <p className="mt-0.5 text-sm text-mist-500">
+                {previousCount} previous {previousCount === 1 ? "enquiry" : "enquiries"} from this client
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </Card>
+
+      <Tabs defaultValue="overview">
+        <TabsList variant="line">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="quotes">Quotes</TabsTrigger>
+          <TabsTrigger value="survey">Survey</TabsTrigger>
+          <TabsTrigger value="activity">Activity</TabsTrigger>
+          <TabsTrigger value="comms">Comms</TabsTrigger>
+        </TabsList>
+
+        {/* Overview */}
+        <TabsContent value="overview" className="mt-5">
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Card className="p-0">
+              <div className="border-b px-5 py-3.5">
+                <h2 className="font-display text-lg text-foreground">Contact</h2>
+              </div>
+              <div className="grid gap-4 p-5 sm:grid-cols-2">
+                <Fact label="Name" value={client?.display_name ?? lead.name} />
+                <Fact label="Phone" value={client?.phone_e164 ?? client?.phone_raw ?? lead.phone} />
+                <Fact label="Email" value={client?.email ?? lead.email} />
+                <Fact label="Postcode" value={client?.postcode_home ?? lead.from_postcode} />
+              </div>
+            </Card>
+
+            <Card className="p-0">
+              <div className="border-b px-5 py-3.5">
+                <h2 className="font-display text-lg text-foreground">Move</h2>
+              </div>
+              <div className="grid gap-4 p-5 sm:grid-cols-2">
+                <Fact
+                  label="Route"
+                  value={
+                    lead.from_postcode || lead.to_postcode
+                      ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
+                      : null
+                  }
+                />
+                <Fact label="Property size" value={lead.property_size} />
+                <Fact label="Preferred date" value={fmtDate(lead.preferred_date)} />
+                <Fact label="Services" value={services.length ? services.join(", ") : null} />
+                <div className="sm:col-span-2">
+                  <Fact label="Notes" value={lead.notes} />
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {hasAttribution ? (
+            <div className="mt-5 rounded-md bg-muted p-5">
+              <p className="eyebrow mb-3">Attribution</p>
+              <div className="grid gap-x-8 gap-y-3 sm:grid-cols-2 lg:grid-cols-3">
+                <Fact label="gclid" value={lead.gclid} mono />
+                <Fact label="gbraid" value={lead.gbraid} mono />
+                <Fact label="fbclid" value={lead.fbclid} mono />
+                <Fact label="utm source" value={lead.utm_source} mono />
+                <Fact label="utm medium" value={lead.utm_medium} mono />
+                <Fact label="utm campaign" value={lead.utm_campaign} mono />
+                <Fact label="campaign" value={lead.campaign} mono />
+                <Fact label="variant" value={lead.variant_key} mono />
+                <Fact label="landing url" value={lead.landing_url} mono />
+                <div className="sm:col-span-2 lg:col-span-3">
+                  <Fact label="referrer" value={lead.landing_referrer} mono />
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </TabsContent>
+
+        {/* Quotes */}
+        <TabsContent value="quotes" className="mt-5">
+          <Card className="p-0">
+            <EmptyState>No quotes yet.</EmptyState>
+          </Card>
+        </TabsContent>
+
+        {/* Survey */}
+        <TabsContent value="survey" className="mt-5">
+          <Card className="p-0">
+            <EmptyState>No survey booked yet.</EmptyState>
+          </Card>
+        </TabsContent>
+
+        {/* Activity */}
+        <TabsContent value="activity" className="mt-5">
+          <Card className="p-0">
+            {activityRows.length === 0 ? (
+              <EmptyState>No activity yet.</EmptyState>
+            ) : (
+              <ol className="p-5">
+                {activityRows.map((a, i) => (
+                  <li key={a.id} className="relative flex gap-4 pb-5 last:pb-0">
+                    <div className="flex flex-col items-center">
+                      <span className="mt-1.5 size-2 shrink-0 rounded-full bg-mist-400" aria-hidden />
+                      {i < activityRows.length - 1 ? (
+                        <span className="mt-1 w-px flex-1 bg-border" aria-hidden />
+                      ) : null}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-foreground">{a.summary ?? a.type}</p>
+                      <p className="mt-0.5 text-xs text-mist-400">{fmtShort(a.created_at)}</p>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            )}
+          </Card>
+        </TabsContent>
+
+        {/* Comms */}
+        <TabsContent value="comms" className="mt-5">
+          <Card className="p-0">
+            <EmptyState>No messages yet.</EmptyState>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </main>
+  );
+}
