@@ -163,9 +163,9 @@ body {
   font-family: var(--font-display);
 }
 
-/* Money is always tabular */
+/* Money/figures: tabular + lining (Cormorant's default figures read ambiguously small) */
 .tabular {
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 /* Eyebrow label */
