@@ -149,6 +149,13 @@
   border-color: var(--border);
 }
 
+/* Reserve the document scrollbar gutter at all times so centred columns
+   (e.g. the quote wizard) don't resize/shift when a tall step adds a
+   scrollbar and a short step removes it. */
+html {
+  scrollbar-gutter: stable;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);

@@ -45,7 +45,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const emailedCount = quote.email_send_count ?? 0;
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
       <PageHeader
         eyebrow={`Quote · ${quote.quote_ref}`}
         title={quote.customer_name?.trim() || "New quote"}
@@ -71,6 +71,6 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         clientId={quote.client_id}
         estimatorName={estimatorName}
       />
-    </div>
+    </main>
   );
 }

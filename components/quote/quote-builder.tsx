@@ -221,7 +221,7 @@ export function QuoteBuilder({
       </nav>
 
       {/* current step body */}
-      <div className="rounded-lg border border-border bg-card p-5 md:p-6">
+      <div className="rounded-lg border border-border bg-card p-6 md:p-7">
         {step === 1 && <Step1Customer values={values} set={set} />}
         {step === 2 && <Step2Job values={values} set={set} />}
         {step === 3 && <Step3Vehicle values={values} set={set} />}
@@ -233,9 +233,10 @@ export function QuoteBuilder({
         )}
       </div>
 
-      {/* sticky bottom bar — live total + nav */}
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80">
-        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-4 py-3 md:px-6">
+      {/* sticky bottom bar — live total + nav. Offset by the sidebar (w-60) on
+          md+ so its centred row lines up with the wizard card, not the viewport. */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:left-60">
+        <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3 md:px-8">
           <button
             type="button"
             onClick={goBack}
