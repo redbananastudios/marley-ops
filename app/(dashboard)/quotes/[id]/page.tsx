@@ -49,6 +49,8 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
       <PageHeader
         eyebrow={`Quote · ${quote.quote_ref}`}
         title={quote.customer_name?.trim() || "New quote"}
+        backHref="/quotes"
+        backLabel="Quotes"
       >
         <div className="flex items-center gap-3">
           {emailedCount > 0 ? (

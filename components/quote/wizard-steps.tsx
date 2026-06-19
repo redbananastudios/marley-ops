@@ -46,24 +46,32 @@ function TextField({
   label,
   required,
   help,
+  error,
   ...props
 }: {
   label: string;
   required?: boolean;
   help?: string;
+  error?: string;
 } & React.InputHTMLAttributes<HTMLInputElement>) {
   return (
     <div className="mb-5">
       <FieldLabel required={required}>{label}</FieldLabel>
       <input
         {...props}
+        aria-invalid={error ? true : undefined}
         className={cn(
-          "h-14 w-full rounded-md border border-input bg-card px-4 text-base text-foreground",
-          "placeholder:text-mist-300 focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30",
+          "h-14 w-full rounded-md border bg-card px-4 text-base text-foreground",
+          "placeholder:text-mist-300 focus:outline-none focus:ring-2 focus:border-mm-red focus:ring-mm-red/30",
+          error ? "border-mm-red" : "border-input",
           props.className,
         )}
       />
-      {help ? <p className="mt-1.5 text-xs text-mist-400">{help}</p> : null}
+      {error ? (
+        <p className="mt-1.5 text-xs text-mm-red-deep">{error}</p>
+      ) : help ? (
+        <p className="mt-1.5 text-xs text-mist-400">{help}</p>
+      ) : null}
     </div>
   );
 }
@@ -236,8 +244,19 @@ interface StepProps {
 
 /* ---------- STEP 1 — CUSTOMER ---------- */
 
-export function Step1Customer({ values, set }: StepProps) {
+export function Step1Customer({
+  values,
+  set,
+  showErrors,
+}: StepProps & { showErrors?: boolean }) {
   const c = values.customer;
+  const [touched, setTouched] = useState<{ name?: boolean; email?: boolean }>({});
+  const nameErr = !c.name.trim() ? "Enter the customer's name." : undefined;
+  const emailErr = !c.email.trim()
+    ? "Enter an email address."
+    : !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.email.trim())
+      ? "Enter a valid email address."
+      : undefined;
   return (
     <div>
       <StepHeader title="Customer" sub="Who is this quote for?" />
@@ -248,6 +267,8 @@ export function Step1Customer({ values, set }: StepProps) {
         placeholder="e.g. Jane Smith"
         value={c.name}
         onChange={(e) => set("customer", { ...c, name: e.target.value })}
+        onBlur={() => setTouched((t) => ({ ...t, name: true }))}
+        error={(touched.name || showErrors) && nameErr ? nameErr : undefined}
       />
       <TextField
         label="Phone or mobile"
@@ -267,6 +288,8 @@ export function Step1Customer({ values, set }: StepProps) {
         placeholder="e.g. jane@example.com"
         value={c.email}
         onChange={(e) => set("customer", { ...c, email: e.target.value })}
+        onBlur={() => setTouched((t) => ({ ...t, email: true }))}
+        error={(touched.email || showErrors) && emailErr ? emailErr : undefined}
       />
     </div>
   );

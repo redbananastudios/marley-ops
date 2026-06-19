@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, Download, Loader2, Mail } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Download, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { computeQuote } from "@/lib/quote/pricing";
@@ -118,8 +118,14 @@ export function QuoteBuilder({
   const [step, setStep] = useState(1);
   const [sendOpen, setSendOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [showStep1Errors, setShowStep1Errors] = useState(false);
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
   const breakdown = useMemo(() => computeQuote(deriveInputs(values)), [values]);
+
+  const step1Valid =
+    values.customer.name.trim() !== "" &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.customer.email.trim());
 
   /* ---- typed setter passed into every step ---- */
   const set = useCallback(
@@ -140,8 +146,14 @@ export function QuoteBuilder({
     if (readOnly) return;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
+      setSaveState("saving");
       const res = await saveQuoteDraft(quoteId, values);
-      if (!res.ok) toast.error("Could not autosave: " + res.error);
+      if (!res.ok) {
+        setSaveState("idle");
+        toast.error("Could not autosave: " + res.error);
+      } else {
+        setSaveState("saved");
+      }
     }, 800);
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -164,7 +176,14 @@ export function QuoteBuilder({
     }
   }
 
-  const goNext = () => setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+  const goNext = () => {
+    if (step === 1 && !step1Valid) {
+      setShowStep1Errors(true);
+      toast.error("Add the customer's name and a valid email to continue.");
+      return;
+    }
+    setStep((s) => Math.min(TOTAL_STEPS, s + 1));
+  };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
   const reviewActions = (
@@ -222,11 +241,27 @@ export function QuoteBuilder({
         <span className="ml-3 text-xs font-medium text-mist-400">
           Step {step} / {TOTAL_STEPS} · {STEP_LABELS[step - 1]}
         </span>
+        {saveState !== "idle" ? (
+          <span
+            className="ml-auto flex items-center gap-1 text-xs text-mist-400"
+            aria-live="polite"
+          >
+            {saveState === "saving" ? (
+              <>
+                <Loader2 className="size-3 animate-spin" strokeWidth={1.75} /> Saving…
+              </>
+            ) : (
+              <>
+                <Check className="size-3" strokeWidth={2} /> Saved
+              </>
+            )}
+          </span>
+        ) : null}
       </nav>
 
       {/* current step body */}
       <div className="rounded-lg border border-border bg-card p-6 md:p-7">
-        {step === 1 && <Step1Customer values={values} set={set} />}
+        {step === 1 && <Step1Customer values={values} set={set} showErrors={showStep1Errors} />}
         {step === 2 && <Step2Job values={values} set={set} />}
         {step === 3 && <Step3Vehicle values={values} set={set} />}
         {step === 4 && <Step4Access values={values} set={set} />}

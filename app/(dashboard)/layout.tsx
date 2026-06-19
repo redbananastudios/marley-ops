@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionProfile } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
+import { MobileNav } from "@/components/mobile-nav";
 
 export default async function DashboardLayout({
   children,
@@ -10,10 +11,18 @@ export default async function DashboardLayout({
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
 
+  const navProfile = {
+    full_name: profile.full_name || profile.email || "User",
+    role: profile.role,
+  };
+
   return (
     <div className="flex min-h-screen bg-background">
-      <AppSidebar profile={{ full_name: profile.full_name || profile.email || "User", role: profile.role }} />
-      <div className="flex min-w-0 flex-1 flex-col">{children}</div>
+      <AppSidebar profile={navProfile} />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <MobileNav profile={navProfile} />
+        {children}
+      </div>
     </div>
   );
 }

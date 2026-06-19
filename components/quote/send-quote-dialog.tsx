@@ -62,11 +62,17 @@ export function SendQuoteDialog({
 }) {
   const [email, setEmail] = useState(values.customer.email || "");
   const [sending, setSending] = useState(false);
+  // When the comms guard reports the identical email already went out, hold the
+  // detail here and show an in-dialog confirm instead of a native window.confirm.
+  const [dup, setDup] = useState<{ when: string; count: number } | null>(null);
 
   // Refresh the recipient from the latest customer email each time the dialog opens
   // (useState only seeds once at mount, before the wizard's customer step is filled).
   useEffect(() => {
-    if (open) setEmail(values.customer.email || "");
+    if (open) {
+      setEmail(values.customer.email || "");
+      setDup(null);
+    }
   }, [open, values.customer.email]);
 
   async function doSend(override?: { reason: string }) {
@@ -98,15 +104,11 @@ export function SendQuoteDialog({
       });
 
       if ("duplicate" in result) {
-        const when = result.lastSentAt ? new Date(result.lastSentAt).toLocaleString("en-GB") : "earlier";
-        const proceed = window.confirm(
-          `This exact quote email was already sent ${when} (sent ${result.sendCount}×). Send it again?`,
-        );
-        if (proceed) {
-          await doSend({ reason: "Operator re-sent identical quote email" });
-        } else {
-          setSending(false);
-        }
+        const when = result.lastSentAt
+          ? new Date(result.lastSentAt).toLocaleString("en-GB")
+          : "earlier";
+        setDup({ when, count: result.sendCount });
+        setSending(false);
         return;
       }
 
@@ -147,11 +149,24 @@ export function SendQuoteDialog({
               type="email"
               inputMode="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setDup(null);
+              }}
               placeholder="jane@example.com"
               className="h-12"
             />
           </div>
+
+          {dup ? (
+            <div
+              role="alert"
+              className="rounded-md border border-mm-red/40 bg-mm-red-tint p-3 text-sm text-mm-red-deep"
+            >
+              This exact quote email already went to this address {dup.when} (sent{" "}
+              {dup.count}×). Send it again?
+            </div>
+          ) : null}
 
           <div className="rounded-md border border-border bg-muted p-3 text-sm">
             <p className="flex items-center justify-between">
@@ -172,7 +187,9 @@ export function SendQuoteDialog({
             Cancel
           </Button>
           <Button
-            onClick={() => doSend()}
+            onClick={() =>
+              dup ? doSend({ reason: "Operator re-sent identical quote email" }) : doSend()
+            }
             disabled={sending}
             className="bg-mm-red text-white hover:bg-mm-red-deep"
           >
@@ -181,7 +198,7 @@ export function SendQuoteDialog({
             ) : (
               <Mail className="size-4" strokeWidth={1.75} />
             )}
-            Send quote
+            {dup ? "Send again" : "Send quote"}
           </Button>
         </DialogFooter>
       </DialogContent>
