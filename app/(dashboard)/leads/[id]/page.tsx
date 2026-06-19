@@ -36,7 +36,7 @@ function Fact({ label, value, mono = false }: { label: string; value?: string | 
   return (
     <div>
       <p className="eyebrow">{label}</p>
-      <p className={mono ? "mt-0.5 break-all font-mono text-xs text-foreground" : "mt-0.5 text-sm text-foreground"}>
+      <p className={mono ? "mt-0.5 break-all tabular text-xs text-foreground" : "mt-0.5 text-sm text-foreground"}>
         {value && String(value).trim() ? value : "—"}
       </p>
     </div>

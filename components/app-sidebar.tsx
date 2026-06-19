@@ -70,10 +70,13 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
                 if (!it.live) {
                   return (
                     <li key={it.href}>
-                      <span className="flex cursor-not-allowed items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-mist-300">
+                      <span
+                        aria-disabled="true"
+                        className="flex min-h-11 cursor-not-allowed items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-mist-400"
+                      >
                         <Icon className="size-[18px]" strokeWidth={1.75} />
                         {it.label}
-                        <span className="ml-auto text-[10px] uppercase tracking-wide text-mist-300">soon</span>
+                        <span className="ml-auto text-[10px] uppercase tracking-wide text-mist-400">soon</span>
                       </span>
                     </li>
                   );
@@ -83,7 +86,7 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
                     <Link
                       href={it.href}
                       className={cn(
-                        "flex items-center gap-2.5 rounded-sm px-2 py-2 text-sm transition-colors",
+                        "focus-ring flex min-h-11 items-center gap-2.5 rounded-sm px-2 py-2 text-sm transition-colors",
                         active
                           ? "border-l-2 border-mm-red bg-sidebar-accent font-medium text-sidebar-accent-foreground"
                           : "text-foreground hover:bg-muted",
@@ -109,7 +112,7 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
           <button
             onClick={signOut}
             aria-label="Sign out"
-            className="rounded-sm p-2 text-mist-400 hover:bg-muted hover:text-foreground"
+            className="focus-ring flex size-11 items-center justify-center rounded-sm text-mist-400 hover:bg-muted hover:text-foreground"
           >
             <LogOut className="size-[18px]" strokeWidth={1.75} />
           </button>

@@ -93,7 +93,7 @@ function Segmented<T extends string>({
             type="button"
             onClick={() => onChange(o.value)}
             className={cn(
-              "flex min-h-[56px] items-center justify-center rounded-md border px-2 text-center text-sm font-semibold transition-colors",
+              "focus-ring flex min-h-[56px] items-center justify-center rounded-md border px-2 text-center text-sm font-semibold transition-colors",
               active
                 ? "border-mm-red bg-mm-red text-white"
                 : "border-input bg-card text-foreground active:bg-muted",
@@ -124,7 +124,7 @@ function ToggleCard({
       type="button"
       onClick={onToggle}
       className={cn(
-        "flex w-full items-center gap-3 rounded-md border p-4 text-left transition-colors",
+        "focus-ring flex w-full items-center gap-3 rounded-md border p-4 text-left transition-colors",
         active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card active:bg-muted",
       )}
     >
@@ -165,7 +165,7 @@ function Stepper({
         type="button"
         aria-label="Decrease"
         onClick={() => onChange(clamp(value - step))}
-        className="flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
+        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
       >
         <Minus className="size-5" strokeWidth={1.75} />
       </button>
@@ -177,7 +177,7 @@ function Stepper({
         type="button"
         aria-label="Increase"
         onClick={() => onChange(clamp(value + step))}
-        className="flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
+        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
       >
         <Plus className="size-5" strokeWidth={1.75} />
       </button>
@@ -488,7 +488,7 @@ export function Step3Vehicle({ values, set }: StepProps) {
                 type="button"
                 onClick={() => set("packing", p.key)}
                 className={cn(
-                  "flex w-full items-center justify-between rounded-md border p-4 text-left transition-colors",
+                  "focus-ring flex w-full items-center justify-between rounded-md border p-4 text-left transition-colors",
                   active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card active:bg-muted",
                 )}
               >
@@ -690,6 +690,8 @@ export function Step7Review({
         <label className="relative inline-flex cursor-pointer items-center">
           <input
             type="checkbox"
+            role="switch"
+            aria-label="Add VAT at 20%"
             className="peer sr-only"
             checked={values.vatEnabled}
             onChange={(e) => set("vatEnabled", e.target.checked)}
@@ -700,7 +702,7 @@ export function Step7Review({
       </div>
 
       {/* Total card */}
-      <div className="mb-6 overflow-hidden rounded-md border-2 border-charcoal">
+      <div className="mb-6 overflow-hidden rounded-md border border-border">
         <div className="border-l-4 border-mm-red p-5">
           <p className="eyebrow">Quote total</p>
           <p className="font-display tabular mt-1 text-4xl font-bold text-foreground">{gbp(b.grandTotal)}</p>

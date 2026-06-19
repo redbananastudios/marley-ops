@@ -116,8 +116,9 @@ export default async function LeadsPage({
             <Link
               key={t.key}
               href={tabHref(t.key)}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
+                "focus-ring inline-flex min-h-9 items-center rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
                 active
                   ? "bg-card text-foreground shadow-xs"
                   : "text-mist-400 hover:text-foreground",
@@ -155,7 +156,7 @@ export default async function LeadsPage({
                     <TableCell className="h-14 px-5">
                       <Link
                         href={`/leads/${r.id}`}
-                        className="block min-w-0"
+                        className="flex h-14 min-w-0 flex-col justify-center"
                       >
                         <span className="block truncate font-semibold text-foreground">
                           {r.name ?? "—"}
@@ -167,14 +168,14 @@ export default async function LeadsPage({
                       </Link>
                     </TableCell>
                     <TableCell className="h-14">
-                      <Link href={`/leads/${r.id}`} className="block">
+                      <Link href={`/leads/${r.id}`} className="flex h-14 items-center">
                         <LeadStatusBadge status={r.status} />
                       </Link>
                     </TableCell>
                     <TableCell className="h-14 px-5 text-right">
                       <Link
                         href={`/leads/${r.id}`}
-                        className="block tabular text-sm text-mist-500"
+                        className="flex h-14 items-center justify-end tabular text-sm text-mist-500"
                       >
                         {formatDate(r.submitted_at)}
                       </Link>

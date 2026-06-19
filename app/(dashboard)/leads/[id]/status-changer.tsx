@@ -41,7 +41,7 @@ export function StatusChanger({ leadId, status }: { leadId: string; status: stri
         <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} aria-label="Saving" />
       ) : null}
       <Select value={value} onValueChange={onChange} disabled={isPending}>
-        <SelectTrigger size="sm" className="min-w-[10rem]" aria-label="Change lead status">
+        <SelectTrigger size="sm" className="min-h-11 min-w-[10rem]" aria-label="Change lead status">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

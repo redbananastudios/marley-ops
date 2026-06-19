@@ -60,7 +60,7 @@ export function QuoteStatusControl({ quoteId, status }: { quoteId: string; statu
   }
   return (
     <Select value={value} onValueChange={change} disabled={busy}>
-      <SelectTrigger className="h-9 w-[150px]">
+      <SelectTrigger className="min-h-11 w-[150px]">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -172,7 +172,7 @@ export function QuoteBuilder({
       <button
         type="button"
         onClick={() => setSendOpen(true)}
-        className="flex h-14 w-full items-center justify-center gap-2 rounded-md bg-mm-red text-base font-semibold text-white hover:bg-mm-red-deep active:bg-mm-red-deep"
+        className="focus-ring flex h-14 w-full items-center justify-center gap-2 rounded-md bg-mm-red text-base font-semibold text-white hover:bg-mm-red-deep active:bg-mm-red-deep"
       >
         <Mail className="size-5" strokeWidth={1.75} />
         Send quote by email
@@ -181,7 +181,7 @@ export function QuoteBuilder({
         type="button"
         onClick={handleDownloadPdf}
         disabled={pdfBusy}
-        className="flex h-14 w-full items-center justify-center gap-2 rounded-md border border-input bg-card text-base font-semibold text-foreground active:bg-muted disabled:opacity-60"
+        className="focus-ring flex h-14 w-full items-center justify-center gap-2 rounded-md border border-input bg-card text-base font-semibold text-foreground active:bg-muted disabled:opacity-60"
       >
         {pdfBusy ? (
           <Loader2 className="size-5 animate-spin" strokeWidth={1.75} />
@@ -206,13 +206,17 @@ export function QuoteBuilder({
               key={label}
               type="button"
               onClick={() => setStep(n)}
-              aria-label={`Step ${n}: ${label}`}
+              aria-label={`Step ${n}: ${label}${done ? ", completed" : ""}`}
               aria-current={active ? "step" : undefined}
-              className={cn(
-                "h-2 rounded-full transition-all",
-                active ? "w-8 bg-mm-red" : done ? "w-2 bg-mm-red/50" : "w-2 bg-mist-200",
-              )}
-            />
+              className="focus-ring flex h-11 items-center rounded-sm px-1"
+            >
+              <span
+                className={cn(
+                  "h-2 rounded-full transition-all",
+                  active ? "w-8 bg-mm-red" : done ? "w-2 bg-mm-red/50" : "w-2 bg-mist-200",
+                )}
+              />
+            </button>
           );
         })}
         <span className="ml-3 text-xs font-medium text-mist-400">
@@ -241,7 +245,7 @@ export function QuoteBuilder({
             type="button"
             onClick={goBack}
             disabled={step === 1}
-            className="flex h-11 items-center gap-1 rounded-md border border-input bg-card px-4 text-sm font-semibold text-foreground active:bg-muted disabled:opacity-40"
+            className="focus-ring flex h-11 items-center gap-1 rounded-md border border-input bg-card px-4 text-sm font-semibold text-foreground active:bg-muted disabled:opacity-40"
           >
             <ChevronLeft className="size-4" strokeWidth={1.75} />
             Back
@@ -258,7 +262,7 @@ export function QuoteBuilder({
             <button
               type="button"
               onClick={goNext}
-              className="flex h-11 items-center gap-1 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep"
+              className="focus-ring flex h-11 items-center gap-1 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep"
             >
               Continue
               <ChevronRight className="size-4" strokeWidth={1.75} />
@@ -267,7 +271,7 @@ export function QuoteBuilder({
             <button
               type="button"
               onClick={() => setSendOpen(true)}
-              className="flex h-11 items-center gap-1 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep"
+              className="focus-ring flex h-11 items-center gap-1 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep"
             >
               <Mail className="size-4" strokeWidth={1.75} />
               Send

@@ -190,3 +190,11 @@ select,
 textarea {
   font-size: 16px;
 }
+
+/* Keyboard focus ring — brand-red, consistent across the hand-rolled controls
+   (segmented pills, steppers, progress dots, nav buttons, tabs, menu triggers).
+   outline follows border-radius and never shifts layout. */
+.focus-ring:focus-visible {
+  outline: 2px solid var(--color-mm-red);
+  outline-offset: 2px;
+}

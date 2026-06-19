@@ -5,7 +5,7 @@ const STATUS: Record<string, { label: string; className: string }> = {
   website_enquiry: { label: "Enquiry", className: "bg-mist-100 text-charcoal" },
   survey_booked: { label: "Survey booked", className: "bg-mist-100 text-mist-500" },
   quoted: { label: "Quoted", className: "bg-mm-red-tint text-mm-red-deep" },
-  provisional: { label: "Provisional", className: "bg-[#F3EEFB] text-[#6D28D9]" },
+  provisional: { label: "Provisional", className: "bg-mist-100 text-mist-500" },
   confirmed: { label: "Confirmed", className: "bg-mm-red text-white" },
   completed: { label: "Completed", className: "bg-success-bg text-success" },
   declined: { label: "Declined", className: "bg-mist-50 text-mist-400" },

@@ -147,7 +147,7 @@ export function StatusBoard({ leads: initialLeads }: { leads: Lead[] }) {
                       <DropdownMenu>
                         <DropdownMenuTrigger
                           aria-label="Move lead"
-                          className="-mr-1 -mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground focus-visible:outline-none"
+                          className="focus-ring -mr-1 -mt-0.5 inline-flex size-11 shrink-0 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
                         >
                           <MoveHorizontal strokeWidth={1.75} className="size-4" />
                         </DropdownMenuTrigger>
