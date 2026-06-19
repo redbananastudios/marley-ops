@@ -71,14 +71,14 @@ async function seedLeads(estimatorId) {
     {
       client: { display_name: "Mark Stevens", email: null, phone_raw: "07700 900111", phone_e164: "+447700900111", postcode_home: "BA9 9AB" },
       lead: {
-        status: "survey_booked", entry_channel: "phone_google", source_system: "marley_ops", referrer_answer: "Found you on Google",
+        status: "website_enquiry", entry_channel: "phone_google", source_system: "marley_ops", referrer_answer: "Found you on Google",
         name: "Mark Stevens", phone: "+447700900111", from_postcode: "BA9 9AB", to_postcode: "DT9 3NG", property_size: "4 bed",
       },
     },
     {
       client: { display_name: "Priya Patel", email: "priya@example.com", phone_raw: "07555 010101", phone_e164: "+447555010101", postcode_home: "DT11 7SF" },
       lead: {
-        status: "quoted", entry_channel: "referral", source_system: "marley_ops", referrer_answer: "Referred by the Hoopers",
+        status: "website_enquiry", entry_channel: "referral", source_system: "marley_ops", referrer_answer: "Referred by the Hoopers",
         name: "Priya Patel", phone: "+447555010101", email: "priya@example.com", from_postcode: "DT11 7SF", to_postcode: "PR9 8NL", property_size: "2 bed",
       },
     },
