@@ -80,12 +80,23 @@ export async function createLeadAction(input: NewLeadInput) {
 
 export async function updateLeadStatusAction(leadId: string, status: string) {
   const { sb, userId } = await actor();
-  const { data: current } = await sb.from("leads").select("status, client_id").eq("id", leadId).single();
+  const { data: current } = await sb
+    .from("leads")
+    .select("status, client_id, first_contacted_at")
+    .eq("id", leadId)
+    .single();
   const from = current?.status ?? null;
+
+  // First time anyone moves a lead off its initial state = first contact.
+  // Powers the dashboard "median response time" metric.
+  const stampContact = !current?.first_contacted_at;
 
   const { error } = await sb
     .from("leads")
-    .update({ status: status as never })
+    .update({
+      status: status as never,
+      ...(stampContact ? { first_contacted_at: new Date().toISOString() } : {}),
+    })
     .eq("id", leadId);
   if (error) return { ok: false as const, error: error.message };
 

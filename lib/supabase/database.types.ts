@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -386,6 +386,7 @@ export type Database = {
           estimator_id: string | null
           external_lead_id: string | null
           fbclid: string | null
+          first_contacted_at: string | null
           from_postcode: string | null
           gbraid: string | null
           gclid: string | null
@@ -428,6 +429,7 @@ export type Database = {
           estimator_id?: string | null
           external_lead_id?: string | null
           fbclid?: string | null
+          first_contacted_at?: string | null
           from_postcode?: string | null
           gbraid?: string | null
           gclid?: string | null
@@ -470,6 +472,7 @@ export type Database = {
           estimator_id?: string | null
           external_lead_id?: string | null
           fbclid?: string | null
+          first_contacted_at?: string | null
           from_postcode?: string | null
           gbraid?: string | null
           gclid?: string | null
@@ -552,6 +555,8 @@ export type Database = {
       }
       quotes: {
         Row: {
+          accepted_at: string | null
+          agreed_price: number | null
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
@@ -586,6 +591,8 @@ export type Database = {
           vehicle: string | null
         }
         Insert: {
+          accepted_at?: string | null
+          agreed_price?: number | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -620,6 +627,8 @@ export type Database = {
           vehicle?: string | null
         }
         Update: {
+          accepted_at?: string | null
+          agreed_price?: number | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null

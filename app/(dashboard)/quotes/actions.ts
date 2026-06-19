@@ -104,10 +104,69 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
 }
 
 export async function setQuoteStatus(id: string, status: string) {
+  // Accepting captures revenue + advances the lead — route through acceptQuote.
+  if (status === "accepted") return acceptQuote(id);
+
   const { sb } = await ctx();
   const { error } = await sb.from("quotes").update({ status: status as never }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true as const };
+}
+
+const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
+
+/**
+ * Accept a quote: record the agreed price (the booked revenue — may differ from
+ * the quoted total), stamp accepted_at, advance the linked lead to Confirmed
+ * (never regressing), stamp first contact if missing, and log it.
+ */
+export async function acceptQuote(id: string, agreedPrice?: number) {
+  const { sb, userId } = await ctx();
+  const { data: q, error: qErr } = await sb
+    .from("quotes")
+    .select("lead_id, client_id, grand_total")
+    .eq("id", id)
+    .single();
+  if (qErr || !q) return { ok: false as const, error: qErr?.message ?? "Quote not found" };
+
+  const price =
+    typeof agreedPrice === "number" && Number.isFinite(agreedPrice) && agreedPrice > 0
+      ? agreedPrice
+      : Number(q.grand_total ?? 0);
+
+  const { error } = await sb
+    .from("quotes")
+    .update({ status: "accepted" as never, agreed_price: price, accepted_at: new Date().toISOString() })
+    .eq("id", id);
+  if (error) return { ok: false as const, error: error.message };
+
+  if (q.lead_id) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("status, first_contacted_at")
+      .eq("id", q.lead_id)
+      .single();
+    const patch: Record<string, unknown> = {};
+    if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("confirmed")) patch.status = "confirmed";
+    if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
+    if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", q.lead_id);
+
+    await sb.from("activities").insert({
+      lead_id: q.lead_id,
+      client_id: q.client_id,
+      actor_id: userId,
+      type: "status_change",
+      summary: `Quote accepted — agreed £${price.toFixed(0)}`,
+      meta: { quote_id: id, agreed_price: price },
+    });
+    revalidatePath(`/leads/${q.lead_id}`);
+    revalidatePath("/leads");
+  }
+
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/quotes");
+  revalidatePath("/");
+  return { ok: true as const, agreedPrice: price };
 }

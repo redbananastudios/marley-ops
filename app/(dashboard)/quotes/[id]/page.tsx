@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
 import { QuoteBuilder, QuoteStatusControl } from "@/components/quote/quote-builder";
+import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -27,7 +28,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, state_blob, lead_id, client_id, email_send_count, customer_name",
+      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name",
     )
     .eq("id", id)
     .maybeSingle();
@@ -58,10 +59,20 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
               Emailed ×{emailedCount}
             </span>
           ) : null}
+          {quote.status === "accepted" && quote.agreed_price != null ? (
+            <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
+              Agreed {gbp(quote.agreed_price)}
+            </span>
+          ) : null}
           <span className="tabular font-display text-xl font-bold text-foreground">
             {gbp(quote.grand_total)}
           </span>
           <QuoteStatusControl quoteId={quote.id} status={quote.status ?? "draft"} />
+          <AcceptQuoteButton
+            quoteId={quote.id}
+            grandTotal={Number(quote.grand_total ?? 0)}
+            status={quote.status ?? "draft"}
+          />
         </div>
       </PageHeader>
 

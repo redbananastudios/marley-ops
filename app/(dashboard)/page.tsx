@@ -17,6 +17,7 @@ type LeadRow = {
   to_postcode: string | null;
   submitted_at: string | null;
   created_at: string | null;
+  first_contacted_at: string | null;
   gclid: string | null;
   gbraid: string | null;
   wbraid: string | null;
@@ -76,6 +77,14 @@ function srcLabel(l: LeadRow): string {
   return classifySource(l);
 }
 
+function fmtDuration(mins: number | null): string {
+  if (mins == null) return "—";
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const h = mins / 60;
+  if (h < 24) return `${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
 /* --------------------------------- page ----------------------------------- */
 
 export default async function DashboardPage() {
@@ -85,11 +94,11 @@ export default async function DashboardPage() {
     supabase
       .from("leads")
       .select(
-        "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+        "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
       )
       .order("submitted_at", { ascending: false }),
     supabase.from("appointments").select("id, appt_type, starts_at, status"),
-    supabase.from("quotes").select("id, status, grand_total"),
+    supabase.from("quotes").select("id, status, grand_total, agreed_price"),
   ]);
 
   const leads = (leadsData ?? []) as LeadRow[];
@@ -142,10 +151,22 @@ export default async function DashboardPage() {
   ).length;
   const quotesAwaiting = quotes.filter((q) => q.status === "sent").length;
 
-  /* pipeline value (this month, won + open) */
+  /* won revenue = agreed price on accepted quotes (falls back to quoted total) */
   const confirmedValue = quotes
     .filter((q) => q.status === "accepted")
-    .reduce((sum, q) => sum + Number(q.grand_total ?? 0), 0);
+    .reduce((sum, q) => sum + Number(q.agreed_price ?? q.grand_total ?? 0), 0);
+
+  /* median response time (submitted -> first contacted) */
+  const respMins = leads
+    .map((l) => {
+      const start = l.submitted_at || l.created_at;
+      if (!l.first_contacted_at || !start) return null;
+      const m = (new Date(l.first_contacted_at).getTime() - new Date(start).getTime()) / 60000;
+      return Number.isFinite(m) && m >= 0 ? m : null;
+    })
+    .filter((m): m is number => m != null)
+    .sort((a, b) => a - b);
+  const medianResp = respMins.length ? respMins[Math.floor(respMins.length / 2)] : null;
 
   /* 14-day trend */
   const trend: { d: number; count: number }[] = [];
@@ -173,11 +194,20 @@ export default async function DashboardPage() {
         <h1 className="font-display text-3xl text-foreground">Dashboard</h1>
       </header>
 
-      {/* volume */}
-      <section className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      {/* volume + response pulse */}
+      <section className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <VolumeCard label="New today" value={todayCount} />
-        <VolumeCard label="This week" value={last7} delta={last7 - prev7} sub="vs previous 7 days" />
-        <VolumeCard label="This month" value={last30} delta={last30 - prev30} sub="vs previous 30 days" />
+        <VolumeCard label="This week" value={last7} delta={last7 - prev7} sub="vs prev 7 days" />
+        <VolumeCard label="This month" value={last30} delta={last30 - prev30} sub="vs prev 30 days" />
+        <Card className="p-5">
+          <p className="eyebrow">Avg response</p>
+          <p className="mt-1 font-display tabular text-4xl font-bold text-foreground">
+            {fmtDuration(medianResp)}
+          </p>
+          <p className="mt-1 text-xs text-mist-400">
+            {medianResp == null ? "no leads actioned yet" : "median to first contact"}
+          </p>
+        </Card>
       </section>
 
       {/* needs action */}
