@@ -96,7 +96,7 @@ function Segmented<T extends string>({
               "focus-ring flex min-h-[56px] items-center justify-center rounded-md border px-2 text-center text-sm font-semibold transition-colors",
               active
                 ? "border-mm-red bg-mm-red text-white"
-                : "border-input bg-card text-foreground active:bg-muted",
+                : "border-input bg-card text-foreground hover:bg-muted active:bg-muted",
             )}
           >
             {o.label}
@@ -125,7 +125,7 @@ function ToggleCard({
       onClick={onToggle}
       className={cn(
         "focus-ring flex w-full items-center gap-3 rounded-md border p-4 text-left transition-colors",
-        active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card active:bg-muted",
+        active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card hover:bg-muted active:bg-muted",
       )}
     >
       <span
@@ -165,7 +165,7 @@ function Stepper({
         type="button"
         aria-label="Decrease"
         onClick={() => onChange(clamp(value - step))}
-        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
+        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground hover:bg-muted active:bg-muted"
       >
         <Minus className="size-5" strokeWidth={1.75} />
       </button>
@@ -177,7 +177,7 @@ function Stepper({
         type="button"
         aria-label="Increase"
         onClick={() => onChange(clamp(value + step))}
-        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground active:bg-muted"
+        className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground hover:bg-muted active:bg-muted"
       >
         <Plus className="size-5" strokeWidth={1.75} />
       </button>
@@ -489,7 +489,7 @@ export function Step3Vehicle({ values, set }: StepProps) {
                 onClick={() => set("packing", p.key)}
                 className={cn(
                   "focus-ring flex w-full items-center justify-between rounded-md border p-4 text-left transition-colors",
-                  active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card active:bg-muted",
+                  active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card hover:bg-muted active:bg-muted",
                 )}
               >
                 <span>

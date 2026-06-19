@@ -181,7 +181,7 @@ export function QuoteBuilder({
         type="button"
         onClick={handleDownloadPdf}
         disabled={pdfBusy}
-        className="focus-ring flex h-14 w-full items-center justify-center gap-2 rounded-md border border-input bg-card text-base font-semibold text-foreground active:bg-muted disabled:opacity-60"
+        className="focus-ring flex h-14 w-full items-center justify-center gap-2 rounded-md border border-input bg-card text-base font-semibold text-foreground hover:bg-muted active:bg-muted disabled:opacity-60"
       >
         {pdfBusy ? (
           <Loader2 className="size-5 animate-spin" strokeWidth={1.75} />
@@ -245,7 +245,7 @@ export function QuoteBuilder({
             type="button"
             onClick={goBack}
             disabled={step === 1}
-            className="focus-ring flex h-11 items-center gap-1 rounded-md border border-input bg-card px-4 text-sm font-semibold text-foreground active:bg-muted disabled:opacity-40"
+            className="focus-ring flex h-11 items-center gap-1 rounded-md border border-input bg-card px-4 text-sm font-semibold text-foreground hover:bg-muted active:bg-muted disabled:opacity-40"
           >
             <ChevronLeft className="size-4" strokeWidth={1.75} />
             Back
