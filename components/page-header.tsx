@@ -27,7 +27,7 @@ export function PageHeader({
           </Link>
         ) : null}
         <p className="eyebrow">{eyebrow}</p>
-        <h1 className="font-display text-3xl text-foreground">{title}</h1>
+        <h1 className="font-display text-3xl font-semibold text-foreground">{title}</h1>
       </div>
       {children ? <div className="flex items-center gap-2">{children}</div> : null}
     </header>

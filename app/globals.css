@@ -1,27 +1,29 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Marley Ops design system — "quiet workshop tool"
-   Marley brand (charcoal + mm-red, Cormorant + Montserrat)
-   refined to Vercel / ElevenLabs minimalism.
-   Brand hexes carried verbatim from the live quote tool.
+   Marley Ops design system — Vercel (Geist) / ElevenLabs minimal
+   Mono base + ONE rare accent (Marley red #C03838).
+   Pure-white canvas, hairline borders (no shadows on static
+   surfaces), Geist Sans throughout, cool neutral (zinc) scale.
    ============================================================ */
 
 @theme {
-  /* Brand neutrals (warm) */
-  --color-charcoal: #1a1a1a;
-  --color-ink: #222222;
+  /* Ink + dark surfaces */
+  --color-charcoal: #18181b; /* zinc-900 — dark nav / app-bar */
+  --color-ink: #09090b;      /* primary type */
   --color-paper: #fafafa;
-  --color-offwhite: #f6f5f3;
+  --color-offwhite: #ffffff;
 
-  --color-mist-50: #f8f8f7;
-  --color-mist-100: #eae7e2;
-  --color-mist-150: #efede8;
-  --color-mist-200: #cfcac2;
-  --color-mist-300: #b7b2aa;
-  --color-mist-400: #6e6a65;
-  --color-mist-500: #555350;
-  --color-mist-700: #3a3935;
+  /* Cool neutral (zinc) scale — replaces the old warm "mist" greys.
+     Names kept so existing text-mist and bg-mist utilities re-skin in place. */
+  --color-mist-50: #fafafa;   /* zinc-50  — lightest fill */
+  --color-mist-100: #f4f4f5;  /* zinc-100 — muted/secondary fill */
+  --color-mist-150: #efeff1;
+  --color-mist-200: #e4e4e7;  /* zinc-200 — hairline border */
+  --color-mist-300: #d4d4d8;  /* zinc-300 */
+  --color-mist-400: #71717a;  /* zinc-500 — secondary text */
+  --color-mist-500: #52525b;  /* zinc-600 */
+  --color-mist-700: #3f3f46;  /* zinc-700 */
 
   /* Accent — the single restrained red */
   --color-mm-red: #c03838;
@@ -40,27 +42,30 @@
   --color-danger-bg: #fef2f2;
   --color-danger-border: #fecaca;
 
-  /* Type */
-  --font-display: var(--font-cormorant), Georgia, "Times New Roman", serif;
-  --font-sans: var(--font-montserrat), -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Type — Geist Sans everywhere; "display" moments are the same family,
+     just heavier + tighter (no serif). */
+  --font-display: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
 
-  /* Radius — Vercel-crisp 8px default */
+  /* Radius — Vercel-crisp: 8px controls, 12px cards */
   --radius-xs: 4px;
   --radius-sm: 6px;
   --radius-md: 8px;
-  --radius-lg: 10px;
+  --radius-lg: 12px;
   --radius-pill: 999px;
 
-  /* Shadow — micro; reserved for floating things only */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.14);
+  /* Shadow — micro; reserved for floating things only (menus, modals, drag) */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.12);
 }
 
-/* shadcn semantic vars — LIGHT (primary) */
+/* shadcn semantic vars — LIGHT (primary).
+   Canvas + cards are pure white; separation is the 1px hairline, not shadow. */
 :root {
-  --background: var(--color-offwhite);
+  --background: #ffffff;
   --foreground: var(--color-ink);
   --card: #ffffff;
   --card-foreground: var(--color-ink);
@@ -69,50 +74,50 @@
   --primary: var(--color-mm-red);
   --primary-foreground: #ffffff;
   --secondary: var(--color-mist-100);
-  --secondary-foreground: var(--color-charcoal);
-  --muted: var(--color-mist-50);
+  --secondary-foreground: var(--color-ink);
+  --muted: var(--color-mist-100);
   --muted-foreground: var(--color-mist-400);
   --accent: var(--color-mm-red-tint);
   --accent-foreground: var(--color-mm-red-deep);
   --destructive: var(--color-danger);
   --destructive-foreground: #ffffff;
-  --border: var(--color-mist-100);
+  --border: var(--color-mist-200);
   --input: var(--color-mist-200);
   --ring: var(--color-mm-red);
   --radius: 0.5rem;
 
   --sidebar: #ffffff;
   --sidebar-foreground: var(--color-ink);
-  --sidebar-border: var(--color-mist-100);
+  --sidebar-border: var(--color-mist-200);
   --sidebar-accent: var(--color-mm-red-tint);
   --sidebar-accent-foreground: var(--color-mm-red-deep);
 }
 
-/* shadcn semantic vars — DARK (desktop, secondary) */
+/* shadcn semantic vars — DARK (desktop, secondary) — cool zinc, red-bright accent */
 .dark {
-  --background: var(--color-charcoal);
-  --foreground: #eceae7;
-  --card: #212019;
-  --card-foreground: #eceae7;
-  --popover: #212019;
-  --popover-foreground: #eceae7;
+  --background: #09090b;
+  --foreground: #fafafa;
+  --card: #131316;
+  --card-foreground: #fafafa;
+  --popover: #131316;
+  --popover-foreground: #fafafa;
   --primary: var(--color-mm-red-bright);
-  --primary-foreground: #1a1a1a;
-  --secondary: #2a2925;
-  --secondary-foreground: #eceae7;
-  --muted: #242320;
-  --muted-foreground: #a8a29a;
+  --primary-foreground: #18181b;
+  --secondary: #1c1c20;
+  --secondary-foreground: #fafafa;
+  --muted: #1c1c20;
+  --muted-foreground: #a1a1aa;
   --accent: rgba(232, 89, 89, 0.14);
   --accent-foreground: #f0b5b5;
   --destructive: var(--color-danger);
   --destructive-foreground: #ffffff;
-  --border: #2e2c28;
-  --input: #3a3935;
+  --border: #27272a;
+  --input: #27272a;
   --ring: var(--color-mm-red-bright);
 
-  --sidebar: #161512;
-  --sidebar-foreground: #eceae7;
-  --sidebar-border: #2e2c28;
+  --sidebar: #0c0c0e;
+  --sidebar-foreground: #fafafa;
+  --sidebar-border: #27272a;
   --sidebar-accent: rgba(232, 89, 89, 0.14);
   --sidebar-accent-foreground: #f0b5b5;
 }
@@ -162,15 +167,18 @@ body {
   font-family: var(--font-sans);
   font-size: 15px;
   line-height: 1.5;
+  letter-spacing: -0.011em; /* Geist reads best with a touch of negative tracking */
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Display moments only — Cormorant. Mechanics stay Montserrat. */
+/* Display moments — same Geist family, heavier + tighter (no serif). */
 .font-display {
   font-family: var(--font-display);
+  letter-spacing: -0.025em;
 }
 
-/* Money/figures: tabular + lining (Cormorant's default figures read ambiguously small) */
+/* Money/figures: tabular + lining */
 .tabular {
   font-variant-numeric: lining-nums tabular-nums;
 }
@@ -178,9 +186,9 @@ body {
 /* Eyebrow label */
 .eyebrow {
   font-size: 0.6875rem;
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.12em;
   color: var(--color-mist-400);
 }
 
