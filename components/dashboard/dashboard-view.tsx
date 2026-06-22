@@ -1,0 +1,459 @@
+"use client";
+
+/**
+ * The dashboard — the daily "how is the business doing" view. A period toggle
+ * (Today / This week / This month) re-scopes the whole page: headline KPIs,
+ * conversion rates, leads by source, the enquiry→job funnel, a current-vs-previous
+ * overlay chart, and the PostHog website drop-off funnel. Needs-action + recent
+ * enquiries sit below (always "now"). Deliberately varied component styles so the
+ * page reads as a dashboard, not a wall of identical cards.
+ */
+
+import { useState } from "react";
+import Link from "next/link";
+import { ArrowDownRight, ArrowUpRight, ChevronRight, Minus, Clock } from "lucide-react";
+import { Card } from "@/components/ui/card";
+import { LeadStatusBadge } from "@/components/lead-status-badge";
+import { OverlayChart } from "@/components/dashboard/overlay-chart";
+import type { PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
+
+const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+function fmtDuration(mins: number | null): string {
+  if (mins == null) return "—";
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const h = mins / 60;
+  if (h < 24) return `${h < 10 ? h.toFixed(1) : Math.round(h)}h`;
+  return `${Math.round(h / 24)}d`;
+}
+
+function timeAgo(d: string | null): string {
+  if (!d) return "—";
+  const diff = Date.now() - new Date(d).getTime();
+  if (Number.isNaN(diff)) return "—";
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+const PERIODS: PeriodKey[] = ["today", "week", "month"];
+
+export interface DashboardData {
+  periods: Record<PeriodKey, PeriodStats>;
+  medianRespMins: number | null;
+  needsAction: { newToAction: number; surveysToday: number; quotesAwaiting: number };
+  recent: {
+    id: string;
+    name: string | null;
+    status: string;
+    source: string;
+    when: string | null;
+  }[];
+  recentHeading: string;
+  dateLabel: string;
+}
+
+export function DashboardView({ data }: { data: DashboardData }) {
+  const [period, setPeriod] = useState<PeriodKey>("today");
+  const s = data.periods[period];
+  const delta = s.newLeads - s.prevNewLeads;
+
+  return (
+    <main className="flex-1 space-y-6 p-6 md:p-8">
+      {/* header + period toggle */}
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <p className="eyebrow">{data.dateLabel}</p>
+          <h1 className="font-display text-3xl font-semibold text-foreground">Dashboard</h1>
+        </div>
+        <div className="inline-flex rounded-md border border-border bg-muted/50 p-0.5" role="tablist" aria-label="Period">
+          {PERIODS.map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="tab"
+              aria-selected={period === p}
+              onClick={() => setPeriod(p)}
+              className={
+                "focus-ring rounded-[6px] px-3.5 py-1.5 text-sm font-medium capitalize transition-colors " +
+                (period === p
+                  ? "bg-card text-foreground shadow-xs"
+                  : "text-mist-400 hover:text-foreground")
+              }
+            >
+              {data.periods[p].label}
+            </button>
+          ))}
+        </div>
+      </header>
+
+      {/* headline KPI strip */}
+      <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <Kpi label="New leads" value={s.newLeads} accent>
+          <Delta delta={delta} sub={s.vsLabel} />
+        </Kpi>
+        <Kpi label="Contacted" value={s.contacted} sub={`${pctOf(s.contacted, s.newLeads)} of leads`} />
+        <Kpi label="Surveys booked" value={s.surveys} sub={`${s.leadToSurveyPct}% of leads`} />
+        <Kpi label="Jobs won" value={s.jobs} sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} />
+        <Kpi label="Median response" value={fmtDuration(data.medianRespMins)} icon>
+          <span className="text-xs text-mist-400">to first contact</span>
+        </Kpi>
+      </section>
+
+      {/* conversion rings */}
+      <section className="grid grid-cols-3 gap-3 sm:gap-4">
+        <RingStat label="Lead → Survey" pct={s.leadToSurveyPct} color="#C0822E" caption={`${s.surveys}/${s.newLeads}`} />
+        <RingStat label="Survey → Job" pct={s.surveyToJobPct} color="#3F9B6B" caption={`${s.jobs}/${s.surveys}`} />
+        <RingStat label="Lead → Job" pct={s.leadToJobPct} color="#c03838" caption={`${s.jobs}/${s.newLeads}`} />
+      </section>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* sources */}
+        <Card className="p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="eyebrow">Where leads came from</p>
+            <span className="text-xs text-mist-400 capitalize">{s.label.toLowerCase()}</span>
+          </div>
+          <SourceBars sources={s.sources} total={s.newLeads} />
+          {s.topCampaigns.length > 0 ? (
+            <div className="mt-5 border-t border-border pt-4">
+              <p className="eyebrow mb-2">Top campaigns</p>
+              <ul className="space-y-1.5">
+                {s.topCampaigns.map((c) => (
+                  <li key={c.campaign} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="truncate text-mist-500">{c.campaign}</span>
+                    <span className="tabular shrink-0 text-foreground">{c.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Card>
+
+        {/* funnel */}
+        <Card className="p-5">
+          <p className="eyebrow mb-4">Enquiry → job funnel</p>
+          <Funnel stats={s} />
+        </Card>
+      </div>
+
+      {/* overlay chart */}
+      <Card className="p-5">
+        <OverlayChart
+          buckets={s.buckets}
+          label={s.chartLabel}
+          current={s.newLeads}
+          previous={s.prevNewLeads}
+        />
+      </Card>
+
+      {/* website behaviour (PostHog) */}
+      <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <p className="eyebrow">Website behaviour</p>
+          <span className="text-xs text-mist-400">PostHog · {s.label.toLowerCase()}</span>
+        </div>
+        {s.posthog ? (
+          <WebFunnel ph={s.posthog} />
+        ) : (
+          <p className="py-6 text-center text-sm text-mist-400">
+            PostHog data unavailable right now.
+          </p>
+        )}
+      </Card>
+
+      {/* needs action (now) */}
+      <section>
+        <p className="eyebrow mb-2">Needs action now</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <ActionCard label="New enquiries to action" count={data.needsAction.newToAction} href="/leads?status=website_enquiry" accent empty="All enquiries triaged" />
+          <ActionCard label="Surveys today" count={data.needsAction.surveysToday} href="/schedule/surveys" empty="No surveys today" />
+          <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
+        </div>
+      </section>
+
+      {/* recent enquiries */}
+      <Card className="p-0">
+        <div className="flex items-center justify-between border-b px-5 py-3.5">
+          <h2 className="font-display text-lg font-semibold text-foreground">{data.recentHeading}</h2>
+          <Link href="/leads" className="focus-ring rounded-sm text-sm text-mm-red hover:underline">
+            View all
+          </Link>
+        </div>
+        {data.recent.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-mist-400">No leads yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {data.recent.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/leads/${r.id}`}
+                  className="focus-ring flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-muted"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">{r.name ?? "—"}</p>
+                    <p className="truncate text-xs text-mist-400">
+                      {r.source} · {timeAgo(r.when)}
+                    </p>
+                  </div>
+                  <LeadStatusBadge status={r.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </main>
+  );
+}
+
+/* ------------------------------- pieces -------------------------------- */
+
+const pctOf = (n: number, d: number): string => (d > 0 ? `${Math.round((n / d) * 100)}%` : "—");
+
+function Kpi({
+  label,
+  value,
+  sub,
+  accent,
+  good,
+  icon,
+  children,
+}: {
+  label: string;
+  value: number | string;
+  sub?: string;
+  accent?: boolean;
+  good?: boolean;
+  icon?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Card className="gap-0 p-4">
+      <p className="eyebrow flex items-center gap-1">
+        {icon ? <Clock className="size-3" strokeWidth={2} /> : null}
+        {label}
+      </p>
+      <p
+        className={
+          "mt-1 font-display tabular text-3xl font-bold " +
+          (accent ? "text-mm-red" : good ? "text-success" : "text-foreground")
+        }
+      >
+        {value}
+      </p>
+      {children ? <div className="mt-1">{children}</div> : sub ? <p className="mt-1 text-xs text-mist-400">{sub}</p> : null}
+    </Card>
+  );
+}
+
+function Delta({ delta, sub }: { delta: number; sub: string }) {
+  return (
+    <p className="flex items-center gap-1 text-xs text-mist-400">
+      {delta > 0 ? (
+        <ArrowUpRight className="size-3.5 text-success" strokeWidth={2} />
+      ) : delta < 0 ? (
+        <ArrowDownRight className="size-3.5 text-mm-red" strokeWidth={2} />
+      ) : (
+        <Minus className="size-3.5 text-mist-400" strokeWidth={2} />
+      )}
+      <span className="tabular">
+        {delta > 0 ? "+" : ""}
+        {delta}
+      </span>
+      <span>· {sub}</span>
+    </p>
+  );
+}
+
+function RingStat({ label, pct, color, caption }: { label: string; pct: number; color: string; caption: string }) {
+  const r = 26;
+  const circ = 2 * Math.PI * r;
+  const dash = (Math.min(100, pct) / 100) * circ;
+  return (
+    <Card className="flex-row items-center gap-3 p-4">
+      <svg viewBox="0 0 64 64" className="size-14 shrink-0 -rotate-90">
+        <circle cx="32" cy="32" r={r} fill="none" stroke="#f4f4f5" strokeWidth="7" />
+        <circle
+          cx="32"
+          cy="32"
+          r={r}
+          fill="none"
+          stroke={color}
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${circ}`}
+        />
+      </svg>
+      <div className="min-w-0">
+        <p className="font-display tabular text-2xl font-bold leading-none text-foreground">{pct}%</p>
+        <p className="mt-1 truncate text-xs font-medium text-foreground">{label}</p>
+        <p className="tabular text-xs text-mist-400">{caption}</p>
+      </div>
+    </Card>
+  );
+}
+
+function SourceBars({
+  sources,
+  total,
+}: {
+  sources: { key: string; label: string; color: string; count: number }[];
+  total: number;
+}) {
+  const active = sources.filter((x) => x.count > 0);
+  if (active.length === 0) return <p className="py-6 text-center text-sm text-mist-400">No leads in this period.</p>;
+  const max = Math.max(1, ...active.map((x) => x.count));
+  return (
+    <ul className="space-y-3">
+      {active.map((x) => (
+        <li key={x.key}>
+          <div className="mb-1 flex items-baseline justify-between text-sm">
+            <span className="flex items-center gap-2 text-foreground">
+              <span className="inline-block size-2.5 rounded-[3px]" style={{ background: x.color }} />
+              {x.label}
+            </span>
+            <span className="tabular text-mist-500">
+              {x.count}
+              <span className="ml-1.5 text-xs text-mist-400">{Math.round((x.count / total) * 100)}%</span>
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-pill bg-mist-100">
+            <div className="h-full rounded-pill" style={{ width: `${(x.count / max) * 100}%`, background: x.color }} />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const FUNNEL_COLORS: Record<string, string> = {
+  new: "#71717a",
+  contacted: "#5566B5",
+  survey: "#C0822E",
+  quoted: "#7C5CBF",
+  job: "#3F9B6B",
+};
+
+function Funnel({ stats }: { stats: PeriodStats }) {
+  const { funnel } = stats;
+  const base = Math.max(1, funnel[0].count);
+  return (
+    <ul className="space-y-2.5">
+      {funnel.map((f, i) => {
+        const prev = i > 0 ? funnel[i - 1].count : null;
+        const step = prev && prev > 0 ? Math.round((f.count / prev) * 100) : null;
+        return (
+          <li key={f.key}>
+            <div className="mb-1 flex items-baseline justify-between text-sm">
+              <span className="text-foreground">{f.label}</span>
+              <span className="tabular text-mist-500">
+                {f.count}
+                {i > 0 ? <span className="ml-1.5 text-xs text-mist-400">{f.pct}%</span> : null}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-6 flex-1 overflow-hidden rounded-sm bg-mist-100">
+                <div
+                  className="h-full rounded-sm"
+                  style={{ width: `${(f.count / base) * 100}%`, background: FUNNEL_COLORS[f.key], minWidth: f.count > 0 ? "2px" : 0 }}
+                />
+              </div>
+              {step != null ? (
+                <span className="tabular w-10 shrink-0 text-right text-[11px] text-mist-400">→{step}%</span>
+              ) : (
+                <span className="w-10 shrink-0" />
+              )}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+function WebFunnel({ ph }: { ph: { visited: number; started: number; enquiry: number; callClicks: number; whatsappClicks: number } }) {
+  // Two guaranteed-monotonic steps (you can't submit without a pageview). The
+  // mid-funnel `lead_start` fires inconsistently on the lead-form-hero LPs (the
+  // form IS the hero, so there's no distinct "start"), so it lives in the context
+  // line below rather than as a funnel bar that could read as broken.
+  const conv = ph.visited > 0 ? Math.round((ph.enquiry / ph.visited) * 100) : 0;
+  const drop = ph.visited > 0 ? 100 - conv : 0;
+  const steps = [
+    { label: "Visited site", count: ph.visited, color: "#71717a" },
+    { label: "Submitted enquiry", count: ph.enquiry, color: "#3F9B6B" },
+  ];
+  const base = Math.max(1, ph.visited);
+  return (
+    <div>
+      <div className="mb-3 flex items-baseline justify-between">
+        <span className="text-sm text-mist-500">Site → enquiry conversion</span>
+        <span className="tabular font-display text-xl font-bold text-foreground">{conv}%</span>
+      </div>
+      <ul className="space-y-2.5">
+        {steps.map((st, i) => (
+          <li key={st.label}>
+            <div className="mb-1 flex items-baseline justify-between text-sm">
+              <span className="text-foreground">{st.label}</span>
+              <span className="tabular text-mist-500">{st.count}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-6 flex-1 overflow-hidden rounded-sm bg-mist-100">
+                <div
+                  className="h-full rounded-sm"
+                  style={{ width: `${(st.count / base) * 100}%`, background: st.color, minWidth: st.count > 0 ? "2px" : 0 }}
+                />
+              </div>
+              {i === 1 ? (
+                <span className="tabular w-16 shrink-0 text-right text-[11px] text-mm-red">−{drop}% drop</span>
+              ) : (
+                <span className="w-16 shrink-0" />
+              )}
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 border-t border-border pt-3 text-xs text-mist-400">
+        <span className="tabular text-foreground">{ph.started}</span> started a quote ·{" "}
+        <span className="tabular text-foreground">{ph.callClicks}</span> called ·{" "}
+        <span className="tabular text-foreground">{ph.whatsappClicks}</span> WhatsApp
+      </p>
+    </div>
+  );
+}
+
+function ActionCard({
+  label,
+  count,
+  href,
+  accent,
+  empty,
+}: {
+  label: string;
+  count: number;
+  href: string;
+  accent?: boolean;
+  empty: string;
+}) {
+  const isEmpty = count === 0;
+  return (
+    <Link href={href} className="focus-ring block rounded-lg">
+      <Card className="p-5 transition-colors hover:bg-muted">
+        <div className="flex items-start justify-between gap-2">
+          <p className="eyebrow">{label}</p>
+          <ChevronRight className="size-4 shrink-0 text-mist-300" strokeWidth={1.75} />
+        </div>
+        {isEmpty ? (
+          <p className="mt-2 text-sm text-mist-400">{empty}</p>
+        ) : (
+          <p className={"mt-1 font-display tabular text-4xl font-bold " + (accent ? "text-mm-red" : "text-foreground")}>
+            {count}
+          </p>
+        )}
+      </Card>
+    </Link>
+  );
+}
