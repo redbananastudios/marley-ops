@@ -21,6 +21,7 @@ import {
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
 import type { PackingKey, VehicleKey } from "@/lib/quote/constants";
 import type { BusinessSettings } from "@/lib/settings";
+import { crewSize, jobCost } from "@/lib/margin";
 
 const gbp = (n: number): string =>
   (n < 0 ? "-£" : "£") + Math.abs(n).toLocaleString("en-GB", { maximumFractionDigits: 0 });
@@ -33,12 +34,6 @@ interface Job {
   boxes: number;
   days: number;
   congestion: boolean;
-}
-
-/** Crew is fixed by the van config: 1 Luton=2, 2=3, 3=4, plus 1 for the 7.5t. */
-const CREW_BY_VEHICLE: Record<VehicleKey, number> = { "1luton": 2, "2luton": 3, "3luton": 4 };
-function crewSize(vehicle: VehicleKey, has75T: boolean): number {
-  return CREW_BY_VEHICLE[vehicle] + (has75T ? 1 : 0);
 }
 
 const PRESETS: { label: string; job: Job }[] = [
@@ -180,14 +175,22 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const vanCount = breakdown.vanCount;
   const crew = crewSize(job.vehicle, job.has75T);
 
-  const cost = useMemo(() => {
-    const labourCost = crew * job.days * labourDay;
-    const vansCost = vanCount * job.days * vanDay;
-    const fuelCost = job.miles * fuel;
-    const boxesCost = job.boxes * boxCost;
-    const total = labourCost + vansCost + fuelCost + boxesCost + misc + estFee;
-    return { labourCost, vansCost, fuelCost, boxesCost, misc, estFee, total };
-  }, [job, crew, vanCount, labourDay, vanDay, fuel, boxCost, misc, estFee]);
+  // Cost via the shared job-cost helper, fed the calculator's editable rates.
+  const cost = useMemo(
+    () =>
+      jobCost(
+        { vehicle: job.vehicle, has75T: job.has75T, vanCount, totalMiles: job.miles, boxes: job.boxes, days: job.days },
+        {
+          estimatorFee: estFee,
+          costFuelPerMile: fuel,
+          costLabourPerDay: labourDay,
+          costBox: boxCost,
+          costVanDay: vanDay,
+          costMisc: misc,
+        },
+      ),
+    [job, vanCount, labourDay, vanDay, fuel, boxCost, misc, estFee],
+  );
 
   const margin = charge - cost.total;
   const marginPct = charge > 0 ? Math.round((margin / charge) * 100) : 0;
@@ -279,12 +282,12 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
         <div>
           <p className="eyebrow mb-1">Your cost <span className="font-normal normal-case text-mist-400">(editable rates)</span></p>
-          <Line label={`Labour (${crew} crew × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labourCost} />
-          <Line label={`Vans (${vanCount}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vansCost} />
-          <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuelCost} />
-          <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxesCost} />
+          <Line label={`Labour (${crew} crew × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
+          <Line label={`Vans (${vanCount}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
+          <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
+          <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxes} />
           <Line label="Misc / consumables" rate={misc} onRate={setMisc} amount={cost.misc} />
-          <Line label="Estimator fee (survey)" rate={estFee} onRate={setEstFee} amount={cost.estFee} />
+          <Line label="Estimator fee (survey)" rate={estFee} onRate={setEstFee} amount={cost.estimatorFee} />
           <Line label="Total cost" amount={cost.total} strong />
         </div>
       </div>
