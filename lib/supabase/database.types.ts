@@ -179,7 +179,7 @@ export type Database = {
         Row: {
           cost_box: number
           cost_fuel_per_mile: number
-          cost_labour_per_hour: number
+          cost_labour_per_day: number
           cost_misc: number
           cost_van_day: number
           estimator_fee: number
@@ -189,7 +189,7 @@ export type Database = {
         Insert: {
           cost_box?: number
           cost_fuel_per_mile?: number
-          cost_labour_per_hour?: number
+          cost_labour_per_day?: number
           cost_misc?: number
           cost_van_day?: number
           estimator_fee?: number
@@ -199,7 +199,7 @@ export type Database = {
         Update: {
           cost_box?: number
           cost_fuel_per_mile?: number
-          cost_labour_per_hour?: number
+          cost_labour_per_day?: number
           cost_misc?: number
           cost_van_day?: number
           estimator_fee?: number

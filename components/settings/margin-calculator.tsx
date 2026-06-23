@@ -30,17 +30,21 @@ interface Job {
   has75T: boolean;
   packing: PackingKey;
   miles: number;
-  men: number;
-  hours: number;
   boxes: number;
   days: number;
   congestion: boolean;
 }
 
+/** Crew is fixed by the van config: 1 Luton=2, 2=3, 3=4, plus 1 for the 7.5t. */
+const CREW_BY_VEHICLE: Record<VehicleKey, number> = { "1luton": 2, "2luton": 3, "3luton": 4 };
+function crewSize(vehicle: VehicleKey, has75T: boolean): number {
+  return CREW_BY_VEHICLE[vehicle] + (has75T ? 1 : 0);
+}
+
 const PRESETS: { label: string; job: Job }[] = [
-  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, packing: "owner", miles: 20, men: 2, hours: 6, boxes: 25, days: 1, congestion: false } },
-  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, packing: "fragile", miles: 110, men: 3, hours: 8, boxes: 40, days: 1, congestion: false } },
-  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, packing: "full", miles: 420, men: 4, hours: 10, boxes: 60, days: 2, congestion: false } },
+  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, packing: "owner", miles: 20, boxes: 25, days: 1, congestion: false } },
+  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, packing: "fragile", miles: 110, boxes: 40, days: 1, congestion: false } },
+  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, packing: "full", miles: 420, boxes: 60, days: 2, congestion: false } },
 ];
 
 const numCls =
@@ -77,23 +81,31 @@ function Line({
   strong?: boolean;
 }) {
   return (
-    <div className={"flex items-center gap-3 py-1.5 " + (strong ? "border-t pt-2 font-semibold" : "")}>
-      <span className={"flex-1 text-sm " + (strong ? "text-foreground" : "text-mist-500")}>{label}</span>
-      {onRate ? (
-        <span className="flex items-center gap-1">
-          <span className="text-xs text-mist-400">£</span>
-          <input
-            type="number"
-            inputMode="decimal"
-            min={0}
-            value={rate ?? 0}
-            onChange={(e) => onRate(e.target.value === "" ? 0 : Number(e.target.value))}
-            className="tabular h-8 w-20 rounded-md border border-input bg-card px-2 text-sm text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
-          />
-          {rateUnit ? <span className="text-xs text-mist-400">{rateUnit}</span> : null}
-        </span>
-      ) : null}
-      <span className="tabular w-20 text-right text-sm text-foreground">{gbp(amount)}</span>
+    <div
+      className={
+        "grid grid-cols-[1fr_8rem_4.5rem] items-center gap-2 py-1.5 " +
+        (strong ? "border-t pt-2 font-semibold" : "")
+      }
+    >
+      <span className={"text-sm " + (strong ? "text-foreground" : "text-mist-500")}>{label}</span>
+      {/* rate cell — fixed width with a reserved unit slot so every input box lines up */}
+      <span className="flex items-center justify-end gap-1">
+        {onRate ? (
+          <>
+            <span className="text-xs text-mist-400">£</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={0}
+              value={rate ?? 0}
+              onChange={(e) => onRate(e.target.value === "" ? 0 : Number(e.target.value))}
+              className="tabular h-8 w-16 rounded-md border border-input bg-card px-2 text-sm text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
+            />
+            <span className="w-5 text-left text-xs text-mist-400">{rateUnit ?? ""}</span>
+          </>
+        ) : null}
+      </span>
+      <span className="tabular text-right text-sm text-foreground">{gbp(amount)}</span>
     </div>
   );
 }
@@ -117,7 +129,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   }, [job.vehicle, job.packing]);
 
   // Editable cost rates (seed from the saved rate card).
-  const [labour, setLabour] = useState(settings.costLabourPerHour);
+  const [labourDay, setLabourDay] = useState(settings.costLabourPerDay);
   const [vanDay, setVanDay] = useState(settings.costVanDay);
   const [fuel, setFuel] = useState(settings.costFuelPerMile);
   const [boxCost, setBoxCost] = useState(settings.costBox);
@@ -166,15 +178,16 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
   const charge = breakdown.total; // ex-VAT (VAT is pass-through, not margin)
   const vanCount = breakdown.vanCount;
+  const crew = crewSize(job.vehicle, job.has75T);
 
   const cost = useMemo(() => {
-    const labourCost = job.men * job.hours * labour;
+    const labourCost = crew * job.days * labourDay;
     const vansCost = vanCount * job.days * vanDay;
     const fuelCost = job.miles * fuel;
     const boxesCost = job.boxes * boxCost;
     const total = labourCost + vansCost + fuelCost + boxesCost + misc + estFee;
     return { labourCost, vansCost, fuelCost, boxesCost, misc, estFee, total };
-  }, [job, vanCount, labour, vanDay, fuel, boxCost, misc, estFee]);
+  }, [job, crew, vanCount, labourDay, vanDay, fuel, boxCost, misc, estFee]);
 
   const margin = charge - cost.total;
   const marginPct = charge > 0 ? Math.round((margin / charge) * 100) : 0;
@@ -231,9 +244,13 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         </label>
         <label className="grid gap-1"><span className="eyebrow">Miles (total)</span><NumIn value={job.miles} onChange={(n) => setJ("miles", n)} /></label>
         <label className="grid gap-1"><span className="eyebrow">Days</span><NumIn value={job.days} onChange={(n) => setJ("days", n)} /></label>
-        <label className="grid gap-1"><span className="eyebrow">Men</span><NumIn value={job.men} onChange={(n) => setJ("men", n)} /></label>
-        <label className="grid gap-1"><span className="eyebrow">Hours</span><NumIn value={job.hours} onChange={(n) => setJ("hours", n)} /></label>
         <label className="grid gap-1"><span className="eyebrow">Boxes</span><NumIn value={job.boxes} onChange={(n) => setJ("boxes", n)} /></label>
+        <div className="grid gap-1">
+          <span className="eyebrow">Crew</span>
+          <span className="flex h-9 items-center text-sm text-foreground">
+            {crew} men <span className="ml-1 text-xs text-mist-400">(from vans)</span>
+          </span>
+        </div>
         <div className="flex items-end gap-4">
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={job.has75T} onChange={(e) => setJ("has75T", e.target.checked)} className="size-4 accent-mm-red" />
@@ -262,7 +279,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
         <div>
           <p className="eyebrow mb-1">Your cost <span className="font-normal normal-case text-mist-400">(editable rates)</span></p>
-          <Line label={`Labour (${job.men}×${job.hours}h)`} rate={labour} onRate={setLabour} rateUnit="/h" amount={cost.labourCost} />
+          <Line label={`Labour (${crew} crew × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labourCost} />
           <Line label={`Vans (${vanCount}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vansCost} />
           <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuelCost} />
           <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxesCost} />

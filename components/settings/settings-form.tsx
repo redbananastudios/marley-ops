@@ -26,7 +26,7 @@ interface FieldDef {
 const FIELDS: FieldDef[] = [
   { key: "estimatorFee", label: "Estimator fee per visit", hint: "Paid per attended survey. Drives Performance + the dashboard.", unit: "£" },
   { key: "costFuelPerMile", label: "Fuel cost per mile", hint: "Internal cost. For margin once wired.", unit: "£/mile" },
-  { key: "costLabourPerHour", label: "Labour cost per hour", hint: "Per mover. Internal cost.", unit: "£/hour" },
+  { key: "costLabourPerDay", label: "Labour day rate (per man)", hint: "Per man per 8-hour day. Crew size auto-derives from vans.", unit: "£/day" },
   { key: "costBox", label: "Box unit cost", hint: "Per box supplied. Internal cost.", unit: "£" },
   { key: "costVanDay", label: "Van day rate", hint: "Per van per day. Internal cost.", unit: "£/day" },
   { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
@@ -76,7 +76,7 @@ export function SettingsForm({
   const [v, setV] = useState<Record<keyof BusinessSettings, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
-    costLabourPerHour: String(initial.costLabourPerHour),
+    costLabourPerDay: String(initial.costLabourPerDay),
     costBox: String(initial.costBox),
     costVanDay: String(initial.costVanDay),
     costMisc: String(initial.costMisc),
@@ -87,7 +87,7 @@ export function SettingsForm({
     const payload = {
       estimatorFee: Number(v.estimatorFee),
       costFuelPerMile: Number(v.costFuelPerMile),
-      costLabourPerHour: Number(v.costLabourPerHour),
+      costLabourPerDay: Number(v.costLabourPerDay),
       costBox: Number(v.costBox),
       costVanDay: Number(v.costVanDay),
       costMisc: Number(v.costMisc),
