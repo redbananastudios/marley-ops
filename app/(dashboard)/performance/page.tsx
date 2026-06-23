@@ -88,7 +88,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Per-job margin for the month's booked jobs (cost assumes 1-day jobs for now).
   const jobs = (acceptedQuotes ?? []).map((q) => {
     const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
-    const items = ((q.state_blob as { items?: Record<string, number> } | null)?.items) ?? null;
+    const blob = (q.state_blob as { items?: Record<string, number>; job?: { days?: number } } | null) ?? null;
     const revenue = Number(q.agreed_price ?? q.grand_total ?? 0);
     const cost = jobCost(
       {
@@ -96,8 +96,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         has75T: b.has75T ?? false,
         vanCount: b.vanCount ?? 1,
         totalMiles: Number(b.totalMiles ?? 0),
-        boxes: boxesFromItems(items),
-        days: 1,
+        boxes: boxesFromItems(blob?.items),
+        days: Math.max(1, Number(blob?.job?.days ?? 1)),
       },
       settings,
     );
@@ -225,7 +225,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       <Card className="mt-6 p-0">
         <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
           <h2 className="font-display text-lg font-semibold text-foreground">Jobs &amp; margin</h2>
-          <span className="text-xs text-mist-400">Booked this month. Est. cost assumes 1-day jobs.</span>
+          <span className="text-xs text-mist-400">Booked this month. Cost uses each job&apos;s days, crew &amp; miles against your rate card.</span>
         </div>
         {jobs.length === 0 ? (
           <p className="px-5 py-12 text-center text-sm text-mist-400">No jobs booked in {monthLabel}.</p>

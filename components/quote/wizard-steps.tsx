@@ -419,6 +419,19 @@ export function Step2Job({ values, set }: StepProps) {
       </div>
 
       <div className="mb-5">
+        <FieldLabel>Days on the job</FieldLabel>
+        <input
+          type="number"
+          min={1}
+          step={1}
+          value={j.days}
+          onChange={(e) => set("job", { ...j, days: e.target.value === "" ? 1 : Math.max(1, Number(e.target.value)) })}
+          className="h-14 w-full rounded-md border border-input bg-card px-4 text-base text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
+        />
+        <p className="mt-1.5 text-xs text-mist-400">For internal costing (labour + vans). Not shown to the customer.</p>
+      </div>
+
+      <div className="mb-5">
         <FieldLabel>Property scope</FieldLabel>
         <Segmented
           value={j.scope}

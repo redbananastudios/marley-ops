@@ -9,6 +9,8 @@ export interface QuoteFormValues {
     destAddr: string;
     moveDate: string;
     moveDateEstimated: boolean;
+    /** Estimated days on the job — internal costing only (labour/van), not charged. */
+    days: number;
     scope: "rented" | "owned";
     bedsOvernight: "no" | "yes";
   };
@@ -68,7 +70,7 @@ export const ZERO_ITEMS: QuoteItems = {
 export function defaultQuoteValues(): QuoteFormValues {
   return {
     customer: { name: "", phone: "", email: "" },
-    job: { collectAddr: "", destAddr: "", moveDate: "", moveDateEstimated: false, scope: "rented", bedsOvernight: "no" },
+    job: { collectAddr: "", destAddr: "", moveDate: "", moveDateEstimated: false, days: 1, scope: "rented", bedsOvernight: "no" },
     route: { deadMiles: null, jobMiles: null, routeLegs: [] },
     vehicle: "1luton",
     has75T: false,
