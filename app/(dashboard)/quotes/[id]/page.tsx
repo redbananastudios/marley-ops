@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
 import { QuoteBuilder, QuoteStatusControl } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
+import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -83,6 +84,11 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
             quoteId={quote.id}
             grandTotal={Number(quote.grand_total ?? 0)}
             status={quote.status ?? "draft"}
+          />
+          <DeleteQuoteButton
+            quoteId={quote.id}
+            status={quote.status ?? "draft"}
+            quoteRef={quote.quote_ref ?? "—"}
           />
         </div>
       </PageHeader>

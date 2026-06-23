@@ -103,6 +103,17 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
   return { ok: true as const };
 }
 
+/** Delete a quote. Drafts/rejected go freely; the UI gates sent/accepted behind an
+ *  extra confirm (deleting an accepted quote removes a recorded win). */
+export async function deleteQuote(id: string) {
+  const { sb } = await ctx();
+  const { error } = await sb.from("quotes").delete().eq("id", id);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/quotes");
+  revalidatePath("/");
+  return { ok: true as const };
+}
+
 export async function setQuoteStatus(id: string, status: string) {
   // Accepting captures revenue + advances the lead — route through acceptQuote.
   if (status === "accepted") return acceptQuote(id);
