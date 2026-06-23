@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  BarChart3,
   CalendarCheck,
   FileText,
   KanbanSquare,
@@ -36,6 +37,7 @@ export const NAV: NavGroup[] = [
     ],
   },
   { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: true }] },
+  { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3, live: true }] },
   { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: false }] },
 ];
 

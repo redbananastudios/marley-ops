@@ -113,6 +113,46 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {/* paid performance */}
       <PaidCard adSpend={s.adSpend} paidLeads={s.paidLeads} paidWonValue={s.paidWonValue} />
 
+      {/* estimator performance */}
+      <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <p className="eyebrow">Estimator performance</p>
+          <Link href="/performance" className="focus-ring rounded-sm text-xs text-mm-red hover:underline">
+            Payroll →
+          </Link>
+        </div>
+        {s.estimators.length === 0 ? (
+          <p className="py-4 text-center text-sm text-mist-400">No completed visits this period.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left">
+                  <th className="eyebrow pb-2 font-semibold">Estimator</th>
+                  <th className="eyebrow pb-2 text-right font-semibold">Visits</th>
+                  <th className="eyebrow pb-2 text-right font-semibold">Won</th>
+                  <th className="eyebrow pb-2 text-right font-semibold">Win&nbsp;rate</th>
+                  <th className="eyebrow pb-2 text-right font-semibold">£&nbsp;Won</th>
+                  <th className="eyebrow pb-2 text-right font-semibold">Fee</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {s.estimators.map((e) => (
+                  <tr key={e.id}>
+                    <td className="py-2 font-medium text-foreground">{e.name}</td>
+                    <td className="tabular py-2 text-right text-foreground">{e.visits}</td>
+                    <td className="tabular py-2 text-right text-foreground">{e.won}</td>
+                    <td className="tabular py-2 text-right text-mist-500">{e.winRate}%</td>
+                    <td className="tabular py-2 text-right text-foreground">{e.wonValue > 0 ? gbp(e.wonValue) : "—"}</td>
+                    <td className="tabular py-2 text-right font-semibold text-foreground">{gbp(e.fee)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* sources */}
         <Card className="p-5">

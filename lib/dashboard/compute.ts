@@ -13,6 +13,7 @@
  */
 
 import type { WebsiteFunnel } from "@/lib/posthog";
+import type { EstimatorStat } from "@/lib/estimator";
 
 export type PeriodKey = "today" | "week" | "month";
 
@@ -93,6 +94,8 @@ export interface PeriodStats {
   chartLabel: string;
   buckets: Bucket[];
   posthog: WebsiteFunnel | null;
+  /** per-estimator visits/won/fee for this period — filled by the page. */
+  estimators: EstimatorStat[];
 }
 
 const DAY = 86_400_000;
@@ -306,6 +309,7 @@ export function buildPeriodStats(
     chartLabel: w.chartLabel,
     buckets,
     posthog,
+    estimators: [],
   };
 }
 

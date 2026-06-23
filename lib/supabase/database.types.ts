@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -332,6 +332,47 @@ export type Database = {
           {
             foreignKeyName: "communications_sent_by_fkey"
             columns: ["sent_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      estimator_payouts: {
+        Row: {
+          amount: number
+          created_at: string
+          estimator_id: string
+          id: string
+          paid_at: string | null
+          period_month: string
+          updated_at: string
+          visits: number
+        }
+        Insert: {
+          amount?: number
+          created_at?: string
+          estimator_id: string
+          id?: string
+          paid_at?: string | null
+          period_month: string
+          updated_at?: string
+          visits?: number
+        }
+        Update: {
+          amount?: number
+          created_at?: string
+          estimator_id?: string
+          id?: string
+          paid_at?: string | null
+          period_month?: string
+          updated_at?: string
+          visits?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "estimator_payouts_estimator_id_fkey"
+            columns: ["estimator_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]

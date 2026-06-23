@@ -11,6 +11,7 @@ import {
   type PeriodStats,
   type ProgressSets,
 } from "@/lib/dashboard/compute";
+import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 
 export const dynamic = "force-dynamic";
@@ -29,9 +30,12 @@ export default async function DashboardPage() {
         "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
       )
       .order("submitted_at", { ascending: false }),
-    supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id"),
+    supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
     supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id"),
   ]);
+
+  const { data: profilesData } = await supabase.from("profiles").select("id, full_name");
+  const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
 
   const leads = (leadsData ?? []) as LeadLite[];
   const appts = apptData ?? [];
@@ -78,6 +82,33 @@ export default async function DashboardPage() {
       return [k, stats];
     }),
   ) as Record<PeriodKey, PeriodStats>;
+
+  /* estimator performance per period — attended (completed) survey visits */
+  const leadName = new Map(leads.map((l) => [l.id, l.name ?? "—"]));
+  const wonLeadIds = new Set<string>(prog.won.keys());
+  for (const l of leads) if (l.status === "confirmed" || l.status === "completed") wonLeadIds.add(l.id);
+  const completedSurveys = appts.filter((a) => a.appt_type === "survey" && a.status === "completed" && a.estimator_id);
+  for (const k of PERIOD_KEYS) {
+    const { from, to } = periodWindow(k, now);
+    const f = from.getTime();
+    const t = to.getTime();
+    const visits: EstimatorVisit[] = completedSurveys
+      .filter((a) => {
+        const ts = a.starts_at ? new Date(a.starts_at).getTime() : 0;
+        return ts >= f && ts < t;
+      })
+      .map((a) => ({
+        apptId: a.id,
+        estimatorId: a.estimator_id as string,
+        estimatorName: profileName.get(a.estimator_id as string) ?? "Unknown",
+        leadId: a.lead_id,
+        customer: a.lead_id ? leadName.get(a.lead_id) ?? "—" : "—",
+        date: a.starts_at,
+        won: a.lead_id ? wonLeadIds.has(a.lead_id) : false,
+        value: a.lead_id ? prog.won.get(a.lead_id) ?? null : null,
+      }));
+    periods[k].estimators = aggregateEstimators(visits);
+  }
 
   /* needs-action (now) */
   const statusCounts = new Map<string, number>();
