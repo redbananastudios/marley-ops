@@ -28,7 +28,8 @@ const FIELDS: FieldDef[] = [
   { key: "costFuelPerMile", label: "Fuel cost per mile", hint: "Internal cost. For margin once wired.", unit: "£/mile" },
   { key: "costLabourPerDay", label: "Labour day rate (per man)", hint: "Per man per 8-hour day. Crew size auto-derives from vans.", unit: "£/day" },
   { key: "costBox", label: "Box unit cost", hint: "Per box supplied. Internal cost.", unit: "£" },
-  { key: "costVanDay", label: "Van day rate", hint: "Per van per day. Internal cost.", unit: "£/day" },
+  { key: "costVanDay", label: "Luton van day rate", hint: "Per Luton per day. Each van includes its driver.", unit: "£/day" },
+  { key: "cost75t", label: "7.5t lorry (per job)", hint: "Flat per job. Includes its 1 man.", unit: "£" },
   { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
 ];
 
@@ -79,6 +80,7 @@ export function SettingsForm({
     costLabourPerDay: String(initial.costLabourPerDay),
     costBox: String(initial.costBox),
     costVanDay: String(initial.costVanDay),
+    cost75t: String(initial.cost75t),
     costMisc: String(initial.costMisc),
   });
 
@@ -90,6 +92,7 @@ export function SettingsForm({
       costLabourPerDay: Number(v.costLabourPerDay),
       costBox: Number(v.costBox),
       costVanDay: Number(v.costVanDay),
+      cost75t: Number(v.cost75t),
       costMisc: Number(v.costMisc),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);

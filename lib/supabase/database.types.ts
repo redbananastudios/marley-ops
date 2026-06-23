@@ -177,6 +177,7 @@ export type Database = {
       }
       business_settings: {
         Row: {
+          cost_75t: number
           cost_box: number
           cost_fuel_per_mile: number
           cost_labour_per_day: number
@@ -187,6 +188,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cost_75t?: number
           cost_box?: number
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number
@@ -197,6 +199,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cost_75t?: number
           cost_box?: number
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number

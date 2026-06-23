@@ -19,9 +19,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
-import type { PackingKey, VehicleKey } from "@/lib/quote/constants";
+import { VAN_COUNT, type PackingKey, type VehicleKey } from "@/lib/quote/constants";
 import type { BusinessSettings } from "@/lib/settings";
-import { crewSize, jobCost } from "@/lib/margin";
+import { crewSize, extraCrew, jobCost } from "@/lib/margin";
 
 const gbp = (n: number): string =>
   (n < 0 ? "-£" : "£") + Math.abs(n).toLocaleString("en-GB", { maximumFractionDigits: 0 });
@@ -126,6 +126,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   // Editable cost rates (seed from the saved rate card).
   const [labourDay, setLabourDay] = useState(settings.costLabourPerDay);
   const [vanDay, setVanDay] = useState(settings.costVanDay);
+  const [cost75t, setCost75t] = useState(settings.cost75t);
   const [fuel, setFuel] = useState(settings.costFuelPerMile);
   const [boxCost, setBoxCost] = useState(settings.costBox);
   const [misc, setMisc] = useState(settings.costMisc);
@@ -174,22 +175,25 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const charge = breakdown.total; // ex-VAT (VAT is pass-through, not margin)
   const vanCount = breakdown.vanCount;
   const crew = crewSize(job.vehicle, job.has75T);
+  const helpers = extraCrew(job.vehicle, job.has75T);
+  const lutonVans = VAN_COUNT[job.vehicle];
 
   // Cost via the shared job-cost helper, fed the calculator's editable rates.
   const cost = useMemo(
     () =>
       jobCost(
-        { vehicle: job.vehicle, has75T: job.has75T, vanCount, totalMiles: job.miles, boxes: job.boxes, days: job.days },
+        { vehicle: job.vehicle, has75T: job.has75T, totalMiles: job.miles, boxes: job.boxes, days: job.days },
         {
           estimatorFee: estFee,
           costFuelPerMile: fuel,
           costLabourPerDay: labourDay,
           costBox: boxCost,
           costVanDay: vanDay,
+          cost75t,
           costMisc: misc,
         },
       ),
-    [job, vanCount, labourDay, vanDay, fuel, boxCost, misc, estFee],
+    [job, labourDay, vanDay, cost75t, fuel, boxCost, misc, estFee],
   );
 
   const margin = charge - cost.total;
@@ -282,8 +286,9 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
         <div>
           <p className="eyebrow mb-1">Your cost <span className="font-normal normal-case text-mist-400">(editable rates)</span></p>
-          <Line label={`Labour (${crew} crew × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
-          <Line label={`Vans (${vanCount}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
+          <Line label={`Labour (${helpers} helper${helpers === 1 ? "" : "s"} × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
+          <Line label={`Luton vans (${lutonVans}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
+          {job.has75T ? <Line label="7.5t lorry (incl 1 man)" rate={cost75t} onRate={setCost75t} amount={cost.sevenT} /> : null}
           <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
           <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxes} />
           <Line label="Misc / consumables" rate={misc} onRate={setMisc} amount={cost.misc} />

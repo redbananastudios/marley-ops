@@ -12,6 +12,7 @@ const settingsSchema = z.object({
   costLabourPerDay: num,
   costBox: num,
   costVanDay: num,
+  cost75t: num,
   costMisc: num,
 });
 
@@ -41,6 +42,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_labour_per_day: v.costLabourPerDay,
       cost_box: v.costBox,
       cost_van_day: v.costVanDay,
+      cost_75t: v.cost75t,
       cost_misc: v.costMisc,
     })
     .eq("id", true);
