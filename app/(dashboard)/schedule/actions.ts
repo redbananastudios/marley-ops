@@ -14,7 +14,6 @@ async function ctx() {
 function revalidateSchedule() {
   revalidatePath("/schedule/surveys");
   revalidatePath("/schedule/removals");
-  revalidatePath("/schedule/overlap");
 }
 
 export interface CreateAppointmentInput {

@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * FullCalendar wrapper for the three schedule surfaces (surveys / removals /
- * overlap). Colour-codes by appointment type:
+ * FullCalendar wrapper for the schedule surfaces (surveys / removals; the
+ * removals view can overlay surveys to spot clashes). Colour-codes by type:
  *   - survey  -> white bg, 1px mm-red border, mm-red text (outline chip)
  *   - removal -> solid charcoal (#1A1A1A) bg, white text
  *
@@ -33,6 +33,7 @@ import type {
 } from "@fullcalendar/interaction";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { rescheduleAppointment } from "@/app/(dashboard)/schedule/actions";
 import {
   AppointmentDialog,
@@ -41,7 +42,7 @@ import {
   type LeadOption,
 } from "./appointment-dialog";
 
-export type SchedulerKind = "survey" | "removal" | "overlap";
+export type SchedulerKind = "survey" | "removal";
 
 export interface SchedulerEvent {
   id: string;
@@ -92,6 +93,8 @@ export function SchedulerView({
   const [presetStart, setPresetStart] = useState<string | undefined>();
   const [presetEnd, setPresetEnd] = useState<string | undefined>();
   const [presetAllDay, setPresetAllDay] = useState<boolean | undefined>();
+  // Removals view can overlay surveys to spot clashes (replaces the Overlap page).
+  const [showSurveys, setShowSurveys] = useState(false);
 
   // Default type for the create dialog from this surface.
   const defaultType: ApptType = view === "removal" ? "removal" : "survey";
@@ -109,12 +112,18 @@ export function SchedulerView({
   const initialView = useMemo(() => {
     if (isNarrow) return "timeGridDay";
     if (view === "removal") return "dayGridMonth";
-    return "timeGridWeek"; // surveys + overlap
+    return "timeGridWeek"; // surveys
   }, [view, isNarrow]);
+
+  // On the removals calendar, surveys are hidden unless "Show surveys" is on.
+  const shown = useMemo(
+    () => (view === "removal" && !showSurveys ? events.filter((e) => e.appt_type === "removal") : events),
+    [events, view, showSurveys],
+  );
 
   const fcEvents: EventInput[] = useMemo(
     () =>
-      events.map((e) => {
+      shown.map((e) => {
         const style = e.appt_type === "removal" ? REMOVAL_STYLE : SURVEY_STYLE;
         const cancelled = e.status === "cancelled";
         return {
@@ -134,7 +143,7 @@ export function SchedulerView({
           },
         };
       }),
-    [events],
+    [shown],
   );
 
   const openCreate = useCallback(
@@ -212,22 +221,33 @@ export function SchedulerView({
 
   return (
     <div className="mm-scheduler relative">
-      {view === "overlap" ? (
-        <div className="text-mist-500 mb-3 flex items-center gap-4 text-xs">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block size-3 rounded-[3px] border bg-white"
-              style={{ borderColor: MM_RED }}
-            />
-            Survey
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="inline-block size-3 rounded-[3px]"
-              style={{ backgroundColor: CHARCOAL }}
-            />
-            Removal
-          </span>
+      {view === "removal" ? (
+        <div className="mb-3 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowSurveys((s) => !s)}
+            aria-pressed={showSurveys}
+            className={cn(
+              "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
+              showSurveys
+                ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+                : "border-input bg-card text-mist-500 hover:bg-muted",
+            )}
+          >
+            {showSurveys ? "Hide surveys" : "Show surveys"}
+          </button>
+          {showSurveys ? (
+            <div className="flex items-center gap-4 text-xs text-mist-500">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block size-3 rounded-[3px] border bg-white" style={{ borderColor: MM_RED }} />
+                Survey
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="inline-block size-3 rounded-[3px]" style={{ backgroundColor: CHARCOAL }} />
+                Removal
+              </span>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   CalendarCheck,
-  CalendarRange,
   FileText,
   KanbanSquare,
   LayoutDashboard,
@@ -34,7 +33,6 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
-      { href: "/schedule/overlap", label: "Overlap", icon: CalendarRange, live: true },
     ],
   },
   { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: true }] },
