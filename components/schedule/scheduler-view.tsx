@@ -40,6 +40,7 @@ import {
   type ApptType,
   type EditTarget,
   type LeadOption,
+  type EstimatorOption,
 } from "./appointment-dialog";
 
 export type SchedulerKind = "survey" | "removal";
@@ -54,6 +55,7 @@ export interface SchedulerEvent {
   status: string | null;
   location: string | null;
   lead_id: string | null;
+  estimator_id: string | null;
 }
 
 const CHARCOAL = "#1A1A1A";
@@ -82,10 +84,14 @@ export function SchedulerView({
   view,
   events,
   leads,
+  estimators,
+  defaultEstimatorId,
 }: {
   view: SchedulerKind;
   events: SchedulerEvent[];
   leads: LeadOption[];
+  estimators: EstimatorOption[];
+  defaultEstimatorId?: string | null;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -137,6 +143,7 @@ export function SchedulerView({
           extendedProps: {
             apptType: e.appt_type,
             leadId: e.lead_id,
+            estimatorId: e.estimator_id,
             status: e.status,
             location: e.location,
             title: e.title,
@@ -177,6 +184,8 @@ export function SchedulerView({
     const ep = arg.event.extendedProps as {
       apptType: ApptType;
       leadId: string | null;
+      estimatorId: string | null;
+      status: string | null;
       location: string | null;
       title: string | null;
     };
@@ -184,6 +193,8 @@ export function SchedulerView({
       id: arg.event.id,
       apptType: ep.apptType,
       leadId: ep.leadId ?? null,
+      estimatorId: ep.estimatorId ?? null,
+      status: ep.status ?? null,
       title: ep.title ?? arg.event.title,
       location: ep.location ?? null,
       notes: null, // not loaded into the calendar payload; edit overwrites only if changed
@@ -308,6 +319,8 @@ export function SchedulerView({
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         leads={leads}
+        estimators={estimators}
+        defaultEstimatorId={defaultEstimatorId}
         defaultType={defaultType}
         presetStart={presetStart}
         presetEnd={presetEnd}

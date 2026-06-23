@@ -19,6 +19,7 @@ function revalidateSchedule() {
 export interface CreateAppointmentInput {
   apptType: "survey" | "removal";
   leadId?: string | null;
+  estimatorId?: string | null;
   startsAt: string; // ISO
   endsAt: string; // ISO
   title?: string;
@@ -29,6 +30,9 @@ export interface CreateAppointmentInput {
 
 export async function createAppointment(input: CreateAppointmentInput) {
   const { sb, userId } = await ctx();
+  // Who actually does this visit — chosen in the dialog, defaults to the creator.
+  // This is what attributes visits to Connor vs Luke for pay + win stats.
+  const estimatorId = input.estimatorId ?? userId;
 
   // Pull the lead (for client_id + status + a default title).
   let lead: { id: string; client_id: string | null; status: string; name: string | null } | null = null;
@@ -42,7 +46,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
   if (input.apptType === "survey" && lead) {
     const { data: survey } = await sb
       .from("surveys")
-      .insert({ lead_id: lead.id, client_id: lead.client_id, estimator_id: userId, status: "scheduled" })
+      .insert({ lead_id: lead.id, client_id: lead.client_id, estimator_id: estimatorId, status: "scheduled" })
       .select("id")
       .single();
     surveyId = survey?.id ?? null;
@@ -55,7 +59,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
       lead_id: input.leadId ?? null,
       client_id: lead?.client_id ?? null,
       survey_id: surveyId,
-      estimator_id: userId,
+      estimator_id: estimatorId,
       title: input.title || (lead?.name ? `${input.apptType === "survey" ? "Survey" : "Removal"} — ${lead.name}` : input.apptType === "survey" ? "Survey" : "Removal"),
       starts_at: input.startsAt,
       ends_at: input.endsAt,
@@ -98,7 +102,7 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
 
 export async function updateAppointment(
   id: string,
-  patch: { title?: string; location?: string; notes?: string; status?: string },
+  patch: { title?: string; location?: string; notes?: string; status?: string; estimatorId?: string | null },
 ) {
   const { sb } = await ctx();
   const { error } = await sb
@@ -108,6 +112,7 @@ export async function updateAppointment(
       ...(patch.location !== undefined ? { location: patch.location || null } : {}),
       ...(patch.notes !== undefined ? { notes: patch.notes || null } : {}),
       ...(patch.status !== undefined ? { status: patch.status as never } : {}),
+      ...(patch.estimatorId !== undefined ? { estimator_id: patch.estimatorId } : {}),
     })
     .eq("id", id);
   if (error) return { ok: false as const, error: error.message };

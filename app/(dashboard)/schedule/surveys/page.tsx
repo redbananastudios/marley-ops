@@ -9,16 +9,20 @@ export const dynamic = "force-dynamic";
 
 export default async function SurveysSchedulePage() {
   const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
 
-  const [{ data: appts }, { data: leads }] = await Promise.all([
+  const [{ data: appts }, { data: leads }, { data: estimators }] = await Promise.all([
     sb
       .from("appointments")
       .select(
-        "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id",
+        "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
       )
       .eq("appt_type", "survey")
       .order("starts_at", { ascending: true }),
     sb.from("leads").select("id,name").order("created_at", { ascending: false }),
+    sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
   return (
@@ -28,6 +32,8 @@ export default async function SurveysSchedulePage() {
         view="survey"
         events={(appts ?? []) as SchedulerEvent[]}
         leads={leads ?? []}
+        estimators={(estimators ?? []) as { id: string; full_name: string }[]}
+        defaultEstimatorId={user?.id ?? null}
       />
     </div>
   );

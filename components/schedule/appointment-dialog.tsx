@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2, Trash2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -48,10 +48,17 @@ export interface LeadOption {
   name: string | null;
 }
 
+export interface EstimatorOption {
+  id: string;
+  full_name: string;
+}
+
 export interface EditTarget {
   id: string;
   apptType: ApptType;
   leadId: string | null;
+  estimatorId: string | null;
+  status: string | null;
   title: string | null;
   location: string | null;
   notes: string | null;
@@ -60,6 +67,7 @@ export interface EditTarget {
 }
 
 const NO_LEAD = "__none__";
+const NO_EST = "__none__";
 
 /** Convert an ISO (or Date) into a value for <input type="datetime-local"> in local wall-clock. */
 function toLocalInput(iso: string | Date | null | undefined): string {
@@ -97,6 +105,8 @@ export function AppointmentDialog({
   open,
   onOpenChange,
   leads,
+  estimators,
+  defaultEstimatorId,
   defaultType,
   presetStart,
   presetEnd,
@@ -106,6 +116,9 @@ export function AppointmentDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   leads: LeadOption[];
+  estimators: EstimatorOption[];
+  /** current user — the default estimator for a new appointment */
+  defaultEstimatorId?: string | null;
   /** the view's natural type — used to preset the type selector in create mode */
   defaultType: ApptType;
   /** datetime-local strings to prefill (from dateClick/select) */
@@ -120,6 +133,8 @@ export function AppointmentDialog({
 
   const [apptType, setApptType] = useState<ApptType>(defaultType);
   const [leadId, setLeadId] = useState<string>(NO_LEAD);
+  const [estimatorId, setEstimatorId] = useState<string>(NO_EST);
+  const [status, setStatus] = useState<string>("scheduled");
   const [start, setStart] = useState<string>("");
   const [end, setEnd] = useState<string>("");
   const [title, setTitle] = useState<string>("");
@@ -135,6 +150,8 @@ export function AppointmentDialog({
     if (edit) {
       setApptType(edit.apptType);
       setLeadId(edit.leadId ?? NO_LEAD);
+      setEstimatorId(edit.estimatorId ?? NO_EST);
+      setStatus(edit.status ?? "scheduled");
       setStart(toLocalInput(edit.startsAt));
       setEnd(toLocalInput(edit.endsAt));
       setTitle(edit.title ?? "");
@@ -146,6 +163,8 @@ export function AppointmentDialog({
       const s = presetStart ?? toLocalInput(new Date());
       setApptType(defaultType);
       setLeadId(NO_LEAD);
+      setEstimatorId(defaultEstimatorId ?? NO_EST);
+      setStatus("scheduled");
       setStart(s);
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
       setTitle("");
@@ -195,6 +214,8 @@ export function AppointmentDialog({
           title: title.trim() || undefined,
           location,
           notes,
+          status,
+          estimatorId: estimatorId === NO_EST ? null : estimatorId,
         });
         if (!meta.ok) {
           toast.error(meta.error || "Could not save appointment.");
@@ -213,6 +234,7 @@ export function AppointmentDialog({
         const res = await createAppointment({
           apptType,
           leadId: lead,
+          estimatorId: estimatorId === NO_EST ? null : estimatorId,
           startsAt,
           endsAt,
           title: title.trim() || undefined,
@@ -228,6 +250,23 @@ export function AppointmentDialog({
           apptType === "survey" ? "Survey booked." : "Removal scheduled.",
         );
       }
+      onOpenChange(false);
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function markCompleted() {
+    if (!edit) return;
+    setBusy(true);
+    try {
+      const r = await updateAppointment(edit.id, { status: "completed" });
+      if (!r.ok) {
+        toast.error(r.error || "Could not update.");
+        return;
+      }
+      toast.success("Visit marked completed.");
       onOpenChange(false);
       router.refresh();
     } finally {
@@ -304,6 +343,40 @@ export function AppointmentDialog({
             </Select>
           </div>
 
+          <div className="grid gap-2">
+            <Label htmlFor="appt-estimator">Estimator</Label>
+            <Select value={estimatorId} onValueChange={setEstimatorId}>
+              <SelectTrigger id="appt-estimator">
+                <SelectValue placeholder="Unassigned" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_EST}>Unassigned</SelectItem>
+                {estimators.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.full_name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-mist-400">Who does this visit — drives their pay + win stats.</p>
+          </div>
+
+          {isEdit ? (
+            <div className="grid gap-2">
+              <Label htmlFor="appt-status">Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger id="appt-status">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="scheduled">Scheduled</SelectItem>
+                  <SelectItem value="completed">Completed (attended)</SelectItem>
+                  <SelectItem value="cancelled">Cancelled / no-show</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
               <Label htmlFor="appt-start">Starts</Label>
@@ -363,16 +436,30 @@ export function AppointmentDialog({
 
         <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
           {isEdit ? (
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={onDelete}
-              disabled={busy}
-              className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint h-11"
-            >
-              <Trash2 className="size-4" strokeWidth={1.75} />
-              Delete
-            </Button>
+            <div className="flex items-center gap-1">
+              {status !== "completed" ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={markCompleted}
+                  disabled={busy}
+                  className="h-11 text-success hover:bg-success-bg hover:text-success"
+                >
+                  <CheckCircle2 className="size-4" strokeWidth={1.75} />
+                  Mark done
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={onDelete}
+                disabled={busy}
+                className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint h-11"
+              >
+                <Trash2 className="size-4" strokeWidth={1.75} />
+                Delete
+              </Button>
+            </div>
           ) : (
             <span />
           )}
