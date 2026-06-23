@@ -87,7 +87,7 @@ export function LeadActionBar({
           Mark contacted
         </button>
       ) : null}
-      <Link href={`/quotes/new?leadId=${leadId}`} className={btn}>
+      <Link href={`/quotes/new?leadId=${leadId}`} prefetch={false} className={btn}>
         <FileText className="size-4 text-mm-red" strokeWidth={1.75} />
         New quote
       </Link>

@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
@@ -54,6 +56,15 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         backLabel="Quotes"
       >
         <div className="flex items-center gap-3">
+          {quote.lead_id ? (
+            <Link
+              href={`/leads/${quote.lead_id}`}
+              className="focus-ring inline-flex items-center gap-1 rounded-sm text-sm text-mist-400 transition-colors hover:text-foreground"
+            >
+              <Users className="size-4" strokeWidth={1.75} />
+              View lead
+            </Link>
+          ) : null}
           {emailedCount > 0 ? (
             <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
               Emailed ×{emailedCount}

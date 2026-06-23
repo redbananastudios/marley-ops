@@ -394,7 +394,7 @@ function Card({
             <MessageCircle className="size-4" strokeWidth={1.75} />
           </a>
         ) : null}
-        <Link href={`/quotes/new?leadId=${lead.id}`} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mm-red hover:bg-muted">
+        <Link href={`/quotes/new?leadId=${lead.id}`} prefetch={false} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mm-red hover:bg-muted">
           <FileText className="size-4" strokeWidth={1.75} />
         </Link>
         <DropdownMenu>

@@ -374,6 +374,7 @@ function Row({ lead }: { lead: LeadCard }) {
           ) : null}
           <Link
             href={`/quotes/new?leadId=${lead.id}`}
+            prefetch={false}
             title="New quote"
             aria-label="New quote"
             className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted"

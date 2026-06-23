@@ -249,7 +249,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <div className="flex items-center justify-between border-b px-5 py-3.5">
               <h2 className="font-display text-lg text-foreground">Quotes</h2>
               <Button asChild size="sm">
-                <Link href={`/quotes/new?leadId=${lead.id}`}>
+                <Link href={`/quotes/new?leadId=${lead.id}`} prefetch={false}>
                   <Plus strokeWidth={1.75} />
                   New quote
                 </Link>
