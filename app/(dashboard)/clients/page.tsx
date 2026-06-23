@@ -1,0 +1,51 @@
+import { createClient } from "@/lib/supabase/server";
+import { PageHeader } from "@/components/page-header";
+import { ClientsView, type ClientRow } from "@/components/clients/clients-view";
+
+export const dynamic = "force-dynamic";
+
+export default async function ClientsPage() {
+  const supabase = await createClient();
+
+  const [{ data: clients }, { data: leads }] = await Promise.all([
+    supabase
+      .from("clients")
+      .select("id, display_name, email, phone_e164, phone_raw, postcode_home, created_at")
+      .is("merged_into_id", null)
+      .eq("is_active", true),
+    supabase.from("leads").select("client_id, submitted_at, created_at"),
+  ]);
+
+  // per-client lead count + last enquiry date
+  const agg = new Map<string, { count: number; last: number }>();
+  for (const l of leads ?? []) {
+    if (!l.client_id) continue;
+    const ts = new Date(l.submitted_at || l.created_at || 0).getTime();
+    const cur = agg.get(l.client_id) ?? { count: 0, last: 0 };
+    cur.count += 1;
+    if (ts > cur.last) cur.last = ts;
+    agg.set(l.client_id, cur);
+  }
+
+  const rows: ClientRow[] = (clients ?? [])
+    .map((c) => {
+      const a = agg.get(c.id);
+      return {
+        id: c.id,
+        display_name: c.display_name,
+        email: c.email,
+        phone: c.phone_e164 ?? c.phone_raw,
+        postcode: c.postcode_home,
+        leadCount: a?.count ?? 0,
+        lastLeadAt: a?.last ? new Date(a.last).toISOString() : c.created_at,
+      };
+    })
+    .sort((x, y) => new Date(y.lastLeadAt ?? 0).getTime() - new Date(x.lastLeadAt ?? 0).getTime());
+
+  return (
+    <main className="flex-1 p-6 md:p-8">
+      <PageHeader eyebrow="Pipeline" title="Clients" />
+      <ClientsView clients={rows} />
+    </main>
+  );
+}
