@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PlacesInput } from "@/components/places/places-input";
 import {
   Select,
   SelectContent,
@@ -418,10 +419,11 @@ export function AppointmentDialog({
 
           <div className="grid gap-2">
             <Label htmlFor="appt-location">Location</Label>
-            <Input
+            <PlacesInput
               id="appt-location"
+              kind="address"
               value={location}
-              onChange={(e) => setLocation(e.target.value)}
+              onValueChange={setLocation}
               placeholder="Collection address / postcode"
             />
           </div>

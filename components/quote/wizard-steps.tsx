@@ -11,6 +11,7 @@
 import { useState } from "react";
 import { Minus, Plus, Loader2, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PlacesInput } from "@/components/places/places-input";
 import {
   BASE_PRICES,
   PACK_PRICES,
@@ -336,20 +337,26 @@ export function Step2Job({ values, set }: StepProps) {
   return (
     <div>
       <StepHeader title="Job Details" sub="Where are we going?" />
-      <TextField
-        label="Collection address"
-        required
-        placeholder="Start typing the full address…"
-        value={j.collectAddr}
-        onChange={(e) => set("job", { ...j, collectAddr: e.target.value })}
-      />
-      <TextField
-        label="Destination address"
-        required
-        placeholder="Start typing the full address…"
-        value={j.destAddr}
-        onChange={(e) => set("job", { ...j, destAddr: e.target.value })}
-      />
+      <div className="mb-5">
+        <FieldLabel required>Collection address</FieldLabel>
+        <PlacesInput
+          kind="address"
+          value={j.collectAddr}
+          onValueChange={(v) => set("job", { ...j, collectAddr: v })}
+          placeholder="Start typing the full address…"
+          className="h-14 rounded-md px-4 text-base"
+        />
+      </div>
+      <div className="mb-5">
+        <FieldLabel required>Destination address</FieldLabel>
+        <PlacesInput
+          kind="address"
+          value={j.destAddr}
+          onValueChange={(v) => set("job", { ...j, destAddr: v })}
+          placeholder="Start typing the full address…"
+          className="h-14 rounded-md px-4 text-base"
+        />
+      </div>
 
       <button
         type="button"

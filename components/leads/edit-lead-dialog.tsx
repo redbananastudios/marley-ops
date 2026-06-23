@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PlacesInput } from "@/components/places/places-input";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
 import type { EditLeadInput } from "@/lib/leads/schema";
 
@@ -57,6 +58,7 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
 
   const set = (k: keyof EditLeadValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setV((s) => ({ ...s, [k]: e.target.value }));
+  const setVal = (k: keyof EditLeadValues) => (val: string) => setV((s) => ({ ...s, [k]: val }));
 
   async function onSave() {
     setBusy(true);
@@ -108,21 +110,21 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
 
           <div className="grid gap-2">
             <Label htmlFor="ed-faddr">Pickup address</Label>
-            <Input id="ed-faddr" value={v.from_address} onChange={set("from_address")} placeholder="House, street, town" />
+            <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} placeholder="Start typing the address…" />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1 grid gap-2">
               <Label htmlFor="ed-fpc">Pickup postcode</Label>
-              <Input id="ed-fpc" value={v.from_postcode} onChange={set("from_postcode")} />
+              <PlacesInput id="ed-fpc" kind="postcode" value={v.from_postcode} onValueChange={setVal("from_postcode")} placeholder="BA11…" />
             </div>
             <div className="col-span-2 grid gap-2">
               <Label htmlFor="ed-taddr">Destination address</Label>
-              <Input id="ed-taddr" value={v.to_address} onChange={set("to_address")} placeholder="House, street, town" />
+              <PlacesInput id="ed-taddr" kind="address" value={v.to_address} onValueChange={setVal("to_address")} placeholder="Start typing the address…" />
             </div>
           </div>
           <div className="grid gap-2">
             <Label htmlFor="ed-tpc">Destination postcode</Label>
-            <Input id="ed-tpc" value={v.to_postcode} onChange={set("to_postcode")} />
+            <PlacesInput id="ed-tpc" kind="postcode" value={v.to_postcode} onValueChange={setVal("to_postcode")} placeholder="BA21…" />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
