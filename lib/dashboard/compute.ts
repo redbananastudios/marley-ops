@@ -81,6 +81,12 @@ export interface PeriodStats {
   leadToSurveyPct: number;
   leadToJobPct: number;
   surveyToJobPct: number;
+  /** Google Ads leads in this cohort (for cost-per-lead). */
+  paidLeads: number;
+  /** won (agreed) revenue from Google Ads leads in this cohort (for ROAS). */
+  paidWonValue: number;
+  /** Google Ads spend for the period — filled by the page after the Ads API call; null if unavailable. */
+  adSpend: number | null;
   sources: { key: SourceKey; label: string; color: string; count: number }[];
   funnel: FunnelStage[];
   topCampaigns: { campaign: string; count: number }[];
@@ -266,6 +272,10 @@ export function buildPeriodStats(
   }));
 
   const wonValue = cohort.reduce((sum, l) => sum + (prog.won.get(l.id) ?? 0), 0);
+  const paidLeads = srcCount.get("google_ads") ?? 0;
+  const paidWonValue = cohort
+    .filter((l) => classifySource(l) === "google_ads")
+    .reduce((sum, l) => sum + (prog.won.get(l.id) ?? 0), 0);
 
   return {
     key,
@@ -281,6 +291,9 @@ export function buildPeriodStats(
     leadToSurveyPct: pct(surveys, newLeads),
     leadToJobPct: pct(jobs, newLeads),
     surveyToJobPct: pct(jobs, surveys),
+    paidLeads,
+    paidWonValue,
+    adSpend: null,
     sources,
     funnel: [
       { key: "new", label: "Enquiries", count: newLeads, pct: 100 },

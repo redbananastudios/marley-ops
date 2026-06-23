@@ -110,6 +110,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <RingStat label="Lead → Job" pct={s.leadToJobPct} color="#c03838" caption={`${s.jobs}/${s.newLeads}`} />
       </section>
 
+      {/* paid performance */}
+      <PaidCard adSpend={s.adSpend} paidLeads={s.paidLeads} paidWonValue={s.paidWonValue} />
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* sources */}
         <Card className="p-5">
@@ -266,6 +269,85 @@ function Delta({ delta, sub }: { delta: number; sub: string }) {
       </span>
       <span>· {sub}</span>
     </p>
+  );
+}
+
+const gbp2 = (n: number): string =>
+  "£" + n.toFixed(2).replace(/\.00$/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+function PaidCard({
+  adSpend,
+  paidLeads,
+  paidWonValue,
+}: {
+  adSpend: number | null;
+  paidLeads: number;
+  paidWonValue: number;
+}) {
+  if (adSpend == null) {
+    return (
+      <Card className="p-5">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="eyebrow">Paid performance</p>
+          <span className="text-xs text-mist-400">Google Ads</span>
+        </div>
+        <p className="py-4 text-center text-sm text-mist-400">Google Ads data unavailable right now.</p>
+      </Card>
+    );
+  }
+  const cpl = paidLeads > 0 ? adSpend / paidLeads : null;
+  const roas = adSpend > 0 ? paidWonValue / adSpend : null;
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <p className="eyebrow">Paid performance</p>
+        <span className="text-xs text-mist-400">Google Ads · this period</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <PaidStat label="Ad spend" value={gbp2(adSpend)} />
+        <PaidStat label="Cost per lead" value={cpl == null ? "—" : gbp2(cpl)} sub={`${paidLeads} paid leads`} />
+        <PaidStat label="Won from ads" value={paidWonValue > 0 ? gbp2(paidWonValue) : "—"} good={paidWonValue > 0} />
+        <PaidStat
+          label="ROAS"
+          value={roas == null || paidWonValue === 0 ? "—" : `${roas.toFixed(1)}×`}
+          good={roas != null && roas >= 1}
+          bad={roas != null && paidWonValue > 0 && roas < 1}
+          sub={paidWonValue === 0 ? "no won revenue yet" : "won ÷ spend"}
+        />
+      </div>
+      <p className="mt-4 border-t border-border pt-3 text-xs text-mist-400">
+        Meta not connected — add an ad-account ID + ads_read token to include Meta spend.
+      </p>
+    </Card>
+  );
+}
+
+function PaidStat({
+  label,
+  value,
+  sub,
+  good,
+  bad,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  good?: boolean;
+  bad?: boolean;
+}) {
+  return (
+    <div>
+      <p className="eyebrow">{label}</p>
+      <p
+        className={
+          "mt-1 font-display tabular text-2xl font-bold " +
+          (good ? "text-success" : bad ? "text-mm-red" : "text-foreground")
+        }
+      >
+        {value}
+      </p>
+      {sub ? <p className="mt-0.5 text-xs text-mist-400">{sub}</p> : null}
+    </div>
   );
 }
 

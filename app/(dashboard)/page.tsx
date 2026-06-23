@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
+import { fetchAdSpend } from "@/lib/google-ads";
 import {
   buildPeriodStats,
   classifySource,
@@ -54,16 +55,28 @@ export default async function DashboardPage() {
     ),
   };
 
-  /* PostHog website funnel — one window per period, all in parallel, fail-soft */
-  const phResults = await Promise.all(
-    PERIOD_KEYS.map((k) => {
-      const { from, to } = periodWindow(k, now);
-      return fetchWebsiteFunnel(from, to).catch(() => null);
-    }),
-  );
+  /* PostHog website funnel + Google Ads spend — one window per period, all parallel, fail-soft */
+  const [phResults, spendResults] = await Promise.all([
+    Promise.all(
+      PERIOD_KEYS.map((k) => {
+        const { from, to } = periodWindow(k, now);
+        return fetchWebsiteFunnel(from, to).catch(() => null);
+      }),
+    ),
+    Promise.all(
+      PERIOD_KEYS.map((k) => {
+        const { from, to } = periodWindow(k, now);
+        return fetchAdSpend(from, to).catch(() => null);
+      }),
+    ),
+  ]);
 
   const periods = Object.fromEntries(
-    PERIOD_KEYS.map((k, i) => [k, buildPeriodStats(k, leads, prog, now, phResults[i])]),
+    PERIOD_KEYS.map((k, i) => {
+      const stats = buildPeriodStats(k, leads, prog, now, phResults[i]);
+      stats.adSpend = spendResults[i] ? spendResults[i]!.costGbp : null;
+      return [k, stats];
+    }),
   ) as Record<PeriodKey, PeriodStats>;
 
   /* needs-action (now) */
