@@ -60,13 +60,13 @@ export function LeadActionBar({
     <div className="flex flex-wrap gap-2 border-t px-5 py-4">
       {phone ? (
         <a href={`tel:${phone}`} className={btn} aria-label="Call">
-          <Phone className="size-4" strokeWidth={1.75} />
+          <Phone className="size-4 text-[#2563eb]" strokeWidth={1.75} />
           Call
         </a>
       ) : null}
       {wa ? (
         <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={btn} aria-label="WhatsApp">
-          <MessageCircle className="size-4" strokeWidth={1.75} />
+          <MessageCircle className="size-4 text-[#16a34a]" strokeWidth={1.75} />
           WhatsApp
         </a>
       ) : null}
@@ -88,7 +88,7 @@ export function LeadActionBar({
         </button>
       ) : null}
       <Link href={`/quotes/new?leadId=${leadId}`} className={btn}>
-        <FileText className="size-4" strokeWidth={1.75} />
+        <FileText className="size-4 text-mm-red" strokeWidth={1.75} />
         New quote
       </Link>
       <Link href={`/schedule/surveys?leadId=${leadId}`} className={btn}>

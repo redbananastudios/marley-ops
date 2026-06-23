@@ -343,7 +343,7 @@ function Row({ lead }: { lead: LeadCard }) {
               href={`tel:${lead.phone}`}
               title="Call"
               aria-label="Call"
-              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
+              className="focus-ring flex size-9 items-center justify-center rounded-md text-[#2563eb] hover:bg-muted"
             >
               <Phone className="size-4" strokeWidth={1.75} />
             </a>
@@ -355,7 +355,7 @@ function Row({ lead }: { lead: LeadCard }) {
               rel="noopener noreferrer"
               title="WhatsApp"
               aria-label="WhatsApp"
-              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success"
+              className="focus-ring flex size-9 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted"
             >
               <MessageCircle className="size-4" strokeWidth={1.75} />
             </a>
@@ -376,7 +376,7 @@ function Row({ lead }: { lead: LeadCard }) {
             href={`/quotes/new?leadId=${lead.id}`}
             title="New quote"
             aria-label="New quote"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted"
           >
             <FileText className="size-4" strokeWidth={1.75} />
           </Link>

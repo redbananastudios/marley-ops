@@ -121,6 +121,7 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
   const [source, setSource] = useState<string>("");
   const [mine, setMine] = useState(false);
   const [showDeclined, setShowDeclined] = useState(false);
+  const [mobileCol, setMobileCol] = useState<string>("website_enquiry");
 
   const columns = useMemo(
     () => [...STATUSES.filter((s) => s !== "declined"), ...(showDeclined ? ["declined"] : [])],
@@ -206,9 +207,34 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
         </button>
       </div>
 
+      {/* mobile stage selector — pick a column to view full-width */}
+      <div className="-mx-6 mb-3 flex gap-1.5 overflow-x-auto px-6 pb-1 lg:hidden">
+        {columns.map((status) => {
+          const color = STATUS_COLOR[status] ?? "#71717a";
+          const count = filtered.filter((l) => l.status === status).length;
+          const active = mobileCol === status;
+          return (
+            <button
+              key={status}
+              type="button"
+              onClick={() => setMobileCol(status)}
+              aria-pressed={active}
+              className={cn(
+                "focus-ring inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
+                active ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-card text-mist-500",
+              )}
+            >
+              <span className="size-2 rounded-full" style={{ background: color }} />
+              {LEAD_STATUS_META[status]?.label ?? status}
+              <span className="tabular text-xs opacity-70">{count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* columns */}
       <div className="-mx-6 flex-1 overflow-x-auto px-6 pb-2 md:-mx-8 md:px-8">
-        <div className="flex min-w-max gap-4">
+        <div className="flex gap-4 lg:min-w-max">
           {columns.map((status) => {
             const meta = LEAD_STATUS_META[status];
             const color = STATUS_COLOR[status] ?? "#71717a";
@@ -236,7 +262,8 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
                   if (leadId) void move(leadId, status);
                 }}
                 className={cn(
-                  "flex w-72 shrink-0 flex-col overflow-hidden rounded-lg border bg-muted/30 transition-colors",
+                  "flex w-full flex-col overflow-hidden rounded-lg border bg-muted/30 transition-colors lg:w-72 lg:shrink-0",
+                  status !== mobileCol && "hidden lg:flex",
                   isTarget && "border-dashed border-mm-red bg-accent",
                 )}
               >
@@ -358,16 +385,16 @@ function Card({
       {/* quick actions */}
       <div className="mt-2 flex items-center gap-0.5 border-t pt-1.5">
         {lead.phone ? (
-          <a href={`tel:${lead.phone}`} title="Call" aria-label="Call" className="focus-ring flex size-8 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground">
+          <a href={`tel:${lead.phone}`} title="Call" aria-label="Call" className="focus-ring flex size-8 items-center justify-center rounded-md text-[#2563eb] hover:bg-muted">
             <Phone className="size-4" strokeWidth={1.75} />
           </a>
         ) : null}
         {wa ? (
-          <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" aria-label="WhatsApp" className="focus-ring flex size-8 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success">
+          <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" aria-label="WhatsApp" className="focus-ring flex size-8 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted">
             <MessageCircle className="size-4" strokeWidth={1.75} />
           </a>
         ) : null}
-        <Link href={`/quotes/new?leadId=${lead.id}`} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground">
+        <Link href={`/quotes/new?leadId=${lead.id}`} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mm-red hover:bg-muted">
           <FileText className="size-4" strokeWidth={1.75} />
         </Link>
         <DropdownMenu>
