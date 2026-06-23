@@ -10,7 +10,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { SurveyPanel } from "@/components/survey/survey-panel";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
+import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { OwnerPicker } from "@/components/leads/owner-picker";
 import { StatusChanger } from "./status-changer";
+
+const gbp = (n: number | null | undefined): string =>
+  n == null || isNaN(n as number)
+    ? "—"
+    : "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/** A date value as YYYY-MM-DD for a date input, or "". */
+function dateInput(value: string | null | undefined): string {
+  if (!value) return "";
+  const m = String(value).match(/^\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : "";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -55,7 +69,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { data: lead } = await supabase.from("leads").select("*").eq("id", id).single();
   if (!lead) notFound();
 
-  const [{ data: client }, { data: activities }, { count: clientLeadCount }, { data: estimator }] =
+  const [{ data: client }, { data: activities }, { count: clientLeadCount }, { data: estimators }] =
     await Promise.all([
       lead.client_id
         ? supabase.from("clients").select("*").eq("id", lead.client_id).single()
@@ -68,10 +82,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       lead.client_id
         ? supabase.from("leads").select("id", { count: "exact", head: true }).eq("client_id", lead.client_id)
         : Promise.resolve({ count: 0 }),
-      lead.estimator_id
-        ? supabase.from("profiles").select("full_name").eq("id", lead.estimator_id).single()
-        : Promise.resolve({ data: null }),
+      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name", { ascending: true }),
     ]);
+  const estimatorList = (estimators ?? []) as { id: string; full_name: string }[];
 
   const { data: comms } = await supabase
     .from("communications")
@@ -149,12 +162,34 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <LeadStatusBadge status={lead.status} />
             </div>
           </div>
-          <StatusChanger leadId={lead.id} status={lead.status} />
+          <div className="flex flex-wrap items-center gap-2">
+            <EditLeadDialog
+              leadId={lead.id}
+              initial={{
+                name: lead.name ?? "",
+                phone: client?.phone_e164 ?? client?.phone_raw ?? lead.phone ?? "",
+                email: client?.email ?? lead.email ?? "",
+                from_postcode: lead.from_postcode ?? "",
+                to_postcode: lead.to_postcode ?? "",
+                from_address: lead.from_address ?? "",
+                to_address: lead.to_address ?? "",
+                property_size: lead.property_size ?? "",
+                preferred_date: dateInput(lead.preferred_date),
+                estimate_given: lead.estimate_given != null ? String(lead.estimate_given) : "",
+                notes: lead.notes ?? "",
+              }}
+            />
+            <StatusChanger leadId={lead.id} status={lead.status} />
+          </div>
         </div>
 
-        <div className="flex flex-wrap gap-x-10 gap-y-4 border-t px-5 py-4">
+        <div className="flex flex-wrap items-end gap-x-10 gap-y-4 border-t px-5 py-4">
           <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
-          <Fact label="Owner" value={estimator?.full_name || "Unassigned"} />
+          <div>
+            <p className="eyebrow mb-1">Owner</p>
+            <OwnerPicker leadId={lead.id} ownerId={lead.estimator_id} estimators={estimatorList} />
+          </div>
+          {lead.estimate_given != null ? <Fact label="Estimate given" value={gbp(lead.estimate_given)} /> : null}
           <Fact label="Submitted" value={fmtDate(lead.submitted_at ?? lead.created_at)} />
           {previousCount > 0 ? (
             <div>
@@ -213,6 +248,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   }
                 />
                 <Fact label="Property size" value={lead.property_size} />
+                <Fact label="Pickup address" value={lead.from_address} />
+                <Fact label="Destination address" value={lead.to_address} />
                 <Fact label="Preferred date" value={fmtDate(lead.preferred_date)} />
                 <Fact label="Services" value={services.length ? services.join(", ") : null} />
                 <div className="sm:col-span-2">

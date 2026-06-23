@@ -7,7 +7,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function SurveysSchedulePage() {
+export default async function SurveysSchedulePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ leadId?: string }>;
+}) {
+  const { leadId } = await searchParams;
   const sb = await createClient();
   const {
     data: { user },
@@ -25,6 +30,18 @@ export default async function SurveysSchedulePage() {
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
+  // Booked from a lead ("Book survey") — auto-open the dialog prefilled with that
+  // lead + its pickup address as the location.
+  let presetLocation: string | null = null;
+  if (leadId) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("from_address, from_postcode")
+      .eq("id", leadId)
+      .single();
+    presetLocation = lead?.from_address || lead?.from_postcode || null;
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Schedule" title="Surveys" />
@@ -34,6 +51,8 @@ export default async function SurveysSchedulePage() {
         leads={leads ?? []}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}
+        presetLeadId={leadId ?? null}
+        presetLocation={presetLocation}
       />
     </div>
   );

@@ -51,8 +51,9 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
         customer_name: lead?.name ?? null,
         customer_email: lead?.email ?? null,
         customer_phone: lead?.phone ?? null,
-        collect_addr: lead?.from_postcode ?? null,
-        dest_addr: lead?.to_postcode ?? null,
+        // prefer the full address captured in the panel; fall back to the postcode
+        collect_addr: lead?.from_address ?? lead?.from_postcode ?? null,
+        dest_addr: lead?.to_address ?? lead?.to_postcode ?? null,
       })
       .select("id, quote_ref")
       .single();

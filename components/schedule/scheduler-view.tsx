@@ -86,12 +86,17 @@ export function SchedulerView({
   leads,
   estimators,
   defaultEstimatorId,
+  presetLeadId,
+  presetLocation,
 }: {
   view: SchedulerKind;
   events: SchedulerEvent[];
   leads: LeadOption[];
   estimators: EstimatorOption[];
   defaultEstimatorId?: string | null;
+  /** when navigated from a lead's "Book survey", auto-open the dialog prefilled */
+  presetLeadId?: string | null;
+  presetLocation?: string | null;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -120,6 +125,14 @@ export function SchedulerView({
     if (view === "removal") return "dayGridMonth";
     return "timeGridWeek"; // surveys
   }, [view, isNarrow]);
+
+  // Arrived from a lead's "Book survey" — pop the create dialog straight away.
+  useEffect(() => {
+    if (presetLeadId) {
+      setEditTarget(null);
+      setDialogOpen(true);
+    }
+  }, [presetLeadId]);
 
   // On the removals calendar, surveys are hidden unless "Show surveys" is on.
   const shown = useMemo(
@@ -325,6 +338,8 @@ export function SchedulerView({
         presetStart={presetStart}
         presetEnd={presetEnd}
         presetAllDay={presetAllDay}
+        presetLeadId={presetLeadId ?? undefined}
+        presetLocation={presetLocation ?? undefined}
         edit={editTarget}
       />
 

@@ -424,10 +424,12 @@ export type Database = {
           created_at: string
           email: string | null
           entry_channel: Database["public"]["Enums"]["lead_entry_channel"]
+          estimate_given: number | null
           estimator_id: string | null
           external_lead_id: string | null
           fbclid: string | null
           first_contacted_at: string | null
+          from_address: string | null
           from_postcode: string | null
           gbraid: string | null
           gclid: string | null
@@ -449,6 +451,7 @@ export type Database = {
           source_system: string
           status: Database["public"]["Enums"]["lead_status"]
           submitted_at: string
+          to_address: string | null
           to_postcode: string | null
           ttclid: string | null
           updated_at: string
@@ -467,10 +470,12 @@ export type Database = {
           created_at?: string
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
+          estimate_given?: number | null
           estimator_id?: string | null
           external_lead_id?: string | null
           fbclid?: string | null
           first_contacted_at?: string | null
+          from_address?: string | null
           from_postcode?: string | null
           gbraid?: string | null
           gclid?: string | null
@@ -492,6 +497,7 @@ export type Database = {
           source_system?: string
           status?: Database["public"]["Enums"]["lead_status"]
           submitted_at?: string
+          to_address?: string | null
           to_postcode?: string | null
           ttclid?: string | null
           updated_at?: string
@@ -510,10 +516,12 @@ export type Database = {
           created_at?: string
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
+          estimate_given?: number | null
           estimator_id?: string | null
           external_lead_id?: string | null
           fbclid?: string | null
           first_contacted_at?: string | null
+          from_address?: string | null
           from_postcode?: string | null
           gbraid?: string | null
           gclid?: string | null
@@ -535,6 +543,7 @@ export type Database = {
           source_system?: string
           status?: Database["public"]["Enums"]["lead_status"]
           submitted_at?: string
+          to_address?: string | null
           to_postcode?: string | null
           ttclid?: string | null
           updated_at?: string

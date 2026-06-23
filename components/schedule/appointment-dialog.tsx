@@ -111,6 +111,8 @@ export function AppointmentDialog({
   presetStart,
   presetEnd,
   presetAllDay,
+  presetLeadId,
+  presetLocation,
   edit,
 }: {
   open: boolean;
@@ -125,6 +127,9 @@ export function AppointmentDialog({
   presetStart?: string;
   presetEnd?: string;
   presetAllDay?: boolean;
+  /** booked from a lead: preselect the lead + its address as the location */
+  presetLeadId?: string;
+  presetLocation?: string;
   /** when set, the dialog is in edit mode */
   edit?: EditTarget | null;
 }) {
@@ -162,14 +167,14 @@ export function AppointmentDialog({
     } else {
       const s = presetStart ?? toLocalInput(new Date());
       setApptType(defaultType);
-      setLeadId(NO_LEAD);
+      setLeadId(presetLeadId ?? NO_LEAD);
       setEstimatorId(defaultEstimatorId ?? NO_EST);
       setStatus("scheduled");
       setStart(s);
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
       setTitle("");
       setTitleTouched(false);
-      setLocation("");
+      setLocation(presetLocation ?? "");
       setNotes("");
       setAllDay(!!presetAllDay);
     }

@@ -36,3 +36,22 @@ export const newLeadSchema = z.object({
   });
 
 export type NewLeadInput = z.infer<typeof newLeadSchema>;
+
+/** Editable lead/customer detail fields (name + contact + move + the phone estimate). */
+export const editLeadSchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  phone: z.string().trim().optional().or(z.literal("")),
+  email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
+  from_postcode: z.string().trim().optional().or(z.literal("")),
+  to_postcode: z.string().trim().optional().or(z.literal("")),
+  from_address: z.string().trim().optional().or(z.literal("")),
+  to_address: z.string().trim().optional().or(z.literal("")),
+  property_size: z.string().trim().optional().or(z.literal("")),
+  preferred_date: z.string().trim().optional().or(z.literal("")),
+  estimate_given: z
+    .union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")])
+    .optional(),
+  notes: z.string().trim().optional().or(z.literal("")),
+});
+
+export type EditLeadInput = z.infer<typeof editLeadSchema>;
