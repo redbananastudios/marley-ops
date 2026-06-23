@@ -23,7 +23,6 @@ import {
   Check,
   FileText,
   CalendarPlus,
-  Trophy,
   X,
   CheckCircle2,
   RotateCcw,
@@ -34,6 +33,7 @@ import {
   markLeadContactedAction,
   updateLeadStatusAction,
 } from "@/app/(dashboard)/leads/actions";
+import { MarkWonButton, type WonQuote } from "@/components/leads/mark-won-button";
 
 const CLOSED = new Set(["completed", "declined"]);
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
@@ -58,12 +58,14 @@ export function LeadActionBar({
   email,
   status,
   firstContactedAt,
+  quotes = [],
 }: {
   leadId: string;
   phone?: string | null;
   email?: string | null;
   status: string;
   firstContactedAt?: string | null;
+  quotes?: WonQuote[];
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -141,10 +143,7 @@ export function LeadActionBar({
 
         {quoting ? (
           <>
-            <button type="button" onClick={() => setStatus("confirmed", "Marked won.")} disabled={pending} className={primaryBtn}>
-              <Trophy className="size-4" strokeWidth={2} />
-              Mark won
-            </button>
+            <MarkWonButton leadId={leadId} quotes={quotes} className={primaryBtn} />
             <button
               type="button"
               onClick={() => {

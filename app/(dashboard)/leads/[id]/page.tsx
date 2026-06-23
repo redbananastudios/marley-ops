@@ -207,6 +207,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           email={client?.email ?? lead.email}
           status={lead.status}
           firstContactedAt={lead.first_contacted_at}
+          quotes={quoteRows.map((q) => ({
+            id: q.id,
+            quote_ref: q.quote_ref,
+            grand_total: q.grand_total,
+            status: q.status,
+          }))}
         />
       </Card>
 
