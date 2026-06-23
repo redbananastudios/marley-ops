@@ -1,0 +1,387 @@
+"use client";
+
+/**
+ * Leads triage board — turns the flat lead list into a "what needs me now" view.
+ * - Each row is a triage unit: source colour dot, name, route, a response/urgency
+ *   chip, value (when quoted) and status.
+ * - Quick-filter preset chips with live counts (All / New / Uncontacted /
+ *   Surveys due / Mine / This week) + search + status + All/Web source toggle.
+ * - Smart default ordering: active & uncontacted first (longest-waiting on top),
+ *   then active & contacted, then closed.
+ * - Inline actions per row: call, WhatsApp, mark-contacted, new quote — no need
+ *   to open the lead to act.
+ * Responsive: table-ish rows on desktop, stacked cards on mobile.
+ */
+
+import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { Search, Phone, MessageCircle, Check, FileText, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { cn } from "@/lib/utils";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { LeadStatusBadge, LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
+import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
+import { markLeadContactedAction } from "@/app/(dashboard)/leads/actions";
+
+export interface LeadCard {
+  id: string;
+  name: string | null;
+  status: string;
+  entry_channel: string;
+  from_postcode: string | null;
+  to_postcode: string | null;
+  submitted_at: string | null;
+  created_at: string | null;
+  first_contacted_at: string | null;
+  phone: string | null;
+  email: string | null;
+  estimator_id: string | null;
+  source: SourceKey;
+  value: number | null;
+  surveyDue: boolean;
+}
+
+type PresetKey = "all" | "new" | "uncontacted" | "surveys" | "mine" | "week";
+
+const SOURCE_COLOR: Record<SourceKey, string> = Object.fromEntries(
+  SOURCES.map((s) => [s.key, s.color]),
+) as Record<SourceKey, string>;
+const SOURCE_LABEL: Record<SourceKey, string> = Object.fromEntries(
+  SOURCES.map((s) => [s.key, s.label]),
+) as Record<SourceKey, string>;
+
+const CLOSED = new Set(["completed", "declined"]);
+const DAY = 86_400_000;
+
+const tsOf = (l: LeadCard): number => new Date(l.submitted_at || l.created_at || 0).getTime();
+
+const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+function ago(d: string | null): string {
+  if (!d) return "";
+  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+function waNumber(phone: string | null): string | null {
+  if (!phone) return null;
+  let d = phone.replace(/[^\d+]/g, "");
+  if (d.startsWith("+")) d = d.slice(1);
+  else if (d.startsWith("0")) d = "44" + d.slice(1);
+  return d.length >= 10 ? d : null;
+}
+
+/** Triage rank: active+uncontacted (0) → active+contacted (1) → closed (2). */
+function rank(l: LeadCard): number {
+  if (CLOSED.has(l.status)) return 2;
+  return l.first_contacted_at ? 1 : 0;
+}
+
+export function LeadsBoard({
+  leads,
+  meId,
+  initialStatus,
+}: {
+  leads: LeadCard[];
+  meId: string | null;
+  initialStatus?: string;
+}) {
+  const [tab, setTab] = useState<"all" | "web">("all");
+  const [preset, setPreset] = useState<PresetKey>(initialStatus === "website_enquiry" ? "new" : "all");
+  const [status, setStatus] = useState<string>(
+    initialStatus && initialStatus !== "website_enquiry" ? initialStatus : "",
+  );
+  const [search, setSearch] = useState("");
+
+  const base = useMemo(
+    () => (tab === "web" ? leads.filter((l) => l.entry_channel === "web") : leads),
+    [leads, tab],
+  );
+
+  const now = Date.now();
+  const matchesPreset = (l: LeadCard, p: PresetKey): boolean => {
+    switch (p) {
+      case "new":
+        return l.status === "website_enquiry";
+      case "uncontacted":
+        return !CLOSED.has(l.status) && !l.first_contacted_at;
+      case "surveys":
+        return l.surveyDue;
+      case "mine":
+        return !!meId && l.estimator_id === meId;
+      case "week":
+        return tsOf(l) >= now - 7 * DAY;
+      default:
+        return true;
+    }
+  };
+
+  const counts = useMemo(() => {
+    const c: Record<PresetKey, number> = { all: base.length, new: 0, uncontacted: 0, surveys: 0, mine: 0, week: 0 };
+    for (const l of base) {
+      if (matchesPreset(l, "new")) c.new++;
+      if (matchesPreset(l, "uncontacted")) c.uncontacted++;
+      if (matchesPreset(l, "surveys")) c.surveys++;
+      if (matchesPreset(l, "mine")) c.mine++;
+      if (matchesPreset(l, "week")) c.week++;
+    }
+    return c;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, meId]);
+
+  const visible = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return base
+      .filter((l) => matchesPreset(l, preset))
+      .filter((l) => (status ? l.status === status : true))
+      .filter((l) => {
+        if (!term) return true;
+        return [l.name, l.phone, l.email, l.from_postcode, l.to_postcode]
+          .filter(Boolean)
+          .some((v) => String(v).toLowerCase().includes(term));
+      })
+      .sort((a, b) => {
+        const r = rank(a) - rank(b);
+        if (r !== 0) return r;
+        // uncontacted bucket: oldest waiting first; others: newest first
+        return rank(a) === 0 ? tsOf(a) - tsOf(b) : tsOf(b) - tsOf(a);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [base, preset, status, search]);
+
+  const PRESETS: { key: PresetKey; label: string }[] = [
+    { key: "all", label: "All" },
+    { key: "new", label: "New" },
+    { key: "uncontacted", label: "Uncontacted" },
+    { key: "surveys", label: "Surveys due" },
+    { key: "mine", label: "Mine" },
+    { key: "week", label: "This week" },
+  ];
+
+  return (
+    <div>
+      {/* preset chips */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {PRESETS.map((p) => {
+          const active = preset === p.key;
+          const count = counts[p.key];
+          return (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setPreset(p.key)}
+              aria-pressed={active}
+              className={cn(
+                "focus-ring inline-flex items-center gap-1.5 rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
+                active
+                  ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+                  : "border-border bg-card text-mist-500 hover:bg-muted",
+              )}
+            >
+              {p.label}
+              <span
+                className={cn(
+                  "tabular rounded-pill px-1.5 text-xs",
+                  active ? "bg-mm-red/15 text-mm-red-deep" : "bg-muted text-mist-400",
+                )}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+        <div className="ml-auto inline-flex rounded-md border border-border bg-muted/50 p-0.5">
+          {(["all", "web"] as const).map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setTab(t)}
+              className={cn(
+                "focus-ring rounded-[5px] px-2.5 py-1 text-xs font-medium capitalize transition-colors",
+                tab === t ? "bg-card text-foreground shadow-xs" : "text-mist-400 hover:text-foreground",
+              )}
+            >
+              {t === "all" ? "All sources" : "Web"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* search + status */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+          <Search strokeWidth={1.75} className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-mist-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, phone, email, postcode"
+            className="pl-9"
+            aria-label="Search leads"
+          />
+        </div>
+        <Select value={status || "all"} onValueChange={(v) => setStatus(v === "all" ? "" : v)}>
+          <SelectTrigger className="h-9 w-[160px]" aria-label="Filter by status">
+            <SelectValue placeholder="All statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {LEAD_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>
+                {LEAD_STATUS_META[s].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
+      </div>
+
+      {/* list */}
+      <ul className="mt-4 divide-y rounded-lg border border-border bg-card">
+        {visible.length === 0 ? (
+          <li className="px-5 py-12 text-center text-sm text-mist-400">No leads match.</li>
+        ) : (
+          visible.map((l) => <Row key={l.id} lead={l} />)
+        )}
+      </ul>
+    </div>
+  );
+}
+
+function ResponseChip({ lead }: { lead: LeadCard }) {
+  if (CLOSED.has(lead.status)) return null;
+  if (lead.first_contacted_at) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-xs text-mist-500">
+        Contacted {ago(lead.first_contacted_at)} ago
+      </span>
+    );
+  }
+  const mins = Math.floor((Date.now() - tsOf(lead)) / 60000);
+  const tone = mins > 240 ? "danger" : mins > 60 ? "warn" : "neutral";
+  const cls =
+    tone === "danger"
+      ? "bg-danger-bg text-danger"
+      : tone === "warn"
+        ? "bg-warn-bg text-warn"
+        : "bg-mm-red-tint text-mm-red-deep";
+  return (
+    <span className={cn("inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-xs font-medium", cls)}>
+      {ago(lead.submitted_at || lead.created_at)} · not contacted
+    </span>
+  );
+}
+
+function Row({ lead }: { lead: LeadCard }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const route =
+    lead.from_postcode || lead.to_postcode
+      ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
+      : "no postcodes";
+  const wa = waNumber(lead.phone);
+  const uncontacted = !CLOSED.has(lead.status) && !lead.first_contacted_at;
+
+  function markContacted() {
+    start(async () => {
+      const res = await markLeadContactedAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not mark contacted.");
+      else {
+        toast.success("Marked contacted.");
+        router.refresh();
+      }
+    });
+  }
+
+  return (
+    <li className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
+      {/* identity — full width on mobile so the name has room */}
+      <Link href={`/leads/${lead.id}`} className="flex min-w-0 items-center gap-3 sm:flex-1">
+        <span
+          className="size-2.5 shrink-0 rounded-full"
+          style={{ background: SOURCE_COLOR[lead.source] }}
+          title={SOURCE_LABEL[lead.source]}
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-foreground">{lead.name ?? "—"}</span>
+          <span className="block truncate text-xs text-mist-400">
+            {SOURCE_LABEL[lead.source]} · {route}
+          </span>
+        </span>
+      </Link>
+
+      {/* meta cluster — second line on mobile, inline on desktop */}
+      <div className="flex items-center gap-2 sm:gap-3">
+        <div className="mr-auto sm:mr-0">
+          <ResponseChip lead={lead} />
+        </div>
+
+        {lead.value != null ? (
+          <span className="tabular hidden shrink-0 text-sm font-semibold text-foreground md:inline">
+            {gbp(lead.value)}
+          </span>
+        ) : null}
+
+        <div className="shrink-0">
+          <LeadStatusBadge status={lead.status} />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-0.5">
+          {lead.phone ? (
+            <a
+              href={`tel:${lead.phone}`}
+              title="Call"
+              aria-label="Call"
+              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
+            >
+              <Phone className="size-4" strokeWidth={1.75} />
+            </a>
+          ) : null}
+          {wa ? (
+            <a
+              href={`https://wa.me/${wa}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="WhatsApp"
+              aria-label="WhatsApp"
+              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success"
+            >
+              <MessageCircle className="size-4" strokeWidth={1.75} />
+            </a>
+          ) : null}
+          {uncontacted ? (
+            <button
+              type="button"
+              onClick={markContacted}
+              disabled={pending}
+              title="Mark contacted"
+              aria-label="Mark contacted"
+              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success disabled:opacity-50"
+            >
+              {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Check className="size-4" strokeWidth={1.75} />}
+            </button>
+          ) : null}
+          <Link
+            href={`/quotes/new?leadId=${lead.id}`}
+            title="New quote"
+            aria-label="New quote"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
+          >
+            <FileText className="size-4" strokeWidth={1.75} />
+          </Link>
+        </div>
+      </div>
+    </li>
+  );
+}

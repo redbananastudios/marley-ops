@@ -78,6 +78,40 @@ export async function createLeadAction(input: NewLeadInput) {
   return { ok: true as const, leadId: lead.id, matchedExistingClient: matched };
 }
 
+/**
+ * Mark a lead contacted without changing its status — stamps first_contacted_at
+ * (the field the dashboard's median-response metric reads) and logs it. Idempotent:
+ * a no-op once already stamped.
+ */
+export async function markLeadContactedAction(leadId: string) {
+  const { sb, userId } = await actor();
+  const { data: cur } = await sb
+    .from("leads")
+    .select("first_contacted_at, client_id")
+    .eq("id", leadId)
+    .single();
+  if (cur?.first_contacted_at) return { ok: true as const, already: true as const };
+
+  const { error } = await sb
+    .from("leads")
+    .update({ first_contacted_at: new Date().toISOString() })
+    .eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+
+  await sb.from("activities").insert({
+    client_id: cur?.client_id ?? null,
+    lead_id: leadId,
+    actor_id: userId,
+    type: "note",
+    summary: "Marked contacted",
+  });
+
+  revalidatePath("/leads");
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+  return { ok: true as const };
+}
+
 export async function updateLeadStatusAction(leadId: string, status: string) {
   const { sb, userId } = await actor();
   const { data: current } = await sb

@@ -3,99 +3,87 @@ import { Plus } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { SyncLeadsButton } from "@/components/sync-leads-button";
-import { LeadStatusBadge } from "@/components/lead-status-badge";
-import { CHANNEL_LABELS } from "@/lib/leads/schema";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { cn } from "@/lib/utils";
-import { LeadsFilterBar } from "./leads-filter-bar";
+import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
+import { LeadsBoard, type LeadCard } from "@/components/leads/leads-board";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = {
-  status?: string;
-  channel?: string;
-  q?: string;
-  tab?: string;
-};
+type SearchParams = { status?: string };
 
-function formatDate(value: string | null): string {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
-}
+const DAY = 86_400_000;
 
-function postcodeLine(from: string | null, to: string | null): string {
-  const f = from?.trim();
-  const t = to?.trim();
-  if (f && t) return `${f} → ${t}`;
-  if (f) return `from ${f}`;
-  if (t) return `to ${t}`;
-  return "no postcodes";
-}
-
-export default async function LeadsPage({
-  searchParams,
-}: {
-  searchParams: Promise<SearchParams>;
-}) {
+export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
-  const status = sp.status?.trim() || "";
-  const channel = sp.channel?.trim() || "";
-  const q = sp.q?.trim() || "";
-  const tab = sp.tab === "web" ? "web" : "all";
+  const initialStatus = sp.status?.trim() || undefined;
 
   const supabase = await createClient();
-  let query = supabase
-    .from("leads")
-    .select(
-      "id, name, phone, email, status, entry_channel, from_postcode, to_postcode, submitted_at",
-    )
-    .order("submitted_at", { ascending: false });
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-  if (status) query = query.eq("status", status as never);
-  if (tab === "web") {
-    query = query.eq("entry_channel", "web");
-  } else if (channel) {
-    query = query.eq("entry_channel", channel as never);
+  const [{ data: leadsData }, { data: quoteData }, { data: apptData }] = await Promise.all([
+    supabase
+      .from("leads")
+      .select(
+        "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+      )
+      .order("submitted_at", { ascending: false }),
+    supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
+    supabase.from("appointments").select("lead_id, appt_type, starts_at, status"),
+  ]);
+
+  const leads = leadsData ?? [];
+
+  /* per-lead best value: accepted agreed price, else latest quoted total */
+  const valueMap = new Map<string, { accepted: number | null; latest: number | null; latestAt: number }>();
+  for (const q of quoteData ?? []) {
+    if (!q.lead_id) continue;
+    const cur = valueMap.get(q.lead_id) ?? { accepted: null, latest: null, latestAt: 0 };
+    if (q.status === "accepted") cur.accepted = Number(q.agreed_price ?? q.grand_total ?? 0);
+    const at = new Date(q.created_at ?? 0).getTime();
+    if (at >= cur.latestAt && q.grand_total != null) {
+      cur.latest = Number(q.grand_total);
+      cur.latestAt = at;
+    }
+    valueMap.set(q.lead_id, cur);
   }
-  if (q) {
-    const term = q.replace(/[%,()]/g, " ").trim();
-    query = query.or(
-      `name.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%,from_postcode.ilike.%${term}%,to_postcode.ilike.%${term}%`,
-    );
-  }
 
-  const { data: leads } = await query;
-  const rows = leads ?? [];
+  /* leads with an upcoming (non-cancelled) survey appointment */
+  const startToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const upcomingSurvey = new Set(
+    (apptData ?? [])
+      .filter(
+        (a) =>
+          a.appt_type === "survey" &&
+          a.status !== "cancelled" &&
+          a.lead_id &&
+          a.starts_at &&
+          new Date(a.starts_at).getTime() >= startToday - DAY,
+      )
+      .map((a) => a.lead_id as string),
+  );
 
-  const tabHref = (next: "all" | "web") => {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (channel && next !== "web") params.set("channel", channel);
-    if (q) params.set("q", q);
-    if (next === "web") params.set("tab", "web");
-    const qs = params.toString();
-    return qs ? `/leads?${qs}` : "/leads";
-  };
-
-  const tabs: { key: "all" | "web"; label: string }[] = [
-    { key: "all", label: "All" },
-    { key: "web", label: "Web-synced" },
-  ];
+  const cards: LeadCard[] = leads.map((l) => {
+    const v = valueMap.get(l.id);
+    return {
+      id: l.id,
+      name: l.name,
+      status: l.status,
+      entry_channel: l.entry_channel,
+      from_postcode: l.from_postcode,
+      to_postcode: l.to_postcode,
+      submitted_at: l.submitted_at,
+      created_at: l.created_at,
+      first_contacted_at: l.first_contacted_at,
+      phone: l.phone,
+      email: l.email,
+      estimator_id: l.estimator_id,
+      source: classifySource(l as LeadLite),
+      value: v ? (v.accepted ?? v.latest) : null,
+      surveyDue: upcomingSurvey.has(l.id) || l.status === "survey_booked",
+    };
+  });
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -109,84 +97,7 @@ export default async function LeadsPage({
         </Button>
       </PageHeader>
 
-      <div className="mb-4 inline-flex rounded-md border p-0.5">
-        {tabs.map((t) => {
-          const active = tab === t.key;
-          return (
-            <Link
-              key={t.key}
-              href={tabHref(t.key)}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "focus-ring inline-flex min-h-9 items-center rounded-[5px] px-3 py-1.5 text-sm font-medium transition-colors",
-                active
-                  ? "bg-card text-foreground shadow-xs"
-                  : "text-mist-400 hover:text-foreground",
-              )}
-            >
-              {t.label}
-            </Link>
-          );
-        })}
-      </div>
-
-      <LeadsFilterBar />
-
-      <Card className="mt-4 p-0">
-        {rows.length === 0 ? (
-          <p className="px-5 py-12 text-center text-sm text-mist-400">
-            No leads match.
-          </p>
-        ) : (
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="px-5">Customer</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="px-5 text-right">Submitted</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((r) => {
-                const channelLabel =
-                  CHANNEL_LABELS[r.entry_channel] ??
-                  r.entry_channel.replace(/_/g, " ");
-                return (
-                  <TableRow key={r.id} className="group">
-                    <TableCell className="h-14 px-5">
-                      <Link
-                        href={`/leads/${r.id}`}
-                        className="flex h-14 min-w-0 flex-col justify-center"
-                      >
-                        <span className="block truncate font-semibold text-foreground">
-                          {r.name ?? "—"}
-                        </span>
-                        <span className="block truncate text-xs text-mist-400">
-                          {channelLabel} ·{" "}
-                          {postcodeLine(r.from_postcode, r.to_postcode)}
-                        </span>
-                      </Link>
-                    </TableCell>
-                    <TableCell className="h-14">
-                      <Link href={`/leads/${r.id}`} className="flex h-14 items-center">
-                        <LeadStatusBadge status={r.status} />
-                      </Link>
-                    </TableCell>
-                    <TableCell className="h-14 px-5 text-right">
-                      <Link
-                        href={`/leads/${r.id}`}
-                        className="flex h-14 items-center justify-end tabular text-sm text-mist-500"
-                      >
-                        {formatDate(r.submitted_at)}
-                      </Link>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </Card>
+      <LeadsBoard leads={cards} meId={user?.id ?? null} initialStatus={initialStatus} />
     </main>
   );
 }
