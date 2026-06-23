@@ -9,6 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { SurveyPanel } from "@/components/survey/survey-panel";
+import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { StatusChanger } from "./status-changer";
 
 export const dynamic = "force-dynamic";
@@ -164,6 +165,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             </div>
           ) : null}
         </div>
+
+        <LeadActionBar
+          leadId={lead.id}
+          phone={client?.phone_e164 ?? client?.phone_raw ?? lead.phone}
+          email={client?.email ?? lead.email}
+          status={lead.status}
+          firstContactedAt={lead.first_contacted_at}
+        />
       </Card>
 
       <Tabs defaultValue="overview">
