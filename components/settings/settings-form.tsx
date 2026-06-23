@@ -29,6 +29,7 @@ const FIELDS: FieldDef[] = [
   { key: "costLabourPerHour", label: "Labour cost per hour", hint: "Per mover. Internal cost.", unit: "£/hour" },
   { key: "costBox", label: "Box unit cost", hint: "Per box supplied. Internal cost.", unit: "£" },
   { key: "costVanDay", label: "Van day rate", hint: "Per van per day. Internal cost.", unit: "£/day" },
+  { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
 ];
 
 function MoneyInput({
@@ -78,6 +79,7 @@ export function SettingsForm({
     costLabourPerHour: String(initial.costLabourPerHour),
     costBox: String(initial.costBox),
     costVanDay: String(initial.costVanDay),
+    costMisc: String(initial.costMisc),
   });
 
   async function onSave() {
@@ -88,6 +90,7 @@ export function SettingsForm({
       costLabourPerHour: Number(v.costLabourPerHour),
       costBox: Number(v.costBox),
       costVanDay: Number(v.costVanDay),
+      costMisc: Number(v.costMisc),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
     setBusy(false);

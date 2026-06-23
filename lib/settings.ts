@@ -11,6 +11,7 @@ export interface BusinessSettings {
   costLabourPerHour: number;
   costBox: number;
   costVanDay: number;
+  costMisc: number;
 }
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
@@ -19,6 +20,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   costLabourPerHour: 0,
   costBox: 0,
   costVanDay: 0,
+  costMisc: 0,
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -27,7 +29,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_labour_per_hour, cost_box, cost_van_day")
+    .select("estimator_fee, cost_fuel_per_mile, cost_labour_per_hour, cost_box, cost_van_day, cost_misc")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -37,5 +39,6 @@ export async function getBusinessSettings(
     costLabourPerHour: Number(data.cost_labour_per_hour ?? 0),
     costBox: Number(data.cost_box ?? 0),
     costVanDay: Number(data.cost_van_day ?? 0),
+    costMisc: Number(data.cost_misc ?? 0),
   };
 }

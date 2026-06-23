@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { computeQuote, getAccessCharge, getFloorCharge, type QuoteInputs } from '@/lib/quote/pricing';
+import {
+  computeQuote,
+  getAccessCharge,
+  getFloorCharge,
+  DEFAULT_PRICING,
+  type PricingConfig,
+  type QuoteInputs,
+} from '@/lib/quote/pricing';
 
 /**
  * Money-core lock. Expected grand totals are hand-computed from the verbatim arithmetic
@@ -216,6 +223,31 @@ describe('parity snapshot — full breakdown frozen (human-verify vs live before
     base({ tolls: 12.5, parking: 6.5, discount: 50 }),
   ];
   it('breakdown shape is stable', () => {
-    expect(fixtures.map(computeQuote)).toMatchSnapshot();
+    expect(fixtures.map((f) => computeQuote(f))).toMatchSnapshot();
+  });
+});
+
+describe('computeQuote — editable price config (margin calculator)', () => {
+  it('explicit DEFAULT_PRICING equals the implicit default', () => {
+    expect(computeQuote(base({ vehicle: '2luton' }), DEFAULT_PRICING).grandTotal).toBe(
+      computeQuote(base({ vehicle: '2luton' })).grandTotal,
+    );
+  });
+
+  it('overriding a base price flows into the total', () => {
+    const pricing: PricingConfig = {
+      ...DEFAULT_PRICING,
+      base: { ...DEFAULT_PRICING.base, '1luton': 800 },
+    };
+    // 800 base + 150 admin = 950 (vs the locked 850)
+    expect(computeQuote(base(), pricing).grandTotal).toBe(950);
+    // the locked default is untouched
+    expect(computeQuote(base()).grandTotal).toBe(850);
+  });
+
+  it('overriding the mileage rate flows into the total', () => {
+    const pricing: PricingConfig = { ...DEFAULT_PRICING, mileageRate: 3 };
+    // 700 + 150 + (30 miles × £3) = 940
+    expect(computeQuote(base({ deadMiles: 10, jobMiles: 20 }), pricing).grandTotal).toBe(940);
   });
 });

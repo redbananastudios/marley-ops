@@ -180,6 +180,7 @@ export type Database = {
           cost_box: number
           cost_fuel_per_mile: number
           cost_labour_per_hour: number
+          cost_misc: number
           cost_van_day: number
           estimator_fee: number
           id: boolean
@@ -189,6 +190,7 @@ export type Database = {
           cost_box?: number
           cost_fuel_per_mile?: number
           cost_labour_per_hour?: number
+          cost_misc?: number
           cost_van_day?: number
           estimator_fee?: number
           id?: boolean
@@ -198,6 +200,7 @@ export type Database = {
           cost_box?: number
           cost_fuel_per_mile?: number
           cost_labour_per_hour?: number
+          cost_misc?: number
           cost_van_day?: number
           estimator_fee?: number
           id?: boolean

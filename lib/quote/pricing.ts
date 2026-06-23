@@ -27,6 +27,34 @@ import {
   type VehicleKey,
 } from './constants';
 
+/**
+ * Editable price levers. computeQuote defaults to DEFAULT_PRICING (the locked
+ * constants) so the live engine + every test are unchanged; the margin calculator
+ * passes an overridden config to model "what if I charged X". Access tiers (£100/£300)
+ * and the 20% VAT rate stay fixed for now.
+ */
+export interface PricingConfig {
+  base: Record<VehicleKey, number>;
+  pack: Record<VehicleKey, Record<PackingKey, number>>;
+  addon75Base: number;
+  addon75Pack: Record<PackingKey, number>;
+  floor: Record<FloorKey, number>;
+  adminFee: number;
+  mileageRate: number;
+  congestionPerVan: number;
+}
+
+export const DEFAULT_PRICING: PricingConfig = {
+  base: BASE_PRICES,
+  pack: PACK_PRICES,
+  addon75Base: ADDON_75T_BASE,
+  addon75Pack: ADDON_75T_PACK,
+  floor: FLOOR_PRICES,
+  adminFee: ADMIN_FEE,
+  mileageRate: MILEAGE_RATE,
+  congestionPerVan: CONGESTION_PER_VAN,
+};
+
 export interface QuoteInputs {
   vehicle: VehicleKey;
   packing: PackingKey;
@@ -89,9 +117,14 @@ export function getAccessCharge(m: number): number {
 }
 
 /** L2293-2296 verbatim. Floor charge applies per-van AND only when the property is a flat. */
-export function getFloorCharge(floor: FloorKey, isFlat: boolean, vanCount: number): number {
+export function getFloorCharge(
+  floor: FloorKey,
+  isFlat: boolean,
+  vanCount: number,
+  floorPrices: Record<FloorKey, number> = FLOOR_PRICES,
+): number {
   if (!isFlat) return 0;
-  return (FLOOR_PRICES[floor] || 0) * vanCount;
+  return (floorPrices[floor] || 0) * vanCount;
 }
 
 /**
@@ -99,22 +132,22 @@ export function getFloorCharge(floor: FloorKey, isFlat: boolean, vanCount: numbe
  * the typed QuoteInputs; the arithmetic is identical. Defensive `|| default` fallbacks
  * mirror the live tool's `getRadioValue(...) || 'default'`.
  */
-export function computeQuote(i: QuoteInputs): QuoteBreakdown {
+export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PRICING): QuoteBreakdown {
   const vehicle = i.vehicle || '1luton';
   const packing = i.packing || 'owner';
   const has75T = i.has75T;
   const lutonVanCount = VAN_COUNT[vehicle];
   const vanCount = lutonVanCount + (has75T ? 1 : 0);
-  const base = BASE_PRICES[vehicle];
-  const packCost = PACK_PRICES[vehicle][packing];
-  const addon75Cost = has75T ? ADDON_75T_BASE : 0;
-  const addon75PackCost = has75T ? ADDON_75T_PACK[packing] : 0;
+  const base = pricing.base[vehicle];
+  const packCost = pricing.pack[vehicle][packing];
+  const addon75Cost = has75T ? pricing.addon75Base : 0;
+  const addon75PackCost = has75T ? pricing.addon75Pack[packing] : 0;
 
   let mileageCost: number | null = null;
   let totalMiles: number | null = null;
   if (i.deadMiles !== null && i.jobMiles !== null) {
     totalMiles = i.deadMiles + i.jobMiles;
-    mileageCost = totalMiles * MILEAGE_RATE;
+    mileageCost = totalMiles * pricing.mileageRate;
   }
 
   const collectAccessM = i.collectAccessM || 0;
@@ -126,10 +159,10 @@ export function computeQuote(i: QuoteInputs): QuoteBreakdown {
   const collectFloor = i.collectFloor || 'ground';
   const destType = i.destType || 'house';
   const destFloor = i.destFloor || 'ground';
-  const collectFloorCost = getFloorCharge(collectFloor, collectType === 'flat', vanCount);
-  const destFloorCost = getFloorCharge(destFloor, destType === 'flat', vanCount);
+  const collectFloorCost = getFloorCharge(collectFloor, collectType === 'flat', vanCount, pricing.floor);
+  const destFloorCost = getFloorCharge(destFloor, destType === 'flat', vanCount, pricing.floor);
 
-  const congestion = i.congestion ? vanCount * CONGESTION_PER_VAN : 0;
+  const congestion = i.congestion ? vanCount * pricing.congestionPerVan : 0;
   const tolls = i.tolls || 0;
   const parking = i.parking || 0;
   const discount = i.discount || 0;
@@ -147,7 +180,7 @@ export function computeQuote(i: QuoteInputs): QuoteBreakdown {
     congestion +
     tolls +
     parking +
-    ADMIN_FEE;
+    pricing.adminFee;
   const total = Math.max(0, subtotal - discount);
   const vatEnabled = i.vatEnabled;
   const vatAmount = vatEnabled ? total * 0.2 : 0;
@@ -183,6 +216,6 @@ export function computeQuote(i: QuoteInputs): QuoteBreakdown {
     vatEnabled,
     vatAmount,
     grandTotal,
-    adminFee: ADMIN_FEE,
+    adminFee: pricing.adminFee,
   };
 }

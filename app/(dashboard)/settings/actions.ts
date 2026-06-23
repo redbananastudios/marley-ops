@@ -12,6 +12,7 @@ const settingsSchema = z.object({
   costLabourPerHour: num,
   costBox: num,
   costVanDay: num,
+  costMisc: num,
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
@@ -40,6 +41,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_labour_per_hour: v.costLabourPerHour,
       cost_box: v.costBox,
       cost_van_day: v.costVanDay,
+      cost_misc: v.costMisc,
     })
     .eq("id", true);
   if (error) return { ok: false as const, error: error.message };
