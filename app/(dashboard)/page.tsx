@@ -13,6 +13,8 @@ import {
 } from "@/lib/dashboard/compute";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { getBusinessSettings } from "@/lib/settings";
+import { jobCost, boxesFromItems } from "@/lib/margin";
+import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 
 export const dynamic = "force-dynamic";
@@ -32,12 +34,13 @@ export default async function DashboardPage() {
       )
       .order("submitted_at", { ascending: false }),
     supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
-    supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id"),
+    supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob"),
   ]);
 
   const { data: profilesData } = await supabase.from("profiles").select("id, full_name");
   const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
-  const { estimatorFee } = await getBusinessSettings(supabase);
+  const settings = await getBusinessSettings(supabase);
+  const estimatorFee = settings.estimatorFee;
 
   const leads = (leadsData ?? []) as LeadLite[];
   const appts = apptData ?? [];
@@ -58,6 +61,25 @@ export default async function DashboardPage() {
       quotes
         .filter((q) => q.status === "accepted" && q.lead_id)
         .map((q) => [q.lead_id as string, Number(q.agreed_price ?? q.grand_total ?? 0)]),
+    ),
+    cost: new Map(
+      quotes
+        .filter((q) => q.status === "accepted" && q.lead_id)
+        .map((q) => {
+          const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
+          const blob = (q.state_blob as { items?: Record<string, number>; job?: { days?: number } } | null) ?? null;
+          const c = jobCost(
+            {
+              vehicle: b.vehicle ?? "1luton",
+              has75T: b.has75T ?? false,
+              totalMiles: Number(b.totalMiles ?? 0),
+              boxes: boxesFromItems(blob?.items),
+              days: Math.max(1, Number(blob?.job?.days ?? 1)),
+            },
+            settings,
+          );
+          return [q.lead_id as string, c.total];
+        }),
     ),
   };
 

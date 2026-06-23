@@ -79,6 +79,12 @@ export interface PeriodStats {
   quoted: number;
   jobs: number;
   wonValue: number;
+  /** estimated cost of the won jobs in this cohort (rate card) */
+  wonCost: number;
+  /** wonValue − wonCost */
+  margin: number;
+  /** margin as a % of wonValue */
+  marginPct: number;
   leadToSurveyPct: number;
   leadToJobPct: number;
   surveyToJobPct: number;
@@ -146,6 +152,8 @@ export interface ProgressSets {
   quoted: Set<string>;
   /** lead id -> accepted (agreed) value, for won leads */
   won: Map<string, number>;
+  /** lead id -> estimated job cost (from the accepted quote + rate card) */
+  cost: Map<string, number>;
 }
 
 interface WindowDef {
@@ -275,6 +283,9 @@ export function buildPeriodStats(
   }));
 
   const wonValue = cohort.reduce((sum, l) => sum + (prog.won.get(l.id) ?? 0), 0);
+  const wonCost = cohort.reduce((sum, l) => sum + (prog.won.has(l.id) ? prog.cost.get(l.id) ?? 0 : 0), 0);
+  const margin = wonValue - wonCost;
+  const marginPctVal = wonValue > 0 ? Math.round((margin / wonValue) * 100) : 0;
   const paidLeads = srcCount.get("google_ads") ?? 0;
   const paidWonValue = cohort
     .filter((l) => classifySource(l) === "google_ads")
@@ -291,6 +302,9 @@ export function buildPeriodStats(
     quoted,
     jobs,
     wonValue,
+    wonCost,
+    margin,
+    marginPct: marginPctVal,
     leadToSurveyPct: pct(surveys, newLeads),
     leadToJobPct: pct(jobs, newLeads),
     surveyToJobPct: pct(jobs, surveys),

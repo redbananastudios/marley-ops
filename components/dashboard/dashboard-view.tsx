@@ -110,6 +110,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
         <RingStat label="Lead → Job" pct={s.leadToJobPct} color="#c03838" caption={`${s.jobs}/${s.newLeads}`} />
       </section>
 
+      {/* profit / margin */}
+      <MarginCard revenue={s.wonValue} cost={s.wonCost} margin={s.margin} marginPct={s.marginPct} jobs={s.jobs} />
+
       {/* paid performance */}
       <PaidCard adSpend={s.adSpend} paidLeads={s.paidLeads} paidWonValue={s.paidWonValue} />
 
@@ -314,6 +317,46 @@ function Delta({ delta, sub }: { delta: number; sub: string }) {
 
 const gbp2 = (n: number): string =>
   "£" + n.toFixed(2).replace(/\.00$/, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+function MarginCard({
+  revenue,
+  cost,
+  margin,
+  marginPct,
+  jobs,
+}: {
+  revenue: number;
+  cost: number;
+  margin: number;
+  marginPct: number;
+  jobs: number;
+}) {
+  if (jobs === 0) {
+    return (
+      <Card className="p-5">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="eyebrow">Profit this period</p>
+          <span className="text-xs text-mist-400">Won jobs · est. cost</span>
+        </div>
+        <p className="py-4 text-center text-sm text-mist-400">No jobs won in this period yet.</p>
+      </Card>
+    );
+  }
+  return (
+    <Card className="p-5">
+      <div className="mb-4 flex items-center justify-between">
+        <p className="eyebrow">Profit this period</p>
+        <span className="text-xs text-mist-400">{jobs} won · est. cost from rate card</span>
+      </div>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <PaidStat label="Booked revenue" value={gbp(revenue)} />
+        <PaidStat label="Est. cost" value={gbp(cost)} />
+        <PaidStat label="Margin" value={gbp(margin)} good={margin >= 0} bad={margin < 0} />
+        <PaidStat label="Margin %" value={`${marginPct}%`} good={margin >= 0} bad={margin < 0} />
+      </div>
+    </Card>
+  );
+}
 
 function PaidCard({
   adSpend,
