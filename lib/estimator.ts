@@ -4,8 +4,8 @@
  * assigned to an estimator; that's the billable unit. Luke is paid ESTIMATOR_FEE
  * per attended visit; a visit counts as won when its lead became a job.
  *
- * ESTIMATOR_FEE is a constant for now — it moves into the Settings/rates screen
- * later (editable default + per-appointment override), alongside the other job costs.
+ * The fee is editable in Settings (business_settings.estimator_fee); pass it into
+ * aggregateEstimators. ESTIMATOR_FEE is the fallback default only.
  */
 
 export const ESTIMATOR_FEE = 50;
@@ -31,8 +31,12 @@ export interface EstimatorStat {
   fee: number;
 }
 
-/** Group attended visits into per-estimator stats, sorted by visits desc. */
-export function aggregateEstimators(visits: EstimatorVisit[]): EstimatorStat[] {
+/** Group attended visits into per-estimator stats, sorted by visits desc.
+ *  `fee` is the per-visit rate from Settings (defaults to ESTIMATOR_FEE). */
+export function aggregateEstimators(
+  visits: EstimatorVisit[],
+  fee: number = ESTIMATOR_FEE,
+): EstimatorStat[] {
   const by = new Map<string, EstimatorStat>();
   for (const v of visits) {
     const cur =
@@ -48,7 +52,7 @@ export function aggregateEstimators(visits: EstimatorVisit[]): EstimatorStat[] {
   const out = [...by.values()];
   for (const s of out) {
     s.winRate = s.visits ? Math.round((s.won / s.visits) * 100) : 0;
-    s.fee = s.visits * ESTIMATOR_FEE;
+    s.fee = s.visits * fee;
   }
   return out.sort((a, b) => b.visits - a.visits);
 }

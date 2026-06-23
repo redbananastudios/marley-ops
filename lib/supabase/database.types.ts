@@ -175,6 +175,36 @@ export type Database = {
           },
         ]
       }
+      business_settings: {
+        Row: {
+          cost_box: number
+          cost_fuel_per_mile: number
+          cost_labour_per_hour: number
+          cost_van_day: number
+          estimator_fee: number
+          id: boolean
+          updated_at: string
+        }
+        Insert: {
+          cost_box?: number
+          cost_fuel_per_mile?: number
+          cost_labour_per_hour?: number
+          cost_van_day?: number
+          estimator_fee?: number
+          id?: boolean
+          updated_at?: string
+        }
+        Update: {
+          cost_box?: number
+          cost_fuel_per_mile?: number
+          cost_labour_per_hour?: number
+          cost_van_day?: number
+          estimator_fee?: number
+          id?: boolean
+          updated_at?: string
+        }
+        Relationships: []
+      }
       clients: {
         Row: {
           created_at: string

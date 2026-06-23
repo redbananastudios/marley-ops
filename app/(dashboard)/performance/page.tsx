@@ -3,7 +3,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
-import { aggregateEstimators, ESTIMATOR_FEE, type EstimatorVisit } from "@/lib/estimator";
+import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
+import { getBusinessSettings } from "@/lib/settings";
 import { MarkPaidButton } from "@/components/performance/mark-paid-button";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +70,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     }))
     .sort((x, y) => new Date(y.date ?? 0).getTime() - new Date(x.date ?? 0).getTime());
 
-  const stats = aggregateEstimators(visits);
+  const { estimatorFee } = await getBusinessSettings(sb);
+  const stats = aggregateEstimators(visits, estimatorFee);
   const totalFee = stats.reduce((s, e) => s + e.fee, 0);
 
   return (
@@ -87,7 +89,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       </PageHeader>
 
       <p className="mb-4 text-sm text-mist-400">
-        Attended survey visits this month, by estimator. Fee = visits × {gbp(ESTIMATOR_FEE)} per visit.
+        Attended survey visits this month, by estimator. Fee = visits × {gbp(estimatorFee)} per visit.
       </p>
 
       {/* per-estimator payroll */}

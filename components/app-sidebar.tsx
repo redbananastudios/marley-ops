@@ -40,7 +40,7 @@ export const NAV: NavGroup[] = [
   },
   { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: true }] },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3, live: true }] },
-  { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: false }] },
+  { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: true }] },
 ];
 
 /** The grouped nav links — shared by the desktop sidebar and the mobile drawer.

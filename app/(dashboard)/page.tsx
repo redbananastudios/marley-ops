@@ -12,6 +12,7 @@ import {
   type ProgressSets,
 } from "@/lib/dashboard/compute";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
+import { getBusinessSettings } from "@/lib/settings";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 
 export const dynamic = "force-dynamic";
@@ -36,6 +37,7 @@ export default async function DashboardPage() {
 
   const { data: profilesData } = await supabase.from("profiles").select("id, full_name");
   const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
+  const { estimatorFee } = await getBusinessSettings(supabase);
 
   const leads = (leadsData ?? []) as LeadLite[];
   const appts = apptData ?? [];
@@ -107,7 +109,7 @@ export default async function DashboardPage() {
         won: a.lead_id ? wonLeadIds.has(a.lead_id) : false,
         value: a.lead_id ? prog.won.get(a.lead_id) ?? null : null,
       }));
-    periods[k].estimators = aggregateEstimators(visits);
+    periods[k].estimators = aggregateEstimators(visits, estimatorFee);
   }
 
   /* needs-action (now) */
