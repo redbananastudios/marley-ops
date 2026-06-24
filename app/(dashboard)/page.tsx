@@ -16,6 +16,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, boxesFromItems } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
+import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 
 export const dynamic = "force-dynamic";
 
@@ -25,6 +26,11 @@ const sourceLabel = (key: string): string => SOURCES.find((s) => s.key === key)?
 
 export default async function DashboardPage() {
   const supabase = await createClient();
+
+  // Keep the panel current: pull any new website leads from Sanity before reading.
+  // Incremental (only docs newer than the latest synced lead) so it's fast, and
+  // fail-soft so a slow/unreachable Sanity never blocks the dashboard render.
+  await syncSanityLeads({ incremental: true }).catch(() => null);
 
   const [{ data: leadsData }, { data: apptData }, { data: quoteData }] = await Promise.all([
     supabase
