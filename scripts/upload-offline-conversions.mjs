@@ -24,7 +24,14 @@
 
 const API = "v21";
 const args = new Set(process.argv.slice(2));
-const MODE = args.has("--commit") ? "commit" : args.has("--dry-run") ? "dry-run" : "list";
+const MODE = args.has("--commit")
+  ? "commit"
+  : args.has("--csv")
+    ? "csv"
+    : args.has("--dry-run")
+      ? "dry-run"
+      : "list";
+const CONV_NAME = process.env.MARLEY_ADS_CONVERSION_NAME || "Marley offline lead (gclid)";
 const sinceArg = [...args].find((a) => a.startsWith("--since="))?.split("=")[1];
 const SINCE = sinceArg || new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
 
@@ -90,6 +97,25 @@ async function main() {
     console.log(
       `  - ${l.submittedAt} | ${l.name} | ${l.gclid ? "gclid" : "gbraid"}=${(l.gclid || l.gbraid).slice(0, 16)}… | ${l.utmCampaign || "-"}`,
     );
+  }
+  if (MODE === "csv") {
+    // Google Ads offline click-conversion import CSV (for the UI upload — the API
+    // ConversionUploadService is allowlist-restricted for new accounts). gclid only;
+    // gbraid uses a separate import flow.
+    const gclidLeads = leads.filter((l) => l.gclid);
+    const fmt = (iso) => new Date(iso).toISOString().replace("T", " ").replace(/\.\d+Z$/, "+0000");
+    const rows = [
+      "Parameters:TimeZone=+0000",
+      "Google Click ID,Conversion Name,Conversion Time,Conversion Value,Conversion Currency",
+      ...gclidLeads.map((l) => `${l.gclid},${CONV_NAME},${fmt(l.submittedAt)},,GBP`),
+    ];
+    const { writeFileSync } = await import("node:fs");
+    const out = process.env.CSV_OUT || "offline-conversions.csv";
+    writeFileSync(out, rows.join("\r\n") + "\r\n");
+    console.log(`\nWrote ${gclidLeads.length} gclid rows to ${out} (conversion: "${CONV_NAME}").`);
+    const gbraid = leads.filter((l) => !l.gclid && l.gbraid);
+    if (gbraid.length) console.log(`Note: ${gbraid.length} gbraid lead(s) excluded — gbraid needs the separate import flow.`);
+    return;
   }
   if (MODE === "list" || leads.length === 0) {
     if (MODE === "list") console.log("\nlist mode — no Ads call. Re-run with --dry-run (validate) or --commit (upload).");
