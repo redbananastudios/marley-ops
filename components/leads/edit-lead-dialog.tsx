@@ -9,7 +9,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Pencil } from "lucide-react";
+import { Loader2, Pencil, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -122,23 +122,40 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
             </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="ed-faddr">Pickup address</Label>
-            <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} onPick={onAddressPick("from_address", "from_postcode")} placeholder="Start typing the address…" />
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-1 grid gap-2">
-              <Label htmlFor="ed-fpc">Pickup postcode</Label>
-              <PlacesInput id="ed-fpc" kind="postcode" value={v.from_postcode} onValueChange={setVal("from_postcode")} placeholder="BA11…" />
+          {/* Pickup */}
+          <div className="grid gap-3 border-t pt-4">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-mm-red">
+              <MapPin className="size-4" strokeWidth={1.75} />
+              Pickup
+            </p>
+            <div className="grid gap-2">
+              <Label htmlFor="ed-faddr">Street address</Label>
+              <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} onPick={onAddressPick("from_address", "from_postcode")} placeholder="Start typing the address…" />
             </div>
-            <div className="col-span-2 grid gap-2">
-              <Label htmlFor="ed-taddr">Destination address</Label>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="ed-fpc">Postcode</Label>
+                <PlacesInput id="ed-fpc" kind="postcode" value={v.from_postcode} onValueChange={setVal("from_postcode")} placeholder="BA11…" />
+              </div>
+            </div>
+          </div>
+
+          {/* Destination */}
+          <div className="grid gap-3 border-t pt-4">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-mm-red">
+              <MapPin className="size-4" strokeWidth={1.75} />
+              Destination
+            </p>
+            <div className="grid gap-2">
+              <Label htmlFor="ed-taddr">Street address</Label>
               <PlacesInput id="ed-taddr" kind="address" value={v.to_address} onValueChange={setVal("to_address")} onPick={onAddressPick("to_address", "to_postcode")} placeholder="Start typing the address…" />
             </div>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="ed-tpc">Destination postcode</Label>
-            <PlacesInput id="ed-tpc" kind="postcode" value={v.to_postcode} onValueChange={setVal("to_postcode")} placeholder="BA21…" />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="ed-tpc">Postcode</Label>
+                <PlacesInput id="ed-tpc" kind="postcode" value={v.to_postcode} onValueChange={setVal("to_postcode")} placeholder="BA21…" />
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
