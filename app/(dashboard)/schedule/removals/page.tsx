@@ -22,7 +22,10 @@ export default async function RemovalsSchedulePage() {
         "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
       )
       .order("starts_at", { ascending: true }),
-    sb.from("leads").select("id,name").order("created_at", { ascending: false }),
+    sb
+      .from("leads")
+      .select("id,name,phone,email,from_postcode,from_address")
+      .order("created_at", { ascending: false }),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 

@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Trash2, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PlacesInput } from "@/components/places/places-input";
+import { lookupPlaceDetails } from "@/lib/places/lookup";
+import { LeadCombobox } from "@/components/schedule/lead-combobox";
 import {
   Select,
   SelectContent,
@@ -47,7 +50,14 @@ export type ApptType = "survey" | "removal";
 export interface LeadOption {
   id: string;
   name: string | null;
+  phone?: string | null;
+  email?: string | null;
+  from_postcode?: string | null;
+  from_address?: string | null;
 }
+
+/** Surveys are a fixed 1-hour visit. */
+const SURVEY_HOURS = 1;
 
 export interface EstimatorOption {
   id: string;
@@ -100,6 +110,15 @@ function addHoursLocal(local: string, hours: number): string {
 
 function defaultDuration(type: ApptType): number {
   return type === "removal" ? 3 : 1;
+}
+
+/** Round a time up to the next 15-minute boundary (keeps "now" defaults on-grid). */
+function roundUpTo15(d: Date): Date {
+  const r = new Date(d);
+  r.setSeconds(0, 0);
+  const add = (15 - (r.getMinutes() % 15)) % 15;
+  if (add) r.setMinutes(r.getMinutes() + add);
+  return r;
 }
 
 export function AppointmentDialog({
@@ -166,7 +185,7 @@ export function AppointmentDialog({
       setNotes(edit.notes ?? "");
       setAllDay(false);
     } else {
-      const s = presetStart ?? toLocalInput(new Date());
+      const s = presetStart ?? toLocalInput(roundUpTo15(new Date()));
       setApptType(defaultType);
       setLeadId(presetLeadId ?? NO_LEAD);
       setEstimatorId(defaultEstimatorId ?? NO_EST);
@@ -199,12 +218,34 @@ export function AppointmentDialog({
     }
   }
 
+  // Switching type re-bases the end on the type's default duration.
+  function onTypeChange(v: ApptType) {
+    setApptType(v);
+    if (start) setEnd(addHoursLocal(start, defaultDuration(v)));
+  }
+
+  // Surveys are a fixed 1-hour visit (no end field — just a label). Removals use
+  // the editable end. Derive the effective end the same way for both submit paths.
+  const effectiveEnd = apptType === "survey" ? addHoursLocal(start, SURVEY_HOURS) : end;
+  const surveyEndLabel = start ? addHoursLocal(start, SURVEY_HOURS).slice(11, 16) : "";
+
+  // Picking a lead pre-fills the location with its address (unless already set).
+  function selectLead(id: string) {
+    setLeadId(id);
+    if (id !== NO_LEAD && !location.trim()) {
+      const l = leads.find((x) => x.id === id);
+      const addr = l?.from_address || l?.from_postcode || "";
+      if (addr) setLocation(addr);
+    }
+  }
+
   async function onSubmit() {
-    if (!start || !end) {
-      toast.error("Pick a start and end time.");
+    if (!start) {
+      toast.error("Pick a start time.");
       return;
     }
-    if (new Date(end) <= new Date(start)) {
+    const endLocal = effectiveEnd;
+    if (!endLocal || new Date(endLocal) <= new Date(start)) {
       toast.error("End must be after start.");
       return;
     }
@@ -212,7 +253,7 @@ export function AppointmentDialog({
     try {
       const lead = leadId === NO_LEAD ? null : leadId;
       const startsAt = localToIso(start);
-      const endsAt = localToIso(end);
+      const endsAt = localToIso(endLocal);
 
       if (isEdit && edit) {
         // Persist the editable metadata.
@@ -317,7 +358,7 @@ export function AppointmentDialog({
             <Label htmlFor="appt-type">Type</Label>
             <Select
               value={apptType}
-              onValueChange={(v) => setApptType(v as ApptType)}
+              onValueChange={(v) => onTypeChange(v as ApptType)}
             >
               <SelectTrigger id="appt-type">
                 <SelectValue />
@@ -331,22 +372,10 @@ export function AppointmentDialog({
 
           <div className="grid gap-2">
             <Label htmlFor="appt-lead">
-              Lead{" "}
+              Lead / customer{" "}
               <span className="text-mist-400 font-normal">(optional)</span>
             </Label>
-            <Select value={leadId} onValueChange={setLeadId}>
-              <SelectTrigger id="appt-lead">
-                <SelectValue placeholder="No lead (blocked time)" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_LEAD}>No lead (blocked time)</SelectItem>
-                {leads.map((l) => (
-                  <SelectItem key={l.id} value={l.id}>
-                    {l.name || "Unnamed lead"}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
           </div>
 
           <div className="grid gap-2">
@@ -383,26 +412,35 @@ export function AppointmentDialog({
             </div>
           ) : null}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className={cn("grid gap-3", apptType === "removal" ? "grid-cols-2" : "grid-cols-1")}>
             <div className="grid gap-2">
               <Label htmlFor="appt-start">Starts</Label>
               <Input
                 id="appt-start"
                 type="datetime-local"
+                step={900}
                 value={start}
                 onChange={(e) => onStartChange(e.target.value)}
               />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="appt-end">Ends</Label>
-              <Input
-                id="appt-end"
-                type="datetime-local"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-              />
-            </div>
+            {apptType === "removal" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="appt-end">Ends</Label>
+                <Input
+                  id="appt-end"
+                  type="datetime-local"
+                  step={900}
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                />
+              </div>
+            ) : null}
           </div>
+          {apptType === "survey" ? (
+            <p className="-mt-2 text-xs text-mist-400">
+              Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}.
+            </p>
+          ) : null}
 
           <div className="grid gap-2">
             <Label htmlFor="appt-title">Title</Label>
@@ -424,6 +462,10 @@ export function AppointmentDialog({
               kind="address"
               value={location}
               onValueChange={setLocation}
+              onPick={async (p) => {
+                const a = await lookupPlaceDetails(p.id);
+                if (a?.formatted) setLocation(a.formatted);
+              }}
               placeholder="Collection address / postcode"
             />
           </div>

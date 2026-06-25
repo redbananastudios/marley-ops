@@ -26,7 +26,10 @@ export default async function SurveysSchedulePage({
       )
       .eq("appt_type", "survey")
       .order("starts_at", { ascending: true }),
-    sb.from("leads").select("id,name").order("created_at", { ascending: false }),
+    sb
+      .from("leads")
+      .select("id,name,phone,email,from_postcode,from_address")
+      .order("created_at", { ascending: false }),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
