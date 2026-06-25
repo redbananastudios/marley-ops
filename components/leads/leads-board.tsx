@@ -377,13 +377,20 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
         </p>
 
         {/* move type + lead date */}
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-mist-400">
-          <span className="inline-flex min-w-0 items-center gap-1.5">
-            <Home className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-            <span className="truncate">{lead.property_size || "Size not given"}</span>
-          </span>
-          <span className="inline-flex shrink-0 items-center gap-1.5 tabular">
-            <Clock className="size-3.5 text-mist-400" strokeWidth={1.75} />
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
+          {lead.property_size ? (
+            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-mm-red-tint px-2 py-0.5 text-xs font-medium text-mm-red-deep">
+              <Home className="size-3 shrink-0" strokeWidth={2} />
+              <span className="truncate">{lead.property_size}</span>
+            </span>
+          ) : (
+            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-xs text-mist-400">
+              <Home className="size-3 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">Size not given</span>
+            </span>
+          )}
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-[#eff6ff] px-2 py-0.5 text-xs font-medium tabular text-[#2563eb]">
+            <Clock className="size-3 shrink-0" strokeWidth={2} />
             {fmtLeadDate(lead.submitted_at || lead.created_at)}
           </span>
         </div>
