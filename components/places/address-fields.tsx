@@ -13,6 +13,7 @@ import { useCallback, useState } from "react";
 import { PlacesInput } from "@/components/places/places-input";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { lookupPlaceDetails } from "@/lib/places/lookup";
 
 export interface AddressValue {
   line1: string;
@@ -30,23 +31,6 @@ export const BLANK_ADDRESS: AddressValue = {
   country: "United Kingdom",
 };
 
-interface DetailsResponse {
-  ok: boolean;
-  address: { line1: string; town: string; county: string; postcode: string; country: string };
-}
-
-async function lookupDetails(placeId: string): Promise<DetailsResponse["address"] | null> {
-  try {
-    const res = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`, {
-      signal: AbortSignal.timeout(5000),
-    });
-    const json = (await res.json()) as DetailsResponse;
-    return json.ok ? json.address : null;
-  } catch {
-    return null;
-  }
-}
-
 export function AddressFields({
   value,
   onChange,
@@ -63,7 +47,7 @@ export function AddressFields({
   const onStreetPick = useCallback(
     async (p: { id: string; description: string }) => {
       setBusy(true);
-      const a = await lookupDetails(p.id);
+      const a = await lookupPlaceDetails(p.id);
       setBusy(false);
       if (!a) return;
       onChange({
@@ -81,7 +65,7 @@ export function AddressFields({
   const onPostcodePick = useCallback(
     async (p: { id: string; main: string }) => {
       setBusy(true);
-      const a = await lookupDetails(p.id);
+      const a = await lookupPlaceDetails(p.id);
       setBusy(false);
       onChange({
         ...value,

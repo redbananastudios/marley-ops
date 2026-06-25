@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PlacesInput } from "@/components/places/places-input";
+import { lookupPlaceDetails } from "@/lib/places/lookup";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
 import type { EditLeadInput } from "@/lib/leads/schema";
 
@@ -59,6 +60,19 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
   const set = (k: keyof EditLeadValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setV((s) => ({ ...s, [k]: e.target.value }));
   const setVal = (k: keyof EditLeadValues) => (val: string) => setV((s) => ({ ...s, [k]: val }));
+
+  // Picking an address fills its matching postcode so the two stay in step.
+  const onAddressPick =
+    (addrKey: "from_address" | "to_address", pcKey: "from_postcode" | "to_postcode") =>
+    async (p: { id: string }) => {
+      const a = await lookupPlaceDetails(p.id);
+      if (!a) return;
+      setV((s) => ({
+        ...s,
+        [pcKey]: a.postcode || s[pcKey],
+        [addrKey]: a.formatted || s[addrKey],
+      }));
+    };
 
   async function onSave() {
     setBusy(true);
@@ -110,7 +124,7 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
 
           <div className="grid gap-2">
             <Label htmlFor="ed-faddr">Pickup address</Label>
-            <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} placeholder="Start typing the address…" />
+            <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} onPick={onAddressPick("from_address", "from_postcode")} placeholder="Start typing the address…" />
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1 grid gap-2">
@@ -119,7 +133,7 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
             </div>
             <div className="col-span-2 grid gap-2">
               <Label htmlFor="ed-taddr">Destination address</Label>
-              <PlacesInput id="ed-taddr" kind="address" value={v.to_address} onValueChange={setVal("to_address")} placeholder="Start typing the address…" />
+              <PlacesInput id="ed-taddr" kind="address" value={v.to_address} onValueChange={setVal("to_address")} onPick={onAddressPick("to_address", "to_postcode")} placeholder="Start typing the address…" />
             </div>
           </div>
           <div className="grid gap-2">

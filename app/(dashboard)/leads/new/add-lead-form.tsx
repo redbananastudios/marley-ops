@@ -13,6 +13,7 @@ import { checkDuplicateAction, createLeadAction } from "@/app/(dashboard)/leads/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PlacesInput } from "@/components/places/places-input";
 import {
   Select,
   SelectContent,
@@ -213,10 +214,24 @@ export function AddLeadForm() {
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field htmlFor="from_postcode" label="From postcode" error={errors.from_postcode?.message}>
-          <Input id="from_postcode" className={INPUT_H} placeholder="SP7 9PX" {...register("from_postcode")} />
+          <PlacesInput
+            id="from_postcode"
+            kind="postcode"
+            className={INPUT_H}
+            placeholder="SP7 9PX"
+            value={watch("from_postcode") ?? ""}
+            onValueChange={(v) => setValue("from_postcode", v, { shouldValidate: true })}
+          />
         </Field>
         <Field htmlFor="to_postcode" label="To postcode" error={errors.to_postcode?.message}>
-          <Input id="to_postcode" className={INPUT_H} placeholder="BA8 0TG" {...register("to_postcode")} />
+          <PlacesInput
+            id="to_postcode"
+            kind="postcode"
+            className={INPUT_H}
+            placeholder="BA8 0TG"
+            value={watch("to_postcode") ?? ""}
+            onValueChange={(v) => setValue("to_postcode", v, { shouldValidate: true })}
+          />
         </Field>
       </div>
 
