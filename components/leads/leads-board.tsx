@@ -16,7 +16,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Phone, MessageCircle, Check, Undo2, FileText, Loader2 } from "lucide-react";
+import { Search, Phone, MessageCircle, Check, Undo2, FileText, Loader2, Home, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,7 @@ export interface LeadCard {
   entry_channel: string;
   from_postcode: string | null;
   to_postcode: string | null;
+  property_size: string | null;
   submitted_at: string | null;
   created_at: string | null;
   first_contacted_at: string | null;
@@ -67,6 +68,20 @@ const DAY = 86_400_000;
 const tsOf = (l: LeadCard): number => new Date(l.submitted_at || l.created_at || 0).getTime();
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+/** When the lead came in — e.g. "25 Jun 2026, 12:45". */
+function fmtLeadDate(d: string | null): string {
+  if (!d) return "—";
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return "—";
+  return t.toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function ago(d: string | null): string {
   if (!d) return "";
@@ -360,6 +375,18 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
         <p className="truncate text-xs text-mist-400">
           {[lead.phone, lead.email].filter(Boolean).join(" · ") || "no contact details"}
         </p>
+
+        {/* move type + lead date */}
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-mist-400">
+          <span className="inline-flex min-w-0 items-center gap-1.5">
+            <Home className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+            <span className="truncate">{lead.property_size || "Size not given"}</span>
+          </span>
+          <span className="inline-flex shrink-0 items-center gap-1.5 tabular">
+            <Clock className="size-3.5 text-mist-400" strokeWidth={1.75} />
+            {fmtLeadDate(lead.submitted_at || lead.created_at)}
+          </span>
+        </div>
 
         {/* response / urgency chip */}
         <div className="mt-auto pt-1">

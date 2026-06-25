@@ -31,7 +31,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     supabase
       .from("leads")
       .select(
-        "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+        "id, name, status, entry_channel, from_postcode, to_postcode, property_size, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
       )
       .order("submitted_at", { ascending: false }),
     supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
@@ -86,6 +86,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       entry_channel: l.entry_channel,
       from_postcode: l.from_postcode,
       to_postcode: l.to_postcode,
+      property_size: l.property_size,
       submitted_at: l.submitted_at,
       created_at: l.created_at,
       first_contacted_at: l.first_contacted_at,
