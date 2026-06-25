@@ -119,6 +119,40 @@ export async function markLeadContactedAction(leadId: string) {
 }
 
 /**
+ * Reverse a mistaken "mark contacted" — clears first_contacted_at so the lead drops
+ * back into the uncontacted queue and stops counting toward the response-time metric.
+ * Idempotent: a no-op if it was never contacted. Status is left untouched.
+ */
+export async function markLeadUncontactedAction(leadId: string) {
+  const { sb, userId } = await actor();
+  const { data: cur } = await sb
+    .from("leads")
+    .select("first_contacted_at, client_id")
+    .eq("id", leadId)
+    .single();
+  if (!cur?.first_contacted_at) return { ok: true as const, already: true as const };
+
+  const { error } = await sb
+    .from("leads")
+    .update({ first_contacted_at: null })
+    .eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+
+  await sb.from("activities").insert({
+    client_id: cur?.client_id ?? null,
+    lead_id: leadId,
+    actor_id: userId,
+    type: "note",
+    summary: "Reverted to uncontacted",
+  });
+
+  revalidatePath("/leads");
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/");
+  return { ok: true as const };
+}
+
+/**
  * Edit a lead's customer + move details. Writes the lead row AND keeps the linked
  * client's core contact in step (the detail page reads client-first), so a correction
  * shows everywhere. A phone/email change that collides with another live client is

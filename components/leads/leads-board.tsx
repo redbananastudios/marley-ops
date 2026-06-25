@@ -16,7 +16,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Phone, MessageCircle, Check, FileText, Loader2 } from "lucide-react";
+import { Search, Phone, MessageCircle, Check, Undo2, FileText, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -29,7 +29,10 @@ import {
 } from "@/components/ui/select";
 import { LeadStatusBadge, LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
-import { markLeadContactedAction } from "@/app/(dashboard)/leads/actions";
+import {
+  markLeadContactedAction,
+  markLeadUncontactedAction,
+} from "@/app/(dashboard)/leads/actions";
 
 export interface LeadCard {
   id: string;
@@ -49,7 +52,7 @@ export interface LeadCard {
   surveyDue: boolean;
 }
 
-type PresetKey = "all" | "new" | "uncontacted" | "surveys" | "mine" | "week";
+type PresetKey = "all" | "new" | "uncontacted" | "contacted" | "surveys" | "mine" | "week";
 
 const SOURCE_COLOR: Record<SourceKey, string> = Object.fromEntries(
   SOURCES.map((s) => [s.key, s.color]),
@@ -117,6 +120,8 @@ export function LeadsBoard({
         return l.status === "website_enquiry";
       case "uncontacted":
         return !CLOSED.has(l.status) && !l.first_contacted_at;
+      case "contacted":
+        return !CLOSED.has(l.status) && !!l.first_contacted_at;
       case "surveys":
         return l.surveyDue;
       case "mine":
@@ -129,10 +134,11 @@ export function LeadsBoard({
   };
 
   const counts = useMemo(() => {
-    const c: Record<PresetKey, number> = { all: base.length, new: 0, uncontacted: 0, surveys: 0, mine: 0, week: 0 };
+    const c: Record<PresetKey, number> = { all: base.length, new: 0, uncontacted: 0, contacted: 0, surveys: 0, mine: 0, week: 0 };
     for (const l of base) {
       if (matchesPreset(l, "new")) c.new++;
       if (matchesPreset(l, "uncontacted")) c.uncontacted++;
+      if (matchesPreset(l, "contacted")) c.contacted++;
       if (matchesPreset(l, "surveys")) c.surveys++;
       if (matchesPreset(l, "mine")) c.mine++;
       if (matchesPreset(l, "week")) c.week++;
@@ -165,6 +171,7 @@ export function LeadsBoard({
     { key: "all", label: "All" },
     { key: "new", label: "New" },
     { key: "uncontacted", label: "Uncontacted" },
+    { key: "contacted", label: "Contacted" },
     { key: "surveys", label: "Surveys due" },
     { key: "mine", label: "Mine" },
     { key: "week", label: "This week" },
@@ -295,7 +302,9 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
       : "no postcodes";
   const wa = waNumber(lead.phone);
-  const uncontacted = !CLOSED.has(lead.status) && !lead.first_contacted_at;
+  const active = !CLOSED.has(lead.status);
+  const uncontacted = active && !lead.first_contacted_at;
+  const contacted = active && !!lead.first_contacted_at;
 
   function markContacted() {
     start(async () => {
@@ -303,6 +312,17 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
       if (!res.ok) toast.error(res.error || "Could not mark contacted.");
       else {
         toast.success("Marked contacted.");
+        router.refresh();
+      }
+    });
+  }
+
+  function markUncontacted() {
+    start(async () => {
+      const res = await markLeadUncontactedAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not revert.");
+      else {
+        toast.success("Back to uncontacted.");
         router.refresh();
       }
     });
@@ -382,6 +402,18 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success disabled:opacity-50"
           >
             {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Check className="size-4" strokeWidth={1.75} />}
+          </button>
+        ) : null}
+        {contacted ? (
+          <button
+            type="button"
+            onClick={markUncontacted}
+            disabled={pending}
+            title="Mark uncontacted (undo)"
+            aria-label="Mark uncontacted"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Undo2 className="size-4" strokeWidth={1.75} />}
           </button>
         ) : null}
         <Link
