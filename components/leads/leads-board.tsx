@@ -379,7 +379,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
         {/* move type + lead date */}
         <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
           {lead.property_size ? (
-            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-mm-red-tint px-2 py-0.5 text-xs font-medium text-mm-red-deep">
+            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-[#ecfdf5] px-2 py-0.5 text-xs font-medium text-[#16a34a]">
               <Home className="size-3 shrink-0" strokeWidth={2} />
               <span className="truncate">{lead.property_size}</span>
             </span>
