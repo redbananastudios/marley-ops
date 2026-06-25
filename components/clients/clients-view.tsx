@@ -9,16 +9,18 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Repeat, Phone, Mail, MapPin } from "lucide-react";
+import { Search, Repeat, Phone, Mail, MapPin, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 export interface ClientRow {
   id: string;
   display_name: string | null;
+  isCompany: boolean;
   email: string | null;
   phone: string | null;
   postcode: string | null;
+  address: string | null;
   leadCount: number;
   lastLeadAt: string | null;
   origin: SourceKey;
@@ -55,7 +57,9 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
     const term = search.trim().toLowerCase();
     if (!term) return clients;
     return clients.filter((c) =>
-      [c.display_name, c.email, c.phone, c.postcode].filter(Boolean).some((v) => String(v).toLowerCase().includes(term)),
+      [c.display_name, c.email, c.phone, c.postcode, c.address]
+        .filter(Boolean)
+        .some((v) => String(v).toLowerCase().includes(term)),
     );
   }, [clients, search]);
 
@@ -85,7 +89,10 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground">{c.display_name || "Unnamed"}</p>
+                  <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+                    {c.isCompany ? <Building2 className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
+                    {c.display_name || "Unnamed"}
+                  </p>
                   <div className="mt-1.5">
                     <OriginBadge origin={c.origin} />
                   </div>
@@ -109,7 +116,7 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
                 </p>
                 <p className="flex items-center gap-2">
                   <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-                  <span className="tabular truncate">{c.postcode || "—"}</span>
+                  <span className="truncate">{c.address || c.postcode || "—"}</span>
                 </p>
               </div>
 

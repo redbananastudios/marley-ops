@@ -213,45 +213,78 @@ export type Database = {
       }
       clients: {
         Row: {
+          address_line1: string | null
+          alt_phone: string | null
+          business_number: string | null
+          company_name: string | null
+          country: string
+          county: string | null
           created_at: string
           display_name: string | null
           email: string | null
           email_norm: string | null
+          first_name: string | null
           id: string
           is_active: boolean
+          is_company: boolean
+          last_name: string | null
           merged_into_id: string | null
           notes: string | null
           phone_e164: string | null
           phone_raw: string | null
           postcode_home: string | null
+          secondary_emails: string[]
+          town: string | null
           updated_at: string
         }
         Insert: {
+          address_line1?: string | null
+          alt_phone?: string | null
+          business_number?: string | null
+          company_name?: string | null
+          country?: string
+          county?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           email_norm?: string | null
+          first_name?: string | null
           id?: string
           is_active?: boolean
+          is_company?: boolean
+          last_name?: string | null
           merged_into_id?: string | null
           notes?: string | null
           phone_e164?: string | null
           phone_raw?: string | null
           postcode_home?: string | null
+          secondary_emails?: string[]
+          town?: string | null
           updated_at?: string
         }
         Update: {
+          address_line1?: string | null
+          alt_phone?: string | null
+          business_number?: string | null
+          company_name?: string | null
+          country?: string
+          county?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           email_norm?: string | null
+          first_name?: string | null
           id?: string
           is_active?: boolean
+          is_company?: boolean
+          last_name?: string | null
           merged_into_id?: string | null
           notes?: string | null
           phone_e164?: string | null
           phone_raw?: string | null
           postcode_home?: string | null
+          secondary_emails?: string[]
+          town?: string | null
           updated_at?: string
         }
         Relationships: [

@@ -59,6 +59,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const leadRows = leads ?? [];
   const quoteRows = quotes ?? [];
 
+  const fullAddress =
+    [client.address_line1, client.town, client.county, client.postcode_home, client.country]
+      .filter(Boolean)
+      .join(", ")
+      .trim() || null;
+  const secondaryEmails = (client.secondary_emails ?? []).filter(Boolean);
+
   return (
     <main className="flex-1 p-6 md:p-8">
       <Link href="/clients" className="focus-ring -ml-1 mb-3 inline-flex items-center gap-0.5 rounded-sm text-sm text-mist-400 transition-colors hover:text-foreground">
@@ -79,8 +86,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
         <div className="flex flex-wrap gap-x-10 gap-y-4 border-t px-5 py-4">
           <Fact label="Phone" value={phone} />
+          {client.alt_phone ? <Fact label="Alt phone" value={client.alt_phone} /> : null}
           <Fact label="Email" value={email} />
-          <Fact label="Postcode" value={client.postcode_home} />
+          {secondaryEmails.length ? <Fact label="Other emails" value={secondaryEmails.join(", ")} /> : null}
+          <Fact label="Address" value={fullAddress} />
+          {client.business_number ? <Fact label="Business no." value={client.business_number} /> : null}
           <Fact label="First seen" value={fmtDate(client.created_at)} />
         </div>
 

@@ -23,6 +23,7 @@ interface Prediction {
 export function PlacesInput({
   value,
   onValueChange,
+  onPick,
   kind = "address",
   id,
   placeholder,
@@ -31,6 +32,8 @@ export function PlacesInput({
 }: {
   value: string;
   onValueChange: (v: string) => void;
+  /** Fired when a suggestion is chosen — carries the place_id for a details lookup. */
+  onPick?: (prediction: Prediction) => void;
   kind?: "address" | "postcode";
   id?: string;
   placeholder?: string;
@@ -98,6 +101,7 @@ export function PlacesInput({
   function pick(p: Prediction) {
     skipNext.current = true;
     onValueChange(kind === "postcode" ? p.main : p.description);
+    onPick?.(p);
     setItems([]);
     setOpen(false);
     setActive(-1);
