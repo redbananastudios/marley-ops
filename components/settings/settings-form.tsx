@@ -17,7 +17,7 @@ import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/sett
 import type { BusinessSettings } from "@/lib/settings";
 
 interface FieldDef {
-  key: keyof BusinessSettings;
+  key: Exclude<keyof BusinessSettings, "vatDefault">;
   label: string;
   hint: string;
   unit: "£" | "£/mile" | "£/hour" | "£/day";
@@ -74,7 +74,8 @@ export function SettingsForm({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [v, setV] = useState<Record<keyof BusinessSettings, string>>({
+  const [vatDefault, setVatDefault] = useState(initial.vatDefault);
+  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault">, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costLabourPerDay: String(initial.costLabourPerDay),
@@ -94,6 +95,7 @@ export function SettingsForm({
       costVanDay: Number(v.costVanDay),
       cost75t: Number(v.cost75t),
       costMisc: Number(v.costMisc),
+      vatDefault,
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
     setBusy(false);
@@ -125,6 +127,28 @@ export function SettingsForm({
           </div>
         ))}
       </div>
+
+      {/* VAT default for new quotes */}
+      <div className="flex items-center justify-between gap-4 border-t px-5 py-4">
+        <div>
+          <p className="text-sm font-medium text-foreground">New quotes default to VAT (20%)</p>
+          <p className="text-xs text-mist-400">Each quote can still be toggled individually on the Review step.</p>
+        </div>
+        <label className="relative inline-flex cursor-pointer items-center">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label="New quotes default to VAT"
+            className="peer sr-only"
+            checked={vatDefault}
+            disabled={!canEdit || busy}
+            onChange={(e) => setVatDefault(e.target.checked)}
+          />
+          <span className="h-7 w-12 rounded-full bg-mist-200 transition-colors peer-checked:bg-mm-red peer-disabled:opacity-60" />
+          <span className="absolute left-1 size-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
+        </label>
+      </div>
+
       {canEdit ? (
         <div className="flex justify-end border-t px-5 py-4">
           <Button onClick={onSave} disabled={busy} className="h-11">

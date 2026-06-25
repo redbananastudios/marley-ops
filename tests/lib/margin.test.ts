@@ -10,6 +10,7 @@ const RATES: BusinessSettings = {
   costVanDay: 40,
   cost75t: 1800,
   costMisc: 30,
+  vatDefault: true,
 };
 
 describe("crewSize", () => {

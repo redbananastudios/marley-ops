@@ -186,6 +186,7 @@ export type Database = {
           estimator_fee: number
           id: boolean
           updated_at: string
+          vat_default: boolean
         }
         Insert: {
           cost_75t?: number
@@ -197,6 +198,7 @@ export type Database = {
           estimator_fee?: number
           id?: boolean
           updated_at?: string
+          vat_default?: boolean
         }
         Update: {
           cost_75t?: number
@@ -208,6 +210,7 @@ export type Database = {
           estimator_fee?: number
           id?: boolean
           updated_at?: string
+          vat_default?: boolean
         }
         Relationships: []
       }

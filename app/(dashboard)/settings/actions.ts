@@ -14,6 +14,7 @@ const settingsSchema = z.object({
   costVanDay: num,
   cost75t: num,
   costMisc: num,
+  vatDefault: z.boolean(),
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
@@ -44,6 +45,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_van_day: v.costVanDay,
       cost_75t: v.cost75t,
       cost_misc: v.costMisc,
+      vat_default: v.vatDefault,
     })
     .eq("id", true);
   if (error) return { ok: false as const, error: error.message };

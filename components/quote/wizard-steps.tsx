@@ -11,7 +11,7 @@
 import { useState } from "react";
 import { Minus, Plus, Loader2, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { PlacesInput } from "@/components/places/places-input";
+import { AddressFields, type AddressValue } from "@/components/places/address-fields";
 import {
   BASE_PRICES,
   PACK_PRICES,
@@ -21,8 +21,22 @@ import {
   type FloorKey,
   type PropertyType,
 } from "@/lib/quote/constants";
-import { ITEM_FIELDS, type QuoteFormValues, type QuoteItems, type RouteLeg } from "@/lib/quote/form-types";
+import {
+  ITEM_FIELDS,
+  composeAddr,
+  BLANK_QUOTE_ADDRESS,
+  type QuoteFormValues,
+  type QuoteItems,
+  type RouteLeg,
+} from "@/lib/quote/form-types";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -335,6 +349,14 @@ export function Step2Job({ values, set }: StepProps) {
   const route = values.route;
   const [calc, setCalc] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
 
+  // Back-compat: quotes saved before structured addresses only have the string —
+  // seed the structured value's line1 from it so nothing is lost on open.
+  const collectAddress: AddressValue = j.collectAddress ?? { ...BLANK_QUOTE_ADDRESS, line1: j.collectAddr || "" };
+  const destAddress: AddressValue = j.destAddress ?? { ...BLANK_QUOTE_ADDRESS, line1: j.destAddr || "" };
+  const setCollect = (next: AddressValue) =>
+    set("job", { ...j, collectAddress: next, collectAddr: composeAddr(next) });
+  const setDest = (next: AddressValue) => set("job", { ...j, destAddress: next, destAddr: composeAddr(next) });
+
   async function calculateMileage() {
     if (!j.collectAddr.trim() || !j.destAddr.trim()) {
       setCalc({ loading: false, error: "Enter both addresses first." });
@@ -369,25 +391,13 @@ export function Step2Job({ values, set }: StepProps) {
   return (
     <div>
       <StepHeader title="Job Details" sub="Where are we going?" />
-      <div className="mb-5">
+      <div className="mb-5 rounded-md border border-border bg-card p-4">
         <FieldLabel required>Collection address</FieldLabel>
-        <PlacesInput
-          kind="address"
-          value={j.collectAddr}
-          onValueChange={(v) => set("job", { ...j, collectAddr: v })}
-          placeholder="Start typing the full address…"
-          className="h-14 rounded-md px-4 text-base"
-        />
+        <AddressFields value={collectAddress} onChange={setCollect} idPrefix="q-collect" />
       </div>
-      <div className="mb-5">
+      <div className="mb-5 rounded-md border border-border bg-card p-4">
         <FieldLabel required>Destination address</FieldLabel>
-        <PlacesInput
-          kind="address"
-          value={j.destAddr}
-          onValueChange={(v) => set("job", { ...j, destAddr: v })}
-          placeholder="Start typing the full address…"
-          className="h-14 rounded-md px-4 text-base"
-        />
+        <AddressFields value={destAddress} onChange={setDest} idPrefix="q-dest" />
       </div>
 
       <button
@@ -500,50 +510,31 @@ export function Step3Vehicle({ values, set }: StepProps) {
       <StepHeader title="Vehicle &amp; Packing" sub="What is the move size?" />
 
       <div className="mb-5">
-        <FieldLabel>Luton vans needed</FieldLabel>
-        <Segmented<VehicleKey>
-          value={values.vehicle}
-          columns={3}
-          onChange={(v) => set("vehicle", v)}
-          options={[
-            {
-              value: "1luton",
-              label: (
-                <span className="flex flex-col leading-tight">
-                  1 Van
-                  <span className="tabular mt-0.5 text-xs font-medium opacity-80">{gbp(BASE_PRICES["1luton"])}</span>
-                </span>
-              ),
-            },
-            {
-              value: "2luton",
-              label: (
-                <span className="flex flex-col leading-tight">
-                  2 Vans
-                  <span className="tabular mt-0.5 text-xs font-medium opacity-80">{gbp(BASE_PRICES["2luton"])}</span>
-                </span>
-              ),
-            },
-            {
-              value: "3luton",
-              label: (
-                <span className="flex flex-col leading-tight">
-                  3 Vans
-                  <span className="tabular mt-0.5 text-xs font-medium opacity-80">{gbp(BASE_PRICES["3luton"])}</span>
-                </span>
-              ),
-            },
-          ]}
-        />
+        <FieldLabel>Luton vans</FieldLabel>
+        <Select value={values.vehicle} onValueChange={(v) => set("vehicle", v as VehicleKey)}>
+          <SelectTrigger className="h-14 text-base">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1luton">1 van — {gbp(BASE_PRICES["1luton"])}</SelectItem>
+            <SelectItem value="2luton">2 vans — {gbp(BASE_PRICES["2luton"])}</SelectItem>
+            <SelectItem value="3luton">3 vans — {gbp(BASE_PRICES["3luton"])}</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       <div className="mb-5">
-        <ToggleCard
-          active={values.has75T}
-          title="Add 7.5 tonne vehicle"
-          sub={`+${gbp(ADDON_75T_BASE)} (plus packing add-on if applicable)`}
-          onToggle={() => set("has75T", !values.has75T)}
-        />
+        <FieldLabel>7.5 tonne lorry</FieldLabel>
+        <Select value={values.has75T ? "1" : "0"} onValueChange={(v) => set("has75T", v === "1")}>
+          <SelectTrigger className="h-14 text-base">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">None</SelectItem>
+            <SelectItem value="1">1 lorry — +{gbp(ADDON_75T_BASE)}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="mt-1.5 text-xs text-mist-400">Adds the 7.5t base (plus packing add-on if applicable).</p>
       </div>
 
       <div className="mb-5">

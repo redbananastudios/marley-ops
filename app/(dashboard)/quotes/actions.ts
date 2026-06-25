@@ -3,7 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { computeQuote } from "@/lib/quote/pricing";
-import { deriveInputs, type QuoteFormValues } from "@/lib/quote/form-types";
+import {
+  deriveInputs,
+  defaultQuoteValues,
+  composeAddr,
+  BLANK_QUOTE_ADDRESS,
+  type QuoteFormValues,
+} from "@/lib/quote/form-types";
+import { getBusinessSettings } from "@/lib/settings";
 
 async function ctx() {
   const sb = await createClient();
@@ -37,6 +44,28 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     lead = data;
   }
 
+  // Seed the wizard state so the form opens pre-filled. The wizard hydrates from
+  // state_blob, so without this a quote created from a lead would show empty fields.
+  const settings = await getBusinessSettings(sb);
+  const seed: QuoteFormValues = defaultQuoteValues();
+  seed.vatEnabled = settings.vatDefault; // VAT default from settings
+  if (lead) {
+    seed.customer = { name: lead.name ?? "", phone: lead.phone ?? "", email: lead.email ?? "" };
+    seed.job.collectAddress = {
+      ...BLANK_QUOTE_ADDRESS,
+      line1: lead.from_address ?? "",
+      postcode: lead.from_postcode ?? "",
+    };
+    seed.job.destAddress = {
+      ...BLANK_QUOTE_ADDRESS,
+      line1: lead.to_address ?? "",
+      postcode: lead.to_postcode ?? "",
+    };
+    seed.job.collectAddr = composeAddr(seed.job.collectAddress);
+    seed.job.destAddr = composeAddr(seed.job.destAddress);
+  }
+  const breakdown = computeQuote(deriveInputs(seed));
+
   // Retry once on the unlikely ref collision.
   for (let attempt = 0; attempt < 2; attempt++) {
     const quote_ref = await nextQuoteRef(sb);
@@ -48,12 +77,17 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
         lead_id: lead?.id ?? null,
         client_id: lead?.client_id ?? null,
         status: "draft",
-        customer_name: lead?.name ?? null,
-        customer_email: lead?.email ?? null,
-        customer_phone: lead?.phone ?? null,
-        // prefer the full address captured in the panel; fall back to the postcode
-        collect_addr: lead?.from_address ?? lead?.from_postcode ?? null,
-        dest_addr: lead?.to_address ?? lead?.to_postcode ?? null,
+        customer_name: seed.customer.name || null,
+        customer_email: seed.customer.email || null,
+        customer_phone: seed.customer.phone || null,
+        collect_addr: seed.job.collectAddr || null,
+        dest_addr: seed.job.destAddr || null,
+        state_blob: seed as never,
+        breakdown: breakdown as never,
+        subtotal: breakdown.subtotal,
+        vat_enabled: breakdown.vatEnabled,
+        vat_amount: breakdown.vatAmount,
+        grand_total: breakdown.grandTotal,
       })
       .select("id, quote_ref")
       .single();

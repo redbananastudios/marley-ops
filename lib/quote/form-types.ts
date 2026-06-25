@@ -1,10 +1,37 @@
 import type { QuoteInputs } from "./pricing";
 import type { FloorKey, PackingKey, PropertyType, VehicleKey } from "./constants";
 
+/** Structured address (matches the shared AddressFields shape, kept in a server-safe
+ *  lib so form-types stays importable from server actions). */
+export interface QuoteAddress {
+  line1: string;
+  town: string;
+  county: string;
+  postcode: string;
+  country: string;
+}
+
+export const BLANK_QUOTE_ADDRESS: QuoteAddress = {
+  line1: "",
+  town: "",
+  county: "",
+  postcode: "",
+  country: "United Kingdom",
+};
+
+/** One-line string (line1, town, postcode) for mileage + the PDF + the quote columns. */
+export function composeAddr(a: QuoteAddress): string {
+  return [a.line1, a.town, a.postcode].filter((s) => s && s.trim()).join(", ").trim();
+}
+
 /** Full wizard state. The pricing-relevant subset is derived via deriveInputs(). */
 export interface QuoteFormValues {
   customer: { name: string; phone: string; email: string };
   job: {
+    /** Structured collection/destination addresses (with postcode). */
+    collectAddress: QuoteAddress;
+    destAddress: QuoteAddress;
+    /** Derived one-line strings for mileage + PDF + columns (kept in sync with the above). */
     collectAddr: string;
     destAddr: string;
     moveDate: string;
@@ -73,7 +100,17 @@ export const ZERO_ITEMS: QuoteItems = {
 export function defaultQuoteValues(): QuoteFormValues {
   return {
     customer: { name: "", phone: "", email: "" },
-    job: { collectAddr: "", destAddr: "", moveDate: "", moveDateEstimated: false, days: 1, scope: "rented", bedsOvernight: "no" },
+    job: {
+      collectAddress: { ...BLANK_QUOTE_ADDRESS },
+      destAddress: { ...BLANK_QUOTE_ADDRESS },
+      collectAddr: "",
+      destAddr: "",
+      moveDate: "",
+      moveDateEstimated: false,
+      days: 1,
+      scope: "rented",
+      bedsOvernight: "no",
+    },
     route: { deadMiles: null, jobMiles: null, routeLegs: [] },
     vehicle: "1luton",
     has75T: false,
