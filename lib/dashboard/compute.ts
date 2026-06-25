@@ -123,7 +123,14 @@ const ts = (l: LeadLite): number => {
   return Number.isNaN(n) ? 0 : n;
 };
 
-export function classifySource(l: LeadLite): SourceKey {
+/** The lead fields classifySource actually reads — lets narrower queries
+ *  (e.g. the clients directory) classify without selecting the full LeadLite. */
+export type SourceSignals = Pick<
+  LeadLite,
+  "gclid" | "gbraid" | "wbraid" | "fbclid" | "utm_source" | "utm_medium" | "entry_channel"
+>;
+
+export function classifySource(l: SourceSignals): SourceKey {
   if (
     l.gclid ||
     l.gbraid ||

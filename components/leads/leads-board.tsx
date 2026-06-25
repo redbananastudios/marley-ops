@@ -8,9 +8,9 @@
  *   Surveys due / Mine / This week) + search + status + All/Web source toggle.
  * - Smart default ordering: active & uncontacted first (longest-waiting on top),
  *   then active & contacted, then closed.
- * - Inline actions per row: call, WhatsApp, mark-contacted, new quote — no need
- *   to open the lead to act.
- * Responsive: table-ish rows on desktop, stacked cards on mobile.
+ * - Per-card actions in a footer: call, WhatsApp, mark-contacted, new quote — no
+ *   need to open the lead to act.
+ * Card grid: 3 per row on desktop, stacking to 1 on mobile.
  */
 
 import { useMemo, useState, useTransition } from "react";
@@ -247,14 +247,18 @@ export function LeadsBoard({
         <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
       </div>
 
-      {/* list */}
-      <ul className="mt-4 divide-y rounded-lg border border-border bg-card">
-        {visible.length === 0 ? (
-          <li className="px-5 py-12 text-center text-sm text-mist-400">No leads match.</li>
-        ) : (
-          visible.map((l) => <Row key={l.id} lead={l} />)
-        )}
-      </ul>
+      {/* card grid — 3 per row on desktop */}
+      {visible.length === 0 ? (
+        <div className="mt-4 rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-400">
+          No leads match.
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {visible.map((l) => (
+            <LeadCardItem key={l.id} lead={l} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -283,7 +287,7 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
   );
 }
 
-function Row({ lead }: { lead: LeadCard }) {
+function LeadCardItem({ lead }: { lead: LeadCard }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const route =
@@ -305,84 +309,92 @@ function Row({ lead }: { lead: LeadCard }) {
   }
 
   return (
-    <li className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
-      {/* identity — full width on mobile so the name has room */}
-      <Link href={`/leads/${lead.id}`} className="flex min-w-0 items-center gap-3 sm:flex-1">
-        <span
-          className="size-2.5 shrink-0 rounded-full"
-          style={{ background: SOURCE_COLOR[lead.source] }}
-          title={SOURCE_LABEL[lead.source]}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-semibold text-foreground">{lead.name ?? "—"}</span>
-          <span className="block truncate text-xs text-mist-400">
-            {SOURCE_LABEL[lead.source]} · {route}
-          </span>
-        </span>
-      </Link>
-
-      {/* meta cluster — second line on mobile, inline on desktop */}
-      <div className="flex items-center gap-2 sm:gap-3">
-        <div className="mr-auto sm:mr-0">
-          <ResponseChip lead={lead} />
-        </div>
-
-        {lead.value != null ? (
-          <span className="tabular hidden shrink-0 text-sm font-semibold text-foreground md:inline">
-            {gbp(lead.value)}
-          </span>
-        ) : null}
-
-        <div className="shrink-0">
+    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-shadow hover:shadow-sm">
+      {/* card body — taps through to the lead */}
+      <Link href={`/leads/${lead.id}`} className="flex flex-1 flex-col gap-3 p-4">
+        {/* identity row */}
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <span
+              className="mt-1 size-2.5 shrink-0 rounded-full"
+              style={{ background: SOURCE_COLOR[lead.source] }}
+              title={SOURCE_LABEL[lead.source]}
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
+              <p className="truncate text-xs text-mist-400">{SOURCE_LABEL[lead.source]}</p>
+            </div>
+          </div>
           <LeadStatusBadge status={lead.status} />
         </div>
 
-        <div className="flex shrink-0 items-center gap-0.5">
-          {lead.phone ? (
-            <a
-              href={`tel:${lead.phone}`}
-              title="Call"
-              aria-label="Call"
-              className="focus-ring flex size-9 items-center justify-center rounded-md text-[#2563eb] hover:bg-muted"
-            >
-              <Phone className="size-4" strokeWidth={1.75} />
-            </a>
+        {/* route + value */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="tabular min-w-0 truncate text-sm text-foreground">{route}</span>
+          {lead.value != null ? (
+            <span className="tabular shrink-0 text-sm font-semibold text-foreground">{gbp(lead.value)}</span>
           ) : null}
-          {wa ? (
-            <a
-              href={`https://wa.me/${wa}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="WhatsApp"
-              aria-label="WhatsApp"
-              className="focus-ring flex size-9 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted"
-            >
-              <MessageCircle className="size-4" strokeWidth={1.75} />
-            </a>
-          ) : null}
-          {uncontacted ? (
-            <button
-              type="button"
-              onClick={markContacted}
-              disabled={pending}
-              title="Mark contacted"
-              aria-label="Mark contacted"
-              className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success disabled:opacity-50"
-            >
-              {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Check className="size-4" strokeWidth={1.75} />}
-            </button>
-          ) : null}
-          <Link
-            href={`/quotes/new?leadId=${lead.id}`}
-            prefetch={false}
-            title="New quote"
-            aria-label="New quote"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted"
-          >
-            <FileText className="size-4" strokeWidth={1.75} />
-          </Link>
         </div>
+
+        {/* contact line */}
+        <p className="truncate text-xs text-mist-400">
+          {[lead.phone, lead.email].filter(Boolean).join(" · ") || "no contact details"}
+        </p>
+
+        {/* response / urgency chip */}
+        <div className="mt-auto pt-1">
+          <ResponseChip lead={lead} />
+        </div>
+      </Link>
+
+      {/* actions — below the card */}
+      <div className="flex items-center gap-0.5 border-t border-border bg-muted/30 px-2.5 py-2">
+        {lead.phone ? (
+          <a
+            href={`tel:${lead.phone}`}
+            title="Call"
+            aria-label="Call"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#2563eb] hover:bg-muted"
+          >
+            <Phone className="size-4" strokeWidth={1.75} />
+            Call
+          </a>
+        ) : null}
+        {wa ? (
+          <a
+            href={`https://wa.me/${wa}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="WhatsApp"
+            aria-label="WhatsApp"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted"
+          >
+            <MessageCircle className="size-4" strokeWidth={1.75} />
+          </a>
+        ) : null}
+        {uncontacted ? (
+          <button
+            type="button"
+            onClick={markContacted}
+            disabled={pending}
+            title="Mark contacted"
+            aria-label="Mark contacted"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success disabled:opacity-50"
+          >
+            {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Check className="size-4" strokeWidth={1.75} />}
+          </button>
+        ) : null}
+        <Link
+          href={`/quotes/new?leadId=${lead.id}`}
+          prefetch={false}
+          title="New quote"
+          aria-label="New quote"
+          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mm-red hover:bg-muted"
+        >
+          <FileText className="size-4" strokeWidth={1.75} />
+          Quote
+        </Link>
       </div>
-    </li>
+    </div>
   );
 }

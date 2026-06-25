@@ -34,6 +34,29 @@ export async function ensureSurveyForLead(leadId: string) {
   return { ok: true as const, surveyId: data.id };
 }
 
+/** List a lead's survey photos (across its latest survey). Read-only; for the
+ *  quote builder's in-step photo uploaders to hydrate what's already there. */
+export async function loadSurveyPhotos(leadId: string) {
+  const { sb } = await ctx();
+  const { data: survey } = await sb
+    .from("surveys")
+    .select("id")
+    .eq("lead_id", leadId)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!survey) return { ok: true as const, photos: [] as { id: string; category: "access" | "large_items"; storage_path: string }[] };
+  const { data } = await sb
+    .from("survey_photos")
+    .select("id, category, storage_path")
+    .eq("survey_id", survey.id)
+    .order("created_at", { ascending: true });
+  return {
+    ok: true as const,
+    photos: (data ?? []) as { id: string; category: "access" | "large_items"; storage_path: string }[],
+  };
+}
+
 export async function saveSurveyData(
   surveyId: string,
   leadId: string,

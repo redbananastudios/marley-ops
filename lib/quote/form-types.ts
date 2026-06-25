@@ -22,6 +22,9 @@ export interface QuoteFormValues {
   dest: { type: PropertyType; lift: "no" | "yes"; floor: FloorKey; accessM: number };
   extras: { congestion: boolean; tolls: number; parking: number };
   items: QuoteItems;
+  /** In-person survey capture — notes from the visit. Not priced (informational,
+   *  stored with the quote). Photos live in survey_photos, keyed by the lead. */
+  survey: { accessNotes: string; largeItemsNotes: string };
   review: { discount: number; quoteNotes: string };
   vatEnabled: boolean;
 }
@@ -79,6 +82,7 @@ export function defaultQuoteValues(): QuoteFormValues {
     dest: { type: "house", lift: "no", floor: "ground", accessM: 0 },
     extras: { congestion: false, tolls: 0, parking: 0 },
     items: { ...ZERO_ITEMS },
+    survey: { accessNotes: "", largeItemsNotes: "" },
     review: { discount: 0, quoteNotes: "" },
     vatEnabled: false,
   };

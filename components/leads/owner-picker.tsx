@@ -38,11 +38,11 @@ export function OwnerPicker({
     start(async () => {
       const res = await assignLeadOwnerAction(leadId, next === NONE ? null : next);
       if (res.ok) {
-        toast.success("Owner updated.");
+        toast.success("Estimator updated.");
         router.refresh();
       } else {
         setValue(prev);
-        toast.error(res.error || "Could not assign owner.");
+        toast.error(res.error || "Could not assign estimator.");
       }
     });
   }
@@ -51,7 +51,7 @@ export function OwnerPicker({
     <div className="flex items-center gap-2">
       {pending ? <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} /> : null}
       <Select value={value} onValueChange={onChange} disabled={pending}>
-        <SelectTrigger size="sm" className="min-h-9 min-w-[9rem]" aria-label="Assign owner">
+        <SelectTrigger size="sm" className="min-h-9 min-w-[9rem]" aria-label="Assign estimator">
           <SelectValue placeholder="Unassigned" />
         </SelectTrigger>
         <SelectContent>

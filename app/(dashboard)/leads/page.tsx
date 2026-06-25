@@ -6,6 +6,7 @@ import { SyncLeadsButton } from "@/components/sync-leads-button";
 import { Button } from "@/components/ui/button";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { LeadsBoard, type LeadCard } from "@/components/leads/leads-board";
+import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,10 @@ const DAY = 86_400_000;
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const initialStatus = sp.status?.trim() || undefined;
+
+  // Always current: pull any new website leads from Sanity before reading.
+  // Incremental + fail-soft so a slow/unreachable Sanity never blocks the page.
+  await syncSanityLeads({ incremental: true }).catch(() => null);
 
   const supabase = await createClient();
   const {

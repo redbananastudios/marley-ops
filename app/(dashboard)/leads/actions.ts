@@ -212,7 +212,7 @@ export async function assignLeadOwnerAction(leadId: string, estimatorId: string 
     lead_id: leadId,
     actor_id: userId,
     type: "note",
-    summary: `Owner set to ${who}`,
+    summary: `Estimator set to ${who}`,
   });
 
   revalidatePath(`/leads/${leadId}`);

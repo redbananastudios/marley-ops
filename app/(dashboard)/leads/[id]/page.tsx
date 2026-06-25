@@ -8,7 +8,6 @@ import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
-import { SurveyPanel } from "@/components/survey/survey-panel";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { OwnerPicker } from "@/components/leads/owner-picker";
@@ -100,26 +99,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
 
-  const { data: survey } = await supabase
-    .from("surveys")
-    .select("id, survey_data")
-    .eq("lead_id", id)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  const { data: surveyPhotos } = survey
-    ? await supabase
-        .from("survey_photos")
-        .select("id, category, storage_path")
-        .eq("survey_id", survey.id)
-        .order("created_at", { ascending: true })
-    : { data: [] };
-  const surveyData = (survey?.survey_data ?? {}) as {
-    items?: Record<string, number>;
-    accessNotes?: string;
-    largeItemsNotes?: string;
-  };
-
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
 
@@ -186,7 +165,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <div className="flex flex-wrap items-end gap-x-10 gap-y-4 border-t px-5 py-4">
           <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
           <div>
-            <p className="eyebrow mb-1">Owner</p>
+            <p className="eyebrow mb-1">Estimator</p>
             <OwnerPicker leadId={lead.id} ownerId={lead.estimator_id} estimators={estimatorList} />
           </div>
           {lead.estimate_given != null ? <Fact label="Estimate given" value={gbp(lead.estimate_given)} /> : null}
@@ -220,7 +199,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <TabsList variant="line">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="quotes">Quotes</TabsTrigger>
-          <TabsTrigger value="survey">Survey</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="comms">Comms</TabsTrigger>
         </TabsList>
@@ -298,6 +276,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 </Link>
               </Button>
             </div>
+            <p className="border-b bg-muted/30 px-5 py-2.5 text-xs text-mist-400">
+              The site survey lives inside the quote — access and large-item notes &amp; photos are
+              captured in the quote builder (steps 4 &amp; 6).
+            </p>
             {quoteRows.length === 0 ? (
               <EmptyState>No quotes yet.</EmptyState>
             ) : (
@@ -324,20 +306,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </ul>
             )}
           </Card>
-        </TabsContent>
-
-        {/* Survey */}
-        <TabsContent value="survey" className="mt-5">
-          <SurveyPanel
-            leadId={lead.id}
-            surveyId={survey?.id ?? null}
-            initialData={{
-              items: surveyData.items,
-              accessNotes: surveyData.accessNotes,
-              largeItemsNotes: surveyData.largeItemsNotes,
-            }}
-            initialPhotos={(surveyPhotos ?? []) as { id: string; category: "access" | "large_items"; storage_path: string }[]}
-          />
         </TabsContent>
 
         {/* Activity */}

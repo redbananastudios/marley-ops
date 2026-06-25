@@ -264,9 +264,9 @@ export function QuoteBuilder({
         {step === 1 && <Step1Customer values={values} set={set} showErrors={showStep1Errors} />}
         {step === 2 && <Step2Job values={values} set={set} />}
         {step === 3 && <Step3Vehicle values={values} set={set} />}
-        {step === 4 && <Step4Access values={values} set={set} />}
+        {step === 4 && <Step4Access values={values} set={set} leadId={leadId} />}
         {step === 5 && <Step5Extras values={values} set={set} />}
-        {step === 6 && <Step6Items values={values} set={set} />}
+        {step === 6 && <Step6Items values={values} set={set} leadId={leadId} />}
         {step === 7 && (
           <Step7Review values={values} set={set} breakdown={breakdown} actions={reviewActions} />
         )}

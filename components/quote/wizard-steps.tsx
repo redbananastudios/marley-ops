@@ -22,6 +22,7 @@ import {
   type PropertyType,
 } from "@/lib/quote/constants";
 import { ITEM_FIELDS, type QuoteFormValues, type QuoteItems, type RouteLeg } from "@/lib/quote/form-types";
+import { SurveyPhotos } from "@/components/quote/survey-photos";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -241,6 +242,37 @@ type Setter = <K extends keyof QuoteFormValues>(key: K, value: QuoteFormValues[K
 interface StepProps {
   values: QuoteFormValues;
   set: Setter;
+  /** Present when the quote is tied to a lead — enables survey notes + photo capture. */
+  leadId?: string | null;
+}
+
+/** Shared survey-note textarea (Marley field styling). */
+function SurveyNotes({
+  id,
+  label,
+  placeholder,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <textarea
+        id={id}
+        rows={3}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        className="w-full rounded-md border border-input bg-card px-3 py-2.5 text-sm text-foreground placeholder:text-mist-300 focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/20"
+      />
+    </div>
+  );
 }
 
 /* ---------- STEP 1 — CUSTOMER ---------- */
@@ -623,13 +655,30 @@ function AccessSide({
   );
 }
 
-export function Step4Access({ values, set }: StepProps) {
+export function Step4Access({ values, set, leadId }: StepProps) {
   return (
     <div>
       <StepHeader title="Access &amp; Property" sub="Collection and destination details." />
       <div className="grid gap-4 md:grid-cols-2">
         <AccessSide title="Collection" data={values.collect} onChange={(next) => set("collect", next)} />
         <AccessSide title="Destination" data={values.dest} onChange={(next) => set("dest", next)} />
+      </div>
+
+      {/* Survey — access capture from the visit (notes saved with the quote; photos to the lead) */}
+      <div className="mt-6 space-y-4 rounded-md border border-border bg-muted/30 p-4">
+        <p className="eyebrow">Survey · access</p>
+        <SurveyNotes
+          id="survey-access-notes"
+          label="Access notes"
+          placeholder="Parking, stairs, lift, narrow doorways, long carries…"
+          value={values.survey.accessNotes}
+          onChange={(v) => set("survey", { ...values.survey, accessNotes: v })}
+        />
+        {leadId ? (
+          <SurveyPhotos leadId={leadId} category="access" label="Access" />
+        ) : (
+          <p className="text-xs text-mist-400">Link this quote to a lead to attach access photos.</p>
+        )}
       </div>
     </div>
   );
@@ -662,7 +711,7 @@ export function Step5Extras({ values, set }: StepProps) {
 
 /* ---------- STEP 6 — ITEMS & MATERIALS ---------- */
 
-export function Step6Items({ values, set }: StepProps) {
+export function Step6Items({ values, set, leadId }: StepProps) {
   const items = values.items;
   const setItem = (key: keyof QuoteItems, v: number) => set("items", { ...items, [key]: v });
   const groups: ("Boxes" | "Covers")[] = ["Boxes", "Covers"];
@@ -685,6 +734,23 @@ export function Step6Items({ values, set }: StepProps) {
           </div>
         </div>
       ))}
+
+      {/* Survey — large items / extra packing capture from the visit */}
+      <div className="space-y-4 rounded-md border border-border bg-muted/30 p-4">
+        <p className="eyebrow">Survey · large items &amp; extra packing</p>
+        <SurveyNotes
+          id="survey-large-notes"
+          label="Large items / extra packing notes"
+          placeholder="Pianos, safes, fragile or oversized items, dismantling needs…"
+          value={values.survey.largeItemsNotes}
+          onChange={(v) => set("survey", { ...values.survey, largeItemsNotes: v })}
+        />
+        {leadId ? (
+          <SurveyPhotos leadId={leadId} category="large_items" label="Large items" />
+        ) : (
+          <p className="text-xs text-mist-400">Link this quote to a lead to attach large-item photos.</p>
+        )}
+      </div>
     </div>
   );
 }
