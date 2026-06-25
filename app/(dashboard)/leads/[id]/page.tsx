@@ -10,7 +10,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
-import { OwnerPicker } from "@/components/leads/owner-picker";
 import { StatusChanger } from "./status-changer";
 
 const gbp = (n: number | null | undefined): string =>
@@ -84,6 +83,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name", { ascending: true }),
     ]);
   const estimatorList = (estimators ?? []) as { id: string; full_name: string }[];
+
+  // Estimator is survey-derived: whoever is assigned the booked survey. Read-only
+  // here and only shown once a survey exists (no estimator at the enquiry stage).
+  const { data: surveyAppt } = await supabase
+    .from("appointments")
+    .select("estimator_id, starts_at")
+    .eq("lead_id", id)
+    .eq("appt_type", "survey")
+    .neq("status", "cancelled")
+    .not("estimator_id", "is", null)
+    .order("starts_at", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const profileName = new Map(estimatorList.map((p) => [p.id, p.full_name]));
+  const surveyEstimatorName = surveyAppt?.estimator_id
+    ? (profileName.get(surveyAppt.estimator_id) ?? "Estimator")
+    : null;
 
   const { data: comms } = await supabase
     .from("communications")
@@ -164,10 +180,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         <div className="flex flex-wrap items-end gap-x-10 gap-y-4 border-t px-5 py-4">
           <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
-          <div>
-            <p className="eyebrow mb-1">Estimator</p>
-            <OwnerPicker leadId={lead.id} ownerId={lead.estimator_id} estimators={estimatorList} />
-          </div>
+          {surveyEstimatorName ? <Fact label="Estimator" value={surveyEstimatorName} /> : null}
           {lead.estimate_given != null ? <Fact label="Estimate given" value={gbp(lead.estimate_given)} /> : null}
           <Fact label="Submitted" value={fmtDate(lead.submitted_at ?? lead.created_at)} />
           {previousCount > 0 ? (

@@ -11,7 +11,7 @@ export default async function BoardPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: leadsData }, { data: quoteData }] = await Promise.all([
+  const [{ data: leadsData }, { data: quoteData }, { data: apptData }] = await Promise.all([
     supabase
       .from("leads")
       .select(
@@ -19,9 +19,17 @@ export default async function BoardPage() {
       )
       .order("submitted_at", { ascending: false }),
     supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
+    supabase.from("appointments").select("lead_id, appt_type, status, estimator_id"),
   ]);
 
   const leads = leadsData ?? [];
+
+  /* estimator is survey-derived (assigned at survey booking), null before that */
+  const surveyEstimator = new Map<string, string>();
+  for (const a of apptData ?? []) {
+    if (a.appt_type !== "survey" || a.status === "cancelled" || !a.lead_id || !a.estimator_id) continue;
+    if (!surveyEstimator.has(a.lead_id)) surveyEstimator.set(a.lead_id, a.estimator_id);
+  }
 
   /* per-lead best value: accepted agreed price, else latest quoted total */
   const valueMap = new Map<string, { accepted: number | null; latest: number | null; latestAt: number }>();
@@ -50,7 +58,7 @@ export default async function BoardPage() {
       property_size: l.property_size,
       first_contacted_at: l.first_contacted_at,
       phone: l.phone,
-      estimator_id: l.estimator_id,
+      estimator_id: surveyEstimator.get(l.id) ?? null,
       submitted_at: l.submitted_at,
       created_at: l.created_at,
       value: v ? (v.accepted ?? v.latest) : null,

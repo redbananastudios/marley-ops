@@ -51,7 +51,9 @@ export async function createLeadAction(input: NewLeadInput) {
     .from("leads")
     .insert({
       client_id: clientId,
-      estimator_id: userId,
+      // No estimator at the lead stage — the estimator is assigned when a survey is
+      // booked (it lives on the survey/appointment). Leaving this null keeps the
+      // lead's "estimator" honest: empty until there's actually a survey to do.
       status: "website_enquiry",
       entry_channel: v.entry_channel,
       referrer_answer: v.referrer_answer || null,

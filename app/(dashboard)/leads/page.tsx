@@ -35,7 +35,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       )
       .order("submitted_at", { ascending: false }),
     supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
-    supabase.from("appointments").select("lead_id, appt_type, starts_at, status"),
+    supabase.from("appointments").select("lead_id, appt_type, starts_at, status, estimator_id"),
   ]);
 
   const leads = leadsData ?? [];
@@ -52,6 +52,14 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       cur.latestAt = at;
     }
     valueMap.set(q.lead_id, cur);
+  }
+
+  /* estimator is survey-derived: whoever is assigned the booked survey owns the lead.
+     null until a survey exists — there's no estimator at the enquiry stage. */
+  const surveyEstimator = new Map<string, string>();
+  for (const a of apptData ?? []) {
+    if (a.appt_type !== "survey" || a.status === "cancelled" || !a.lead_id || !a.estimator_id) continue;
+    if (!surveyEstimator.has(a.lead_id)) surveyEstimator.set(a.lead_id, a.estimator_id);
   }
 
   /* leads with an upcoming (non-cancelled) survey appointment */
@@ -83,7 +91,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       first_contacted_at: l.first_contacted_at,
       phone: l.phone,
       email: l.email,
-      estimator_id: l.estimator_id,
+      estimator_id: surveyEstimator.get(l.id) ?? null,
       source: classifySource(l as LeadLite),
       value: v ? (v.accepted ?? v.latest) : null,
       surveyDue: upcomingSurvey.has(l.id) || l.status === "survey_booked",
