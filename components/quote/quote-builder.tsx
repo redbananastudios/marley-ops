@@ -13,7 +13,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { computeQuote } from "@/lib/quote/pricing";
 import { deriveInputs, defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
-import { saveQuoteDraft, setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
+import { saveQuoteDraft } from "@/app/(dashboard)/quotes/actions";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import { downloadQuotePdf, ensureLogoDataUri } from "@/lib/quote/pdf-client";
 import {
@@ -26,51 +26,31 @@ import {
   Step7Review,
 } from "@/components/quote/wizard-steps";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
-const QUOTE_STATUSES: { value: string; label: string }[] = [
-  { value: "draft", label: "Draft" },
-  { value: "sent", label: "Sent" },
-  { value: "accepted", label: "Accepted" },
-  { value: "rejected", label: "Rejected" },
-  { value: "superseded", label: "Superseded" },
-];
+const QUOTE_STATUS_META: Record<string, { label: string; cls: string }> = {
+  draft: { label: "Draft", cls: "bg-muted text-mist-500" },
+  sent: { label: "Sent", cls: "bg-[#eff6ff] text-[#2563eb]" },
+  accepted: { label: "Accepted", cls: "bg-success-bg text-success" },
+  rejected: { label: "Rejected", cls: "bg-danger-bg text-danger" },
+  superseded: { label: "Superseded", cls: "bg-muted text-mist-400" },
+};
 
-/** Header status control — changes quote status inline. */
-export function QuoteStatusControl({ quoteId, status }: { quoteId: string; status: string }) {
-  const [value, setValue] = useState(status);
-  const [busy, setBusy] = useState(false);
-  async function change(next: string) {
-    setValue(next);
-    setBusy(true);
-    const res = await setQuoteStatus(quoteId, next);
-    setBusy(false);
-    if (!res.ok) {
-      setValue(status);
-      toast.error("Could not update status: " + res.error);
-    } else {
-      toast.success(`Status set to ${next}.`);
-    }
-  }
+/**
+ * Read-only status badge. Quote status is driven by real actions — Send → "sent",
+ * Accept → "accepted" — never set by hand, so a brand-new quote can't be mis-marked
+ * as Sent/Accepted before anything has actually happened.
+ */
+export function QuoteStatusBadge({ status }: { status: string }) {
+  const meta = QUOTE_STATUS_META[status] ?? QUOTE_STATUS_META.draft;
   return (
-    <Select value={value} onValueChange={change} disabled={busy}>
-      <SelectTrigger className="min-h-11 w-[150px]">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {QUOTE_STATUSES.map((s) => (
-          <SelectItem key={s.value} value={s.value}>
-            {s.label}
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <span
+      className={cn(
+        "inline-flex items-center rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide",
+        meta.cls,
+      )}
+    >
+      {meta.label}
+    </span>
   );
 }
 

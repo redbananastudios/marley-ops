@@ -4,7 +4,7 @@ import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
-import { QuoteBuilder, QuoteStatusControl } from "@/components/quote/quote-builder";
+import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 
@@ -79,7 +79,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
           <span className="tabular font-display text-xl font-bold text-foreground">
             {gbp(quote.grand_total)}
           </span>
-          <QuoteStatusControl quoteId={quote.id} status={quote.status ?? "draft"} />
+          <QuoteStatusBadge status={quote.status ?? "draft"} />
           <AcceptQuoteButton
             quoteId={quote.id}
             grandTotal={Number(quote.grand_total ?? 0)}
