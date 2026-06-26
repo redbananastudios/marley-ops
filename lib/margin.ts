@@ -19,23 +19,24 @@ const CREW_BY_VEHICLE: Record<VehicleKey, number> = {
   "5luton": 6,
 };
 
-export function crewSize(vehicle: VehicleKey, has75T: boolean): number {
-  return (CREW_BY_VEHICLE[vehicle] ?? 2) + (has75T ? 1 : 0);
+export function crewSize(vehicle: VehicleKey, sevenFiveT: number): number {
+  return (CREW_BY_VEHICLE[vehicle] ?? 2) + sevenFiveT;
 }
 
-/** Vehicles on the job (Lutons + the 7.5t). Each provides one included man. */
-export function vehicleCount(vehicle: VehicleKey, has75T: boolean): number {
-  return (VAN_COUNT[vehicle] ?? 1) + (has75T ? 1 : 0);
+/** Vehicles on the job (Lutons + the 7.5t lorries). Each provides one included man. */
+export function vehicleCount(vehicle: VehicleKey, sevenFiveT: number): number {
+  return (VAN_COUNT[vehicle] ?? 1) + sevenFiveT;
 }
 
 /** Crew billed at the day rate = total crew minus the one included man per vehicle. */
-export function extraCrew(vehicle: VehicleKey, has75T: boolean): number {
-  return Math.max(0, crewSize(vehicle, has75T) - vehicleCount(vehicle, has75T));
+export function extraCrew(vehicle: VehicleKey, sevenFiveT: number): number {
+  return Math.max(0, crewSize(vehicle, sevenFiveT) - vehicleCount(vehicle, sevenFiveT));
 }
 
 export interface JobCostInputs {
   vehicle: VehicleKey;
-  has75T: boolean;
+  /** Number of 7.5t lorries on the job (cost = N × cost75t). */
+  sevenFiveT: number;
   totalMiles: number;
   boxes: number;
   days: number;
@@ -57,9 +58,9 @@ export interface JobCost {
  *  with the job; misc + the estimator (survey) fee are flat per job. */
 export function jobCost(i: JobCostInputs, s: BusinessSettings): JobCost {
   const lutonVans = VAN_COUNT[i.vehicle] ?? 1;
-  const labour = extraCrew(i.vehicle, i.has75T) * i.days * s.costLabourPerDay;
+  const labour = extraCrew(i.vehicle, i.sevenFiveT) * i.days * s.costLabourPerDay;
   const vans = lutonVans * i.days * s.costVanDay;
-  const sevenT = i.has75T ? s.cost75t : 0;
+  const sevenT = i.sevenFiveT * s.cost75t;
   const fuel = i.totalMiles * s.costFuelPerMile;
   const boxes = i.boxes * s.costBox;
   const misc = s.costMisc;

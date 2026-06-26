@@ -77,7 +77,7 @@ export default async function DashboardPage() {
           const c = jobCost(
             {
               vehicle: b.vehicle ?? "1luton",
-              has75T: b.has75T ?? false,
+              sevenFiveT: b.sevenFiveT ?? (b.has75T ? 1 : 0),
               totalMiles: Number(b.totalMiles ?? 0),
               boxes: boxesFromItems(blob?.items),
               days: Math.max(1, Number(blob?.job?.days ?? 1)),

@@ -174,15 +174,16 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
   const charge = breakdown.total; // ex-VAT (VAT is pass-through, not margin)
   const vanCount = breakdown.vanCount;
-  const crew = crewSize(job.vehicle, job.has75T);
-  const helpers = extraCrew(job.vehicle, job.has75T);
+  const sevenFiveT = job.has75T ? 1 : 0; // sandbox models 0/1; real jobs use the saved count
+  const crew = crewSize(job.vehicle, sevenFiveT);
+  const helpers = extraCrew(job.vehicle, sevenFiveT);
   const lutonVans = VAN_COUNT[job.vehicle];
 
   // Cost via the shared job-cost helper, fed the calculator's editable rates.
   const cost = useMemo(
     () =>
       jobCost(
-        { vehicle: job.vehicle, has75T: job.has75T, totalMiles: job.miles, boxes: job.boxes, days: job.days },
+        { vehicle: job.vehicle, sevenFiveT: job.has75T ? 1 : 0, totalMiles: job.miles, boxes: job.boxes, days: job.days },
         {
           estimatorFee: estFee,
           costFuelPerMile: fuel,
