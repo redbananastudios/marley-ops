@@ -3,6 +3,59 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { VEHICLE_KEYS } from "@/lib/quote/constants";
+import { toPricingConfig, type EditablePricing } from "@/lib/quote/pricing-config";
+
+async function requireAdmin() {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { sb, error: "Not signed in." as const };
+  const { data: prof } = await sb.from("profiles").select("role").eq("id", user.id).single();
+  if (prof?.role !== "admin") return { sb, error: "Only admins can change this." as const };
+  return { sb, error: null };
+}
+
+const money = z.coerce.number().nonnegative();
+const tierPack = z.object({ full: money, fragile: money });
+const pricingSchema = z.object({
+  base: z.record(z.string(), money),
+  pack: z.record(z.string(), tierPack),
+  addon75Base: money,
+  addon75Pack: tierPack,
+});
+
+/** Save the editable quote prices (admin only). Validated + normalised before write. */
+export async function savePricingAction(input: EditablePricing) {
+  const parsed = pricingSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid prices" };
+  }
+  const { sb, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+
+  // Normalise to the canonical shape (owner=0 enforced) before persisting.
+  const config = toPricingConfig(parsed.data as EditablePricing);
+  const stored: EditablePricing = {
+    base: Object.fromEntries(VEHICLE_KEYS.map((k) => [k, config.base[k]])) as EditablePricing["base"],
+    pack: Object.fromEntries(
+      VEHICLE_KEYS.map((k) => [k, { full: config.pack[k].full, fragile: config.pack[k].fragile }]),
+    ) as EditablePricing["pack"],
+    addon75Base: config.addon75Base,
+    addon75Pack: { full: config.addon75Pack.full, fragile: config.addon75Pack.fragile },
+  };
+
+  const { error: dbErr } = await sb
+    .from("business_settings")
+    .update({ pricing: stored as never })
+    .eq("id", true);
+  if (dbErr) return { ok: false as const, error: dbErr.message };
+
+  revalidatePath("/settings");
+  revalidatePath("/quotes");
+  return { ok: true as const };
+}
 
 const num = z.coerce.number().nonnegative("Must be 0 or more");
 

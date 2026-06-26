@@ -4,6 +4,7 @@ import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
+import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -46,6 +47,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
     (user?.user_metadata?.full_name as string | undefined) ?? user?.email ?? null;
 
   const initialValues = normalizeQuoteValues(quote.state_blob);
+  const pricing = await getPricingConfig(sb);
   const emailedCount = quote.email_send_count ?? 0;
 
   return (
@@ -100,6 +102,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         leadId={quote.lead_id}
         clientId={quote.client_id}
         estimatorName={estimatorName}
+        pricing={pricing}
       />
     </main>
   );

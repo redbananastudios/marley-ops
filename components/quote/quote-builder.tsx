@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Download, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { computeQuote } from "@/lib/quote/pricing";
+import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
 import { deriveInputs, defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
 import { saveQuoteDraft } from "@/app/(dashboard)/quotes/actions";
 import { PdfLoader } from "@/components/quote/pdf-loader";
@@ -82,6 +82,7 @@ export function QuoteBuilder({
   clientId,
   estimatorName,
   readOnly,
+  pricing = DEFAULT_PRICING,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -90,6 +91,8 @@ export function QuoteBuilder({
   clientId?: string | null;
   estimatorName?: string | null;
   readOnly?: boolean;
+  /** Active (settings-driven) prices for the live total + step labels. */
+  pricing?: PricingConfig;
 }) {
   const [values, setValues] = useState<QuoteFormValues>(() => ({
     ...defaultQuoteValues(),
@@ -101,7 +104,7 @@ export function QuoteBuilder({
   const [showStep1Errors, setShowStep1Errors] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
-  const breakdown = useMemo(() => computeQuote(deriveInputs(values)), [values]);
+  const breakdown = useMemo(() => computeQuote(deriveInputs(values), pricing), [values, pricing]);
 
   const step1Valid =
     values.customer.name.trim() !== "" &&
@@ -243,7 +246,7 @@ export function QuoteBuilder({
       <div className="rounded-lg border border-border bg-card p-6 md:p-7">
         {step === 1 && <Step1Customer values={values} set={set} showErrors={showStep1Errors} />}
         {step === 2 && <Step2Job values={values} set={set} />}
-        {step === 3 && <Step3Vehicle values={values} set={set} />}
+        {step === 3 && <Step3Vehicle values={values} set={set} pricing={pricing} />}
         {step === 4 && <Step4Access values={values} set={set} leadId={leadId} />}
         {step === 5 && <Step5Extras values={values} set={set} />}
         {step === 6 && <Step6Items values={values} set={set} leadId={leadId} />}

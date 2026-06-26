@@ -185,6 +185,7 @@ export type Database = {
           cost_van_day: number
           estimator_fee: number
           id: boolean
+          pricing: Json | null
           updated_at: string
           vat_default: boolean
         }
@@ -197,6 +198,7 @@ export type Database = {
           cost_van_day?: number
           estimator_fee?: number
           id?: boolean
+          pricing?: Json | null
           updated_at?: string
           vat_default?: boolean
         }
@@ -209,6 +211,7 @@ export type Database = {
           cost_van_day?: number
           estimator_fee?: number
           id?: boolean
+          pricing?: Json | null
           updated_at?: string
           vat_default?: boolean
         }

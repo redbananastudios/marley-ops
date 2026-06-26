@@ -11,6 +11,7 @@ import {
   type QuoteFormValues,
 } from "@/lib/quote/form-types";
 import { getBusinessSettings } from "@/lib/settings";
+import { getPricingConfig } from "@/lib/quote/pricing-config";
 
 async function ctx() {
   const sb = await createClient();
@@ -64,7 +65,8 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
   }
-  const breakdown = computeQuote(deriveInputs(seed));
+  const pricing = await getPricingConfig(sb);
+  const breakdown = computeQuote(deriveInputs(seed), pricing);
 
   // Retry once on the unlikely ref collision.
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -107,7 +109,8 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
 /** Persist wizard state + the computed breakdown. Money columns always come from computeQuote(). */
 export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
   const { sb } = await ctx();
-  const b = computeQuote(deriveInputs(values));
+  const pricing = await getPricingConfig(sb);
+  const b = computeQuote(deriveInputs(values), pricing);
 
   const { error } = await sb
     .from("quotes")
