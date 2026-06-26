@@ -346,7 +346,7 @@ export function AppointmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-display">
             {isEdit ? "Edit appointment" : "New appointment"}
@@ -358,123 +358,115 @@ export function AppointmentDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-1">
-          <div className="grid gap-2">
-            <Label htmlFor="appt-type">Type</Label>
-            <Select
-              value={apptType}
-              onValueChange={(v) => onTypeChange(v as ApptType)}
-            >
-              <SelectTrigger id="appt-type">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="survey">Survey</SelectItem>
-                <SelectItem value="removal">Removal</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="appt-lead">
-              Lead / customer{" "}
-              <span className="text-mist-400 font-normal">(optional)</span>
-            </Label>
-            <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
-          </div>
-
-          <div className="grid gap-2">
-            <Label htmlFor="appt-estimator">Estimator</Label>
-            <Select value={estimatorId} onValueChange={setEstimatorId}>
-              <SelectTrigger id="appt-estimator">
-                <SelectValue placeholder="Unassigned" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NO_EST}>Unassigned</SelectItem>
-                {estimators.map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-mist-400">Who does this visit — drives their pay + win stats.</p>
-          </div>
-
-          {isEdit ? (
-            <div className="grid gap-2">
-              <Label htmlFor="appt-status">Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger id="appt-status">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="scheduled">Scheduled</SelectItem>
-                  <SelectItem value="completed">Completed (attended)</SelectItem>
-                  <SelectItem value="cancelled">Cancelled / no-show</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
-
-          <div className={cn("grid gap-3", apptType === "removal" ? "grid-cols-2" : "grid-cols-1")}>
-            <div className="grid gap-2">
-              <Label htmlFor="appt-start">Starts</Label>
-              <Input
-                id="appt-start"
-                type="datetime-local"
-                step={900}
-                value={start}
-                onChange={(e) => onStartChange(e.target.value)}
-              />
-            </div>
-            {apptType === "removal" ? (
+        {/* Two columns on desktop so the form stays short enough to reach the buttons. */}
+        <div className="grid gap-x-6 gap-y-4 py-1 md:grid-cols-2">
+          {/* Left — the appointment details */}
+          <div className="grid content-start gap-4">
+            <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
-                <Label htmlFor="appt-end">Ends</Label>
-                <Input
-                  id="appt-end"
-                  type="datetime-local"
-                  step={900}
-                  value={end}
-                  onChange={(e) => setEnd(e.target.value)}
-                />
+                <Label htmlFor="appt-type">Type</Label>
+                <Select value={apptType} onValueChange={(v) => onTypeChange(v as ApptType)}>
+                  <SelectTrigger id="appt-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="survey">Survey</SelectItem>
+                    <SelectItem value="removal">Removal</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="appt-estimator">Estimator</Label>
+                <Select value={estimatorId} onValueChange={setEstimatorId}>
+                  <SelectTrigger id="appt-estimator">
+                    <SelectValue placeholder="Unassigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_EST}>Unassigned</SelectItem>
+                    {estimators.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid gap-2">
+              <Label htmlFor="appt-lead">
+                Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
+              </Label>
+              <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
+            </div>
+
+            {isEdit ? (
+              <div className="grid gap-2">
+                <Label htmlFor="appt-status">Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger id="appt-status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="completed">Completed (attended)</SelectItem>
+                    <SelectItem value="cancelled">Cancelled / no-show</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             ) : null}
-          </div>
-          {apptType === "survey" ? (
-            <p className="-mt-2 text-xs text-mist-400">
-              Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}.
-            </p>
-          ) : null}
 
-          <div className="grid gap-2">
-            <Label htmlFor="appt-title">Title</Label>
-            <Input
-              id="appt-title"
-              value={title}
-              onChange={(e) => {
-                setTitle(e.target.value);
-                setTitleTouched(true);
-              }}
-              placeholder="Survey — Jane Smith"
-            />
+            <div className={cn("grid gap-3", apptType === "removal" ? "grid-cols-2" : "grid-cols-1")}>
+              <div className="grid gap-2">
+                <Label htmlFor="appt-start">Starts</Label>
+                <Input id="appt-start" type="datetime-local" step={900} value={start} onChange={(e) => onStartChange(e.target.value)} />
+              </div>
+              {apptType === "removal" ? (
+                <div className="grid gap-2">
+                  <Label htmlFor="appt-end">Ends</Label>
+                  <Input id="appt-end" type="datetime-local" step={900} value={end} onChange={(e) => setEnd(e.target.value)} />
+                </div>
+              ) : null}
+            </div>
+            {apptType === "survey" ? (
+              <p className="-mt-2 text-xs text-mist-400">
+                Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}.
+              </p>
+            ) : null}
+
+            <div className="grid gap-2">
+              <Label htmlFor="appt-title">Title</Label>
+              <Input
+                id="appt-title"
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  setTitleTouched(true);
+                }}
+                placeholder="Survey — Jane Smith"
+              />
+            </div>
           </div>
 
-          <div className="grid gap-2">
-            <Label>Location</Label>
-            <AddressFields value={address} onChange={setAddress} idPrefix="appt-loc" />
-          </div>
+          {/* Right — location + notes */}
+          <div className="grid content-start gap-4">
+            <div className="grid gap-2">
+              <Label>Location</Label>
+              <AddressFields value={address} onChange={setAddress} idPrefix="appt-loc" />
+            </div>
 
-          <div className="grid gap-2">
-            <Label htmlFor="appt-notes">Notes</Label>
-            <textarea
-              id="appt-notes"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className="border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
-              placeholder="Anything the crew needs to know"
-            />
+            <div className="grid gap-2">
+              <Label htmlFor="appt-notes">Notes</Label>
+              <textarea
+                id="appt-notes"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                className="border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
+                placeholder="Anything the crew needs to know"
+              />
+            </div>
+            <p className="text-xs text-mist-400">Who does this visit drives their pay + win stats.</p>
           </div>
         </div>
 
