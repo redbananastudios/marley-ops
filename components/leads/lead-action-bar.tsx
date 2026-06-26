@@ -5,7 +5,7 @@
  * the rest follow the funnel stage so you only ever see the sensible next move:
  *   - enquiry / survey booked → Book survey (primary) + Quote without survey (quiet)
  *   - quoted / provisional    → Mark won / Mark lost (+ quiet New quote)
- *   - confirmed               → Mark completed
+ *   - confirmed               → Book removal (primary) + Mark completed
  *   - completed / declined    → quiet Reopen (declined only)
  * Mark-contacted stamps first_contacted_at (the dashboard response metric) while the
  * lead is active + uncontacted. Booking a survey is the real next step on a fresh
@@ -163,10 +163,16 @@ export function LeadActionBar({
         ) : null}
 
         {confirmed ? (
-          <button type="button" onClick={() => setStatus("completed", "Marked completed.")} disabled={pending} className={primaryBtn}>
-            <CheckCircle2 className="size-4" strokeWidth={2} />
-            Mark completed
-          </button>
+          <>
+            <Link href={`/schedule/removals?leadId=${leadId}`} className={primaryBtn}>
+              <CalendarPlus className="size-4" strokeWidth={2} />
+              Book removal
+            </Link>
+            <button type="button" onClick={() => setStatus("completed", "Marked completed.")} disabled={pending} className={btn}>
+              <CheckCircle2 className="size-4 text-success" strokeWidth={2} />
+              Mark completed
+            </button>
+          </>
         ) : null}
 
         {status === "declined" ? (

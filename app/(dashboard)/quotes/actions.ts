@@ -156,9 +156,36 @@ export async function setQuoteStatus(id: string, status: string) {
   // Accepting captures revenue + advances the lead — route through acceptQuote.
   if (status === "accepted") return acceptQuote(id);
 
-  const { sb } = await ctx();
+  const { sb, userId } = await ctx();
+  const { data: q } = await sb.from("quotes").select("lead_id, client_id").eq("id", id).single();
   const { error } = await sb.from("quotes").update({ status: status as never }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  // Sending a quote advances the linked lead to Quoted (never regressing a later stage),
+  // so the Board reflects reality without a manual status move.
+  if (status === "sent" && q?.lead_id) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("status, first_contacted_at")
+      .eq("id", q.lead_id)
+      .single();
+    if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("quoted")) {
+      const patch: Record<string, unknown> = { status: "quoted" };
+      if (!lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
+      await sb.from("leads").update(patch as never).eq("id", q.lead_id);
+      await sb.from("activities").insert({
+        lead_id: q.lead_id,
+        client_id: q.client_id,
+        actor_id: userId,
+        type: "status_change",
+        summary: "Quote sent — moved to Quoted",
+        meta: { quote_id: id, from: lead.status, to: "quoted" },
+      });
+      revalidatePath(`/leads/${q.lead_id}`);
+      revalidatePath("/leads");
+    }
+  }
+
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
   return { ok: true as const };

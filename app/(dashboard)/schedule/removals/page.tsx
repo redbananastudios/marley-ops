@@ -7,7 +7,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function RemovalsSchedulePage() {
+export default async function RemovalsSchedulePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ leadId?: string }>;
+}) {
+  const { leadId } = await searchParams;
   const sb = await createClient();
   const {
     data: { user },
@@ -37,6 +42,17 @@ export default async function RemovalsSchedulePage() {
   }
   const leadOptions = (leads ?? []).map((l) => ({ ...l, surveyEstimatorId: surveyEst.get(l.id) ?? null }));
 
+  // Booked from a confirmed lead ("Book removal") — prefill the dialog with its address.
+  let presetLocation: string | null = null;
+  if (leadId) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("from_address, from_postcode")
+      .eq("id", leadId)
+      .single();
+    presetLocation = lead?.from_address || lead?.from_postcode || null;
+  }
+
   return (
     <div>
       <PageHeader eyebrow="Schedule" title="Removals" />
@@ -46,6 +62,8 @@ export default async function RemovalsSchedulePage() {
         leads={leadOptions}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}
+        presetLeadId={leadId ?? null}
+        presetLocation={presetLocation}
       />
     </div>
   );
