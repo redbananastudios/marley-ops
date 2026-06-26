@@ -33,6 +33,14 @@ export default async function SurveysSchedulePage({
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
+  // Per-lead survey estimator (so a removal can inherit it read-only).
+  const surveyEst = new Map<string, string>();
+  for (const a of appts ?? []) {
+    if (a.appt_type === "survey" && a.status !== "cancelled" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
+      surveyEst.set(a.lead_id, a.estimator_id);
+  }
+  const leadOptions = (leads ?? []).map((l) => ({ ...l, surveyEstimatorId: surveyEst.get(l.id) ?? null }));
+
   // Booked from a lead ("Book survey") — auto-open the dialog prefilled with that
   // lead + its pickup address as the location.
   let presetLocation: string | null = null;
@@ -51,7 +59,7 @@ export default async function SurveysSchedulePage({
       <SchedulerView
         view="survey"
         events={(appts ?? []) as SchedulerEvent[]}
-        leads={leads ?? []}
+        leads={leadOptions}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}
         presetLeadId={leadId ?? null}

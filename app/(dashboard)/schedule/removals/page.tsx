@@ -29,13 +29,21 @@ export default async function RemovalsSchedulePage() {
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
+  // Per-lead survey estimator (a removal inherits it read-only).
+  const surveyEst = new Map<string, string>();
+  for (const a of appts ?? []) {
+    if (a.appt_type === "survey" && a.status !== "cancelled" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
+      surveyEst.set(a.lead_id, a.estimator_id);
+  }
+  const leadOptions = (leads ?? []).map((l) => ({ ...l, surveyEstimatorId: surveyEst.get(l.id) ?? null }));
+
   return (
     <div>
       <PageHeader eyebrow="Schedule" title="Removals" />
       <SchedulerView
         view="removal"
         events={(appts ?? []) as SchedulerEvent[]}
-        leads={leads ?? []}
+        leads={leadOptions}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}
       />

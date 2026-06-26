@@ -59,6 +59,8 @@ export interface LeadOption {
   email?: string | null;
   from_postcode?: string | null;
   from_address?: string | null;
+  /** Estimator from this lead's booked survey — a removal inherits it (read-only). */
+  surveyEstimatorId?: string | null;
 }
 
 /** Surveys are a fixed 1-hour visit. */
@@ -193,7 +195,12 @@ export function AppointmentDialog({
       const s = presetStart ?? toLocalInput(roundUpTo15(new Date()));
       setApptType(defaultType);
       setLeadId(presetLeadId ?? NO_LEAD);
-      setEstimatorId(defaultEstimatorId ?? NO_EST);
+      // Surveys default the estimator to the booker; removals inherit it from the
+      // lead's survey (read-only), so they never seed the current user.
+      const presetLead = presetLeadId ? leads.find((l) => l.id === presetLeadId) : null;
+      setEstimatorId(
+        defaultType === "removal" ? presetLead?.surveyEstimatorId ?? NO_EST : defaultEstimatorId ?? NO_EST,
+      );
       setStatus("scheduled");
       setStart(s);
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
@@ -223,10 +230,21 @@ export function AppointmentDialog({
     }
   }
 
+  const estimatorName = (id: string) =>
+    id === NO_EST ? null : estimators.find((e) => e.id === id)?.full_name ?? null;
+
+  // A removal's estimator is the survey's — inherited, never chosen here.
+  function inheritSurveyEstimator(leadIdVal: string) {
+    const l = leadIdVal === NO_LEAD ? null : leads.find((x) => x.id === leadIdVal);
+    setEstimatorId(l?.surveyEstimatorId ?? NO_EST);
+  }
+
   // Switching type re-bases the end on the type's default duration.
   function onTypeChange(v: ApptType) {
     setApptType(v);
     if (start) setEnd(addHoursLocal(start, defaultDuration(v)));
+    // Moving to a removal: pull the estimator from the lead's survey (read-only there).
+    if (v === "removal" && !isEdit) inheritSurveyEstimator(leadId);
   }
 
   // Surveys are a fixed 1-hour visit (no end field — just a label). Removals use
@@ -242,6 +260,8 @@ export function AppointmentDialog({
       const addr = l?.from_address || l?.from_postcode || "";
       if (addr) setAddress(addressFromString(addr));
     }
+    // A removal inherits the chosen lead's survey estimator (read-only).
+    if (apptType === "removal" && !isEdit) inheritSurveyEstimator(id);
   }
 
   async function onSubmit() {
@@ -377,19 +397,25 @@ export function AppointmentDialog({
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="appt-estimator">Estimator</Label>
-                <Select value={estimatorId} onValueChange={setEstimatorId}>
-                  <SelectTrigger id="appt-estimator">
-                    <SelectValue placeholder="Unassigned" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_EST}>Unassigned</SelectItem>
-                    {estimators.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.full_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {apptType === "removal" ? (
+                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-mist-500">
+                    {estimatorName(estimatorId) ?? "From the survey"}
+                  </div>
+                ) : (
+                  <Select value={estimatorId} onValueChange={setEstimatorId}>
+                    <SelectTrigger id="appt-estimator">
+                      <SelectValue placeholder="Unassigned" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NO_EST}>Unassigned</SelectItem>
+                      {estimators.map((e) => (
+                        <SelectItem key={e.id} value={e.id}>
+                          {e.full_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
