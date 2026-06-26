@@ -18,6 +18,19 @@ export const CHANNEL_LABELS: Record<string, string> = {
   referral: "Referral",
 };
 
+/** Predefined property-size (move type) options for the lead forms. */
+export const PROPERTY_SIZES = [
+  "Studio",
+  "1 bedroom",
+  "2 bedroom",
+  "3 bedroom",
+  "4 bedroom",
+  "5 bedroom",
+  "6+ bedroom",
+  "Part move / few items",
+  "Office / commercial",
+] as const;
+
 export const newLeadSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
   phone: z.string().trim().optional().or(z.literal("")),

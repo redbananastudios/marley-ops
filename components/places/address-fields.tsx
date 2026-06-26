@@ -31,6 +31,16 @@ export const BLANK_ADDRESS: AddressValue = {
   country: "United Kingdom",
 };
 
+/** One-line string (line1, town, postcode) for storage in a single text column. */
+export function formatAddress(a: AddressValue): string {
+  return [a.line1, a.town, a.postcode].filter((s) => s && s.trim()).join(", ").trim();
+}
+
+/** Seed an AddressValue from a stored one-line string (back-compat for single-column addresses). */
+export function addressFromString(s: string | null | undefined): AddressValue {
+  return { ...BLANK_ADDRESS, line1: (s ?? "").trim() };
+}
+
 export function AddressFields({
   value,
   onChange,

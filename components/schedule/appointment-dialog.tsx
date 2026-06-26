@@ -28,8 +28,13 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PlacesInput } from "@/components/places/places-input";
-import { lookupPlaceDetails } from "@/lib/places/lookup";
+import {
+  AddressFields,
+  formatAddress,
+  addressFromString,
+  BLANK_ADDRESS,
+  type AddressValue,
+} from "@/components/places/address-fields";
 import { LeadCombobox } from "@/components/schedule/lead-combobox";
 import {
   Select,
@@ -164,7 +169,7 @@ export function AppointmentDialog({
   const [end, setEnd] = useState<string>("");
   const [title, setTitle] = useState<string>("");
   const [titleTouched, setTitleTouched] = useState(false);
-  const [location, setLocation] = useState<string>("");
+  const [address, setAddress] = useState<AddressValue>(BLANK_ADDRESS);
   const [notes, setNotes] = useState<string>("");
   const [allDay, setAllDay] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
@@ -181,7 +186,7 @@ export function AppointmentDialog({
       setEnd(toLocalInput(edit.endsAt));
       setTitle(edit.title ?? "");
       setTitleTouched(true);
-      setLocation(edit.location ?? "");
+      setAddress(addressFromString(edit.location));
       setNotes(edit.notes ?? "");
       setAllDay(false);
     } else {
@@ -194,7 +199,7 @@ export function AppointmentDialog({
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
       setTitle("");
       setTitleTouched(false);
-      setLocation(presetLocation ?? "");
+      setAddress(addressFromString(presetLocation ?? ""));
       setNotes("");
       setAllDay(!!presetAllDay);
     }
@@ -232,10 +237,10 @@ export function AppointmentDialog({
   // Picking a lead pre-fills the location with its address (unless already set).
   function selectLead(id: string) {
     setLeadId(id);
-    if (id !== NO_LEAD && !location.trim()) {
+    if (id !== NO_LEAD && !formatAddress(address).trim()) {
       const l = leads.find((x) => x.id === id);
       const addr = l?.from_address || l?.from_postcode || "";
-      if (addr) setLocation(addr);
+      if (addr) setAddress(addressFromString(addr));
     }
   }
 
@@ -259,7 +264,7 @@ export function AppointmentDialog({
         // Persist the editable metadata.
         const meta = await updateAppointment(edit.id, {
           title: title.trim() || undefined,
-          location,
+          location: formatAddress(address),
           notes,
           status,
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
@@ -285,7 +290,7 @@ export function AppointmentDialog({
           startsAt,
           endsAt,
           title: title.trim() || undefined,
-          location: location.trim() || undefined,
+          location: formatAddress(address) || undefined,
           notes: notes.trim() || undefined,
           allDay,
         });
@@ -456,18 +461,8 @@ export function AppointmentDialog({
           </div>
 
           <div className="grid gap-2">
-            <Label htmlFor="appt-location">Location</Label>
-            <PlacesInput
-              id="appt-location"
-              kind="address"
-              value={location}
-              onValueChange={setLocation}
-              onPick={async (p) => {
-                const a = await lookupPlaceDetails(p.id);
-                if (a?.formatted) setLocation(a.formatted);
-              }}
-              placeholder="Collection address / postcode"
-            />
+            <Label>Location</Label>
+            <AddressFields value={address} onChange={setAddress} idPrefix="appt-loc" />
           </div>
 
           <div className="grid gap-2">

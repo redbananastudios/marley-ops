@@ -8,7 +8,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
-import { newLeadSchema, MANUAL_ENTRY_CHANNELS, type NewLeadInput } from "@/lib/leads/schema";
+import { newLeadSchema, MANUAL_ENTRY_CHANNELS, PROPERTY_SIZES, type NewLeadInput } from "@/lib/leads/schema";
 import { checkDuplicateAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -237,7 +237,21 @@ export function AddLeadForm() {
 
       <div className="grid gap-5 sm:grid-cols-2">
         <Field htmlFor="property_size" label="Property size" error={errors.property_size?.message}>
-          <Input id="property_size" className={INPUT_H} placeholder="3-bed house" {...register("property_size")} />
+          <Select
+            value={watch("property_size") || ""}
+            onValueChange={(val) => setValue("property_size", val, { shouldValidate: true })}
+          >
+            <SelectTrigger id="property_size" className={INPUT_H}>
+              <SelectValue placeholder="Select size" />
+            </SelectTrigger>
+            <SelectContent>
+              {PROPERTY_SIZES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {s}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </Field>
         <Field htmlFor="preferred_date" label="Preferred date" error={errors.preferred_date?.message}>
           <Input id="preferred_date" type="date" className={INPUT_H} {...register("preferred_date")} />

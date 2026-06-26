@@ -23,10 +23,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PlacesInput } from "@/components/places/places-input";
-import { lookupPlaceDetails } from "@/lib/places/lookup";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
-import type { EditLeadInput } from "@/lib/leads/schema";
+import { PROPERTY_SIZES, type EditLeadInput } from "@/lib/leads/schema";
 
 export interface EditLeadValues {
   name: string;
@@ -45,34 +51,45 @@ export interface EditLeadValues {
 const textarea =
   "border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]";
 
+/** Build a structured address from the lead's stored line + postcode. */
+function seedAddress(line: string, postcode: string): AddressValue {
+  return { ...BLANK_ADDRESS, line1: line || "", postcode: postcode || "" };
+}
+/** The street part (line1 + town + county) stored back into the lead's *_address column. */
+function streetPart(a: AddressValue): string {
+  return [a.line1, a.town, a.county].filter((s) => s && s.trim()).join(", ").trim();
+}
+
 export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: EditLeadValues }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState<EditLeadValues>(initial);
+  const [fromAddr, setFromAddr] = useState<AddressValue>(seedAddress(initial.from_address, initial.from_postcode));
+  const [toAddr, setToAddr] = useState<AddressValue>(seedAddress(initial.to_address, initial.to_postcode));
 
   // Reseed from the latest server data each time it opens.
   useEffect(() => {
-    if (open) setV(initial);
+    if (open) {
+      setV(initial);
+      setFromAddr(seedAddress(initial.from_address, initial.from_postcode));
+      setToAddr(seedAddress(initial.to_address, initial.to_postcode));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const set = (k: keyof EditLeadValues) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setV((s) => ({ ...s, [k]: e.target.value }));
-  const setVal = (k: keyof EditLeadValues) => (val: string) => setV((s) => ({ ...s, [k]: val }));
 
-  // Picking an address fills its matching postcode so the two stay in step.
-  const onAddressPick =
-    (addrKey: "from_address" | "to_address", pcKey: "from_postcode" | "to_postcode") =>
-    async (p: { id: string }) => {
-      const a = await lookupPlaceDetails(p.id);
-      if (!a) return;
-      setV((s) => ({
-        ...s,
-        [pcKey]: a.postcode || s[pcKey],
-        [addrKey]: a.formatted || s[addrKey],
-      }));
-    };
+  // Structured address → the lead's line + postcode columns (kept in step).
+  const onFromChange = (a: AddressValue) => {
+    setFromAddr(a);
+    setV((s) => ({ ...s, from_address: streetPart(a), from_postcode: a.postcode }));
+  };
+  const onToChange = (a: AddressValue) => {
+    setToAddr(a);
+    setV((s) => ({ ...s, to_address: streetPart(a), to_postcode: a.postcode }));
+  };
 
   async function onSave() {
     setBusy(true);
@@ -128,16 +145,7 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               <MapPin className="size-4" strokeWidth={1.75} />
               Pickup
             </p>
-            <div className="grid gap-2">
-              <Label htmlFor="ed-faddr">Street address</Label>
-              <PlacesInput id="ed-faddr" kind="address" value={v.from_address} onValueChange={setVal("from_address")} onPick={onAddressPick("from_address", "from_postcode")} placeholder="Start typing the address…" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="ed-fpc">Postcode</Label>
-                <PlacesInput id="ed-fpc" kind="postcode" value={v.from_postcode} onValueChange={setVal("from_postcode")} placeholder="BA11…" />
-              </div>
-            </div>
+            <AddressFields value={fromAddr} onChange={onFromChange} idPrefix="ed-from" />
           </div>
 
           {/* Destination */}
@@ -146,22 +154,31 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               <MapPin className="size-4" strokeWidth={1.75} />
               Destination
             </p>
-            <div className="grid gap-2">
-              <Label htmlFor="ed-taddr">Street address</Label>
-              <PlacesInput id="ed-taddr" kind="address" value={v.to_address} onValueChange={setVal("to_address")} onPick={onAddressPick("to_address", "to_postcode")} placeholder="Start typing the address…" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="ed-tpc">Postcode</Label>
-                <PlacesInput id="ed-tpc" kind="postcode" value={v.to_postcode} onValueChange={setVal("to_postcode")} placeholder="BA21…" />
-              </div>
-            </div>
+            <AddressFields value={toAddr} onChange={onToChange} idPrefix="ed-to" />
           </div>
 
           <div className="grid grid-cols-3 gap-3">
             <div className="grid gap-2">
               <Label htmlFor="ed-size">Property size</Label>
-              <Input id="ed-size" value={v.property_size} onChange={set("property_size")} placeholder="3-bed" />
+              <Select
+                value={v.property_size || ""}
+                onValueChange={(val) => setV((s) => ({ ...s, property_size: val }))}
+              >
+                <SelectTrigger id="ed-size" className="h-11">
+                  <SelectValue placeholder="Select size" />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* Preserve a pre-existing free-text value that isn't in the list. */}
+                  {v.property_size && !PROPERTY_SIZES.includes(v.property_size as (typeof PROPERTY_SIZES)[number]) ? (
+                    <SelectItem value={v.property_size}>{v.property_size}</SelectItem>
+                  ) : null}
+                  {PROPERTY_SIZES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-2">
               <Label htmlFor="ed-date">Preferred date</Label>
