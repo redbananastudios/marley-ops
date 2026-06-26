@@ -58,7 +58,10 @@ export const DEFAULT_PRICING: PricingConfig = {
 export interface QuoteInputs {
   vehicle: VehicleKey;
   packing: PackingKey;
-  has75T: boolean;
+  /** Legacy single 7.5t flag. Still read for back-compat; sevenFiveT takes precedence. */
+  has75T?: boolean;
+  /** Number of 7.5t lorries (0..MAX_75T). Each is a flat add-on + counts as a vehicle. */
+  sevenFiveT?: number;
   /** Dead miles (base→collect + dest→base). null until the 3-leg route is calculated. */
   deadMiles: number | null;
   /** Job miles (collect→dest). null until calculated. */
@@ -80,6 +83,8 @@ export interface QuoteBreakdown {
   vehicle: VehicleKey;
   packing: PackingKey;
   has75T: boolean;
+  /** Number of 7.5t lorries on the job (0..MAX_75T). */
+  sevenFiveT: number;
   vanCount: number;
   base: number;
   packCost: number;
@@ -135,13 +140,15 @@ export function getFloorCharge(
 export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PRICING): QuoteBreakdown {
   const vehicle = i.vehicle || '1luton';
   const packing = i.packing || 'owner';
-  const has75T = i.has75T;
+  // 7.5t lorries: prefer the explicit count; fall back to the legacy boolean (0 or 1).
+  const sevenFiveT = i.sevenFiveT ?? (i.has75T ? 1 : 0);
+  const has75T = sevenFiveT > 0;
   const lutonVanCount = VAN_COUNT[vehicle];
-  const vanCount = lutonVanCount + (has75T ? 1 : 0);
+  const vanCount = lutonVanCount + sevenFiveT;
   const base = pricing.base[vehicle];
   const packCost = pricing.pack[vehicle][packing];
-  const addon75Cost = has75T ? pricing.addon75Base : 0;
-  const addon75PackCost = has75T ? pricing.addon75Pack[packing] : 0;
+  const addon75Cost = sevenFiveT * pricing.addon75Base;
+  const addon75PackCost = sevenFiveT * pricing.addon75Pack[packing];
 
   let mileageCost: number | null = null;
   let totalMiles: number | null = null;
@@ -190,6 +197,7 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     vehicle,
     packing,
     has75T,
+    sevenFiveT,
     vanCount,
     base,
     packCost,

@@ -44,15 +44,27 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 
   it('2. 2-van base', () => {
-    expect(computeQuote(base({ vehicle: '2luton' })).grandTotal).toBe(1500); // 1350 + 150
+    expect(computeQuote(base({ vehicle: '2luton' })).grandTotal).toBe(1350); // 1200 + 150
   });
 
   it('3. 3-van base', () => {
     expect(computeQuote(base({ vehicle: '3luton' })).grandTotal).toBe(2100); // 1950 + 150
   });
 
+  it('3b. 4-van + 5-van base', () => {
+    expect(computeQuote(base({ vehicle: '4luton' })).grandTotal).toBe(2650); // 2500 + 150
+    expect(computeQuote(base({ vehicle: '5luton' })).grandTotal).toBe(3150); // 3000 + 150
+  });
+
   it('4. 7.5t add-on, owner pack (owner add = 0)', () => {
-    expect(computeQuote(base({ has75T: true })).grandTotal).toBe(2450); // 700 + 1600 + 150
+    expect(computeQuote(base({ sevenFiveT: 1 })).grandTotal).toBe(2450); // 700 + 1600 + 150
+  });
+
+  it('4b. two 7.5t lorries (count = 2)', () => {
+    // 700 + (2 × 1600) + 150 ; vanCount = 1 + 2 = 3
+    const q = computeQuote(base({ sevenFiveT: 2 }));
+    expect(q.vanCount).toBe(3);
+    expect(q.grandTotal).toBe(4050);
   });
 
   it('5. pack tier — fragile, 1 van', () => {
@@ -60,12 +72,12 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 
   it('6. pack tier — full, 2 van', () => {
-    expect(computeQuote(base({ vehicle: '2luton', packing: 'full' })).grandTotal).toBe(2250); // 1350 + 750 + 150
+    expect(computeQuote(base({ vehicle: '2luton', packing: 'full' })).grandTotal).toBe(2100); // 1200 + 750 + 150
   });
 
   it('7. 7.5t + full pack, 3 van', () => {
-    // 1950 + 995 + 1600 + 1550 + 150
-    expect(computeQuote(base({ vehicle: '3luton', packing: 'full', has75T: true })).grandTotal).toBe(6245);
+    // 1950 + 995 + 1600 + 750 + 150
+    expect(computeQuote(base({ vehicle: '3luton', packing: 'full', sevenFiveT: 1 })).grandTotal).toBe(5445);
   });
 
   it('8. mileage (dead 10 + job 20 = 30 × £2)', () => {
@@ -93,10 +105,10 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 
   it('12. floor × vanCount (7.5t bumps vanCount to 3)', () => {
-    // 1350 + 1600 + (75 × 3) + 150
-    const q = computeQuote(base({ vehicle: '2luton', has75T: true, collectType: 'flat', collectFloor: '1st' }));
+    // 1200 + 1600 + (75 × 3) + 150
+    const q = computeQuote(base({ vehicle: '2luton', sevenFiveT: 1, collectType: 'flat', collectFloor: '1st' }));
     expect(q.vanCount).toBe(3);
-    expect(q.grandTotal).toBe(3325);
+    expect(q.grandTotal).toBe(3175);
   });
 
   it('13. access tiers (15m → £100, 25m → £300)', () => {
@@ -109,11 +121,11 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 
   it('15. congestion (per van, 2 van)', () => {
-    expect(computeQuote(base({ vehicle: '2luton', congestion: true })).grandTotal).toBe(1540); // 1350 + 40 + 150
+    expect(computeQuote(base({ vehicle: '2luton', congestion: true })).grandTotal).toBe(1390); // 1200 + 40 + 150
   });
 
   it('16. congestion with 7.5t (vanCount 2)', () => {
-    expect(computeQuote(base({ has75T: true, congestion: true })).grandTotal).toBe(2490); // 700 + 1600 + 40 + 150
+    expect(computeQuote(base({ sevenFiveT: 1, congestion: true })).grandTotal).toBe(2490); // 700 + 1600 + 40 + 150
   });
 
   it('17. discount before VAT', () => {
@@ -139,18 +151,18 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 
   it('22. kitchen sink', () => {
-    // base 1950 + pack(full,3)=995 + 75tBase 1600 + 75tPack(full)=1550
+    // base 1950 + pack(full,3)=995 + 75tBase 1600 + 75tPack(full)=750
     //  + mileage (12.3+47.7=60 × 2 = 120)
     //  + access collect 22→300, dest 11→100
     //  + floor: collect flat 3rd (250×vanCount4=1000), dest flat 1st (75×4=300)
     //  + congestion 4×20=80 + tolls 15 + parking 8 + admin 150
-    //  subtotal = 1950+995+1600+1550+120+300+100+1000+300+80+15+8+150 = 8168
-    //  total = 8168 − 250 = 7918 ; VAT = 7918 × 0.2 = 1583.6 ; grand = 9501.6
+    //  subtotal = 1950+995+1600+750+120+300+100+1000+300+80+15+8+150 = 7368
+    //  total = 7368 − 250 = 7118 ; VAT = 7118 × 0.2 = 1423.6 ; grand = 8541.6
     const q = computeQuote(
       base({
         vehicle: '3luton',
         packing: 'full',
-        has75T: true,
+        sevenFiveT: 1,
         deadMiles: 12.3,
         jobMiles: 47.7,
         collectAccessM: 22,
@@ -167,9 +179,9 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
       }),
     );
     expect(q.vanCount).toBe(4);
-    expect(q.subtotal).toBeCloseTo(8168, 5);
-    expect(q.total).toBeCloseTo(7918, 5);
-    expect(q.grandTotal).toBeCloseTo(9501.6, 5);
+    expect(q.subtotal).toBeCloseTo(7368, 5);
+    expect(q.total).toBeCloseTo(7118, 5);
+    expect(q.grandTotal).toBeCloseTo(8541.6, 5);
   });
 });
 

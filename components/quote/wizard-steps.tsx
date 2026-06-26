@@ -16,6 +16,8 @@ import {
   BASE_PRICES,
   PACK_PRICES,
   ADDON_75T_BASE,
+  VEHICLE_KEYS,
+  VAN_COUNT,
   type VehicleKey,
   type PackingKey,
   type FloorKey,
@@ -29,6 +31,7 @@ import {
   type QuoteItems,
   type RouteLeg,
 } from "@/lib/quote/form-types";
+import type { PricingConfig } from "@/lib/quote/pricing";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
 import {
   Select,
@@ -258,6 +261,8 @@ interface StepProps {
   set: Setter;
   /** Present when the quote is tied to a lead — enables survey notes + photo capture. */
   leadId?: string | null;
+  /** Active (settings-driven) prices; falls back to the constant defaults. */
+  pricing?: PricingConfig;
 }
 
 /** Shared survey-note textarea (Marley field styling). */
@@ -502,8 +507,11 @@ export function Step2Job({ values, set }: StepProps) {
 
 /* ---------- STEP 3 — VEHICLE & PACKING ---------- */
 
-export function Step3Vehicle({ values, set }: StepProps) {
-  const packPrices = PACK_PRICES[values.vehicle];
+export function Step3Vehicle({ values, set, pricing }: StepProps) {
+  const base = pricing?.base ?? BASE_PRICES;
+  const pack = pricing?.pack ?? PACK_PRICES;
+  const addon75Base = pricing?.addon75Base ?? ADDON_75T_BASE;
+  const packPrices = pack[values.vehicle];
   const packLabel = (k: PackingKey) => (packPrices[k] === 0 ? "Included" : `+${gbp(packPrices[k])}`);
   return (
     <div>
@@ -516,25 +524,28 @@ export function Step3Vehicle({ values, set }: StepProps) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="1luton">1 van — {gbp(BASE_PRICES["1luton"])}</SelectItem>
-            <SelectItem value="2luton">2 vans — {gbp(BASE_PRICES["2luton"])}</SelectItem>
-            <SelectItem value="3luton">3 vans — {gbp(BASE_PRICES["3luton"])}</SelectItem>
+            {VEHICLE_KEYS.map((k) => (
+              <SelectItem key={k} value={k}>
+                {VAN_COUNT[k]} {VAN_COUNT[k] === 1 ? "van" : "vans"} — {gbp(base[k])}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
 
       <div className="mb-5">
-        <FieldLabel>7.5 tonne lorry</FieldLabel>
-        <Select value={values.has75T ? "1" : "0"} onValueChange={(v) => set("has75T", v === "1")}>
+        <FieldLabel>7.5 tonne lorries</FieldLabel>
+        <Select value={String(values.sevenFiveT ?? 0)} onValueChange={(v) => set("sevenFiveT", Number(v))}>
           <SelectTrigger className="h-14 text-base">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="0">None</SelectItem>
-            <SelectItem value="1">1 lorry — +{gbp(ADDON_75T_BASE)}</SelectItem>
+            <SelectItem value="1">1 lorry — +{gbp(addon75Base)}</SelectItem>
+            <SelectItem value="2">2 lorries — +{gbp(addon75Base * 2)}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="mt-1.5 text-xs text-mist-400">Adds the 7.5t base (plus packing add-on if applicable).</p>
+        <p className="mt-1.5 text-xs text-mist-400">Each adds the 7.5t base (plus packing add-on if applicable).</p>
       </div>
 
       <div className="mb-5">
@@ -679,9 +690,8 @@ export function Step4Access({ values, set, leadId }: StepProps) {
 
 export function Step5Extras({ values, set }: StepProps) {
   const e = values.extras;
-  // vanCount for the congestion preview: vans + (75t ? 1 : 0).
-  const lutonVans = values.vehicle === "1luton" ? 1 : values.vehicle === "2luton" ? 2 : 3;
-  const vanCount = lutonVans + (values.has75T ? 1 : 0);
+  // vanCount for the congestion preview: Luton vans + 7.5t lorries.
+  const vanCount = VAN_COUNT[values.vehicle] + (values.sevenFiveT ?? 0);
   const congestionPreview = e.congestion ? vanCount * 20 : 0;
   return (
     <div>

@@ -7,31 +7,44 @@
  * against the live tool and re-verified by tests/lib/quote/pricing.test.ts.
  */
 
-export type VehicleKey = '1luton' | '2luton' | '3luton';
+export type VehicleKey = '1luton' | '2luton' | '3luton' | '4luton' | '5luton';
 export type PackingKey = 'full' | 'fragile' | 'owner';
 export type FloorKey = 'ground' | '1st' | '2nd' | '3rd';
 export type PropertyType = 'house' | 'flat';
 
+/** All Luton tiers in order — used for dropdowns + iterating the price grid. */
+export const VEHICLE_KEYS: VehicleKey[] = ['1luton', '2luton', '3luton', '4luton', '5luton'];
+
+/** Default prices. These are the SEED + fallback for the editable settings prices
+ *  (business_settings.pricing) and the baseline the golden tests pin to. */
 export const BASE_PRICES: Record<VehicleKey, number> = {
   '1luton': 700,
-  '2luton': 1350,
+  '2luton': 1200,
   '3luton': 1950,
+  '4luton': 2500,
+  '5luton': 3000,
 };
 
 export const VAN_COUNT: Record<VehicleKey, number> = {
   '1luton': 1,
   '2luton': 2,
   '3luton': 3,
+  '4luton': 4,
+  '5luton': 5,
 };
 
 export const PACK_PRICES: Record<VehicleKey, Record<PackingKey, number>> = {
   '1luton': { full: 450, fragile: 225, owner: 0 },
   '2luton': { full: 750, fragile: 350, owner: 0 },
   '3luton': { full: 995, fragile: 450, owner: 0 },
+  '4luton': { full: 1100, fragile: 600, owner: 0 },
+  '5luton': { full: 1300, fragile: 700, owner: 0 },
 };
 
 export const ADDON_75T_BASE = 1600;
-export const ADDON_75T_PACK: Record<PackingKey, number> = { full: 1550, fragile: 700, owner: 0 };
+export const ADDON_75T_PACK: Record<PackingKey, number> = { full: 750, fragile: 350, owner: 0 };
+/** Max 7.5t lorries selectable on one job. */
+export const MAX_75T = 2;
 
 export const FLOOR_PRICES: Record<FloorKey, number> = { ground: 0, '1st': 75, '2nd': 150, '3rd': 250 };
 

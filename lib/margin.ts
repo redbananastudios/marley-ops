@@ -11,7 +11,13 @@ import type { BusinessSettings } from "@/lib/settings";
  * 7.5t lorry is a flat per-job cost that already includes its man.
  */
 
-const CREW_BY_VEHICLE: Record<VehicleKey, number> = { "1luton": 2, "2luton": 3, "3luton": 4 };
+const CREW_BY_VEHICLE: Record<VehicleKey, number> = {
+  "1luton": 2,
+  "2luton": 3,
+  "3luton": 4,
+  "4luton": 5,
+  "5luton": 6,
+};
 
 export function crewSize(vehicle: VehicleKey, has75T: boolean): number {
   return (CREW_BY_VEHICLE[vehicle] ?? 2) + (has75T ? 1 : 0);

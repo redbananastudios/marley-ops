@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
-import { defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
+import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -45,7 +45,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const estimatorName =
     (user?.user_metadata?.full_name as string | undefined) ?? user?.email ?? null;
 
-  const initialValues = (quote.state_blob as QuoteFormValues | null) ?? defaultQuoteValues();
+  const initialValues = normalizeQuoteValues(quote.state_blob);
   const emailedCount = quote.email_send_count ?? 0;
 
   return (

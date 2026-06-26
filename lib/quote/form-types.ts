@@ -43,7 +43,8 @@ export interface QuoteFormValues {
   };
   route: { deadMiles: number | null; jobMiles: number | null; routeLegs: RouteLeg[] };
   vehicle: VehicleKey;
-  has75T: boolean;
+  /** Number of 7.5t lorries (0..MAX_75T). */
+  sevenFiveT: number;
   packing: PackingKey;
   collect: { type: PropertyType; lift: "no" | "yes"; floor: FloorKey; accessM: number };
   dest: { type: PropertyType; lift: "no" | "yes"; floor: FloorKey; accessM: number };
@@ -113,7 +114,7 @@ export function defaultQuoteValues(): QuoteFormValues {
     },
     route: { deadMiles: null, jobMiles: null, routeLegs: [] },
     vehicle: "1luton",
-    has75T: false,
+    sevenFiveT: 0,
     packing: "owner",
     collect: { type: "house", lift: "no", floor: "ground", accessM: 0 },
     dest: { type: "house", lift: "no", floor: "ground", accessM: 0 },
@@ -125,12 +126,47 @@ export function defaultQuoteValues(): QuoteFormValues {
   };
 }
 
+/**
+ * Normalise a loaded state_blob into a clean QuoteFormValues. Handles quotes saved
+ * before this change: the legacy single 7.5t boolean (has75T) → count, and the old
+ * single address string → structured address. Deep-merges each slice over the defaults
+ * so a partial/old blob never yields undefined nested objects.
+ */
+export function normalizeQuoteValues(raw: unknown): QuoteFormValues {
+  const d = defaultQuoteValues();
+  if (!raw || typeof raw !== "object") return d;
+  const r = raw as Partial<QuoteFormValues> & {
+    has75T?: boolean;
+    job?: Partial<QuoteFormValues["job"]>;
+  };
+  const job = { ...d.job, ...(r.job ?? {}) };
+  // Structured addresses: seed from the old single string when absent.
+  if (!r.job?.collectAddress) job.collectAddress = { ...BLANK_QUOTE_ADDRESS, line1: job.collectAddr || "" };
+  if (!r.job?.destAddress) job.destAddress = { ...BLANK_QUOTE_ADDRESS, line1: job.destAddr || "" };
+
+  return {
+    ...d,
+    ...r,
+    customer: { ...d.customer, ...(r.customer ?? {}) },
+    job,
+    route: { ...d.route, ...(r.route ?? {}) },
+    collect: { ...d.collect, ...(r.collect ?? {}) },
+    dest: { ...d.dest, ...(r.dest ?? {}) },
+    extras: { ...d.extras, ...(r.extras ?? {}) },
+    items: { ...d.items, ...(r.items ?? {}) },
+    survey: { ...d.survey, ...(r.survey ?? {}) },
+    review: { ...d.review, ...(r.review ?? {}) },
+    // Legacy 7.5t boolean → count (only when the count wasn't stored).
+    sevenFiveT: r.sevenFiveT ?? (r.has75T ? 1 : 0),
+  };
+}
+
 /** Map wizard state → the pure pricing inputs computeQuote() expects. */
 export function deriveInputs(v: QuoteFormValues): QuoteInputs {
   return {
     vehicle: v.vehicle,
     packing: v.packing,
-    has75T: v.has75T,
+    sevenFiveT: v.sevenFiveT ?? 0,
     deadMiles: v.route.deadMiles,
     jobMiles: v.route.jobMiles,
     collectAccessM: Number(v.collect.accessM) || 0,

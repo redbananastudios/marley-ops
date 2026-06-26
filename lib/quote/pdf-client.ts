@@ -44,6 +44,8 @@ const VEHICLE_LABELS: Record<VehicleKey, string> = {
   "1luton": "1 Luton Van",
   "2luton": "2 Luton Vans",
   "3luton": "3 Luton Vans",
+  "4luton": "4 Luton Vans",
+  "5luton": "5 Luton Vans",
 };
 const PACK_LABELS: Record<PackingKey, string> = {
   owner: "Owner Pack",
@@ -132,7 +134,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   const scope = values.job.scope || "rented";
 
   let vLabel = VEHICLE_LABELS[b.vehicle];
-  if (b.has75T) vLabel += " + 7.5 Tonne";
+  if (b.sevenFiveT > 0) vLabel += b.sevenFiveT === 1 ? " + 7.5 Tonne" : ` + ${b.sevenFiveT} × 7.5 Tonne`;
   const packLabel = PACK_LABELS[b.packing];
 
   // Operational requirements (already filtered to qty>0, includes new items).
@@ -307,7 +309,13 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     amount?: number;
   }
   const items: LineItem[] = [{ label: "Vehicle & Base", detail: vLabel, qty: 1, unit: b.base }];
-  if (b.has75T) items.push({ label: "+ 7.5 Tonne Vehicle", detail: "", qty: 1, unit: b.addon75Cost });
+  if (b.sevenFiveT > 0)
+    items.push({
+      label: b.sevenFiveT === 1 ? "+ 7.5 Tonne Vehicle" : `+ ${b.sevenFiveT} × 7.5 Tonne Vehicles`,
+      detail: "",
+      qty: 1,
+      unit: b.addon75Cost,
+    });
   if (b.packCost + b.addon75PackCost > 0)
     items.push({ label: "Packing Service", detail: packLabel, qty: 1, unit: b.packCost + b.addon75PackCost });
   if (b.mileageCost !== null)
