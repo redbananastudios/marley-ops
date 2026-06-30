@@ -62,6 +62,7 @@ const num = z.coerce.number().nonnegative("Must be 0 or more");
 const settingsSchema = z.object({
   estimatorFee: num,
   costFuelPerMile: num,
+  costFuel75PerMile: num,
   costLabourPerDay: num,
   costBox: num,
   costVanDay: num,
@@ -94,6 +95,7 @@ export async function updateSettingsAction(input: SettingsInput) {
     .update({
       estimator_fee: v.estimatorFee,
       cost_fuel_per_mile: v.costFuelPerMile,
+      cost_fuel_75_per_mile: v.costFuel75PerMile,
       cost_labour_per_day: v.costLabourPerDay,
       cost_box: v.costBox,
       cost_van_day: v.costVanDay,

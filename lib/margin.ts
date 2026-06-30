@@ -40,7 +40,10 @@ export interface JobCost {
   labour: number;
   vans: number;
   sevenT: number;
+  /** Luton fuel = miles × Luton fuel rate × number of Lutons. */
   fuel: number;
+  /** 7.5t fuel = miles × 7.5t fuel rate × number of lorries. */
+  fuel75: number;
   boxes: number;
   misc: number;
   estimatorFee: number;
@@ -48,15 +51,17 @@ export interface JobCost {
 }
 
 /** Per-job cost from the rate card. Labour = full crew × days × day-rate; Luton vans
- *  scale with days; each 7.5t is a flat per-lorry vehicle cost; fuel/boxes scale with
- *  the job; misc + the estimator (survey) fee are flat per job. */
+ *  scale with days; each 7.5t is a flat per-lorry vehicle cost; fuel scales with miles
+ *  AND the number of vehicles (each Luton + each lorry burns its own fuel); boxes scale
+ *  with the job; misc + the estimator (survey) fee are flat per job. */
 export function jobCost(i: JobCostInputs, s: BusinessSettings): JobCost {
   const lutonVans = VAN_COUNT[i.vehicle] ?? 1;
   const crew = crewSize(i.vehicle, i.sevenFiveT, i.sevenFiveTSecondMan);
   const labour = crew * i.days * s.costLabourPerDay;
   const vans = lutonVans * i.days * s.costVanDay;
   const sevenT = i.sevenFiveT * s.cost75t;
-  const fuel = i.totalMiles * s.costFuelPerMile;
+  const fuel = i.totalMiles * s.costFuelPerMile * lutonVans;
+  const fuel75 = i.totalMiles * s.costFuel75PerMile * i.sevenFiveT;
   const boxes = i.boxes * s.costBox;
   const misc = s.costMisc;
   const estimatorFee = s.estimatorFee;
@@ -65,10 +70,11 @@ export function jobCost(i: JobCostInputs, s: BusinessSettings): JobCost {
     vans,
     sevenT,
     fuel,
+    fuel75,
     boxes,
     misc,
     estimatorFee,
-    total: labour + vans + sevenT + fuel + boxes + misc + estimatorFee,
+    total: labour + vans + sevenT + fuel + fuel75 + boxes + misc + estimatorFee,
   };
 }
 

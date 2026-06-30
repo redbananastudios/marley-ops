@@ -5,6 +5,7 @@ import type { BusinessSettings } from "@/lib/settings";
 const RATES: BusinessSettings = {
   estimatorFee: 50,
   costFuelPerMile: 0.5,
+  costFuel75PerMile: 0.5,
   costLabourPerDay: 120,
   costBox: 2,
   costVanDay: 40,
@@ -42,11 +43,21 @@ describe("jobCost", () => {
     expect(c.labour).toBe(360); // 3 men × 1 day × 120
     expect(c.vans).toBe(80); // 2 Lutons × 1 × 40
     expect(c.sevenT).toBe(0);
-    expect(c.fuel).toBe(50); // 100 × 0.5
+    expect(c.fuel).toBe(100); // 100mi × 0.5 × 2 Lutons
+    expect(c.fuel75).toBe(0); // no 7.5t
     expect(c.boxes).toBe(80); // 40 × 2
     expect(c.misc).toBe(30);
     expect(c.estimatorFee).toBe(50);
-    expect(c.total).toBe(650); // 360 + 80 + 50 + 80 + 30 + 50
+    expect(c.total).toBe(700); // 360 + 80 + 100 + 80 + 30 + 50
+  });
+
+  it("fuel scales with both the Luton count and a separate 7.5t rate", () => {
+    const c = jobCost(
+      { vehicle: "3luton", sevenFiveT: 1, totalMiles: 100, boxes: 0, days: 1 },
+      { ...RATES, costFuelPerMile: 0.4, costFuel75PerMile: 0.6 },
+    );
+    expect(c.fuel).toBe(120); // 100mi × 0.4 × 3 Lutons
+    expect(c.fuel75).toBe(60); // 100mi × 0.6 × 1 lorry
   });
 
   it("a 7.5t adds its man to labour + the flat lorry cost", () => {

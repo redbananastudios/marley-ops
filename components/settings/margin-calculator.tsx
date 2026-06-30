@@ -129,6 +129,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const [vanDay, setVanDay] = useState(settings.costVanDay);
   const [cost75t, setCost75t] = useState(settings.cost75t);
   const [fuel, setFuel] = useState(settings.costFuelPerMile);
+  const [fuel75, setFuel75] = useState(settings.costFuel75PerMile);
   const [boxCost, setBoxCost] = useState(settings.costBox);
   const [misc, setMisc] = useState(settings.costMisc);
   const [estFee, setEstFee] = useState(settings.estimatorFee);
@@ -194,6 +195,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         {
           estimatorFee: estFee,
           costFuelPerMile: fuel,
+          costFuel75PerMile: fuel75,
           costLabourPerDay: labourDay,
           costBox: boxCost,
           costVanDay: vanDay,
@@ -203,7 +205,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           baseLocation: "",
         },
       ),
-    [job, labourDay, vanDay, cost75t, fuel, boxCost, misc, estFee],
+    [job, labourDay, vanDay, cost75t, fuel, fuel75, boxCost, misc, estFee],
   );
 
   const margin = charge - cost.total;
@@ -310,7 +312,8 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           <Line label={`Labour (${crew} men × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
           <Line label={`Luton vans (${lutonVans}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
           {job.has75T ? <Line label={`7.5t lorry${job.sevenTSecondMan ? " (2 men)" : ""}`} rate={cost75t} onRate={setCost75t} amount={cost.sevenT} /> : null}
-          <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
+          <Line label={`Luton fuel (${job.miles}mi × ${lutonVans})`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
+          {job.has75T ? <Line label={`7.5t fuel (${job.miles}mi)`} rate={fuel75} onRate={setFuel75} rateUnit="/mi" amount={cost.fuel75} /> : null}
           <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxes} />
           <Line label="Misc / consumables" rate={misc} onRate={setMisc} amount={cost.misc} />
           <Line label="Estimator fee (survey)" rate={estFee} onRate={setEstFee} amount={cost.estimatorFee} />

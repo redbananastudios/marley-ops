@@ -180,6 +180,7 @@ export type Database = {
           base_location: string
           cost_75t: number
           cost_box: number
+          cost_fuel_75_per_mile: number
           cost_fuel_per_mile: number
           cost_labour_per_day: number
           cost_misc: number
@@ -194,6 +195,7 @@ export type Database = {
           base_location?: string
           cost_75t?: number
           cost_box?: number
+          cost_fuel_75_per_mile?: number
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number
           cost_misc?: number
@@ -208,6 +210,7 @@ export type Database = {
           base_location?: string
           cost_75t?: number
           cost_box?: number
+          cost_fuel_75_per_mile?: number
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number
           cost_misc?: number

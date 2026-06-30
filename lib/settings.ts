@@ -7,7 +7,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  */
 export interface BusinessSettings {
   estimatorFee: number;
+  /** Luton van fuel cost per mile (billed per Luton). */
   costFuelPerMile: number;
+  /** 7.5t lorry fuel cost per mile (billed per lorry). */
+  costFuel75PerMile: number;
   costLabourPerDay: number;
   costBox: number;
   costVanDay: number;
@@ -24,7 +27,8 @@ export const DEFAULT_BASE_LOCATION = "Ash Cottage, Sherborne Causeway, Shaftesbu
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
   estimatorFee: 50,
-  costFuelPerMile: 0,
+  costFuelPerMile: 0.5,
+  costFuel75PerMile: 0.5,
   costLabourPerDay: 120,
   costBox: 0,
   costVanDay: 0,
@@ -40,13 +44,14 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
   return {
     estimatorFee: Number(data.estimator_fee ?? DEFAULT_SETTINGS.estimatorFee),
-    costFuelPerMile: Number(data.cost_fuel_per_mile ?? 0),
+    costFuelPerMile: Number(data.cost_fuel_per_mile ?? DEFAULT_SETTINGS.costFuelPerMile),
+    costFuel75PerMile: Number(data.cost_fuel_75_per_mile ?? DEFAULT_SETTINGS.costFuel75PerMile),
     costLabourPerDay: Number(data.cost_labour_per_day ?? DEFAULT_SETTINGS.costLabourPerDay),
     costBox: Number(data.cost_box ?? 0),
     costVanDay: Number(data.cost_van_day ?? 0),
