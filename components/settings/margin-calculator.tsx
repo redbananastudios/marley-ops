@@ -21,7 +21,7 @@ import {
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
 import { VAN_COUNT, type PackingKey, type VehicleKey } from "@/lib/quote/constants";
 import type { BusinessSettings } from "@/lib/settings";
-import { crewSize, extraCrew, jobCost } from "@/lib/margin";
+import { crewSize, jobCost } from "@/lib/margin";
 
 const gbp = (n: number): string =>
   (n < 0 ? "-£" : "£") + Math.abs(n).toLocaleString("en-GB", { maximumFractionDigits: 0 });
@@ -29,6 +29,7 @@ const gbp = (n: number): string =>
 interface Job {
   vehicle: VehicleKey;
   has75T: boolean;
+  sevenTSecondMan: boolean;
   packing: PackingKey;
   miles: number;
   boxes: number;
@@ -37,9 +38,9 @@ interface Job {
 }
 
 const PRESETS: { label: string; job: Job }[] = [
-  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, packing: "owner", miles: 20, boxes: 25, days: 1, congestion: false } },
-  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, packing: "fragile", miles: 110, boxes: 40, days: 1, congestion: false } },
-  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, packing: "full", miles: 420, boxes: 60, days: 2, congestion: false } },
+  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, sevenTSecondMan: false, packing: "owner", miles: 20, boxes: 25, days: 1, congestion: false } },
+  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, sevenTSecondMan: false, packing: "fragile", miles: 110, boxes: 40, days: 1, congestion: false } },
+  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, sevenTSecondMan: false, packing: "full", miles: 420, boxes: 60, days: 2, congestion: false } },
 ];
 
 const numCls =
@@ -175,15 +176,21 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const charge = breakdown.total; // ex-VAT (VAT is pass-through, not margin)
   const vanCount = breakdown.vanCount;
   const sevenFiveT = job.has75T ? 1 : 0; // sandbox models 0/1; real jobs use the saved count
-  const crew = crewSize(job.vehicle, sevenFiveT);
-  const helpers = extraCrew(job.vehicle, sevenFiveT);
+  const crew = crewSize(job.vehicle, sevenFiveT, job.sevenTSecondMan);
   const lutonVans = VAN_COUNT[job.vehicle];
 
   // Cost via the shared job-cost helper, fed the calculator's editable rates.
   const cost = useMemo(
     () =>
       jobCost(
-        { vehicle: job.vehicle, sevenFiveT: job.has75T ? 1 : 0, totalMiles: job.miles, boxes: job.boxes, days: job.days },
+        {
+          vehicle: job.vehicle,
+          sevenFiveT: job.has75T ? 1 : 0,
+          sevenFiveTSecondMan: job.sevenTSecondMan,
+          totalMiles: job.miles,
+          boxes: job.boxes,
+          days: job.days,
+        },
         {
           estimatorFee: estFee,
           costFuelPerMile: fuel,
@@ -258,7 +265,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         <div className="grid gap-1">
           <span className="eyebrow">Crew</span>
           <span className="flex h-9 items-center text-sm text-foreground">
-            {crew} men <span className="ml-1 text-xs text-mist-400">(from vans)</span>
+            {crew} men <span className="ml-1 text-xs text-mist-400">(vans + 7.5t)</span>
           </span>
         </div>
         <div className="flex items-end gap-4">
@@ -271,6 +278,17 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
             Congestion
           </label>
         </div>
+        {job.has75T ? (
+          <label className="flex items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              checked={job.sevenTSecondMan}
+              onChange={(e) => setJ("sevenTSecondMan", e.target.checked)}
+              className="size-4 accent-mm-red"
+            />
+            2nd man on 7.5t
+          </label>
+        ) : null}
       </div>
 
       {/* charge vs cost */}
@@ -289,9 +307,9 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
 
         <div>
           <p className="eyebrow mb-1">Your cost <span className="font-normal normal-case text-mist-400">(editable rates)</span></p>
-          <Line label={`Labour (${helpers} helper${helpers === 1 ? "" : "s"} × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
+          <Line label={`Labour (${crew} men × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
           <Line label={`Luton vans (${lutonVans}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
-          {job.has75T ? <Line label="7.5t lorry (incl 1 man)" rate={cost75t} onRate={setCost75t} amount={cost.sevenT} /> : null}
+          {job.has75T ? <Line label={`7.5t lorry${job.sevenTSecondMan ? " (2 men)" : ""}`} rate={cost75t} onRate={setCost75t} amount={cost.sevenT} /> : null}
           <Line label={`Fuel (${job.miles}mi)`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
           <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxes} />
           <Line label="Misc / consumables" rate={misc} onRate={setMisc} amount={cost.misc} />

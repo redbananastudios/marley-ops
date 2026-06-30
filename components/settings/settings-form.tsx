@@ -26,10 +26,10 @@ interface FieldDef {
 const FIELDS: FieldDef[] = [
   { key: "estimatorFee", label: "Estimator fee per visit", hint: "Paid per attended survey. Drives Performance + the dashboard.", unit: "£" },
   { key: "costFuelPerMile", label: "Fuel cost per mile", hint: "Internal cost. For margin once wired.", unit: "£/mile" },
-  { key: "costLabourPerDay", label: "Labour day rate (per man)", hint: "Per man per 8-hour day. Crew size auto-derives from vans.", unit: "£/day" },
+  { key: "costLabourPerDay", label: "Labour day rate (per man)", hint: "Per man per day. Bills the full crew: vans + 1, plus each 7.5t's crew.", unit: "£/day" },
   { key: "costBox", label: "Box unit cost", hint: "Per box supplied. Internal cost.", unit: "£" },
-  { key: "costVanDay", label: "Luton van day rate", hint: "Per Luton per day. Each van includes its driver.", unit: "£/day" },
-  { key: "cost75t", label: "7.5t lorry (per job)", hint: "Flat per job. Includes its 1 man.", unit: "£" },
+  { key: "costVanDay", label: "Luton van day rate", hint: "Per Luton vehicle per day (crew billed via labour).", unit: "£/day" },
+  { key: "cost75t", label: "7.5t lorry (per lorry)", hint: "Flat per 7.5t lorry — vehicle only. Its crew is billed via labour.", unit: "£" },
   { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
 ];
 
