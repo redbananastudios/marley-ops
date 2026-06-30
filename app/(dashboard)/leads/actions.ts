@@ -40,12 +40,27 @@ export async function createLeadAction(input: NewLeadInput) {
   const v = parsed.data;
   const { sb, userId } = await actor();
 
-  const { clientId, matched, previousLeadCount } = await attachOrCreateClient(sb, {
-    name: v.name,
-    phone: v.phone,
-    email: v.email,
-    postcode: v.from_postcode,
-  });
+  // An explicit customer pick attaches straight to that client; otherwise dedupe on
+  // contact details (attach to a match, or create a new client).
+  let clientId: string;
+  let matched: boolean;
+  let previousLeadCount: number;
+  if (v.client_id) {
+    clientId = v.client_id;
+    matched = true;
+    const { count } = await sb
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", v.client_id);
+    previousLeadCount = count ?? 0;
+  } else {
+    ({ clientId, matched, previousLeadCount } = await attachOrCreateClient(sb, {
+      name: v.name,
+      phone: v.phone,
+      email: v.email,
+      postcode: v.from_postcode,
+    }));
+  }
 
   const { data: lead, error } = await sb
     .from("leads")

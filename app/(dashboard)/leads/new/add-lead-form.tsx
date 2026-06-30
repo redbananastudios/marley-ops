@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PlacesInput } from "@/components/places/places-input";
+import { ClientCombobox, type ClientOption } from "@/components/clients/client-combobox";
 import {
   Select,
   SelectContent,
@@ -60,9 +61,10 @@ function Field({
 
 const INPUT_H = "h-11";
 
-export function AddLeadForm() {
+export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
   const router = useRouter();
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
+  const [clientId, setClientId] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
@@ -121,8 +123,19 @@ export function AddLeadForm() {
     };
   }, []);
 
+  // Picking an existing customer pre-fills their details + attaches the lead to them;
+  // "New customer" clears those fields for a fresh record.
+  function onClientChange(c: ClientOption | null) {
+    setClientId(c?.id ?? null);
+    setDuplicate(null);
+    setValue("name", c?.display_name ?? "", { shouldValidate: !!c });
+    setValue("phone", c?.phone ?? "", { shouldValidate: !!c });
+    setValue("email", c?.email ?? "", { shouldValidate: !!c });
+    setValue("from_postcode", c?.postcode ?? "");
+  }
+
   const onSubmit = async (values: NewLeadInput) => {
-    const res = await createLeadAction(values);
+    const res = await createLeadAction({ ...values, client_id: clientId || undefined });
     if (!res.ok) {
       toast.error(res.error);
       return;
@@ -136,6 +149,15 @@ export function AddLeadForm() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+      <Field htmlFor="customer" label="Customer">
+        <ClientCombobox clients={clients} value={clientId} onChange={onClientChange} />
+        <p className="mt-1.5 text-xs text-mist-400">
+          {clientId
+            ? "This lead will attach to the selected customer."
+            : "Search to attach an existing customer, or leave as New customer to create one."}
+        </p>
+      </Field>
+
       <Field htmlFor="name" label="Name" required error={errors.name?.message}>
         <Input id="name" className={INPUT_H} placeholder="Customer name" {...register("name")} />
       </Field>

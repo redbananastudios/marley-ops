@@ -33,6 +33,8 @@ export const PROPERTY_SIZES = [
 
 export const newLeadSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
+  /** When set, attach the lead to this existing client instead of dedupe-on-contact. */
+  client_id: z.string().uuid().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   entry_channel: z.enum(["phone_google", "phone_facebook", "phone_referral", "manual", "referral"]),
