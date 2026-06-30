@@ -226,8 +226,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           </p>
         )}
         {c.email ? (
-          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Email">
-            <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#2563eb]")} title="Email">
+            <Mail className="size-3.5 shrink-0 text-[#2563eb]" strokeWidth={1.75} />
             <span className="truncate">{c.email}</span>
           </a>
         ) : (
