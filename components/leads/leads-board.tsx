@@ -436,7 +436,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             href={`tel:${lead.phone}`}
             title="Call"
             aria-label="Call"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#2563eb] hover:bg-muted"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#db2777] hover:bg-muted"
           >
             <Phone className="size-4" strokeWidth={1.75} />
             Call

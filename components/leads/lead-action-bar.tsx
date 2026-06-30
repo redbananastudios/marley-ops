@@ -96,7 +96,7 @@ export function LeadActionBar({
       {/* contact — always available */}
       {phone ? (
         <a href={`tel:${phone}`} className={btn} aria-label="Call">
-          <Phone className="size-4 text-[#2563eb]" strokeWidth={1.75} />
+          <Phone className="size-4 text-[#db2777]" strokeWidth={1.75} />
           Call
         </a>
       ) : null}
