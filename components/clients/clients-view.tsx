@@ -181,9 +181,11 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
   const [route, setRoute] = useState<RouteInfo | null | "loading" | "error">(null);
   const dest = c.address || c.postcode || "";
 
-  // Fetch distance + drive time (base → client) the first time the map opens.
+  // Fetch distance + drive time (base → client) when the map opens. `route` is
+  // deliberately NOT a dependency — setting it to "loading" must not re-run + cancel
+  // the in-flight fetch.
   useEffect(() => {
-    if (!mapOpen || route !== null || !dest) return;
+    if (!mapOpen || !dest) return;
     let cancelled = false;
     setRoute("loading");
     fetch(`/api/maps/route-to?dest=${encodeURIComponent(dest)}`)
@@ -196,7 +198,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
     return () => {
       cancelled = true;
     };
-  }, [mapOpen, route, dest]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapOpen, dest]);
   // Classic keyless embed (no API key needed) — directions base → client.
   const embedSrc = `https://www.google.com/maps?saddr=${encodeURIComponent(
     baseLocation,
