@@ -7,9 +7,9 @@
  * and a repeat-customer marker.
  */
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Search, Repeat, Phone, Mail, MapPin, Building2, ExternalLink } from "lucide-react";
+import { Search, Repeat, Phone, Mail, MapPin, Building2, ExternalLink, Route, Clock } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import {
@@ -171,9 +171,32 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
   );
 }
 
+interface RouteInfo {
+  miles: number;
+  durationText: string | null;
+}
+
 function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string }) {
   const [mapOpen, setMapOpen] = useState(false);
+  const [route, setRoute] = useState<RouteInfo | null | "loading" | "error">(null);
   const dest = c.address || c.postcode || "";
+
+  // Fetch distance + drive time (base → client) the first time the map opens.
+  useEffect(() => {
+    if (!mapOpen || route !== null || !dest) return;
+    let cancelled = false;
+    setRoute("loading");
+    fetch(`/api/maps/route-to?dest=${encodeURIComponent(dest)}`)
+      .then((r) => r.json())
+      .then((d: { ok: boolean; miles?: number; durationText?: string | null }) => {
+        if (cancelled) return;
+        setRoute(d.ok && d.miles != null ? { miles: d.miles, durationText: d.durationText ?? null } : "error");
+      })
+      .catch(() => !cancelled && setRoute("error"));
+    return () => {
+      cancelled = true;
+    };
+  }, [mapOpen, route, dest]);
   // Classic keyless embed (no API key needed) — directions base → client.
   const embedSrc = `https://www.google.com/maps?saddr=${encodeURIComponent(
     baseLocation,
@@ -269,6 +292,27 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
               Route from base ({baseLocation}) to {dest}.
             </DialogDescription>
           </DialogHeader>
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {route === "loading" ? (
+              <span className="text-mist-400">Calculating distance…</span>
+            ) : route === "error" || route === null ? (
+              <span className="text-mist-400">Distance unavailable</span>
+            ) : (
+              <>
+                <span className="inline-flex items-center gap-1.5 rounded-pill bg-mm-red-tint px-2.5 py-1 font-semibold text-mm-red-deep">
+                  <Route className="size-4" strokeWidth={2} />
+                  {route.miles} miles
+                </span>
+                {route.durationText ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-pill bg-[#eff6ff] px-2.5 py-1 font-semibold text-[#2563eb]">
+                    <Clock className="size-4" strokeWidth={2} />
+                    {route.durationText}
+                  </span>
+                ) : null}
+                <span className="text-xs text-mist-400">one way, from base</span>
+              </>
+            )}
+          </div>
           <div className="overflow-hidden rounded-md border border-border">
             <iframe
               title={`Route to ${dest}`}
