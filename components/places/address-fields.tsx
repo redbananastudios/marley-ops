@@ -36,9 +36,40 @@ export function formatAddress(a: AddressValue): string {
   return [a.line1, a.town, a.postcode].filter((s) => s && s.trim()).join(", ").trim();
 }
 
-/** Seed an AddressValue from a stored one-line string (back-compat for single-column addresses). */
+/** Full UK postcode, tolerant of the internal space (e.g. "SP7 9PX", "ba80tg"). */
+const UK_POSTCODE_FULL = /\b([A-Za-z]{1,2}\d[A-Za-z\d]?)\s*(\d[A-Za-z]{2})\b/;
+/** Bare outward code only (e.g. "SP7", "BA8", "EC1A"). */
+const UK_POSTCODE_OUTWARD = /^[A-Za-z]{1,2}\d[A-Za-z\d]?$/;
+
+/**
+ * Seed an AddressValue from a stored one-line string (back-compat for single-column
+ * addresses). Pulls a UK postcode into the postcode field — so a lead carrying only a
+ * postcode doesn't land it in the street field — and splits a trailing town when the
+ * string is comma-separated (e.g. "Ash Cottage, Shaftesbury, SP7 9PX").
+ */
 export function addressFromString(s: string | null | undefined): AddressValue {
-  return { ...BLANK_ADDRESS, line1: (s ?? "").trim() };
+  const raw = (s ?? "").trim();
+  if (!raw) return { ...BLANK_ADDRESS };
+
+  // Bare outward code ("SP7") — straight into postcode.
+  if (UK_POSTCODE_OUTWARD.test(raw)) return { ...BLANK_ADDRESS, postcode: raw.toUpperCase() };
+
+  let postcode = "";
+  let rest = raw;
+  const m = raw.match(UK_POSTCODE_FULL);
+  if (m && m.index != null) {
+    postcode = `${m[1]} ${m[2]}`.toUpperCase();
+    rest = (raw.slice(0, m.index) + raw.slice(m.index + m[0].length))
+      .replace(/^[,\s]+|[,\s]+$/g, "")
+      .trim();
+  }
+
+  const parts = rest.split(",").map((p) => p.trim()).filter(Boolean);
+  // With a postcode anchor and ≥2 segments, the last segment is most likely the town.
+  if (postcode && parts.length >= 2) {
+    return { ...BLANK_ADDRESS, line1: parts.slice(0, -1).join(", "), town: parts[parts.length - 1], postcode };
+  }
+  return { ...BLANK_ADDRESS, line1: parts.join(", "), postcode };
 }
 
 export function AddressFields({
