@@ -16,7 +16,7 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Phone, MessageCircle, Check, Undo2, FileText, Loader2, Home, Clock } from "lucide-react";
+import { Search, Phone, MessageCircle, Check, Undo2, FileText, CalendarPlus, Loader2, Home, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -477,6 +477,17 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
           >
             {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Undo2 className="size-4" strokeWidth={1.75} />}
           </button>
+        ) : null}
+        {active ? (
+          <Link
+            href={`/schedule/surveys?leadId=${lead.id}`}
+            title="Book survey"
+            aria-label="Book survey"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#2563eb] hover:bg-muted"
+          >
+            <CalendarPlus className="size-4" strokeWidth={1.75} />
+            Survey
+          </Link>
         ) : null}
         <Link
           href={`/quotes/new?leadId=${lead.id}`}
