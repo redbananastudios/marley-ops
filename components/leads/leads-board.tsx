@@ -54,6 +54,14 @@ export interface LeadCard {
 }
 
 type PresetKey = "all" | "new" | "uncontacted" | "contacted" | "surveys" | "mine" | "week";
+type SortKey = "recent" | "oldest" | "uncontacted" | "contacted";
+
+const SORTS: { key: SortKey; label: string }[] = [
+  { key: "recent", label: "Most recent" },
+  { key: "oldest", label: "Oldest" },
+  { key: "uncontacted", label: "Uncontacted first" },
+  { key: "contacted", label: "Contacted first" },
+];
 
 const SOURCE_COLOR: Record<SourceKey, string> = Object.fromEntries(
   SOURCES.map((s) => [s.key, s.color]),
@@ -122,6 +130,7 @@ export function LeadsBoard({
     initialStatus && initialStatus !== "website_enquiry" ? initialStatus : "",
   );
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortKey>("recent");
 
   const base = useMemo(
     () => (tab === "web" ? leads.filter((l) => l.entry_channel === "web") : leads),
@@ -174,13 +183,19 @@ export function LeadsBoard({
           .some((v) => String(v).toLowerCase().includes(term));
       })
       .sort((a, b) => {
-        const r = rank(a) - rank(b);
-        if (r !== 0) return r;
-        // uncontacted bucket: oldest waiting first; others: newest first
-        return rank(a) === 0 ? tsOf(a) - tsOf(b) : tsOf(b) - tsOf(a);
+        // Contacted-axis sorts group by contact state first, then newest within.
+        if (sort === "uncontacted" || sort === "contacted") {
+          const want = sort === "uncontacted" ? 0 : 1; // 0 = uncontacted bucket
+          const ga = rank(a) === want ? 0 : 1;
+          const gb = rank(b) === want ? 0 : 1;
+          if (ga !== gb) return ga - gb;
+          return tsOf(b) - tsOf(a);
+        }
+        // Recency-axis sorts are pure date order.
+        return sort === "oldest" ? tsOf(a) - tsOf(b) : tsOf(b) - tsOf(a);
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, preset, status, search]);
+  }, [base, preset, status, search, sort]);
 
   const PRESETS: { key: PresetKey; label: string }[] = [
     { key: "all", label: "All" },
@@ -262,6 +277,19 @@ export function LeadsBoard({
             {LEAD_STATUSES.map((s) => (
               <SelectItem key={s} value={s}>
                 {LEAD_STATUS_META[s].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
+          <SelectTrigger className="h-9 w-[180px]" aria-label="Sort leads">
+            <span className="text-mist-400">Sort:&nbsp;</span>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORTS.map((s) => (
+              <SelectItem key={s.key} value={s.key}>
+                {s.label}
               </SelectItem>
             ))}
           </SelectContent>

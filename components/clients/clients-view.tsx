@@ -7,11 +7,20 @@
  * and a repeat-customer marker.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Search, Repeat, Phone, Mail, MapPin, Building2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
+
+const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
+
+/** First-letter bucket for the A–Z index ("#" for names that don't start A–Z). */
+function letterOf(name: string | null): string {
+  const c = (name ?? "").trim().charAt(0).toUpperCase();
+  return c >= "A" && c <= "Z" ? c : "#";
+}
 
 export interface ClientRow {
   id: string;
@@ -52,16 +61,38 @@ function OriginBadge({ origin }: { origin: SourceKey }) {
 export function ClientsView({ clients }: { clients: ClientRow[] }) {
   const [search, setSearch] = useState("");
   const repeat = useMemo(() => clients.filter((c) => c.leadCount > 1).length, [clients]);
+  const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    if (!term) return clients;
-    return clients.filter((c) =>
-      [c.display_name, c.email, c.phone, c.postcode, c.address]
-        .filter(Boolean)
-        .some((v) => String(v).toLowerCase().includes(term)),
+    const filtered = term
+      ? clients.filter((c) =>
+          [c.display_name, c.email, c.phone, c.postcode, c.address]
+            .filter(Boolean)
+            .some((v) => String(v).toLowerCase().includes(term)),
+        )
+      : clients;
+    // Alphabetical by name, case-insensitive, unnamed/non-alpha last.
+    return [...filtered].sort((a, b) =>
+      (a.display_name || "￿").localeCompare(b.display_name || "￿", "en-GB", { sensitivity: "base" }),
     );
   }, [clients, search]);
+
+  // Group the sorted list into A–Z (then "#") sections for the index rail.
+  const groups = useMemo(() => {
+    const map = new Map<string, ClientRow[]>();
+    for (const c of visible) {
+      const k = letterOf(c.display_name);
+      (map.get(k) ?? map.set(k, []).get(k)!).push(c);
+    }
+    return ALPHABET.filter((l) => map.has(l)).map((l) => ({ letter: l, rows: map.get(l)! }));
+  }, [visible]);
+
+  const present = useMemo(() => new Set(groups.map((g) => g.letter)), [groups]);
+
+  function jumpTo(letter: string) {
+    sectionRefs.current[letter]?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 
   return (
     <div>
@@ -80,56 +111,104 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
           No clients match.
         </div>
       ) : (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((c) => (
-            <Link
-              key={c.id}
-              href={`/clients/${c.id}`}
-              className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-sm"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
-                    {c.isCompany ? <Building2 className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
-                    {c.display_name || "Unnamed"}
-                  </p>
-                  <div className="mt-1.5">
-                    <OriginBadge origin={c.origin} />
-                  </div>
+        <div className="mt-4 flex gap-3">
+          {/* sectioned, alphabetised list */}
+          <div className="min-w-0 flex-1 space-y-6">
+            {groups.map((g) => (
+              <section
+                key={g.letter}
+                ref={(el) => {
+                  sectionRefs.current[g.letter] = el;
+                }}
+                className="scroll-mt-20"
+              >
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {g.rows.map((c) => (
+                    <ClientCard key={c.id} c={c} />
+                  ))}
                 </div>
-                {c.leadCount > 1 ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mm-red-deep">
-                    <Repeat className="size-3" strokeWidth={2} />
-                    {c.leadCount}×
-                  </span>
-                ) : null}
-              </div>
+              </section>
+            ))}
+          </div>
 
-              <div className="space-y-1.5 text-xs text-mist-500">
-                <p className="flex items-center gap-2">
-                  <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-                  <span className="truncate">{c.phone || "—"}</span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-                  <span className="truncate">{c.email || "—"}</span>
-                </p>
-                <p className="flex items-center gap-2">
-                  <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-                  <span className="truncate">{c.address || c.postcode || "—"}</span>
-                </p>
-              </div>
-
-              <div className="mt-auto flex items-center justify-between border-t border-border pt-3 text-xs text-mist-400">
-                <span>
-                  {c.leadCount} {c.leadCount === 1 ? "enquiry" : "enquiries"}
-                </span>
-                <span className="tabular">Last {dateShort(c.lastLeadAt)}</span>
-              </div>
-            </Link>
-          ))}
+          {/* A–Z jump rail */}
+          <nav
+            aria-label="Jump to letter"
+            className="sticky top-4 hidden h-fit shrink-0 flex-col items-center gap-0.5 self-start py-1 sm:flex"
+          >
+            {ALPHABET.map((l) => {
+              const enabled = present.has(l);
+              return (
+                <button
+                  key={l}
+                  type="button"
+                  disabled={!enabled}
+                  onClick={() => jumpTo(l)}
+                  className={cn(
+                    "focus-ring flex h-5 w-5 items-center justify-center rounded text-[11px] font-semibold leading-none transition-colors",
+                    enabled
+                      ? "text-mist-500 hover:bg-mm-red-tint hover:text-mm-red-deep"
+                      : "cursor-default text-mist-300/50",
+                  )}
+                  aria-label={enabled ? `Jump to ${l}` : `No clients under ${l}`}
+                >
+                  {l}
+                </button>
+              );
+            })}
+          </nav>
         </div>
       )}
     </div>
+  );
+}
+
+function ClientCard({ c }: { c: ClientRow }) {
+  return (
+    <Link
+      href={`/clients/${c.id}`}
+      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-sm"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
+            {c.isCompany ? <Building2 className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
+            {c.display_name || "Unnamed"}
+          </p>
+          <div className="mt-1.5">
+            <OriginBadge origin={c.origin} />
+          </div>
+        </div>
+        {c.leadCount > 1 ? (
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mm-red-deep">
+            <Repeat className="size-3" strokeWidth={2} />
+            {c.leadCount}×
+          </span>
+        ) : null}
+      </div>
+
+      <div className="space-y-1.5 text-xs text-mist-500">
+        <p className="flex items-center gap-2">
+          <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <span className="truncate">{c.phone || "—"}</span>
+        </p>
+        <p className="flex items-center gap-2">
+          <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <span className="truncate">{c.email || "—"}</span>
+        </p>
+        <p className="flex items-center gap-2">
+          <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <span className="truncate">{c.address || c.postcode || "—"}</span>
+        </p>
+      </div>
+
+      <div className="mt-auto flex items-center justify-between border-t border-border pt-3 text-xs text-mist-400">
+        <span>
+          {c.leadCount} {c.leadCount === 1 ? "enquiry" : "enquiries"}
+        </span>
+        <span className="tabular">Last {dateShort(c.lastLeadAt)}</span>
+      </div>
+    </Link>
   );
 }
