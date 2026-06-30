@@ -177,6 +177,7 @@ export type Database = {
       }
       business_settings: {
         Row: {
+          base_location: string
           cost_75t: number
           cost_box: number
           cost_fuel_per_mile: number
@@ -190,6 +191,7 @@ export type Database = {
           vat_default: boolean
         }
         Insert: {
+          base_location?: string
           cost_75t?: number
           cost_box?: number
           cost_fuel_per_mile?: number
@@ -203,6 +205,7 @@ export type Database = {
           vat_default?: boolean
         }
         Update: {
+          base_location?: string
           cost_75t?: number
           cost_box?: number
           cost_fuel_per_mile?: number

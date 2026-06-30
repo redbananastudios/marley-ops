@@ -17,7 +17,7 @@ import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/sett
 import type { BusinessSettings } from "@/lib/settings";
 
 interface FieldDef {
-  key: Exclude<keyof BusinessSettings, "vatDefault">;
+  key: Exclude<keyof BusinessSettings, "vatDefault" | "baseLocation">;
   label: string;
   hint: string;
   unit: "£" | "£/mile" | "£/hour" | "£/day";
@@ -75,7 +75,8 @@ export function SettingsForm({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [vatDefault, setVatDefault] = useState(initial.vatDefault);
-  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault">, string>>({
+  const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
+  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "baseLocation">, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costLabourPerDay: String(initial.costLabourPerDay),
@@ -96,6 +97,7 @@ export function SettingsForm({
       cost75t: Number(v.cost75t),
       costMisc: Number(v.costMisc),
       vatDefault,
+      baseLocation: baseLocation.trim(),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
     setBusy(false);
@@ -126,6 +128,23 @@ export function SettingsForm({
             <p className="text-xs text-mist-400">{f.hint}</p>
           </div>
         ))}
+      </div>
+
+      {/* Base / yard location */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-base-location">Base / yard location</Label>
+        <input
+          id="set-base-location"
+          type="text"
+          value={baseLocation}
+          disabled={!canEdit || busy}
+          onChange={(e) => setBaseLocation(e.target.value)}
+          placeholder="Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX"
+          className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1.5 text-xs text-mist-400">
+          The yard mileage starts from, and the origin for the &quot;route from base&quot; map on a client.
+        </p>
       </div>
 
       {/* VAT default for new quotes */}

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
+import { createClient } from "@/lib/supabase/server";
+import { getBusinessSettings } from "@/lib/settings";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-/** Marley yard — the live tool's base for the 3-leg dead/job mileage calc. */
-const BASE_ADDRESS = "Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX";
 const METRES_PER_MILE = 1609.344;
 
 async function legMiles(origin: string, destination: string, key: string): Promise<number | null> {
@@ -42,11 +42,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: "Both addresses are required" }, { status: 200 });
   }
 
+  const sb = await createClient();
+  const { baseLocation } = await getBusinessSettings(sb);
+
   try {
     const [leg1, leg2, leg3] = await Promise.all([
-      legMiles(BASE_ADDRESS, collectAddr, key),
+      legMiles(baseLocation, collectAddr, key),
       legMiles(collectAddr, destAddr, key),
-      legMiles(destAddr, BASE_ADDRESS, key),
+      legMiles(destAddr, baseLocation, key),
     ]);
     if (leg1 == null || leg2 == null || leg3 == null) {
       return NextResponse.json(

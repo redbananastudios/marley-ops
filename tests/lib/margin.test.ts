@@ -11,6 +11,7 @@ const RATES: BusinessSettings = {
   cost75t: 1800,
   costMisc: 30,
   vatDefault: true,
+  baseLocation: "",
 };
 
 describe("crewSize", () => {

@@ -9,9 +9,16 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { Search, Repeat, Phone, Mail, MapPin, Building2 } from "lucide-react";
+import { Search, Repeat, Phone, Mail, MapPin, Building2, ExternalLink } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -58,7 +65,7 @@ function OriginBadge({ origin }: { origin: SourceKey }) {
   );
 }
 
-export function ClientsView({ clients }: { clients: ClientRow[] }) {
+export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; baseLocation: string }) {
   const [search, setSearch] = useState("");
   const repeat = useMemo(() => clients.filter((c) => c.leadCount > 1).length, [clients]);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
@@ -125,7 +132,7 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {g.rows.map((c) => (
-                    <ClientCard key={c.id} c={c} />
+                    <ClientCard key={c.id} c={c} baseLocation={baseLocation} />
                   ))}
                 </div>
               </section>
@@ -164,13 +171,31 @@ export function ClientsView({ clients }: { clients: ClientRow[] }) {
   );
 }
 
-function ClientCard({ c }: { c: ClientRow }) {
+function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string }) {
+  const [mapOpen, setMapOpen] = useState(false);
+  const dest = c.address || c.postcode || "";
+  // Classic keyless embed (no API key needed) — directions base → client.
+  const embedSrc = `https://www.google.com/maps?saddr=${encodeURIComponent(
+    baseLocation,
+  )}&daddr=${encodeURIComponent(dest)}&output=embed`;
+  const externalHref = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+    baseLocation,
+  )}&destination=${encodeURIComponent(dest)}`;
+
+  // Interactive rows sit above the stretched detail-link (z-10) so a tap on the
+  // phone/email/postcode does its own thing, while a tap anywhere else opens the client.
+  const rowBase = "relative z-10 -mx-1 flex items-center gap-2 rounded px-1 py-0.5 text-left";
+
   return (
-    <Link
-      href={`/clients/${c.id}`}
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-sm"
-    >
-      <div className="flex items-start justify-between gap-3">
+    <div className="group relative flex flex-col gap-3 rounded-lg border border-border bg-card p-4 transition-shadow hover:shadow-sm">
+      {/* stretched link — the card background opens the client detail */}
+      <Link
+        href={`/clients/${c.id}`}
+        aria-label={`Open ${c.display_name || "client"}`}
+        className="focus-ring absolute inset-0 z-0 rounded-lg"
+      />
+
+      <div className="relative z-10 flex items-start justify-between gap-3 pointer-events-none">
         <div className="min-w-0">
           <p className="flex items-center gap-1.5 truncate text-sm font-semibold text-foreground">
             {c.isCompany ? <Building2 className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
@@ -188,27 +213,82 @@ function ClientCard({ c }: { c: ClientRow }) {
         ) : null}
       </div>
 
-      <div className="space-y-1.5 text-xs text-mist-500">
-        <p className="flex items-center gap-2">
-          <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-          <span className="truncate">{c.phone || "—"}</span>
-        </p>
-        <p className="flex items-center gap-2">
-          <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-          <span className="truncate">{c.email || "—"}</span>
-        </p>
-        <p className="flex items-center gap-2">
-          <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
-          <span className="truncate">{c.address || c.postcode || "—"}</span>
-        </p>
+      <div className="space-y-1 text-xs text-mist-500">
+        {c.phone ? (
+          <a href={`tel:${c.phone}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#db2777]")} title="Call">
+            <Phone className="size-3.5 shrink-0 text-[#db2777]" strokeWidth={1.75} />
+            <span className="truncate">{c.phone}</span>
+          </a>
+        ) : (
+          <p className="flex items-center gap-2 px-1 py-0.5">
+            <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+            <span className="truncate">—</span>
+          </p>
+        )}
+        {c.email ? (
+          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Email">
+            <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+            <span className="truncate">{c.email}</span>
+          </a>
+        ) : (
+          <p className="flex items-center gap-2 px-1 py-0.5">
+            <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+            <span className="truncate">—</span>
+          </p>
+        )}
+        {dest ? (
+          <button
+            type="button"
+            onClick={() => setMapOpen(true)}
+            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-mm-red")}
+            title="Show route from base"
+          >
+            <MapPin className="size-3.5 shrink-0 text-mm-red" strokeWidth={1.75} />
+            <span className="truncate">{c.address || c.postcode}</span>
+          </button>
+        ) : (
+          <p className="flex items-center gap-2 px-1 py-0.5">
+            <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
+            <span className="truncate">—</span>
+          </p>
+        )}
       </div>
 
-      <div className="mt-auto flex items-center justify-between border-t border-border pt-3 text-xs text-mist-400">
+      <div className="relative z-10 mt-auto flex items-center justify-between border-t border-border pt-3 text-xs text-mist-400 pointer-events-none">
         <span>
           {c.leadCount} {c.leadCount === 1 ? "enquiry" : "enquiries"}
         </span>
         <span className="tabular">Last {dateShort(c.lastLeadAt)}</span>
       </div>
-    </Link>
+
+      <Dialog open={mapOpen} onOpenChange={setMapOpen}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="font-display">{c.display_name || "Client"}</DialogTitle>
+            <DialogDescription>
+              Route from base ({baseLocation}) to {dest}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="overflow-hidden rounded-md border border-border">
+            <iframe
+              title={`Route to ${dest}`}
+              src={embedSrc}
+              className="h-[60vh] max-h-[460px] w-full"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          </div>
+          <a
+            href={externalHref}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="focus-ring inline-flex items-center gap-1.5 self-start text-sm font-medium text-mm-red hover:underline"
+          >
+            <ExternalLink className="size-4" strokeWidth={1.75} />
+            Open in Google Maps
+          </a>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

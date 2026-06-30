@@ -15,7 +15,12 @@ export interface BusinessSettings {
   costMisc: number;
   /** New quotes default to VAT enabled when true. */
   vatDefault: boolean;
+  /** Yard/base location — mileage origin + the clients map "route from base". */
+  baseLocation: string;
 }
+
+/** The Marley yard the live quote tool hardcoded — default base until changed in Settings. */
+export const DEFAULT_BASE_LOCATION = "Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX";
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
   estimatorFee: 50,
@@ -26,6 +31,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   cost75t: 1800,
   costMisc: 0,
   vatDefault: true,
+  baseLocation: DEFAULT_BASE_LOCATION,
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -34,7 +40,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default")
+    .select("estimator_fee, cost_fuel_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -47,5 +53,6 @@ export async function getBusinessSettings(
     cost75t: Number(data.cost_75t ?? DEFAULT_SETTINGS.cost75t),
     costMisc: Number(data.cost_misc ?? 0),
     vatDefault: data.vat_default ?? DEFAULT_SETTINGS.vatDefault,
+    baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
   };
 }

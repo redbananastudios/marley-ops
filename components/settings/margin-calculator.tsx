@@ -193,6 +193,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           cost75t,
           costMisc: misc,
           vatDefault: true,
+          baseLocation: "",
         },
       ),
     [job, labourDay, vanDay, cost75t, fuel, boxCost, misc, estFee],

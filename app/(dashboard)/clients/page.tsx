@@ -3,11 +3,13 @@ import { PageHeader } from "@/components/page-header";
 import { ClientsView, type ClientRow } from "@/components/clients/clients-view";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import { classifySource, type SourceKey } from "@/lib/dashboard/compute";
+import { getBusinessSettings } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function ClientsPage() {
   const supabase = await createClient();
+  const { baseLocation } = await getBusinessSettings(supabase);
 
   const [{ data: clients }, { data: leads }] = await Promise.all([
     supabase
@@ -71,7 +73,7 @@ export default async function ClientsPage() {
       <PageHeader eyebrow="Pipeline" title="Clients">
         <AddClientDialog />
       </PageHeader>
-      <ClientsView clients={rows} />
+      <ClientsView clients={rows} baseLocation={baseLocation} />
     </main>
   );
 }
