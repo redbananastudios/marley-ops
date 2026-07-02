@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 import {
   Phone,
+  PhoneMissed,
   MessageCircle,
   Mail,
   Check,
@@ -33,6 +34,7 @@ import {
   markLeadContactedAction,
   updateLeadStatusAction,
 } from "@/app/(dashboard)/leads/actions";
+import { noReplyForLeadAction } from "@/app/(dashboard)/follow-ups/actions";
 import { MarkWonButton, type WonQuote } from "@/components/leads/mark-won-button";
 
 const CLOSED = new Set(["completed", "declined"]);
@@ -121,6 +123,20 @@ export function LeadActionBar({
         >
           <Check className="size-4 text-success" strokeWidth={1.75} />
           Mark contacted
+        </button>
+      ) : null}
+      {!CLOSED.has(status) ? (
+        <button
+          type="button"
+          onClick={() =>
+            run(() => noReplyForLeadAction(leadId), "No-reply logged — follow-up queued for tomorrow.")
+          }
+          disabled={pending}
+          title="Tried to reach them, no answer — retry tomorrow"
+          className={btn}
+        >
+          <PhoneMissed className="size-4 text-mm-red" strokeWidth={1.75} />
+          No reply
         </button>
       ) : null}
 

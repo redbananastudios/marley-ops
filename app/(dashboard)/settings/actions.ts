@@ -70,6 +70,7 @@ const settingsSchema = z.object({
   costMisc: num,
   vatDefault: z.boolean(),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
+  defaultDeposit: num,
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
@@ -103,6 +104,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_misc: v.costMisc,
       vat_default: v.vatDefault,
       base_location: v.baseLocation,
+      default_deposit: v.defaultDeposit,
     })
     .eq("id", true);
   if (error) return { ok: false as const, error: error.message };

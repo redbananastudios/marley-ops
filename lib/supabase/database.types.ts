@@ -185,6 +185,7 @@ export type Database = {
           cost_labour_per_day: number
           cost_misc: number
           cost_van_day: number
+          default_deposit: number
           estimator_fee: number
           id: boolean
           pricing: Json | null
@@ -200,6 +201,7 @@ export type Database = {
           cost_labour_per_day?: number
           cost_misc?: number
           cost_van_day?: number
+          default_deposit?: number
           estimator_fee?: number
           id?: boolean
           pricing?: Json | null
@@ -215,6 +217,7 @@ export type Database = {
           cost_labour_per_day?: number
           cost_misc?: number
           cost_van_day?: number
+          default_deposit?: number
           estimator_fee?: number
           id?: boolean
           pricing?: Json | null
@@ -498,11 +501,113 @@ export type Database = {
           },
         ]
       }
+      follow_ups: {
+        Row: {
+          assigned_to: string | null
+          attempt_count: number
+          client_id: string | null
+          created_at: string
+          created_by: string | null
+          due_at: string
+          id: string
+          last_attempt_at: string | null
+          lead_id: string
+          metadata: Json
+          notes: string | null
+          outcome: Database["public"]["Enums"]["follow_up_outcome"] | null
+          quote_id: string | null
+          reason: Database["public"]["Enums"]["follow_up_reason"]
+          source: string
+          status: Database["public"]["Enums"]["follow_up_status"]
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          attempt_count?: number
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_at: string
+          id?: string
+          last_attempt_at?: string | null
+          lead_id: string
+          metadata?: Json
+          notes?: string | null
+          outcome?: Database["public"]["Enums"]["follow_up_outcome"] | null
+          quote_id?: string | null
+          reason: Database["public"]["Enums"]["follow_up_reason"]
+          source?: string
+          status?: Database["public"]["Enums"]["follow_up_status"]
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          attempt_count?: number
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          due_at?: string
+          id?: string
+          last_attempt_at?: string | null
+          lead_id?: string
+          metadata?: Json
+          notes?: string | null
+          outcome?: Database["public"]["Enums"]["follow_up_outcome"] | null
+          quote_id?: string | null
+          reason?: Database["public"]["Enums"]["follow_up_reason"]
+          source?: string
+          status?: Database["public"]["Enums"]["follow_up_status"]
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "follow_ups_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "follow_ups_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
+          balance_amount: number | null
+          balance_due_date: string | null
+          balance_paid_at: string | null
           campaign: string | null
           client_id: string
           created_at: string
+          deposit_amount: number | null
+          deposit_paid_at: string | null
+          deposit_requested_at: string | null
           email: string | null
           entry_channel: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given: number | null
@@ -546,9 +651,15 @@ export type Database = {
           wbraid: string | null
         }
         Insert: {
+          balance_amount?: number | null
+          balance_due_date?: string | null
+          balance_paid_at?: string | null
           campaign?: string | null
           client_id: string
           created_at?: string
+          deposit_amount?: number | null
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null
@@ -592,9 +703,15 @@ export type Database = {
           wbraid?: string | null
         }
         Update: {
+          balance_amount?: number | null
+          balance_due_date?: string | null
+          balance_paid_at?: string | null
           campaign?: string | null
           client_id?: string
           created_at?: string
+          deposit_amount?: number | null
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null
@@ -940,6 +1057,20 @@ export type Database = {
       appt_type: "survey" | "removal"
       comm_channel: "email" | "sms"
       comm_status: "queued" | "sent" | "failed" | "blocked_duplicate"
+      follow_up_outcome:
+        | "reached"
+        | "no_answer"
+        | "no_answer_exhausted"
+        | "paid"
+        | "declined"
+        | "cancelled"
+      follow_up_reason:
+        | "no_answer"
+        | "quote_followup"
+        | "deposit"
+        | "balance"
+        | "custom"
+      follow_up_status: "open" | "done" | "cancelled"
       lead_entry_channel:
         | "web"
         | "phone_google"
@@ -1104,6 +1235,22 @@ export const Constants = {
       appt_type: ["survey", "removal"],
       comm_channel: ["email", "sms"],
       comm_status: ["queued", "sent", "failed", "blocked_duplicate"],
+      follow_up_outcome: [
+        "reached",
+        "no_answer",
+        "no_answer_exhausted",
+        "paid",
+        "declined",
+        "cancelled",
+      ],
+      follow_up_reason: [
+        "no_answer",
+        "quote_followup",
+        "deposit",
+        "balance",
+        "custom",
+      ],
+      follow_up_status: ["open", "done", "cancelled"],
       lead_entry_channel: [
         "web",
         "phone_google",

@@ -33,12 +33,19 @@ export function CommsDialog({
   defaultEmail,
   defaultPhone,
   trigger,
+  initialSubject,
+  initialEmailBody,
+  initialSmsBody,
 }: {
   leadId?: string;
   clientId?: string;
   defaultEmail?: string;
   defaultPhone?: string;
   trigger?: React.ReactNode;
+  /** Optional template prefill — applied on open + channel switch; fully editable. */
+  initialSubject?: string;
+  initialEmailBody?: string;
+  initialSmsBody?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = React.useState(false);
@@ -61,16 +68,22 @@ export function CommsDialog({
         : "email";
     setChannel(initialChannel);
     setTo(initialChannel === "email" ? (defaultEmail ?? "") : (defaultPhone ?? ""));
-    setSubject("");
-    setBody("");
+    setSubject(initialSubject ?? "");
+    setBody((initialChannel === "email" ? initialEmailBody : initialSmsBody) ?? "");
     setDuplicate(null);
     setSending(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, defaultEmail, defaultPhone]);
 
   function switchChannel(next: Channel) {
     if (next === channel) return;
     setChannel(next);
     setTo(next === "email" ? (defaultEmail ?? "") : (defaultPhone ?? ""));
+    // Re-seed the template for the new channel only if the user hasn't diverged.
+    const prevSeed = (channel === "email" ? initialEmailBody : initialSmsBody) ?? "";
+    if (!body.trim() || body === prevSeed) {
+      setBody((next === "email" ? initialEmailBody : initialSmsBody) ?? "");
+    }
     setDuplicate(null);
   }
 

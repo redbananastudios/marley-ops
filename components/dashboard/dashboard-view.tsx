@@ -44,7 +44,13 @@ const PERIODS: PeriodKey[] = ["today", "week", "month"];
 export interface DashboardData {
   periods: Record<PeriodKey, PeriodStats>;
   medianRespMins: number | null;
-  needsAction: { newToAction: number; surveysToday: number; quotesAwaiting: number };
+  needsAction: {
+    newToAction: number;
+    surveysToday: number;
+    quotesAwaiting: number;
+    followUpsDueToday: number;
+    followUpsOverdue: number;
+  };
   recent: {
     id: string;
     name: string | null;
@@ -214,7 +220,9 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {/* needs action (now) */}
       <section>
         <p className="eyebrow mb-2">Needs action now</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+          <ActionCard label="Follow-ups overdue" count={data.needsAction.followUpsOverdue} href="/follow-ups" accent empty="Nothing overdue" />
+          <ActionCard label="Follow-ups due today" count={data.needsAction.followUpsDueToday} href="/follow-ups" empty="None due today" />
           <ActionCard label="New enquiries to action" count={data.needsAction.newToAction} href="/leads?status=website_enquiry" accent empty="All enquiries triaged" />
           <ActionCard label="Surveys today" count={data.needsAction.surveysToday} href="/schedule/surveys" empty="No surveys today" />
           <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />

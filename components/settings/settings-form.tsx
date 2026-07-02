@@ -32,6 +32,7 @@ const FIELDS: FieldDef[] = [
   { key: "costVanDay", label: "Luton van day rate", hint: "Per Luton vehicle per day (crew billed via labour).", unit: "£/day" },
   { key: "cost75t", label: "7.5t lorry (per lorry)", hint: "Flat per 7.5t lorry — vehicle only. Its crew is billed via labour.", unit: "£" },
   { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
+  { key: "defaultDeposit", label: "Standard deposit", hint: "Prefills 'Request deposit' on a job. Editable per job.", unit: "£" },
 ];
 
 function MoneyInput({
@@ -86,6 +87,7 @@ export function SettingsForm({
     costVanDay: String(initial.costVanDay),
     cost75t: String(initial.cost75t),
     costMisc: String(initial.costMisc),
+    defaultDeposit: String(initial.defaultDeposit),
   });
 
   async function onSave() {
@@ -99,6 +101,7 @@ export function SettingsForm({
       costVanDay: Number(v.costVanDay),
       cost75t: Number(v.cost75t),
       costMisc: Number(v.costMisc),
+      defaultDeposit: Number(v.defaultDeposit),
       vatDefault,
       baseLocation: baseLocation.trim(),
     } satisfies SettingsInput;

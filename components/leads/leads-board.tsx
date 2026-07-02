@@ -16,9 +16,10 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Phone, MessageCircle, Check, Undo2, FileText, CalendarPlus, Loader2, Home, Clock } from "lucide-react";
+import { Search, Phone, PhoneMissed, MessageCircle, Check, Undo2, FileText, CalendarPlus, Loader2, Home, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { noReplyForLeadAction } from "@/app/(dashboard)/follow-ups/actions";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -371,6 +372,17 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
     });
   }
 
+  function logNoReply() {
+    start(async () => {
+      const res = await noReplyForLeadAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not log the attempt.");
+      else {
+        toast.success("No-reply logged — follow-up queued for tomorrow.");
+        router.refresh();
+      }
+    });
+  }
+
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-shadow hover:shadow-sm">
       {/* card body — taps through to the lead */}
@@ -476,6 +488,18 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground disabled:opacity-50"
           >
             {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Undo2 className="size-4" strokeWidth={1.75} />}
+          </button>
+        ) : null}
+        {active ? (
+          <button
+            type="button"
+            onClick={logNoReply}
+            disabled={pending}
+            title="No reply — retry tomorrow"
+            aria-label="No reply"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted disabled:opacity-50"
+          >
+            <PhoneMissed className="size-4" strokeWidth={1.75} />
           </button>
         ) : null}
         {active ? (

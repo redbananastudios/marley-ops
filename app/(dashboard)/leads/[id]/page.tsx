@@ -11,6 +11,9 @@ import { MessageButton } from "@/components/comms/message-button";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
+import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
+import { PaymentsCard } from "@/components/leads/payments-card";
+import { getBusinessSettings } from "@/lib/settings";
 import { StatusChanger } from "./status-changer";
 
 const gbp = (n: number | null | undefined): string =>
@@ -120,10 +123,22 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id, quote_ref, grand_total, status, email_send_count, created_at")
+    .select("id, quote_ref, grand_total, agreed_price, status, email_send_count, created_at")
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
+
+  // Payments context: standard deposit from Settings + the accepted quote's value.
+  const { defaultDeposit } = await getBusinessSettings(supabase);
+  const acceptedQuote = quoteRows.find((q) => q.status === "accepted");
+  const agreedPrice = acceptedQuote
+    ? Number(acceptedQuote.agreed_price ?? acceptedQuote.grand_total ?? 0) || null
+    : null;
+  // Payments matter once the job is real (or once any payment state exists).
+  const showPayments =
+    ["confirmed", "completed"].includes(lead.status) ||
+    lead.deposit_amount != null ||
+    lead.balance_amount != null;
 
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
@@ -184,6 +199,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 notes: lead.notes ?? "",
               }}
             />
+            <AddFollowUpDialog leadId={lead.id} />
             <StatusChanger leadId={lead.id} status={lead.status} />
           </div>
         </div>
@@ -266,6 +282,24 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </div>
             </Card>
           </div>
+
+          {showPayments ? (
+            <div className="mt-5">
+              <PaymentsCard
+                leadId={lead.id}
+                defaultDeposit={defaultDeposit}
+                agreedPrice={agreedPrice}
+                state={{
+                  depositAmount: lead.deposit_amount != null ? Number(lead.deposit_amount) : null,
+                  depositRequestedAt: lead.deposit_requested_at,
+                  depositPaidAt: lead.deposit_paid_at,
+                  balanceAmount: lead.balance_amount != null ? Number(lead.balance_amount) : null,
+                  balanceDueDate: lead.balance_due_date,
+                  balancePaidAt: lead.balance_paid_at,
+                }}
+              />
+            </div>
+          ) : null}
 
           {hasAttribution ? (
             <div className="mt-5 rounded-md bg-muted p-5">

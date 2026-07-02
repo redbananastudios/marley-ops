@@ -20,6 +20,8 @@ export interface BusinessSettings {
   vatDefault: boolean;
   /** Yard/base location — mileage origin + the clients map "route from base". */
   baseLocation: string;
+  /** Standard deposit £ — prefills "Request deposit" on a job (editable per job). */
+  defaultDeposit: number;
 }
 
 /** The Marley yard the live quote tool hardcoded — default base until changed in Settings. */
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   costMisc: 0,
   vatDefault: true,
   baseLocation: DEFAULT_BASE_LOCATION,
+  defaultDeposit: 0,
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -44,7 +47,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location, default_deposit")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -59,5 +62,6 @@ export async function getBusinessSettings(
     costMisc: Number(data.cost_misc ?? 0),
     vatDefault: data.vat_default ?? DEFAULT_SETTINGS.vatDefault,
     baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
+    defaultDeposit: Number(data.default_deposit ?? 0),
   };
 }

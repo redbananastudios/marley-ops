@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
+  BellRing,
   CalendarCheck,
   Contact,
   FileText,
@@ -27,6 +28,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard, live: true },
       { href: "/leads", label: "Leads", icon: Users, live: true },
+      { href: "/follow-ups", label: "Follow-ups", icon: BellRing, live: true },
       { href: "/clients", label: "Clients", icon: Contact, live: true },
       { href: "/board", label: "Board", icon: KanbanSquare, live: true },
     ],

@@ -154,6 +154,18 @@ export default async function DashboardPage() {
         new Date(a.starts_at).getTime() < startToday + DAY,
     ).length,
     quotesAwaiting: quotes.filter((q) => q.status === "sent").length,
+    ...(await (async () => {
+      // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
+      const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");
+      let followUpsOverdue = 0;
+      let followUpsDueToday = 0;
+      for (const f of fus ?? []) {
+        const t = new Date(f.due_at).getTime();
+        if (t < startToday) followUpsOverdue++;
+        else if (t < startToday + DAY) followUpsDueToday++;
+      }
+      return { followUpsOverdue, followUpsDueToday };
+    })()),
   };
 
   /* median first-response (all-time pulse) */
