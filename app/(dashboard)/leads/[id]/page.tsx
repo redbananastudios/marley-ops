@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { StatusChanger } from "./status-changer";
 
 const gbp = (n: number | null | undefined): string =>
@@ -100,6 +101,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const surveyEstimatorName = surveyAppt?.estimator_id
     ? (profileName.get(surveyAppt.estimator_id) ?? "Estimator")
     : null;
+
+  // Latest survey record (photos hang off it; created lazily on first upload).
+  const { data: surveyRow } = await supabase
+    .from("surveys")
+    .select("id, status, created_at")
+    .eq("lead_id", id)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   const { data: comms } = await supabase
     .from("communications")
@@ -212,6 +222,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <TabsList variant="line">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="quotes">Quotes</TabsTrigger>
+          <TabsTrigger value="survey">Survey</TabsTrigger>
           <TabsTrigger value="activity">Activity</TabsTrigger>
           <TabsTrigger value="comms">Comms</TabsTrigger>
         </TabsList>
@@ -319,6 +330,40 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </ul>
             )}
           </Card>
+        </TabsContent>
+
+        {/* Survey */}
+        <TabsContent value="survey" className="mt-5">
+          <Card className="mb-5 p-0">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
+              <h2 className="font-display text-lg text-foreground">Survey visit</h2>
+              {!surveyAppt ? (
+                <Button asChild size="sm">
+                  <Link href={`/schedule/surveys?leadId=${lead.id}`}>
+                    <Plus strokeWidth={1.75} />
+                    Book survey
+                  </Link>
+                </Button>
+              ) : null}
+            </div>
+            <div className="grid gap-4 p-5 sm:grid-cols-3">
+              <Fact label="Booked for" value={surveyAppt ? fmtShort(surveyAppt.starts_at) : "Not booked"} />
+              <Fact label="Estimator" value={surveyEstimatorName} />
+              <Fact label="Survey record" value={surveyRow ? `${surveyRow.status} · ${fmtDate(surveyRow.created_at)}` : "Starts with the first photo"} />
+            </div>
+          </Card>
+
+          <div className="grid gap-5 lg:grid-cols-2">
+            <Card className="p-5">
+              <SurveyPhotos leadId={lead.id} category="access" label="Access" />
+            </Card>
+            <Card className="p-5">
+              <SurveyPhotos leadId={lead.id} category="large_items" label="Large items / extra packing" />
+            </Card>
+          </div>
+          <p className="mt-3 text-xs text-mist-400">
+            These are the same photos as the quote builder&apos;s steps 4 &amp; 6 — added here or there, they stay together on the lead.
+          </p>
         </TabsContent>
 
         {/* Activity */}
