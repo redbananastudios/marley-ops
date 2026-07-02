@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +19,7 @@ export const dynamic = "force-dynamic";
 const EMPTY = { ok: false as const, predictions: [] as never[] };
 
 export async function GET(req: Request) {
+  if (!(await requireApiUser())) return NextResponse.json(EMPTY, { status: 401 });
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return NextResponse.json(EMPTY, { status: 200 });
 

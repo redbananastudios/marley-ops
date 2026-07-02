@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
+import { requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,6 +26,9 @@ async function legMiles(origin: string, destination: string, key: string): Promi
 
 /** POST { collectAddr, destAddr } -> { deadMiles, jobMiles, legs } via Google Directions. */
 export async function POST(req: Request) {
+  if (!(await requireApiUser())) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) {
     return NextResponse.json({ ok: false, error: "GOOGLE_MAPS_API_KEY not configured" }, { status: 200 });

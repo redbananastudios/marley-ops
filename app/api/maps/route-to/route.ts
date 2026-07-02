@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
+import { requireApiUser } from "@/lib/api-auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,9 @@ const METRES_PER_MILE = 1609.344;
 
 /** GET ?dest=<address|postcode> → distance + drive time from the base (single leg). */
 export async function GET(req: Request) {
+  if (!(await requireApiUser())) {
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return NextResponse.json({ ok: false, error: "Maps not configured" }, { status: 200 });
 
