@@ -184,6 +184,7 @@ export type Database = {
           cost_fuel_per_mile: number
           cost_labour_per_day: number
           cost_misc: number
+          cost_transit_day: number
           cost_van_day: number
           default_deposit: number
           estimator_fee: number
@@ -200,6 +201,7 @@ export type Database = {
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number
           cost_misc?: number
+          cost_transit_day?: number
           cost_van_day?: number
           default_deposit?: number
           estimator_fee?: number
@@ -216,6 +218,7 @@ export type Database = {
           cost_fuel_per_mile?: number
           cost_labour_per_day?: number
           cost_misc?: number
+          cost_transit_day?: number
           cost_van_day?: number
           default_deposit?: number
           estimator_fee?: number

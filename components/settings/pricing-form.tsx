@@ -86,7 +86,7 @@ export function PricingForm({ initial, canEdit }: { initial: EditablePricing; ca
             {VEHICLE_KEYS.map((k) => (
               <tr key={k}>
                 <td className="pr-3 text-sm font-medium text-foreground">
-                  {VAN_COUNT[k]} Luton {VAN_COUNT[k] === 1 ? "van" : "vans"}
+                  {k === "transit" ? "Transit van (1 man)" : `${VAN_COUNT[k]} Luton ${VAN_COUNT[k] === 1 ? "van" : "vans"}`}
                 </td>
                 <td className="pr-3">
                   <PriceCell prefix="" value={String(p.base[k])} disabled={!canEdit || busy} onChange={(v) => setBase(k, v)} />
@@ -122,6 +122,20 @@ export function PricingForm({ initial, canEdit }: { initial: EditablePricing; ca
                   disabled={!canEdit || busy}
                   onChange={(v) => setP((s) => ({ ...s, addon75Pack: { ...s.addon75Pack, fragile: Number(v) || 0 } }))}
                 />
+              </td>
+            </tr>
+            <tr>
+              <td className="pr-3 text-sm font-medium text-foreground">Transit add-on (per van)</td>
+              <td className="pr-3">
+                <PriceCell
+                  prefix=""
+                  value={String(p.addonTransitBase)}
+                  disabled={!canEdit || busy}
+                  onChange={(v) => setP((s) => ({ ...s, addonTransitBase: Number(v) || 0 }))}
+                />
+              </td>
+              <td className="pr-3 text-xs text-mist-400" colSpan={2}>
+                Flat per Transit, its 1 man included
               </td>
             </tr>
           </tbody>

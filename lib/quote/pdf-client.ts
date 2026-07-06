@@ -41,6 +41,7 @@ const PDF_C = {
 };
 
 const VEHICLE_LABELS: Record<VehicleKey, string> = {
+  transit: "Transit Van",
   "1luton": "1 Luton Van",
   "2luton": "2 Luton Vans",
   "3luton": "3 Luton Vans",
@@ -135,6 +136,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
 
   let vLabel = VEHICLE_LABELS[b.vehicle];
   if (b.sevenFiveT > 0) vLabel += b.sevenFiveT === 1 ? " + 7.5 Tonne" : ` + ${b.sevenFiveT} × 7.5 Tonne`;
+  if ((b.transitVans ?? 0) > 0) vLabel += b.transitVans === 1 ? " + Transit Van" : ` + ${b.transitVans} × Transit Vans`;
   const packLabel = PACK_LABELS[b.packing];
 
   // Operational requirements (already filtered to qty>0, includes new items).
@@ -315,6 +317,14 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       detail: "",
       qty: 1,
       unit: b.addon75Cost,
+    });
+  if ((b.transitVans ?? 0) > 0)
+    items.push({
+      label: b.transitVans === 1 ? "+ Transit Van (1 man)" : `+ ${b.transitVans} × Transit Vans (1 man each)`,
+      detail: "",
+      qty: b.transitVans,
+      unit: b.transitVans > 0 ? (b.transitCost ?? 0) / b.transitVans : 0,
+      amount: b.transitCost ?? 0,
     });
   if (b.packCost + b.addon75PackCost > 0)
     items.push({ label: "Packing Service", detail: packLabel, qty: 1, unit: b.packCost + b.addon75PackCost });

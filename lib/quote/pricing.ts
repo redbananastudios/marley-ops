@@ -14,6 +14,7 @@
 import {
   ADDON_75T_BASE,
   ADDON_75T_PACK,
+  ADDON_TRANSIT_BASE,
   ADMIN_FEE,
   BASE_PRICES,
   CONGESTION_PER_VAN,
@@ -38,6 +39,8 @@ export interface PricingConfig {
   pack: Record<VehicleKey, Record<PackingKey, number>>;
   addon75Base: number;
   addon75Pack: Record<PackingKey, number>;
+  /** Add-on Transit van: flat per van (its 1 man included). */
+  addonTransitBase: number;
   floor: Record<FloorKey, number>;
   adminFee: number;
   mileageRate: number;
@@ -49,6 +52,7 @@ export const DEFAULT_PRICING: PricingConfig = {
   pack: PACK_PRICES,
   addon75Base: ADDON_75T_BASE,
   addon75Pack: ADDON_75T_PACK,
+  addonTransitBase: ADDON_TRANSIT_BASE,
   floor: FLOOR_PRICES,
   adminFee: ADMIN_FEE,
   mileageRate: MILEAGE_RATE,
@@ -62,6 +66,8 @@ export interface QuoteInputs {
   has75T?: boolean;
   /** Number of 7.5t lorries (0..MAX_75T). Each is a flat add-on + counts as a vehicle. */
   sevenFiveT?: number;
+  /** Number of add-on Transit vans (0..MAX_TRANSIT). Flat per van + counts as a vehicle. */
+  transitVans?: number;
   /** Dead miles (base→collect + dest→base). null until the 3-leg route is calculated. */
   deadMiles: number | null;
   /** Job miles (collect→dest). null until calculated. */
@@ -85,11 +91,15 @@ export interface QuoteBreakdown {
   has75T: boolean;
   /** Number of 7.5t lorries on the job (0..MAX_75T). */
   sevenFiveT: number;
+  /** Number of add-on Transit vans on the job (0..MAX_TRANSIT). */
+  transitVans: number;
   vanCount: number;
   base: number;
   packCost: number;
   addon75Cost: number;
   addon75PackCost: number;
+  /** Add-on Transit vans cost (count × addonTransitBase). */
+  transitCost: number;
   mileageCost: number | null;
   totalMiles: number | null;
   collectAccessM: number;
@@ -143,12 +153,14 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
   // 7.5t lorries: prefer the explicit count; fall back to the legacy boolean (0 or 1).
   const sevenFiveT = i.sevenFiveT ?? (i.has75T ? 1 : 0);
   const has75T = sevenFiveT > 0;
+  const transitVans = i.transitVans ?? 0;
   const lutonVanCount = VAN_COUNT[vehicle];
-  const vanCount = lutonVanCount + sevenFiveT;
+  const vanCount = lutonVanCount + sevenFiveT + transitVans;
   const base = pricing.base[vehicle];
   const packCost = pricing.pack[vehicle][packing];
   const addon75Cost = sevenFiveT * pricing.addon75Base;
   const addon75PackCost = sevenFiveT * pricing.addon75Pack[packing];
+  const transitCost = transitVans * pricing.addonTransitBase;
 
   let mileageCost: number | null = null;
   let totalMiles: number | null = null;
@@ -179,6 +191,7 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     packCost +
     addon75Cost +
     addon75PackCost +
+    transitCost +
     (mileageCost || 0) +
     collectAccessCost +
     destAccessCost +
@@ -198,11 +211,13 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     packing,
     has75T,
     sevenFiveT,
+    transitVans,
     vanCount,
     base,
     packCost,
     addon75Cost,
     addon75PackCost,
+    transitCost,
     mileageCost,
     totalMiles,
     collectAccessM,

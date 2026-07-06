@@ -14,6 +14,8 @@ export interface BusinessSettings {
   costLabourPerDay: number;
   costBox: number;
   costVanDay: number;
+  /** Transit van day rate (vehicle only — its man is billed via labour). */
+  costTransitDay: number;
   cost75t: number;
   costMisc: number;
   /** New quotes default to VAT enabled when true. */
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   costLabourPerDay: 120,
   costBox: 0,
   costVanDay: 0,
+  costTransitDay: 0,
   cost75t: 1800,
   costMisc: 0,
   vatDefault: true,
@@ -47,7 +50,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_75t, cost_misc, vat_default, base_location, default_deposit")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, base_location, default_deposit")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -58,6 +61,7 @@ export async function getBusinessSettings(
     costLabourPerDay: Number(data.cost_labour_per_day ?? DEFAULT_SETTINGS.costLabourPerDay),
     costBox: Number(data.cost_box ?? 0),
     costVanDay: Number(data.cost_van_day ?? 0),
+    costTransitDay: Number(data.cost_transit_day ?? 0),
     cost75t: Number(data.cost_75t ?? DEFAULT_SETTINGS.cost75t),
     costMisc: Number(data.cost_misc ?? 0),
     vatDefault: data.vat_default ?? DEFAULT_SETTINGS.vatDefault,

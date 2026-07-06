@@ -16,6 +16,7 @@ import {
   BASE_PRICES,
   PACK_PRICES,
   ADDON_75T_BASE,
+  ADDON_TRANSIT_BASE,
   VEHICLE_KEYS,
   VAN_COUNT,
   type VehicleKey,
@@ -511,14 +512,19 @@ export function Step3Vehicle({ values, set, pricing }: StepProps) {
   const base = pricing?.base ?? BASE_PRICES;
   const pack = pricing?.pack ?? PACK_PRICES;
   const addon75Base = pricing?.addon75Base ?? ADDON_75T_BASE;
+  const addonTransitBase = pricing?.addonTransitBase ?? ADDON_TRANSIT_BASE;
   const packPrices = pack[values.vehicle];
   const packLabel = (k: PackingKey) => (packPrices[k] === 0 ? "Included" : `+${gbp(packPrices[k])}`);
+  const vehicleLabel = (k: VehicleKey) =>
+    k === "transit"
+      ? `Transit van (1 man) — ${gbp(base[k])}`
+      : `${VAN_COUNT[k]} Luton ${VAN_COUNT[k] === 1 ? "van" : "vans"} — ${gbp(base[k])}`;
   return (
     <div>
       <StepHeader title="Vehicle &amp; Packing" sub="What is the move size?" />
 
       <div className="mb-5">
-        <FieldLabel>Luton vans</FieldLabel>
+        <FieldLabel>Vehicle</FieldLabel>
         <Select value={values.vehicle} onValueChange={(v) => set("vehicle", v as VehicleKey)}>
           <SelectTrigger className="h-14 text-base">
             <SelectValue />
@@ -526,7 +532,7 @@ export function Step3Vehicle({ values, set, pricing }: StepProps) {
           <SelectContent>
             {VEHICLE_KEYS.map((k) => (
               <SelectItem key={k} value={k}>
-                {VAN_COUNT[k]} {VAN_COUNT[k] === 1 ? "van" : "vans"} — {gbp(base[k])}
+                {vehicleLabel(k)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -546,6 +552,21 @@ export function Step3Vehicle({ values, set, pricing }: StepProps) {
           </SelectContent>
         </Select>
         <p className="mt-1.5 text-xs text-mist-400">Each adds the 7.5t base (plus packing add-on if applicable).</p>
+      </div>
+
+      <div className="mb-5">
+        <FieldLabel>Transit vans (add-on)</FieldLabel>
+        <Select value={String(values.transitVans ?? 0)} onValueChange={(v) => set("transitVans", Number(v))}>
+          <SelectTrigger className="h-14 text-base">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="0">None</SelectItem>
+            <SelectItem value="1">1 van — +{gbp(addonTransitBase)}</SelectItem>
+            <SelectItem value="2">2 vans — +{gbp(addonTransitBase * 2)}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="mt-1.5 text-xs text-mist-400">Each adds a Transit with its 1 man included.</p>
       </div>
 
       <div className="mb-5">
@@ -690,8 +711,8 @@ export function Step4Access({ values, set, leadId }: StepProps) {
 
 export function Step5Extras({ values, set }: StepProps) {
   const e = values.extras;
-  // vanCount for the congestion preview: Luton vans + 7.5t lorries.
-  const vanCount = VAN_COUNT[values.vehicle] + (values.sevenFiveT ?? 0);
+  // vanCount for the congestion preview: base vehicle + 7.5t lorries + add-on Transits.
+  const vanCount = VAN_COUNT[values.vehicle] + (values.sevenFiveT ?? 0) + (values.transitVans ?? 0);
   const congestionPreview = e.congestion ? vanCount * 20 : 0;
   return (
     <div>

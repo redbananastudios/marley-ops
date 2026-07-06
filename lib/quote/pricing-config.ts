@@ -12,6 +12,8 @@ export interface EditablePricing {
   pack: Record<VehicleKey, { full: number; fragile: number }>;
   addon75Base: number;
   addon75Pack: { full: number; fragile: number };
+  /** Add-on Transit van: flat per van, 1 man included. */
+  addonTransitBase: number;
 }
 
 /** Pull the editable defaults out of the code DEFAULT_PRICING (the seed shown in Settings). */
@@ -27,6 +29,7 @@ export function defaultEditablePricing(): EditablePricing {
     pack,
     addon75Base: DEFAULT_PRICING.addon75Base,
     addon75Pack: { full: DEFAULT_PRICING.addon75Pack.full, fragile: DEFAULT_PRICING.addon75Pack.fragile },
+    addonTransitBase: DEFAULT_PRICING.addonTransitBase,
   };
 }
 
@@ -52,6 +55,7 @@ export function toPricingConfig(e: EditablePricing): PricingConfig {
       fragile: Number(e.addon75Pack?.fragile ?? DEFAULT_PRICING.addon75Pack.fragile),
       owner: 0,
     },
+    addonTransitBase: Number(e.addonTransitBase ?? DEFAULT_PRICING.addonTransitBase),
   };
 }
 
@@ -80,5 +84,6 @@ export async function getEditablePricing(sb: SupabaseClient): Promise<EditablePr
     pack,
     addon75Base: stored.addon75Base ?? d.addon75Base,
     addon75Pack: { ...d.addon75Pack, ...(stored.addon75Pack ?? {}) },
+    addonTransitBase: stored.addonTransitBase ?? d.addonTransitBase,
   };
 }

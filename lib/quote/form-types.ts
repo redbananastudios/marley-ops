@@ -45,6 +45,8 @@ export interface QuoteFormValues {
   vehicle: VehicleKey;
   /** Number of 7.5t lorries (0..MAX_75T). */
   sevenFiveT: number;
+  /** Number of add-on Transit vans (0..MAX_TRANSIT). */
+  transitVans: number;
   packing: PackingKey;
   collect: { type: PropertyType; lift: "no" | "yes"; floor: FloorKey; accessM: number };
   dest: { type: PropertyType; lift: "no" | "yes"; floor: FloorKey; accessM: number };
@@ -115,6 +117,7 @@ export function defaultQuoteValues(): QuoteFormValues {
     route: { deadMiles: null, jobMiles: null, routeLegs: [] },
     vehicle: "1luton",
     sevenFiveT: 0,
+    transitVans: 0,
     packing: "owner",
     collect: { type: "house", lift: "no", floor: "ground", accessM: 0 },
     dest: { type: "house", lift: "no", floor: "ground", accessM: 0 },
@@ -158,6 +161,7 @@ export function normalizeQuoteValues(raw: unknown): QuoteFormValues {
     review: { ...d.review, ...(r.review ?? {}) },
     // Legacy 7.5t boolean → count (only when the count wasn't stored).
     sevenFiveT: r.sevenFiveT ?? (r.has75T ? 1 : 0),
+    transitVans: r.transitVans ?? 0,
   };
 }
 
@@ -167,6 +171,7 @@ export function deriveInputs(v: QuoteFormValues): QuoteInputs {
     vehicle: v.vehicle,
     packing: v.packing,
     sevenFiveT: v.sevenFiveT ?? 0,
+    transitVans: v.transitVans ?? 0,
     deadMiles: v.route.deadMiles,
     jobMiles: v.route.jobMiles,
     collectAccessM: Number(v.collect.accessM) || 0,

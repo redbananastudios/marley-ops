@@ -30,6 +30,7 @@ interface Job {
   vehicle: VehicleKey;
   has75T: boolean;
   sevenTSecondMan: boolean;
+  transitVans: number;
   packing: PackingKey;
   miles: number;
   boxes: number;
@@ -38,9 +39,9 @@ interface Job {
 }
 
 const PRESETS: { label: string; job: Job }[] = [
-  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, sevenTSecondMan: false, packing: "owner", miles: 20, boxes: 25, days: 1, congestion: false } },
-  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, sevenTSecondMan: false, packing: "fragile", miles: 110, boxes: 40, days: 1, congestion: false } },
-  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, sevenTSecondMan: false, packing: "full", miles: 420, boxes: 60, days: 2, congestion: false } },
+  { label: "2-bed local", job: { vehicle: "1luton", has75T: false, sevenTSecondMan: false, transitVans: 0, packing: "owner", miles: 20, boxes: 25, days: 1, congestion: false } },
+  { label: "3-bed · 50mi", job: { vehicle: "2luton", has75T: false, sevenTSecondMan: false, transitVans: 0, packing: "fragile", miles: 110, boxes: 40, days: 1, congestion: false } },
+  { label: "4-bed long distance", job: { vehicle: "3luton", has75T: false, sevenTSecondMan: false, transitVans: 0, packing: "full", miles: 420, boxes: 60, days: 2, congestion: false } },
 ];
 
 const numCls =
@@ -114,6 +115,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const [packPrice, setPackPrice] = useState(DEFAULT_PRICING.pack[job.vehicle][job.packing]);
   const [addon75Base, setAddon75Base] = useState(DEFAULT_PRICING.addon75Base);
   const [addon75Pack, setAddon75Pack] = useState(DEFAULT_PRICING.addon75Pack[job.packing]);
+  const [addonTransit, setAddonTransit] = useState(DEFAULT_PRICING.addonTransitBase);
   const [mileageRate, setMileageRate] = useState(DEFAULT_PRICING.mileageRate);
   const [adminFee, setAdminFee] = useState(DEFAULT_PRICING.adminFee);
   const [congestionPerVan, setCongestionPerVan] = useState(DEFAULT_PRICING.congestionPerVan);
@@ -127,6 +129,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   // Editable cost rates (seed from the saved rate card).
   const [labourDay, setLabourDay] = useState(settings.costLabourPerDay);
   const [vanDay, setVanDay] = useState(settings.costVanDay);
+  const [transitDay, setTransitDay] = useState(settings.costTransitDay);
   const [cost75t, setCost75t] = useState(settings.cost75t);
   const [fuel, setFuel] = useState(settings.costFuelPerMile);
   const [fuel75, setFuel75] = useState(settings.costFuel75PerMile);
@@ -147,6 +150,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
       },
       addon75Base,
       addon75Pack: { ...DEFAULT_PRICING.addon75Pack, [job.packing]: addon75Pack },
+      addonTransitBase: addonTransit,
       mileageRate,
       adminFee,
       congestionPerVan,
@@ -156,6 +160,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         vehicle: job.vehicle,
         packing: job.packing,
         has75T: job.has75T,
+        transitVans: job.transitVans,
         deadMiles: 0,
         jobMiles: job.miles,
         collectAccessM: 0,
@@ -172,13 +177,14 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
       },
       pricing,
     );
-  }, [job, base, packPrice, addon75Base, addon75Pack, mileageRate, adminFee, congestionPerVan]);
+  }, [job, base, packPrice, addon75Base, addon75Pack, addonTransit, mileageRate, adminFee, congestionPerVan]);
 
   const charge = breakdown.total; // ex-VAT (VAT is pass-through, not margin)
   const vanCount = breakdown.vanCount;
   const sevenFiveT = job.has75T ? 1 : 0; // sandbox models 0/1; real jobs use the saved count
-  const crew = crewSize(job.vehicle, sevenFiveT, job.sevenTSecondMan);
-  const lutonVans = VAN_COUNT[job.vehicle];
+  const crew = crewSize(job.vehicle, sevenFiveT, job.sevenTSecondMan, job.transitVans);
+  const lutonVans = job.vehicle === "transit" ? 0 : VAN_COUNT[job.vehicle];
+  const transitCount = (job.vehicle === "transit" ? 1 : 0) + job.transitVans;
 
   // Cost via the shared job-cost helper, fed the calculator's editable rates.
   const cost = useMemo(
@@ -188,6 +194,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           vehicle: job.vehicle,
           sevenFiveT: job.has75T ? 1 : 0,
           sevenFiveTSecondMan: job.sevenTSecondMan,
+          transitVans: job.transitVans,
           totalMiles: job.miles,
           boxes: job.boxes,
           days: job.days,
@@ -199,6 +206,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           costLabourPerDay: labourDay,
           costBox: boxCost,
           costVanDay: vanDay,
+          costTransitDay: transitDay,
           cost75t,
           costMisc: misc,
           vatDefault: true,
@@ -206,7 +214,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           defaultDeposit: 0,
         },
       ),
-    [job, labourDay, vanDay, cost75t, fuel, fuel75, boxCost, misc, estFee],
+    [job, labourDay, vanDay, transitDay, cost75t, fuel, fuel75, boxCost, misc, estFee],
   );
 
   const margin = charge - cost.total;
@@ -241,13 +249,16 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
       {/* the job */}
       <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-b px-5 py-4 sm:grid-cols-3 lg:grid-cols-4">
         <label className="grid gap-1">
-          <span className="eyebrow">Vans</span>
+          <span className="eyebrow">Vehicle</span>
           <Select value={job.vehicle} onValueChange={(v) => setJ("vehicle", v as VehicleKey)}>
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
+              <SelectItem value="transit">Transit (1 man)</SelectItem>
               <SelectItem value="1luton">1 Luton</SelectItem>
               <SelectItem value="2luton">2 Luton</SelectItem>
               <SelectItem value="3luton">3 Luton</SelectItem>
+              <SelectItem value="4luton">4 Luton</SelectItem>
+              <SelectItem value="5luton">5 Luton</SelectItem>
             </SelectContent>
           </Select>
         </label>
@@ -265,10 +276,21 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         <label className="grid gap-1"><span className="eyebrow">Miles (total)</span><NumIn value={job.miles} onChange={(n) => setJ("miles", n)} /></label>
         <label className="grid gap-1"><span className="eyebrow">Days</span><NumIn value={job.days} onChange={(n) => setJ("days", n)} /></label>
         <label className="grid gap-1"><span className="eyebrow">Boxes</span><NumIn value={job.boxes} onChange={(n) => setJ("boxes", n)} /></label>
+        <label className="grid gap-1">
+          <span className="eyebrow">Transit add-on</span>
+          <Select value={String(job.transitVans)} onValueChange={(v) => setJ("transitVans", Number(v))}>
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="0">None</SelectItem>
+              <SelectItem value="1">1 Transit</SelectItem>
+              <SelectItem value="2">2 Transits</SelectItem>
+            </SelectContent>
+          </Select>
+        </label>
         <div className="grid gap-1">
           <span className="eyebrow">Crew</span>
           <span className="flex h-9 items-center text-sm text-foreground">
-            {crew} men <span className="ml-1 text-xs text-mist-400">(vans + 7.5t)</span>
+            {crew} men <span className="ml-1 text-xs text-mist-400">(all vehicles)</span>
           </span>
         </div>
         <div className="flex items-end gap-4">
@@ -302,6 +324,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           <Line label="Packing" rate={packPrice} onRate={setPackPrice} amount={breakdown.packCost} />
           {job.has75T ? <Line label="7.5t add-on" rate={addon75Base} onRate={setAddon75Base} amount={breakdown.addon75Cost} /> : null}
           {job.has75T ? <Line label="7.5t packing" rate={addon75Pack} onRate={setAddon75Pack} amount={breakdown.addon75PackCost} /> : null}
+          {job.transitVans > 0 ? <Line label={`Transit add-on (${job.transitVans})`} rate={addonTransit} onRate={setAddonTransit} amount={breakdown.transitCost} /> : null}
           <Line label={`Mileage (${job.miles}mi)`} rate={mileageRate} onRate={setMileageRate} rateUnit="/mi" amount={breakdown.mileageCost ?? 0} />
           {job.congestion ? <Line label="Congestion" rate={congestionPerVan} onRate={setCongestionPerVan} rateUnit="/van" amount={breakdown.congestion} /> : null}
           <Line label="Admin fee" rate={adminFee} onRate={setAdminFee} amount={breakdown.adminFee} />
@@ -311,9 +334,10 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
         <div>
           <p className="eyebrow mb-1">Your cost <span className="font-normal normal-case text-mist-400">(editable rates)</span></p>
           <Line label={`Labour (${crew} men × ${job.days}d)`} rate={labourDay} onRate={setLabourDay} rateUnit="/d" amount={cost.labour} />
-          <Line label={`Luton vans (${lutonVans}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} />
+          {lutonVans > 0 ? <Line label={`Luton vans (${lutonVans}×${job.days}d)`} rate={vanDay} onRate={setVanDay} rateUnit="/d" amount={cost.vans} /> : null}
+          {transitCount > 0 ? <Line label={`Transit vans (${transitCount}×${job.days}d)`} rate={transitDay} onRate={setTransitDay} rateUnit="/d" amount={cost.transits} /> : null}
           {job.has75T ? <Line label={`7.5t lorry${job.sevenTSecondMan ? " (2 men)" : ""}`} rate={cost75t} onRate={setCost75t} amount={cost.sevenT} /> : null}
-          <Line label={`Luton fuel (${job.miles}mi × ${lutonVans})`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
+          <Line label={`Van fuel (${job.miles}mi × ${lutonVans + transitCount})`} rate={fuel} onRate={setFuel} rateUnit="/mi" amount={cost.fuel} />
           {job.has75T ? <Line label={`7.5t fuel (${job.miles}mi)`} rate={fuel75} onRate={setFuel75} rateUnit="/mi" amount={cost.fuel75} /> : null}
           <Line label={`Boxes (${job.boxes})`} rate={boxCost} onRate={setBoxCost} amount={cost.boxes} />
           <Line label="Misc / consumables" rate={misc} onRate={setMisc} amount={cost.misc} />

@@ -9,6 +9,7 @@ const RATES: BusinessSettings = {
   costLabourPerDay: 120,
   costBox: 2,
   costVanDay: 40,
+  costTransitDay: 25,
   cost75t: 1800,
   costMisc: 30,
   vatDefault: true,
@@ -32,6 +33,11 @@ describe("crewSize", () => {
   it("adds two men per 7.5t lorry with the second-man option", () => {
     expect(crewSize("1luton", 1, true)).toBe(4); // 2 + 1×2
     expect(crewSize("2luton", 2, true)).toBe(7); // 3 + 2×2
+  });
+  it("transit tier is a single man; add-on transits add one man each", () => {
+    expect(crewSize("transit", 0)).toBe(1);
+    expect(crewSize("transit", 0, false, 1)).toBe(2); // transit tier + 1 add-on transit
+    expect(crewSize("2luton", 0, false, 2)).toBe(5); // 3 + 2 transit men
   });
 });
 
@@ -98,6 +104,30 @@ describe("jobCost", () => {
     expect(c.labour).toBe(720); // 3 men × 2 days × 120
     expect(c.vans).toBe(80); // 1 Luton × 2 days × 40
     expect(c.sevenT).toBe(1800); // flat per lorry, not ×days
+  });
+});
+
+describe("jobCost — transit", () => {
+  it("transit tier: 1 man, 1 transit vehicle at the transit day rate, no Luton cost", () => {
+    const c = jobCost(
+      { vehicle: "transit", sevenFiveT: 0, totalMiles: 100, boxes: 0, days: 1 },
+      RATES,
+    );
+    expect(c.labour).toBe(120); // 1 man × 120
+    expect(c.vans).toBe(0); // no Lutons
+    expect(c.transits).toBe(25); // 1 transit × 25 × 1 day
+    expect(c.fuel).toBe(50); // 100mi × 0.5 × 1 vehicle
+  });
+
+  it("add-on transit on a Luton job adds its vehicle, man and fuel", () => {
+    const c = jobCost(
+      { vehicle: "2luton", sevenFiveT: 0, transitVans: 1, totalMiles: 100, boxes: 0, days: 1 },
+      RATES,
+    );
+    expect(c.labour).toBe(480); // 4 men (3 + 1 transit man) × 120
+    expect(c.vans).toBe(80); // 2 Lutons × 40
+    expect(c.transits).toBe(25); // 1 transit × 25
+    expect(c.fuel).toBe(150); // 100mi × 0.5 × 3 vehicles (2 Lutons + 1 transit)
   });
 });
 

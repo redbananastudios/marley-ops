@@ -24,6 +24,7 @@ const pricingSchema = z.object({
   pack: z.record(z.string(), tierPack),
   addon75Base: money,
   addon75Pack: tierPack,
+  addonTransitBase: money,
 });
 
 /** Save the editable quote prices (admin only). Validated + normalised before write. */
@@ -44,6 +45,7 @@ export async function savePricingAction(input: EditablePricing) {
     ) as EditablePricing["pack"],
     addon75Base: config.addon75Base,
     addon75Pack: { full: config.addon75Pack.full, fragile: config.addon75Pack.fragile },
+    addonTransitBase: config.addonTransitBase,
   };
 
   const { error: dbErr } = await sb
@@ -66,6 +68,7 @@ const settingsSchema = z.object({
   costLabourPerDay: num,
   costBox: num,
   costVanDay: num,
+  costTransitDay: num,
   cost75t: num,
   costMisc: num,
   vatDefault: z.boolean(),
@@ -100,6 +103,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_labour_per_day: v.costLabourPerDay,
       cost_box: v.costBox,
       cost_van_day: v.costVanDay,
+      cost_transit_day: v.costTransitDay,
       cost_75t: v.cost75t,
       cost_misc: v.costMisc,
       vat_default: v.vatDefault,

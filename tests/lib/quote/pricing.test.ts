@@ -207,6 +207,57 @@ describe('computeQuote — invariants', () => {
   });
 });
 
+describe('computeQuote — Transit van (tier + add-on)', () => {
+  it('transit tier base: £350 + £150 admin', () => {
+    const q = computeQuote(base({ vehicle: 'transit' }));
+    expect(q.base).toBe(350);
+    expect(q.vanCount).toBe(1);
+    expect(q.subtotal).toBe(500); // 350 + 150 admin
+    expect(q.grandTotal).toBe(500);
+  });
+
+  it('transit tier packing defaults to £0 until priced in Settings', () => {
+    const q = computeQuote(base({ vehicle: 'transit', packing: 'full' }));
+    expect(q.packCost).toBe(0);
+    expect(q.grandTotal).toBe(500);
+  });
+
+  it('add-on transit: +£350 each on top of the Luton base', () => {
+    const q = computeQuote(base({ vehicle: '2luton', transitVans: 1 }));
+    expect(q.transitCost).toBe(350);
+    expect(q.vanCount).toBe(3); // 2 Lutons + 1 transit
+    expect(q.subtotal).toBe(1700); // 1200 + 350 + 150 admin
+  });
+
+  it('two add-on transits double the add-on', () => {
+    const q = computeQuote(base({ vehicle: '1luton', transitVans: 2 }));
+    expect(q.transitCost).toBe(700);
+    expect(q.subtotal).toBe(1550); // 700 + 700 + 150
+  });
+
+  it('transit counts as a van for congestion and flat floors', () => {
+    const q = computeQuote(
+      base({ vehicle: '1luton', transitVans: 1, congestion: true, collectType: 'flat', collectFloor: '1st' }),
+    );
+    expect(q.vanCount).toBe(2);
+    expect(q.congestion).toBe(40); // £20 × 2 vans
+    expect(q.collectFloorCost).toBe(150); // £75 × 2 vans
+  });
+
+  it('transit tier + 7.5t + add-on transit all stack', () => {
+    const q = computeQuote(base({ vehicle: 'transit', sevenFiveT: 1, transitVans: 1 }));
+    expect(q.vanCount).toBe(3);
+    expect(q.subtotal).toBe(350 + 1600 + 350 + 150); // 2450
+  });
+
+  it('transitVans absent (legacy blobs) prices identically to before', () => {
+    const withZero = computeQuote(base({ vehicle: '2luton', transitVans: 0 }));
+    const withoutField = computeQuote(base({ vehicle: '2luton' }));
+    expect(withZero.grandTotal).toBe(withoutField.grandTotal);
+    expect(withoutField.transitCost).toBe(0);
+  });
+});
+
 describe('helpers', () => {
   it('getAccessCharge tiers', () => {
     expect(getAccessCharge(0)).toBe(0);
