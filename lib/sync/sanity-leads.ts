@@ -89,6 +89,11 @@ export interface SyncResult {
  *                          the on-dashboard-load auto-sync.
  */
 export async function syncSanityLeads(opts: { since?: string; incremental?: boolean } = {}): Promise<SyncResult> {
+  // Kill switch: while comms testing runs against seeded test leads, the sync must
+  // not re-import real website leads (it fires on dashboard/leads load + daily cron).
+  if (process.env.SANITY_SYNC_DISABLED === "true") {
+    return { ok: false, synced: 0, inserted: 0, updated: 0, failed: 0, error: "Sanity sync disabled (SANITY_SYNC_DISABLED=true)" };
+  }
   const projectId = process.env.SANITY_PROJECT_ID || "963i5lvk";
   const dataset = process.env.SANITY_DATASET || "production";
   const token = process.env.SANITY_API_READ_TOKEN;
