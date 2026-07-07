@@ -47,18 +47,21 @@ export async function sendSms(input: { to: string; body: string }): Promise<Send
   if (!key) return { ok: false, error: "WebEx API key not configured" };
   if (!sender) return { ok: false, error: "WebEx sender ID not configured" };
   try {
+    // Payload shape per the live site's proven sender (site/web/lib/sms/webex.ts):
+    // the message field is `message_body` (NOT `body`) and the transaction id
+    // comes back inside `messages[0]`.
     const res = await fetch("https://api.webexinteract.com/v1/sms", {
       method: "POST",
-      headers: { "X-AUTH-KEY": key, "Content-Type": "application/json" },
-      body: JSON.stringify({ from: sender, to: [{ phone: [input.to] }], body: input.body }),
+      headers: { "X-AUTH-KEY": key, "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ from: sender, message_body: input.body, to: [{ phone: [input.to] }] }),
     });
     const json = (await res.json().catch(() => ({}))) as {
-      transaction_id?: string;
+      messages?: { transaction_id?: string }[];
       message?: string;
       error?: string;
     };
     if (!res.ok) return { ok: false, error: json.message || json.error || `WebEx error ${res.status}` };
-    return { ok: true, providerId: json.transaction_id };
+    return { ok: true, providerId: json.messages?.[0]?.transaction_id };
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : "SMS send failed" };
   }
