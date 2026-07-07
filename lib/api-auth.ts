@@ -21,10 +21,11 @@ export async function requireApiUser(): Promise<string | null> {
  * <SYNC_CRON_SECRET>` when that env var is set.
  */
 export async function requireUserOrCronSecret(req: Request): Promise<boolean> {
-  const secret = process.env.SYNC_CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization") ?? "";
-    if (auth === `Bearer ${secret}`) return true;
+  // CRON_SECRET is what Vercel Cron sends automatically; SYNC_CRON_SECRET covers
+  // any other scheduled caller (e.g. an i9 task).
+  const auth = req.headers.get("authorization") ?? "";
+  for (const secret of [process.env.CRON_SECRET, process.env.SYNC_CRON_SECRET]) {
+    if (secret && auth === `Bearer ${secret}`) return true;
   }
   return (await requireApiUser()) !== null;
 }

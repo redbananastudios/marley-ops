@@ -5,6 +5,16 @@ const nextConfig: NextConfig = {
   // Next 16 blocks cross-origin dev requests (HMR, server actions) unless the
   // origin is allow-listed — without this, the LAN login hangs / 403s.
   allowedDevOrigins: ["i9", "i9.local", "localhost", "127.0.0.1"],
+
+  // Internal admin panel — must never be indexed (the login page is public).
+  async headers() {
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+      },
+    ];
+  },
 };
 
 export default nextConfig;
