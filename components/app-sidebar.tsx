@@ -83,13 +83,18 @@ export function SidebarNavList({
                     href={it.href}
                     onClick={onNavigate}
                     className={cn(
-                      "focus-ring flex min-h-11 items-center gap-2.5 rounded-sm px-2 py-2 text-sm transition-colors",
+                      "focus-ring relative flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
                       active
-                        ? "border-l-2 border-mm-red bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                        : "text-foreground hover:bg-muted",
+                        ? // Modern active state: soft crimson pill + floating rounded indicator
+                          // (no border-l, so nothing shifts) + the icon carries the accent.
+                          "bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-crimson"
+                        : "text-mist-500 hover:bg-muted hover:text-foreground",
                     )}
                   >
-                    <Icon className="size-[18px]" strokeWidth={1.75} />
+                    <Icon
+                      className={cn("size-[18px]", active ? "text-crimson" : "text-mist-400")}
+                      strokeWidth={active ? 2 : 1.75}
+                    />
                     {it.label}
                   </Link>
                 </li>

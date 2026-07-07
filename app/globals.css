@@ -31,6 +31,12 @@
   --color-mm-red-bright: #e85959; /* on charcoal only */
   --color-mm-red-tint: #fbeded;
 
+  /* Nav highlight — refined crimson (rose family), used ONLY for the active menu
+     state: cleaner tint + deeper label tone than the brick brand red. */
+  --color-crimson: #e11d48;      /* rose-600 — indicator + active icon */
+  --color-crimson-deep: #be123c; /* rose-700 — active label (6.5:1 on the tint) */
+  --color-crimson-tint: #fff1f2; /* rose-50 — active pill background */
+
   /* Semantic (monochrome + one accent; "info" is neutral grey, never blue) */
   --color-success: #15803d;
   --color-success-bg: #f0fdf4;
@@ -89,8 +95,8 @@
   --sidebar: #ffffff;
   --sidebar-foreground: var(--color-ink);
   --sidebar-border: var(--color-mist-200);
-  --sidebar-accent: var(--color-mm-red-tint);
-  --sidebar-accent-foreground: var(--color-mm-red-deep);
+  --sidebar-accent: var(--color-crimson-tint);
+  --sidebar-accent-foreground: var(--color-crimson-deep);
 }
 
 /* shadcn semantic vars — DARK (desktop, secondary) — cool zinc, red-bright accent */
