@@ -44,7 +44,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   vatDefault: true,
   vatNumber: "",
   baseLocation: DEFAULT_BASE_LOCATION,
-  defaultDeposit: 0,
+  defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -70,6 +70,6 @@ export async function getBusinessSettings(
     vatDefault: data.vat_default ?? DEFAULT_SETTINGS.vatDefault,
     vatNumber: (data.vat_number as string | null)?.trim() || "",
     baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
-    defaultDeposit: Number(data.default_deposit ?? 0),
+    defaultDeposit: Number(data.default_deposit ?? DEFAULT_SETTINGS.defaultDeposit) || DEFAULT_SETTINGS.defaultDeposit,
   };
 }

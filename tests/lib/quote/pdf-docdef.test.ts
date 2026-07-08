@@ -48,7 +48,7 @@ function kitchenSink() {
 /** The breakdown table is the only content entry with the 5 line-item columns. */
 function lineItemRows(docDef: any): any[][] {
   const tbl = (docDef.content as any[]).find(
-    (c) => c?.table?.widths?.length === 5 && c.table.widths[0] === 28,
+    (c) => c?.table?.widths?.length === 5 && c.table.headerRows === 1,
   );
   expect(tbl).toBeTruthy();
   return tbl.table.body.slice(1); // drop the header row
@@ -56,7 +56,12 @@ function lineItemRows(docDef: any): any[][] {
 
 describe("quote PDF doc-def — money correctness", () => {
   const { values, b } = kitchenSink();
-  const docDef = buildQuoteDocDef(values, b, { quoteRef: "MM-TEST-001", vatNumber: "GB 123 4567 89" });
+  const docDef = buildQuoteDocDef(values, b, {
+    quoteRef: "MM-TEST-001",
+    vatNumber: "GB 123 4567 89",
+    depositAmount: 100,
+    acceptUrl: "https://ops.marleymoves.co.uk/q/abc123",
+  });
   const flat = JSON.stringify(docDef);
 
   it("line items sum EXACTLY to the subtotal (admin fee itemised, nothing rolled in)", () => {
@@ -84,19 +89,41 @@ describe("quote PDF doc-def — money correctness", () => {
     expect(flat).toContain(two(b.grandTotal));
   });
 
-  it("QUOTE TOTAL bar uses the Cormorant display font", () => {
-    const bar = flat.indexOf("QUOTE TOTAL");
+  it("red total bar reads TOTAL INCLUDING VAT with the N2 grand total", () => {
+    const bar = flat.indexOf("TOTAL INCLUDING VAT");
     expect(bar).toBeGreaterThan(-1);
-    expect(flat.slice(bar, bar + 200)).toContain("Cormorant");
+    const two = "£" + b.grandTotal.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    expect(flat.slice(bar, bar + 400)).toContain(two);
   });
 
-  it("footer carries the VAT number when set, omits it when blank", () => {
+  it("footer carries the VAT number when set, and an explicit dash when blank", () => {
     const withVat = JSON.stringify(docDef.footer(1, 2));
     expect(withVat).toContain("VAT No. GB 123 4567 89");
     expect(withVat).toContain("Company No. 15914266");
+    expect(withVat).toContain("Page 1 of 2");
 
     const noVat = buildQuoteDocDef(values, b, { quoteRef: "MM-TEST-002" });
-    expect(JSON.stringify(noVat.footer(1, 2))).not.toContain("VAT No.");
+    expect(JSON.stringify(noVat.footer(1, 2))).toContain("VAT No. —");
+  });
+
+  it("acceptance strip + terms page carry the deposit, QR slots and accept URL", () => {
+    expect(flat).toContain("£100 deposit");
+    expect(flat).toContain("A booking deposit of £100");
+    expect(flat).toContain("Accept online: https://ops.marleymoves.co.uk/q/abc123");
+    // two QR slots — page 1 strip + page 2 acceptance box
+    const qrCount = (flat.match(/"qr":/g) ?? []).length;
+    expect(qrCount).toBe(2);
+    expect(flat).toContain("Quote Assumptions & Terms");
+    expect(flat).toContain("CUSTOMER ACCEPTANCE");
+    expect(flat).toContain("BANK DETAILS");
+    expect(flat).toContain("hello@marleymoves.co.uk");
+  });
+
+  it("without an accept URL: no QR nodes, written-acceptance wording, deposit defaults to £100", () => {
+    const plain = buildQuoteDocDef(values, b, { quoteRef: "MM-TEST-004" });
+    const s = JSON.stringify(plain);
+    expect((s.match(/"qr":/g) ?? []).length).toBe(0);
+    expect(s).toContain("reply in writing and pay the £100 deposit");
   });
 
   it("VAT off renders VAT (0%) — the row is never hidden", () => {

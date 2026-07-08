@@ -159,6 +159,7 @@ export function QuoteBuilder({
         quoteRef,
         estimatorName: estimatorName ?? undefined,
         vatNumber: settings?.vatNumber || undefined,
+        depositAmount: settings?.defaultDeposit || undefined,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the PDF.");
@@ -326,6 +327,7 @@ export function QuoteBuilder({
         clientId={clientId}
         estimatorName={estimatorName}
         vatNumber={settings?.vatNumber || undefined}
+        depositAmount={settings?.defaultDeposit || undefined}
       />
     </div>
   );
