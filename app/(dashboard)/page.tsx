@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
 import { fetchAdSpend } from "@/lib/google-ads";
@@ -24,6 +25,33 @@ const DAY = 86_400_000;
 const PERIOD_KEYS: PeriodKey[] = ["today", "week", "month"];
 const sourceLabel = (key: string): string => SOURCES.find((s) => s.key === key)?.label ?? key;
 
+/* PostHog funnel + Google Ads spend are the slow leg of the dashboard (6 external
+   API calls, 1-2s combined) and don't need per-click freshness. Cached for 5 min
+   so menu navigation back to the dashboard doesn't re-pay them. Both return plain
+   numbers, so the JSON round-trip of the data cache is lossless. */
+const fetchExternalPanels = unstable_cache(
+  async () => {
+    const now = Date.now();
+    const [ph, spend] = await Promise.all([
+      Promise.all(
+        PERIOD_KEYS.map((k) => {
+          const { from, to } = periodWindow(k, now);
+          return fetchWebsiteFunnel(from, to).catch(() => null);
+        }),
+      ),
+      Promise.all(
+        PERIOD_KEYS.map((k) => {
+          const { from, to } = periodWindow(k, now);
+          return fetchAdSpend(from, to).catch(() => null);
+        }),
+      ),
+    ]);
+    return { ph, spend };
+  },
+  ["dashboard-external-panels"],
+  { revalidate: 300 },
+);
+
 export default async function DashboardPage() {
   const supabase = await createClient();
 
@@ -32,20 +60,20 @@ export default async function DashboardPage() {
   // fail-soft so a slow/unreachable Sanity never blocks the dashboard render.
   await syncSanityLeads({ incremental: true }).catch(() => null);
 
-  const [{ data: leadsData }, { data: apptData }, { data: quoteData }] = await Promise.all([
-    supabase
-      .from("leads")
-      .select(
-        "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
-      )
-      .order("submitted_at", { ascending: false }),
-    supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
-    supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob"),
-  ]);
-
-  const { data: profilesData } = await supabase.from("profiles").select("id, full_name");
+  const [{ data: leadsData }, { data: apptData }, { data: quoteData }, { data: profilesData }, settings] =
+    await Promise.all([
+      supabase
+        .from("leads")
+        .select(
+          "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+        )
+        .order("submitted_at", { ascending: false }),
+      supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
+      supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob"),
+      supabase.from("profiles").select("id, full_name"),
+      getBusinessSettings(supabase),
+    ]);
   const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
-  const settings = await getBusinessSettings(supabase);
   const estimatorFee = settings.estimatorFee;
 
   const leads = (leadsData ?? []) as LeadLite[];
@@ -89,21 +117,8 @@ export default async function DashboardPage() {
     ),
   };
 
-  /* PostHog website funnel + Google Ads spend — one window per period, all parallel, fail-soft */
-  const [phResults, spendResults] = await Promise.all([
-    Promise.all(
-      PERIOD_KEYS.map((k) => {
-        const { from, to } = periodWindow(k, now);
-        return fetchWebsiteFunnel(from, to).catch(() => null);
-      }),
-    ),
-    Promise.all(
-      PERIOD_KEYS.map((k) => {
-        const { from, to } = periodWindow(k, now);
-        return fetchAdSpend(from, to).catch(() => null);
-      }),
-    ),
-  ]);
+  /* PostHog website funnel + Google Ads spend — cached (see fetchExternalPanels) */
+  const { ph: phResults, spend: spendResults } = await fetchExternalPanels();
 
   const periods = Object.fromEntries(
     PERIOD_KEYS.map((k, i) => {
