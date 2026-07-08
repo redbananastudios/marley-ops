@@ -46,6 +46,9 @@ export async function sendSms(input: { to: string; body: string }): Promise<Send
   const sender = process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
   if (!key) return { ok: false, error: "WebEx API key not configured" };
   if (!sender) return { ok: false, error: "WebEx sender ID not configured" };
+  // WebEx wants E.164 — leads often carry the raw UK "07…" form.
+  let to = input.to.replace(/[\s()-]/g, "");
+  if (/^0\d{10}$/.test(to)) to = "+44" + to.slice(1);
   try {
     // Payload shape per the live site's proven sender (site/web/lib/sms/webex.ts):
     // the message field is `message_body` (NOT `body`) and the transaction id
@@ -53,7 +56,7 @@ export async function sendSms(input: { to: string; body: string }): Promise<Send
     const res = await fetch("https://api.webexinteract.com/v1/sms", {
       method: "POST",
       headers: { "X-AUTH-KEY": key, "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ from: sender, message_body: input.body, to: [{ phone: [input.to] }] }),
+      body: JSON.stringify({ from: sender, message_body: input.body, to: [{ phone: [to] }] }),
     });
     const json = (await res.json().catch(() => ({}))) as {
       messages?: { transaction_id?: string }[];
