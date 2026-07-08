@@ -11,6 +11,9 @@ export interface SendCommInput {
   bodyText: string; // plain text — used for SMS, preview, and the duplicate hash
   subject?: string; // email only
   bodyHtml?: string; // email only; falls back to a wrap of bodyText
+  /** email only — send via a published Resend template instead of bodyHtml.
+   *  bodyText is still required: it drives the duplicate hash + the Comms-tab preview. */
+  template?: { id: string; variables?: Record<string, string | number> };
   attachmentBase64?: string; // email only (e.g. the quote PDF)
   attachmentName?: string;
   leadId?: string;
@@ -65,7 +68,9 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
       ? await sendEmail({
           to: input.to,
           subject: input.subject ?? "Message from Marley Moves",
-          html: input.bodyHtml ?? `<p>${escapeHtml(input.bodyText).replace(/\n/g, "<br>")}</p>`,
+          ...(input.template
+            ? { template: input.template }
+            : { html: input.bodyHtml ?? `<p>${escapeHtml(input.bodyText).replace(/\n/g, "<br>")}</p>` }),
           attachments: input.attachmentBase64
             ? [{ filename: input.attachmentName ?? "attachment.pdf", content: input.attachmentBase64 }]
             : undefined,

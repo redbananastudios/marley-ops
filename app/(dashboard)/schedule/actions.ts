@@ -127,12 +127,29 @@ export async function createAppointment(input: CreateAppointmentInput) {
       address: input.location || lead.from_address || lead.from_postcode || null,
     };
     if (lead.email) {
+      // When the Resend template is published (env holds its alias/id), send via the
+      // template so the design is editable in the Resend dashboard without a deploy.
+      // Otherwise fall back to the in-repo HTML.
+      const templateId = process.env.RESEND_TEMPLATE_SURVEY_CONFIRMATION;
       const r = await sendCommunication({
         channel: "email",
         to: lead.email,
         subject: surveyConfirmSubject(confirm),
         bodyText: surveyConfirmEmailText(confirm),
-        bodyHtml: surveyConfirmEmailHtml(confirm),
+        ...(templateId
+          ? {
+              template: {
+                id: templateId,
+                variables: {
+                  FIRST_NAME: (lead.name || "").trim().split(/\s+/)[0] || "there",
+                  DATE_LABEL: confirm.dateLabel,
+                  TIME_LABEL: confirm.timeLabel,
+                  ESTIMATOR: confirm.estimatorName ?? "One of our team",
+                  ADDRESS: confirm.address ?? "To be confirmed",
+                },
+              },
+            }
+          : { bodyHtml: surveyConfirmEmailHtml(confirm) }),
         leadId: lead.id,
         clientId: lead.client_id ?? undefined,
       }).catch(() => ({ ok: false as const, error: "send crashed" }));

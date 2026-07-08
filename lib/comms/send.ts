@@ -12,12 +12,17 @@ const DRYRUN = process.env.COMMS_DRYRUN === "true";
 export async function sendEmail(input: {
   to: string;
   subject: string;
-  html: string;
+  /** Inline HTML body — ignored when `template` is set (Resend forbids both). */
+  html?: string;
+  /** Send via a PUBLISHED Resend template (id or alias) + its variables.
+   *  Templates are managed in the Resend dashboard/API — see scripts/create-resend-templates.mjs. */
+  template?: { id: string; variables?: Record<string, string | number> };
   attachments?: { filename: string; content: string }[]; // content = base64
 }): Promise<SendResult> {
   if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}` };
   const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: "Resend API key not configured" };
+  if (!input.template && !input.html) return { ok: false, error: "No email body (html or template) given" };
   const from = process.env.RESEND_FROM_EMAIL || "Marley Moves <quotes@marleymoves.co.uk>";
   try {
     const res = await fetch("https://api.resend.com/emails", {
@@ -28,7 +33,7 @@ export async function sendEmail(input: {
         to: [input.to],
         reply_to: "hello@marleymoves.co.uk",
         subject: input.subject,
-        html: input.html,
+        ...(input.template ? { template: input.template } : { html: input.html }),
         attachments: input.attachments,
       }),
     });
