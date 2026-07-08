@@ -52,9 +52,11 @@ export interface LeadCard {
   source: SourceKey;
   value: number | null;
   surveyDue: boolean;
+  /** Open "no reply" retry (queued on Follow-ups), if any. */
+  retry: { dueAt: string | null; attempts: number } | null;
 }
 
-type PresetKey = "all" | "new" | "uncontacted" | "contacted" | "surveys" | "mine" | "week";
+type PresetKey = "all" | "new" | "uncontacted" | "retry" | "contacted" | "surveys" | "mine" | "week";
 type SortKey = "recent" | "oldest" | "uncontacted" | "contacted";
 
 const SORTS: { key: SortKey; label: string }[] = [
@@ -144,7 +146,10 @@ export function LeadsBoard({
       case "new":
         return l.status === "website_enquiry";
       case "uncontacted":
-        return !CLOSED.has(l.status) && !l.first_contacted_at;
+        // "Awaiting retry" leads are actioned — they leave the Uncontacted bucket.
+        return !CLOSED.has(l.status) && !l.first_contacted_at && !l.retry;
+      case "retry":
+        return !CLOSED.has(l.status) && !!l.retry;
       case "contacted":
         return !CLOSED.has(l.status) && !!l.first_contacted_at;
       case "surveys":
@@ -159,10 +164,11 @@ export function LeadsBoard({
   };
 
   const counts = useMemo(() => {
-    const c: Record<PresetKey, number> = { all: base.length, new: 0, uncontacted: 0, contacted: 0, surveys: 0, mine: 0, week: 0 };
+    const c: Record<PresetKey, number> = { all: base.length, new: 0, uncontacted: 0, retry: 0, contacted: 0, surveys: 0, mine: 0, week: 0 };
     for (const l of base) {
       if (matchesPreset(l, "new")) c.new++;
       if (matchesPreset(l, "uncontacted")) c.uncontacted++;
+      if (matchesPreset(l, "retry")) c.retry++;
       if (matchesPreset(l, "contacted")) c.contacted++;
       if (matchesPreset(l, "surveys")) c.surveys++;
       if (matchesPreset(l, "mine")) c.mine++;
@@ -202,6 +208,7 @@ export function LeadsBoard({
     { key: "all", label: "All" },
     { key: "new", label: "New" },
     { key: "uncontacted", label: "Uncontacted" },
+    { key: "retry", label: "Awaiting retry" },
     { key: "contacted", label: "Contacted" },
     { key: "surveys", label: "Surveys due" },
     { key: "mine", label: "Mine" },
@@ -314,8 +321,29 @@ export function LeadsBoard({
   );
 }
 
+/** "tomorrow 09:00" / "today 09:00" / "Mon 14 Jul, 09:00" for the retry chip. */
+function fmtRetryDue(d: string | null): string {
+  if (!d) return "soon";
+  const t = new Date(d);
+  if (Number.isNaN(t.getTime())) return "soon";
+  const time = t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  const startToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const diffDays = Math.floor((t.getTime() - startToday) / 86_400_000);
+  if (diffDays === 0) return `today ${time}`;
+  if (diffDays === 1) return `tomorrow ${time}`;
+  return `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}, ${time}`;
+}
+
 function ResponseChip({ lead }: { lead: LeadCard }) {
   if (CLOSED.has(lead.status)) return null;
+  if (lead.retry && !lead.first_contacted_at) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-medium text-warn">
+        <PhoneMissed className="size-3 shrink-0" strokeWidth={2} />
+        Retry {fmtRetryDue(lead.retry.dueAt)} · attempt {lead.retry.attempts}
+      </span>
+    );
+  }
   if (lead.first_contacted_at) {
     return (
       <span className="inline-flex items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-xs text-mist-500">

@@ -27,7 +27,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: leadsData }, { data: quoteData }, { data: apptData }] = await Promise.all([
+  const [{ data: leadsData }, { data: quoteData }, { data: apptData }, { data: retryData }] = await Promise.all([
     supabase
       .from("leads")
       .select(
@@ -36,6 +36,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       .order("submitted_at", { ascending: false }),
     supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
     supabase.from("appointments").select("lead_id, appt_type, starts_at, status, estimator_id"),
+    // Open "no reply" retries — surfaces as an amber badge + the Awaiting-retry filter.
+    supabase.from("follow_ups").select("lead_id, due_at, attempt_count").eq("reason", "no_answer").eq("status", "open"),
   ]);
 
   const leads = leadsData ?? [];
@@ -77,6 +79,12 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       .map((a) => a.lead_id as string),
   );
 
+  /* open no-reply retry per lead (one open no_answer follow-up max by design) */
+  const retryMap = new Map<string, { dueAt: string | null; attempts: number }>();
+  for (const r of retryData ?? []) {
+    if (r.lead_id) retryMap.set(r.lead_id, { dueAt: r.due_at, attempts: r.attempt_count ?? 0 });
+  }
+
   const cards: LeadCard[] = leads.map((l) => {
     const v = valueMap.get(l.id);
     return {
@@ -96,6 +104,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       source: classifySource(l as LeadLite),
       value: v ? (v.accepted ?? v.latest) : null,
       surveyDue: upcomingSurvey.has(l.id) || l.status === "survey_booked",
+      retry: retryMap.get(l.id) ?? null,
     };
   });
 
