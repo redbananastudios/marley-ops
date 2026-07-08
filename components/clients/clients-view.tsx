@@ -201,11 +201,14 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapOpen, dest]);
   // Classic keyless embed (no API key needed) — directions base → client.
+  // Origin anchored to the base POSTCODE: the embed fuzzy-matches house names
+  // ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
+  const origin = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
   const embedSrc = `https://www.google.com/maps?saddr=${encodeURIComponent(
-    baseLocation,
+    origin,
   )}&daddr=${encodeURIComponent(dest)}&output=embed`;
   const externalHref = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
-    baseLocation,
+    origin,
   )}&destination=${encodeURIComponent(dest)}`;
 
   // Interactive rows sit above the stretched detail-link (z-10) so a tap on the

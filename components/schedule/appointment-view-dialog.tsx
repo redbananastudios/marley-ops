@@ -89,8 +89,11 @@ export function AppointmentViewDialog({
     : "—";
   const badge = STATUS_BADGE[target.status ?? "scheduled"] ?? STATUS_BADGE.scheduled;
   const wa = waNumber(lead?.phone);
+  // Anchor the embed's origin to the base POSTCODE — the keyless embed fuzzy-matches
+  // house names ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
+  const origin = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
   const embedSrc = dest
-    ? `https://www.google.com/maps?saddr=${encodeURIComponent(baseLocation)}&daddr=${encodeURIComponent(dest)}&output=embed`
+    ? `https://www.google.com/maps?saddr=${encodeURIComponent(origin)}&daddr=${encodeURIComponent(dest)}&output=embed`
     : null;
 
   async function setStatus(status: "completed" | "cancelled", doneMsg: string) {
