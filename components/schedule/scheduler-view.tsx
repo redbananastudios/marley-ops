@@ -331,7 +331,7 @@ export function SchedulerView({
           allDaySlot
           dayMaxEvents={3}
           eventDisplay="block"
-          displayEventEnd
+          displayEventEnd={false}
           selectable
           selectMirror
           editable
