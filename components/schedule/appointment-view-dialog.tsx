@@ -8,9 +8,9 @@
  * Mark done / Cancel visit / Delete. Built tablet-first: 44px targets.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, MessageCircle, MessageSquare, Pencil, FileText, Ban, Loader2, Clock, CalendarClock } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Pencil, FileText, Ban, Loader2, Clock, CalendarClock, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -60,10 +60,19 @@ export function AppointmentViewDialog({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [route, setRoute] = useState<"loading" | "error" | { miles: number; durationText: string | null }>("loading");
   // Which journey the map shows: the JOB (pickup -> destination, the default —
   // that's the move being quoted) or TO PICKUP (base -> pickup, the drive out).
   const [routeMode, setRouteMode] = useState<"job" | "pickup">("job");
+  // Nothing is fetched until the user asks for it — a leg becomes "activated" by
+  // tapping the map placeholder or switching to its tab. Once fetched/rendered it
+  // stays cached (and its iframe stays mounted) so switching back costs nothing.
+  const [activated, setActivated] = useState<{ job: boolean; pickup: boolean }>({ job: false, pickup: false });
+  const [routes, setRoutes] = useState<
+    Partial<Record<"job" | "pickup", "loading" | "error" | { miles: number; durationText: string | null }>>
+  >({});
+  // Bumped when a different appointment opens so late fetch results for the old
+  // one can't write into the new one's cache.
+  const routeReq = useRef(0);
 
   const pickupFull =
     [lead?.from_address, lead?.from_postcode].filter(Boolean).join(", ") ||
@@ -71,36 +80,57 @@ export function AppointmentViewDialog({
     null;
   const destFull = [lead?.to_address, lead?.to_postcode].filter(Boolean).join(", ") || null;
   const hasJobRoute = !!(pickupFull && destFull);
+  // Anchor the base origin to its POSTCODE — the keyless embed fuzzy-matches house
+  // names ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
+  const basePc = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
 
-  // Reset to the job view (when available) each time a new appointment opens.
+  const LEGS = {
+    job: { origin: pickupFull, dest: destFull, embedOrigin: pickupFull },
+    pickup: { origin: null, dest: pickupFull, embedOrigin: basePc }, // null origin -> API defaults to base
+  } as const;
+  const embedFor = (mode: "job" | "pickup") => {
+    const l = LEGS[mode];
+    return l.embedOrigin && l.dest
+      ? `https://www.google.com/maps?saddr=${encodeURIComponent(l.embedOrigin)}&daddr=${encodeURIComponent(l.dest)}&output=embed`
+      : null;
+  };
+
+  // Reset to the job view + clear the leg cache each time a new appointment opens.
   useEffect(() => {
-    if (open) setRouteMode(hasJobRoute ? "job" : "pickup");
+    if (open) {
+      setRouteMode(hasJobRoute ? "job" : "pickup");
+      setActivated({ job: false, pickup: false });
+      setRoutes({});
+      routeReq.current++;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, target?.id]);
 
-  const showJob = routeMode === "job" && hasJobRoute;
-  const legOrigin = showJob ? pickupFull : null; // null -> API defaults to base
-  const legDest = showJob ? destFull : pickupFull;
-
-  // Distance + drive time for the shown leg — same pattern as the Clients map dialog.
-  // `route` is deliberately NOT a dependency (setting "loading" must not cancel the fetch).
+  // Distance + drive time for the shown leg — fetched once per leg, on demand.
+  // `routes` is deliberately NOT a dependency (setting "loading" must not refire);
+  // no cancel-on-mode-switch either, so an in-flight leg still lands in the cache.
   useEffect(() => {
-    if (!open || !legDest) return;
-    let cancelled = false;
-    setRoute("loading");
-    const qs = `dest=${encodeURIComponent(legDest)}${legOrigin ? `&origin=${encodeURIComponent(legOrigin)}` : ""}`;
+    if (!open || !activated[routeMode] || routes[routeMode] !== undefined) return;
+    const mode = routeMode;
+    const leg = LEGS[mode];
+    if (!leg.dest) return;
+    const token = routeReq.current;
+    setRoutes((r) => ({ ...r, [mode]: "loading" }));
+    const qs = `dest=${encodeURIComponent(leg.dest)}${leg.origin ? `&origin=${encodeURIComponent(leg.origin)}` : ""}`;
     fetch(`/api/maps/route-to?${qs}`)
       .then((r) => r.json())
       .then((d: { ok: boolean; miles?: number; durationText?: string | null }) => {
-        if (cancelled) return;
-        setRoute(d.ok && d.miles != null ? { miles: d.miles, durationText: d.durationText ?? null } : "error");
+        if (token !== routeReq.current) return;
+        setRoutes((r) => ({
+          ...r,
+          [mode]: d.ok && d.miles != null ? { miles: d.miles, durationText: d.durationText ?? null } : "error",
+        }));
       })
-      .catch(() => !cancelled && setRoute("error"));
-    return () => {
-      cancelled = true;
-    };
+      .catch(() => {
+        if (token === routeReq.current) setRoutes((r) => ({ ...r, [mode]: "error" }));
+      });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, legDest, legOrigin]);
+  }, [open, routeMode, activated]);
 
   if (!target) return null;
 
@@ -110,14 +140,7 @@ export function AppointmentViewDialog({
     : "—";
   const badge = STATUS_BADGE[target.status ?? "scheduled"] ?? STATUS_BADGE.scheduled;
   const wa = waNumber(lead?.phone);
-  // Anchor the base origin to its POSTCODE — the keyless embed fuzzy-matches house
-  // names ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
-  const basePc = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
-  const embedOrigin = showJob ? pickupFull : basePc;
-  const embedSrc =
-    embedOrigin && legDest
-      ? `https://www.google.com/maps?saddr=${encodeURIComponent(embedOrigin)}&daddr=${encodeURIComponent(legDest)}&output=embed`
-      : null;
+  const route = routes[routeMode];
 
   async function setStatus(status: "completed" | "cancelled", doneMsg: string) {
     if (!target) return;
@@ -226,8 +249,8 @@ export function AppointmentViewDialog({
 
           {/* map left (75%), action stack right (25%) */}
           <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[3fr_1fr]">
-            {/* route from base — map + distance/time */}
-            {embedSrc ? (
+            {/* route map — legs load on demand and stay cached once rendered */}
+            {embedFor(routeMode) ? (
               <div className="overflow-hidden rounded-md border border-border">
                 <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
                   {hasJobRoute ? (
@@ -241,7 +264,11 @@ export function AppointmentViewDialog({
                         <button
                           key={m.key}
                           type="button"
-                          onClick={() => setRouteMode(m.key)}
+                          onClick={() => {
+                            setRouteMode(m.key);
+                            // Switching to a tab calculates that leg (first time only).
+                            setActivated((a) => (a[m.key] ? a : { ...a, [m.key]: true }));
+                          }}
                           aria-pressed={routeMode === m.key}
                           className={cn(
                             "focus-ring rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
@@ -256,7 +283,7 @@ export function AppointmentViewDialog({
                     <p className="text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">Route from base</p>
                   )}
                   <div className="ml-auto flex items-center gap-1.5">
-                    {route === "loading" ? (
+                    {!activated[routeMode] ? null : route === "loading" || route === undefined ? (
                       <span className="text-xs text-mist-400">Working out the route…</span>
                     ) : route === "error" ? (
                       <span className="text-xs text-mist-400">Distance unavailable</span>
@@ -274,14 +301,31 @@ export function AppointmentViewDialog({
                     )}
                   </div>
                 </div>
-                <iframe
-                  key={embedSrc}
-                  title={`Route to ${legDest}`}
-                  src={embedSrc}
-                  className="h-56 w-full sm:h-72 lg:h-80"
-                  loading="lazy"
-                  referrerPolicy="no-referrer-when-downgrade"
-                />
+                <div className="relative h-56 w-full sm:h-72 lg:h-80">
+                  {(["job", "pickup"] as const).map((m) => {
+                    const src = activated[m] ? embedFor(m) : null;
+                    return src ? (
+                      <iframe
+                        key={m}
+                        title={m === "job" ? "Job route" : "Route to pickup"}
+                        src={src}
+                        className={cn("absolute inset-0 h-full w-full", routeMode === m ? "" : "hidden")}
+                        loading="lazy"
+                        referrerPolicy="no-referrer-when-downgrade"
+                      />
+                    ) : null;
+                  })}
+                  {!activated[routeMode] ? (
+                    <button
+                      type="button"
+                      onClick={() => setActivated((a) => ({ ...a, [routeMode]: true }))}
+                      className="focus-ring absolute inset-0 flex flex-col items-center justify-center gap-2 bg-muted/40 text-sm font-medium text-mist-500 hover:bg-muted/60"
+                    >
+                      <MapPin className="size-6 text-mm-red" strokeWidth={1.5} />
+                      Tap to calculate route
+                    </button>
+                  ) : null}
+                </div>
               </div>
             ) : (
               <div />

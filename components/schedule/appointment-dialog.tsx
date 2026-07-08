@@ -150,7 +150,7 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
       </span>
     );
   return (
-    <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+    <div className="grid gap-3 sm:grid-cols-[3fr_4fr_3fr] md:col-span-2">
       {/* Customer */}
       <div className="rounded-md border border-border bg-muted/30 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
@@ -201,12 +201,19 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
           <AddrBlock lines={to} />
         </div>
         {lead.property_size ? <p className="mt-1.5 text-xs font-medium text-[#16a34a]">{lead.property_size}</p> : null}
+      </div>
+
+      {/* Notes */}
+      <div className="rounded-md border border-border bg-muted/30 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
+          <StickyNote className="size-3.5" strokeWidth={2} />
+          Notes
+        </p>
         {lead.lead_notes ? (
-          <p className="mt-1.5 flex items-start gap-1.5 text-xs text-mist-500">
-            <StickyNote className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
-            <span className="line-clamp-3">{lead.lead_notes}</span>
-          </p>
-        ) : null}
+          <p className="max-h-28 overflow-y-auto text-sm whitespace-pre-wrap text-foreground">{lead.lead_notes}</p>
+        ) : (
+          <p className="text-sm text-mist-400">No notes on the lead.</p>
+        )}
       </div>
     </div>
   );
