@@ -127,14 +127,30 @@ function defaultDuration(type: ApptType): number {
  *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets). */
 function LeadContextPanels({ lead }: { lead: LeadOption }) {
   // Address + postcode together — the postcode is what the crew navigates by.
-  const withPc = (addr: string | null | undefined, pc: string | null | undefined) => {
+  const addrLines = (addr: string | null | undefined, pc: string | null | undefined): string[] => {
     const a = (addr || "").trim();
     const p = (pc || "").trim();
-    if (a && p) return a.toUpperCase().includes(p.toUpperCase()) ? a : `${a}, ${p}`;
-    return a || p || null;
+    const joined = a && p ? (a.toUpperCase().includes(p.toUpperCase()) ? a : `${a}, ${p}`) : a || p;
+    // One line per comma-separated part — street / town / postcode stack vertically.
+    return joined
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
   };
-  const from = withPc(lead.from_address, lead.from_postcode);
-  const to = withPc(lead.to_address, lead.to_postcode);
+  const from = addrLines(lead.from_address, lead.from_postcode);
+  const to = addrLines(lead.to_address, lead.to_postcode);
+  const AddrBlock = ({ lines }: { lines: string[] }) =>
+    lines.length === 0 ? (
+      <span className="text-mist-400">—</span>
+    ) : (
+      <span className="min-w-0">
+        {lines.map((l, i) => (
+          <span key={i} className="block truncate">
+            {l}
+          </span>
+        ))}
+      </span>
+    );
   return (
     <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
       {/* Customer */}
@@ -144,20 +160,20 @@ function LeadContextPanels({ lead }: { lead: LeadOption }) {
           Customer
         </p>
         <p className="text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+        <div className="mt-1 flex flex-col items-start">
           {lead.phone ? (
             <a
               href={`tel:${lead.phone}`}
               className="focus-ring -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#db2777] hover:bg-muted"
             >
-              <Phone className="size-4" strokeWidth={1.75} />
+              <Phone className="size-4 shrink-0" strokeWidth={1.75} />
               {lead.phone}
             </a>
           ) : null}
           {lead.email ? (
             <a
               href={`mailto:${lead.email}`}
-              className="focus-ring -ml-2 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#2563eb] hover:bg-muted sm:ml-0"
+              className="focus-ring -ml-2 inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#2563eb] hover:bg-muted"
             >
               <Mail className="size-4 shrink-0" strokeWidth={1.75} />
               <span className="truncate">{lead.email}</span>
@@ -174,9 +190,9 @@ function LeadContextPanels({ lead }: { lead: LeadOption }) {
           Move
         </p>
         <div className="flex items-start gap-2 text-sm text-foreground">
-          <span className="min-w-0 flex-1">{from ?? "—"}</span>
+          <AddrBlock lines={from} />
           <ArrowRight className="mt-0.5 size-4 shrink-0 text-mm-red" strokeWidth={2} />
-          <span className="min-w-0 flex-1">{to ?? "—"}</span>
+          <AddrBlock lines={to} />
         </div>
         {lead.property_size ? <p className="mt-1.5 text-xs font-medium text-[#16a34a]">{lead.property_size}</p> : null}
         {lead.lead_notes ? (
@@ -240,8 +256,6 @@ export function AppointmentDialog({
   const [status, setStatus] = useState<string>("scheduled");
   const [start, setStart] = useState<string>("");
   const [end, setEnd] = useState<string>("");
-  const [title, setTitle] = useState<string>("");
-  const [titleTouched, setTitleTouched] = useState(false);
   const [address, setAddress] = useState<AddressValue>(BLANK_ADDRESS);
   const [notes, setNotes] = useState<string>("");
   const [allDay, setAllDay] = useState<boolean>(false);
@@ -257,8 +271,6 @@ export function AppointmentDialog({
       setStatus(edit.status ?? "scheduled");
       setStart(toLocalInput(edit.startsAt));
       setEnd(toLocalInput(edit.endsAt));
-      setTitle(edit.title ?? "");
-      setTitleTouched(true);
       setAddress(addressFromString(edit.location));
       setNotes(edit.notes ?? "");
       setAllDay(false);
@@ -275,23 +287,12 @@ export function AppointmentDialog({
       setStatus("scheduled");
       setStart(s);
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
-      setTitle("");
-      setTitleTouched(false);
       setAddress(addressFromString(presetLocation ?? ""));
       setNotes("");
       setAllDay(!!presetAllDay);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edit?.id]);
-
-  // Auto-title from lead name + type, until the user types their own.
-  useEffect(() => {
-    if (titleTouched) return;
-    const lead = leads.find((l) => l.id === leadId);
-    const label = apptType === "survey" ? "Survey" : "Removal";
-    setTitle(lead?.name ? `${label} — ${lead.name}` : label);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [leadId, apptType, titleTouched]);
 
   // Keep end ahead of start in create mode when start moves.
   function onStartChange(v: string) {
@@ -352,9 +353,8 @@ export function AppointmentDialog({
       const endsAt = localToIso(endLocal);
 
       if (isEdit && edit) {
-        // Persist the editable metadata.
+        // Persist the editable metadata. Title is system-generated — never patched here.
         const meta = await updateAppointment(edit.id, {
-          title: title.trim() || undefined,
           location: formatAddress(address),
           notes,
           status,
@@ -380,7 +380,6 @@ export function AppointmentDialog({
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
           startsAt,
           endsAt,
-          title: title.trim() || undefined,
           location: formatAddress(address) || undefined,
           notes: notes.trim() || undefined,
           allDay,
@@ -444,7 +443,13 @@ export function AppointmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      {/* Never close on outside interaction: fixes the phantom close after using a
+          Select inside the dialog (its portal makes the next click read as "outside"),
+          and stops accidental backdrop-taps losing a half-filled booking on tablets. */}
+      <DialogContent
+        className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
+        onInteractOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle className="font-display">
             {isEdit ? "Edit appointment" : "New appointment"}
@@ -502,12 +507,15 @@ export function AppointmentDialog({
               </div>
             </div>
 
-            <div className="grid gap-2">
-              <Label htmlFor="appt-lead">
-                Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
-              </Label>
-              <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
-            </div>
+            {/* The customer is fixed once booked — pick only when creating. */}
+            {!isEdit ? (
+              <div className="grid gap-2">
+                <Label htmlFor="appt-lead">
+                  Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
+                </Label>
+                <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
+              </div>
+            ) : null}
 
             {isEdit ? (
               <div className="grid gap-2">
@@ -543,18 +551,6 @@ export function AppointmentDialog({
               </p>
             ) : null}
 
-            <div className="grid gap-2">
-              <Label htmlFor="appt-title">Title</Label>
-              <Input
-                id="appt-title"
-                value={title}
-                onChange={(e) => {
-                  setTitle(e.target.value);
-                  setTitleTouched(true);
-                }}
-                placeholder="Survey — Jane Smith"
-              />
-            </div>
           </div>
 
           {/* Right — location + notes */}

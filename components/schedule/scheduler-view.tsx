@@ -61,8 +61,8 @@ export interface SchedulerEvent {
 
 const CHARCOAL = "#1A1A1A";
 const MM_RED = "#c03838";
-// Peter's pick for calendar legibility (2026-07-08): solid red, white text.
-const EVENT_RED = "#ec0c0c";
+// Solid-but-subtle brand red, white text (Peter 2026-07-08: "nicer red, not too bright").
+const EVENT_RED = MM_RED;
 
 const SURVEY_STYLE = {
   backgroundColor: EVENT_RED,
@@ -155,7 +155,7 @@ export function SchedulerView({
           end: e.ends_at ?? undefined,
           allDay: !!e.all_day,
           ...style,
-          classNames: cancelled ? ["mm-evt-cancelled"] : [],
+          classNames: [`mm-evt--${e.appt_type}`, ...(cancelled ? ["mm-evt-cancelled"] : [])],
           extendedProps: {
             apptType: e.appt_type,
             leadId: e.lead_id,
@@ -169,15 +169,17 @@ export function SchedulerView({
     [shown],
   );
 
-  // Custom event card: time, customer/title, and WHO is doing the visit —
-  // an initial-avatar chip so the estimator is readable at a glance.
+  // Custom event card — {time} / bold {full name} / {address}, plus WHO is doing
+  // the visit as a contrasting initial-avatar pill on the time row.
   const estimatorById = useMemo(() => new Map(estimators.map((e) => [e.id, e.full_name])), [estimators]);
   const renderEvent = useCallback(
     (arg: EventContentArg) => {
-      const ep = arg.event.extendedProps as { estimatorId: string | null };
+      const ep = arg.event.extendedProps as { estimatorId: string | null; location: string | null };
       const estimator = ep.estimatorId ? estimatorById.get(ep.estimatorId) ?? null : null;
       const firstName = estimator ? estimator.split(/\s+/)[0] : null;
       const compact = arg.view.type === "dayGridMonth";
+      // Titles are system-generated "Survey — Jane Smith" — the card shows just the name.
+      const name = (arg.event.title || "").replace(/^(Survey|Removal)\s+—\s+/, "");
       return (
         <div className="mm-evt-card">
           <div className="mm-evt-top">
@@ -189,7 +191,8 @@ export function SchedulerView({
               </span>
             ) : null}
           </div>
-          <div className="mm-evt-title">{arg.event.title}</div>
+          <div className="mm-evt-name">{name}</div>
+          {!compact && ep.location ? <div className="mm-evt-loc">{ep.location}</div> : null}
         </div>
       );
     },
@@ -468,8 +471,16 @@ export function SchedulerView({
           opacity: 0.9;
           font-variant-numeric: tabular-nums;
         }
-        .mm-evt-title {
-          font-weight: 600;
+        .mm-evt-name {
+          font-weight: 700;
+          font-size: 0.8125rem;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .mm-evt-loc {
+          font-size: 0.6875rem;
+          opacity: 0.85;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
@@ -491,10 +502,17 @@ export function SchedulerView({
           height: 16px;
           flex: none;
           border-radius: 999px;
-          background: rgba(255, 255, 255, 0.28);
-          color: #fff;
           font-size: 0.625rem;
           font-weight: 700;
+        }
+        /* Estimator pill contrasts with the card: charcoal on red surveys, red on charcoal removals. */
+        .mm-evt--survey .mm-evt-est-chip {
+          background: ${CHARCOAL};
+          color: #fff;
+        }
+        .mm-evt--removal .mm-evt-est-chip {
+          background: ${MM_RED};
+          color: #fff;
         }
         .mm-scheduler .fc .mm-evt-cancelled {
           opacity: 0.45;

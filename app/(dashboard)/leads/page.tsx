@@ -65,20 +65,22 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     if (!surveyEstimator.has(a.lead_id)) surveyEstimator.set(a.lead_id, a.estimator_id);
   }
 
-  /* leads with an upcoming (non-cancelled) survey appointment */
+  /* leads with an upcoming (non-cancelled) survey appointment — keep the soonest time
+     so the card can show WHEN the survey is, not just that one exists */
   const startToday = startOfUkDay().getTime();
-  const upcomingSurvey = new Set(
-    (apptData ?? [])
-      .filter(
-        (a) =>
-          a.appt_type === "survey" &&
-          a.status !== "cancelled" &&
-          a.lead_id &&
-          a.starts_at &&
-          new Date(a.starts_at).getTime() >= startToday - DAY,
-      )
-      .map((a) => a.lead_id as string),
-  );
+  const upcomingSurveyAt = new Map<string, string>();
+  for (const a of apptData ?? []) {
+    if (
+      a.appt_type !== "survey" ||
+      a.status === "cancelled" ||
+      !a.lead_id ||
+      !a.starts_at ||
+      new Date(a.starts_at).getTime() < startToday - DAY
+    )
+      continue;
+    const cur = upcomingSurveyAt.get(a.lead_id);
+    if (!cur || new Date(a.starts_at).getTime() < new Date(cur).getTime()) upcomingSurveyAt.set(a.lead_id, a.starts_at);
+  }
 
   /* open no-reply retry per lead (one open no_answer follow-up max by design) */
   const retryMap = new Map<string, { dueAt: string | null; attempts: number }>();
@@ -104,7 +106,8 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       estimator_id: surveyEstimator.get(l.id) ?? null,
       source: classifySource(l as LeadLite),
       value: v ? (v.accepted ?? v.latest) : null,
-      surveyDue: upcomingSurvey.has(l.id) || l.status === "survey_booked",
+      surveyDue: upcomingSurveyAt.has(l.id) || l.status === "survey_booked",
+      surveyAt: upcomingSurveyAt.get(l.id) ?? null,
       retry: retryMap.get(l.id) ?? null,
     };
   });

@@ -52,6 +52,8 @@ export interface LeadCard {
   source: SourceKey;
   value: number | null;
   surveyDue: boolean;
+  /** Soonest upcoming survey appointment, if one is booked. */
+  surveyAt: string | null;
   /** Open "no reply" retry (queued on Follow-ups), if any. */
   retry: { dueAt: string | null; attempts: number } | null;
 }
@@ -322,7 +324,7 @@ export function LeadsBoard({
 }
 
 /** "tomorrow 09:00" / "today 09:00" / "Mon 14 Jul, 09:00" for the retry chip. */
-function fmtRetryDue(d: string | null): string {
+function fmtWhen(d: string | null): string {
   if (!d) return "soon";
   const t = new Date(d);
   if (Number.isNaN(t.getTime())) return "soon";
@@ -340,7 +342,15 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
     return (
       <span className="inline-flex items-center gap-1 rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-medium text-warn">
         <PhoneMissed className="size-3 shrink-0" strokeWidth={2} />
-        Retry {fmtRetryDue(lead.retry.dueAt)} · attempt {lead.retry.attempts}
+        Retry {fmtWhen(lead.retry.dueAt)} · attempt {lead.retry.attempts}
+      </span>
+    );
+  }
+  if (lead.surveyAt) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded-pill bg-[#eff6ff] px-2 py-0.5 text-xs font-medium text-[#2563eb]">
+        <CalendarPlus className="size-3 shrink-0" strokeWidth={2} />
+        Survey {fmtWhen(lead.surveyAt)}
       </span>
     );
   }

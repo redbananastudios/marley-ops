@@ -96,17 +96,25 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
   if (error) return { ok: false as const, error: error.message };
 
-  // Booking a survey nudges the lead to survey_booked (never regresses a later status).
-  if (input.apptType === "survey" && lead && lead.status === "website_enquiry") {
-    await sb.from("leads").update({ status: "survey_booked" as never }).eq("id", lead.id);
-    await sb.from("activities").insert({
-      lead_id: lead.id,
-      client_id: lead.client_id,
-      actor_id: userId,
-      type: "survey_booked",
-      summary: "Survey booked",
-      meta: { appointment_id: appt.id, starts_at: input.startsAt },
-    });
+  // Booking a survey nudges the lead to survey_booked (never regresses a later status)
+  // and counts as contact — you can't book a visit without having spoken to them.
+  if (input.apptType === "survey" && lead) {
+    await sb
+      .from("leads")
+      .update({ first_contacted_at: new Date().toISOString() })
+      .eq("id", lead.id)
+      .is("first_contacted_at", null);
+    if (lead.status === "website_enquiry") {
+      await sb.from("leads").update({ status: "survey_booked" as never }).eq("id", lead.id);
+      await sb.from("activities").insert({
+        lead_id: lead.id,
+        client_id: lead.client_id,
+        actor_id: userId,
+        type: "survey_booked",
+        summary: "Survey booked",
+        meta: { appointment_id: appt.id, starts_at: input.startsAt },
+      });
+    }
     revalidatePath(`/leads/${lead.id}`);
     revalidatePath("/leads");
   }
