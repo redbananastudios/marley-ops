@@ -203,8 +203,8 @@ export function AppointmentViewDialog({
 
           {lead ? <LeadContextPanels lead={lead} /> : null}
 
-          {/* map left, action stack right (full width of its column) */}
-          <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[3fr_2fr]">
+          {/* map left (75%), action stack right (25%) */}
+          <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[3fr_1fr]">
             {/* route from base — map + distance/time */}
             {embedSrc ? (
               <div className="overflow-hidden rounded-md border border-border">
