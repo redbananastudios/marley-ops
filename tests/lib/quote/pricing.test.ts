@@ -86,6 +86,16 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
     expect(q.grandTotal).toBe(910); // 700 + 60 + 150
   });
 
+  it('8b. mileage charge rounds to the nearest pound', () => {
+    // 9.7 + 9.7 = 19.4 mi × £2 = £38.80 → £39
+    const up = computeQuote(base({ deadMiles: 9.7, jobMiles: 9.7 }));
+    expect(up.mileageCost).toBe(39);
+    expect(up.subtotal).toBe(889); // 700 + 150 + 39
+    // 9.6 + 9.6 = 19.2 mi × £2 = £38.40 → £38
+    const down = computeQuote(base({ deadMiles: 9.6, jobMiles: 9.6 }));
+    expect(down.mileageCost).toBe(38);
+  });
+
   it('9. mileage null (not calculated) contributes 0', () => {
     const q = computeQuote(base({ deadMiles: null, jobMiles: null }));
     expect(q.mileageCost).toBeNull();

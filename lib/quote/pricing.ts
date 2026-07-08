@@ -178,7 +178,9 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
   let totalMiles: number | null = null;
   if (i.deadMiles !== null && i.jobMiles !== null) {
     totalMiles = i.deadMiles + i.jobMiles;
-    mileageCost = totalMiles * pricing.mileageRate;
+    // Deliberate deviation from the live tool (Peter, 2026-07-08): the mileage
+    // charge rounds to the nearest pound so quotes don't carry 80p tails.
+    mileageCost = Math.round(totalMiles * pricing.mileageRate);
   }
 
   const collectAccessM = i.collectAccessM || 0;
