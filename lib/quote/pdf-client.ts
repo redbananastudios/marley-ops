@@ -308,10 +308,10 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   });
   const spacer = (h = 8) => ({ text: "", margin: [0, 0, 0, h] as number[] });
 
-  /** White card with 0.8pt border; inner stack padded 14pt. */
+  /** White card with 0.8pt border; inner stack padded. */
   const card = (inner: any[], fill = C.white) => ({
     unbreakable: true,
-    table: { widths: ["*"], body: [[{ stack: inner, margin: [14, 12, 14, 12] }]] },
+    table: { widths: ["*"], body: [[{ stack: inner, margin: [12, 10, 12, 10] }]] },
     layout: {
       hLineWidth: () => 0.8,
       vLineWidth: () => 0.8,
@@ -357,7 +357,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       {
         width: 250,
         stack: [
-          logoDataUri ? { image: "marleyLogo", width: 160, margin: [0, 0, 0, 10] } : { text: "", margin: [0, 0, 0, 10] },
+          logoDataUri ? { image: "marleyLogo", width: 108, margin: [0, 0, 0, 8] } : { text: "", margin: [0, 0, 0, 8] },
           contactRow("phone", "01747 637070"),
           contactRow("email", "hello@marleymoves.co.uk"),
           contactRow("web", "www.marleymoves.co.uk"),
@@ -384,11 +384,11 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       },
     ],
     columnGap: 14,
-    margin: [0, 0, 0, 10],
+    margin: [0, 0, 0, 8],
   });
   content.push({
     canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: C.red }],
-    margin: [0, 0, 0, 14],
+    margin: [0, 0, 0, 12],
   });
 
   // ═══ CLIENT + JOB CARDS ══════════════════════════════════════════════
@@ -444,7 +444,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       { width: "*", ...card(jobStack) },
     ],
     columnGap: 13,
-    margin: [0, 0, 0, 16],
+    margin: [0, 0, 0, 12],
   });
 
   // ═══ QUOTE BREAKDOWN ═════════════════════════════════════════════════
@@ -561,8 +561,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       hLineWidth: (i: number) => (i <= 1 ? 0 : 0.5),
       vLineWidth: () => 0,
       hLineColor: () => C.border,
-      paddingTop: () => 8,
-      paddingBottom: () => 7,
+      paddingTop: () => 7,
+      paddingBottom: () => 6,
       paddingLeft: () => 8,
       paddingRight: () => 8,
     },
@@ -649,7 +649,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       },
     ],
     columnGap: 10,
-    margin: [0, 14, 0, 16],
+    margin: [0, 12, 0, 12],
   });
 
   // ═══ ACCEPTANCE STRIP (QR + accept-URL slots) ════════════════════════
@@ -701,31 +701,31 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     pageBreak: "before",
     columns: [
       {
-        width: 250,
-        stack: [logoDataUri ? { image: "marleyLogo", width: 150 } : { text: "" }],
+        width: 130,
+        stack: [logoDataUri ? { image: "marleyLogo", width: 92 } : { text: "" }],
       },
-      { width: "*", text: "Quote Assumptions & Terms", bold: true, fontSize: 21, color: C.ink, alignment: "right", margin: [0, 12, 0, 0] },
+      { width: "*", text: "Quote Assumptions & Terms", bold: true, fontSize: 19, color: C.ink, alignment: "right", margin: [0, 26, 0, 0] },
     ],
     columnGap: 14,
-    margin: [0, 0, 0, 10],
+    margin: [0, 0, 0, 8],
   });
   content.push({
     canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: C.red }],
-    margin: [0, 0, 0, 6],
+    margin: [0, 0, 0, 4],
   });
 
   content.push({
     table: {
       widths: [40, "*"],
       body: TERMS.map((t) => [
-        { svg: outlineBadge(t.icon), border: [false, false, false, false], margin: [4, 8, 0, 8] },
+        { svg: outlineBadge(t.icon, 26, 13), border: [false, false, false, false], margin: [2, 6, 0, 6] },
         {
           stack: [
-            { text: t.title, bold: true, fontSize: 9.3, color: C.ink, margin: [0, 0, 0, 3] },
-            { text: t.body(deposit), fontSize: 7.4, lineHeight: 1.3, color: C.ink },
+            { text: t.title, bold: true, fontSize: 9.3, color: C.ink, margin: [0, 0, 0, 2] },
+            { text: t.body(deposit), fontSize: 7.4, lineHeight: 1.22, color: C.ink },
           ],
           border: [false, false, false, false],
-          margin: [8, 9, 0, 9],
+          margin: [8, 6, 0, 6],
         },
       ]),
     },
@@ -738,7 +738,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       paddingTop: () => 0,
       paddingBottom: () => 0,
     },
-    margin: [0, 6, 0, 14],
+    margin: [0, 4, 0, 10],
   });
 
   // ═══ BANK DETAILS + CUSTOMER ACCEPTANCE ══════════════════════════════
