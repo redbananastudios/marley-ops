@@ -155,7 +155,11 @@ export function QuoteBuilder({
   async function handleDownloadPdf() {
     setPdfBusy(true);
     try {
-      await downloadQuotePdf(values, breakdown, { quoteRef, estimatorName: estimatorName ?? undefined });
+      await downloadQuotePdf(values, breakdown, {
+        quoteRef,
+        estimatorName: estimatorName ?? undefined,
+        vatNumber: settings?.vatNumber || undefined,
+      });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the PDF.");
     } finally {
@@ -321,6 +325,7 @@ export function QuoteBuilder({
         leadId={leadId}
         clientId={clientId}
         estimatorName={estimatorName}
+        vatNumber={settings?.vatNumber || undefined}
       />
     </div>
   );

@@ -20,6 +20,8 @@ export interface BusinessSettings {
   costMisc: number;
   /** New quotes default to VAT enabled when true. */
   vatDefault: boolean;
+  /** VAT registration number — printed on the quote PDF footer (legal requirement). */
+  vatNumber: string;
   /** Yard/base location — mileage origin + the clients map "route from base". */
   baseLocation: string;
   /** Standard deposit £ — prefills "Request deposit" on a job (editable per job). */
@@ -40,6 +42,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   cost75t: 1800,
   costMisc: 0,
   vatDefault: true,
+  vatNumber: "",
   baseLocation: DEFAULT_BASE_LOCATION,
   defaultDeposit: 0,
 };
@@ -50,7 +53,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, base_location, default_deposit")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, base_location, default_deposit")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -65,6 +68,7 @@ export async function getBusinessSettings(
     cost75t: Number(data.cost_75t ?? DEFAULT_SETTINGS.cost75t),
     costMisc: Number(data.cost_misc ?? 0),
     vatDefault: data.vat_default ?? DEFAULT_SETTINGS.vatDefault,
+    vatNumber: (data.vat_number as string | null)?.trim() || "",
     baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
     defaultDeposit: Number(data.default_deposit ?? 0),
   };

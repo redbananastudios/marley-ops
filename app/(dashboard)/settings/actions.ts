@@ -74,6 +74,7 @@ const settingsSchema = z.object({
   cost75t: num,
   costMisc: num,
   vatDefault: z.boolean(),
+  vatNumber: z.string().trim().max(20),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
   defaultDeposit: num,
 });
@@ -109,6 +110,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_75t: v.cost75t,
       cost_misc: v.costMisc,
       vat_default: v.vatDefault,
+      vat_number: (v.vatNumber || null) as never,
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
     })

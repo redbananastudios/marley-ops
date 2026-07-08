@@ -210,6 +210,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           cost75t,
           costMisc: misc,
           vatDefault: true,
+          vatNumber: "",
           baseLocation: "",
           defaultDeposit: 0,
         },

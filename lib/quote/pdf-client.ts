@@ -6,11 +6,11 @@
  * <PdfLoader/> via next/script) and window for the cached logo data URI.
  * Every export guards for the browser + a loaded pdfMake before running.
  *
- * The doc-def layout, fonts, colours, line-item logic, totals panel + red
- * QUOTE TOTAL bar, route/ops cards, terms + bank details and the footer are
- * ported verbatim. The only change vs. the live tool is the data source:
- * the original read the DOM via gatherQuoteData(); here we take the typed
- * QuoteFormValues + a computed QuoteBreakdown as arguments.
+ * The doc-def layout, colours, route/ops cards, terms + bank details follow the
+ * live tool, with deliberate deviations (Peter, 2026-07-08): every charge in the
+ * subtotal is itemised (incl. the admin fee — a VAT document's lines must sum
+ * exactly), amounts are always N2 (0.00), the tax row reads "VAT", the QUOTE
+ * TOTAL bar uses Cormorant, and the footer carries the VAT number from Settings.
  */
 
 import { MILEAGE_RATE, type VehicleKey, type PackingKey, type FloorKey } from "./constants";
@@ -54,14 +54,14 @@ const PACK_LABELS: Record<PackingKey, string> = {
   full: "Full Pack Service",
 };
 
-/** £ formatter — verbatim from the live tool (fmtGBP, L2665). */
+/** £ formatter — ALWAYS two decimals (N2). Money on customer paperwork never
+ *  drops the pence; "£700" and "£38.8" read as sloppy on a VAT document. */
 const fmtGBP = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
     ? "—"
     : "£" +
       Number(n)
         .toFixed(2)
-        .replace(/\.00$/, "")
         .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
 const fmtDate = (d: Date): string =>
@@ -105,6 +105,8 @@ interface PdfMeta {
   quoteRef: string;
   estimatorName?: string;
   logoDataUri?: string;
+  /** VAT registration number (Settings) — rendered in the footer when set. */
+  vatNumber?: string;
 }
 
 /**
@@ -341,7 +343,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   if (b.mileageCost !== null)
     items.push({
       label: "Mileage",
-      detail: "Total mileage at £2.00/mi",
+      detail: "Total mileage at £2.00/mi, rounded to the nearest £",
       qty: (b.totalMiles as number).toFixed(1) + " mi",
       unit: MILEAGE_RATE,
       amount: b.mileageCost,
@@ -367,7 +369,9 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   if (b.congestion > 0) items.push({ label: "Congestion Charge", detail: "£20 per van", qty: b.vanCount, unit: 20, amount: b.congestion });
   if (b.tolls > 0) items.push({ label: "Toll Charges", detail: "", qty: 1, unit: b.tolls });
   if (b.parking > 0) items.push({ label: "Parking Permit", detail: "", qty: 1, unit: b.parking });
-  // Administration fee is rolled silently into the quote total — no line item, no disclaimer.
+  // EVERY charge in the subtotal appears as a line — a VAT document's items must
+  // sum exactly to the subtotal, so the admin fee is itemised, never rolled in.
+  if (b.adminFee > 0) items.push({ label: "Administration Fee", detail: "Booking & coordination", qty: 1, unit: b.adminFee });
 
   const headerCell = (text: string, alignment?: string) => ({
     text,
@@ -424,7 +428,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       { text: "−" + fmtGBP(b.discount), font: "Montserrat", bold: true, fontSize: 10, color: PDF_C.success, alignment: "right", border: [false, false, false, false] },
     ]);
   totalRows.push([
-    { text: b.vatEnabled ? "Tax (20%)" : "Tax (0%)", font: "Montserrat", fontSize: 10, color: PDF_C.muted, alignment: "right", border: [false, false, false, false] },
+    { text: b.vatEnabled ? "VAT (20%)" : "VAT (0%)", font: "Montserrat", fontSize: 10, color: PDF_C.muted, alignment: "right", border: [false, false, false, false] },
     { text: fmtGBP(b.vatAmount), font: "Montserrat", bold: true, fontSize: 10, color: PDF_C.ink, alignment: "right", border: [false, false, false, false] },
   ]);
 
@@ -447,8 +451,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
                   widths: ["*", "auto"],
                   body: [
                     [
-                      { text: "QUOTE TOTAL", font: "Montserrat", bold: true, fontSize: 13, color: "#FFFFFF", characterSpacing: 1.2, fillColor: PDF_C.red, margin: [16, 14, 0, 14], border: [false, false, false, false] },
-                      { text: fmtGBP(b.grandTotal), font: "Montserrat", bold: true, fontSize: 18, color: "#FFFFFF", alignment: "right", fillColor: PDF_C.red, margin: [0, 12, 18, 12], border: [false, false, false, false] },
+                      { text: "QUOTE TOTAL", font: "Cormorant", bold: true, fontSize: 15, color: "#FFFFFF", characterSpacing: 2, fillColor: PDF_C.red, margin: [16, 13, 0, 13], border: [false, false, false, false] },
+                      { text: fmtGBP(b.grandTotal), font: "Cormorant", bold: true, fontSize: 21, color: "#FFFFFF", alignment: "right", fillColor: PDF_C.red, margin: [0, 10, 18, 10], border: [false, false, false, false] },
                     ],
                   ],
                 },
@@ -574,7 +578,15 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
           text: [
             { text: "Marley ", font: "Cormorant", bold: true, fontSize: 10, color: PDF_C.ink },
             { text: "Moves", font: "Cormorant", bold: true, fontSize: 10, color: PDF_C.red },
-            { text: "  ·  Company No. 15914266  ·  01747 637070", font: "Montserrat", fontSize: 7.5, color: PDF_C.muted },
+            {
+              text:
+                "  ·  Company No. 15914266" +
+                (meta.vatNumber ? `  ·  VAT No. ${meta.vatNumber}` : "") +
+                "  ·  01747 637070",
+              font: "Montserrat",
+              fontSize: 7.5,
+              color: PDF_C.muted,
+            },
           ],
           noWrap: true,
         },

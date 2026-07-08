@@ -47,6 +47,7 @@ export function SendQuoteDialog({
   leadId,
   clientId,
   estimatorName,
+  vatNumber,
   onSent,
 }: {
   open: boolean;
@@ -58,6 +59,8 @@ export function SendQuoteDialog({
   leadId?: string | null;
   clientId?: string | null;
   estimatorName?: string | null;
+  /** VAT registration number (Settings) — printed on the attached PDF's footer. */
+  vatNumber?: string;
   onSent?: () => void;
 }) {
   const [email, setEmail] = useState(values.customer.email || "");
@@ -86,6 +89,7 @@ export function SendQuoteDialog({
       const attachmentBase64 = await quotePdfBase64(values, breakdown, {
         quoteRef,
         estimatorName: estimatorName ?? undefined,
+        vatNumber,
       });
 
       const result = await sendCommunication({

@@ -17,7 +17,7 @@ import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/sett
 import type { BusinessSettings } from "@/lib/settings";
 
 interface FieldDef {
-  key: Exclude<keyof BusinessSettings, "vatDefault" | "baseLocation">;
+  key: Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation">;
   label: string;
   hint: string;
   unit: "£" | "£/mile" | "£/hour" | "£/day";
@@ -78,8 +78,9 @@ export function SettingsForm({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [vatDefault, setVatDefault] = useState(initial.vatDefault);
+  const [vatNumber, setVatNumber] = useState(initial.vatNumber);
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
-  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "baseLocation">, string>>({
+  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation">, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costFuel75PerMile: String(initial.costFuel75PerMile),
@@ -106,6 +107,7 @@ export function SettingsForm({
       costMisc: Number(v.costMisc),
       defaultDeposit: Number(v.defaultDeposit),
       vatDefault,
+      vatNumber: vatNumber.trim(),
       baseLocation: baseLocation.trim(),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
@@ -154,6 +156,21 @@ export function SettingsForm({
         <p className="mt-1.5 text-xs text-mist-400">
           The yard mileage starts from, and the origin for the &quot;route from base&quot; map on a client.
         </p>
+      </div>
+
+      {/* VAT registration number — printed on quote PDFs (legal requirement) */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-vat-number">VAT registration number</Label>
+        <input
+          id="set-vat-number"
+          type="text"
+          value={vatNumber}
+          disabled={!canEdit || busy}
+          onChange={(e) => setVatNumber(e.target.value)}
+          placeholder="e.g. GB 123 4567 89"
+          className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1.5 text-xs text-mist-400">Printed in the quote PDF footer. Required on customer paperwork once VAT registered.</p>
       </div>
 
       {/* VAT default for new quotes */}
