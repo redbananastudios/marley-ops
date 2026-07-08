@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, MessageCircle, MessageSquare, Pencil, Trash2, CheckCircle2, Ban, Loader2, Clock } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Pencil, FileText, CheckCircle2, Ban, Loader2, Clock, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CommsDialog } from "@/components/comms/comms-dialog";
-import { updateAppointment, deleteAppointment } from "@/app/(dashboard)/schedule/actions";
+import { updateAppointment } from "@/app/(dashboard)/schedule/actions";
 import { LeadContextPanels, type EditTarget, type LeadOption } from "./appointment-dialog";
 
 function waNumber(phone: string | null | undefined): string | null {
@@ -47,6 +47,7 @@ export function AppointmentViewDialog({
   estimatorName,
   baseLocation,
   onEdit,
+  onReschedule,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -55,6 +56,7 @@ export function AppointmentViewDialog({
   estimatorName: string | null;
   baseLocation: string;
   onEdit: () => void;
+  onReschedule: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -113,19 +115,26 @@ export function AppointmentViewDialog({
     }
   }
 
-  async function onDelete() {
+  async function onCancelAppointment() {
     if (!target) return;
-    if (!confirm("Delete this appointment? This cannot be undone.")) return;
+    if (!confirm("Cancel this appointment? It will be removed from the diary (the lead keeps its history).")) return;
+    await setStatus("cancelled", "Appointment cancelled and removed from the diary.");
+  }
+
+  /** The estimator quotes from the visit — providing the quote IS attending it. */
+  async function onQuote() {
+    if (!target || !lead) return;
     setBusy(true);
     try {
-      const r = await deleteAppointment(target.id);
-      if (!r.ok) {
-        toast.error(("error" in r && r.error) || "Could not delete.");
-        return;
+      if (target.status === "scheduled") {
+        const r = await updateAppointment(target.id, { status: "completed" });
+        if (!r.ok) {
+          toast.error(r.error || "Could not mark the visit attended.");
+          return;
+        }
       }
-      toast.success("Appointment deleted.");
       onOpenChange(false);
-      router.refresh();
+      router.push(`/quotes/new?leadId=${lead.id}`);
     } finally {
       setBusy(false);
     }
@@ -141,9 +150,17 @@ export function AppointmentViewDialog({
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle className="font-display flex flex-wrap items-center gap-2">
+          <DialogTitle className="font-display flex flex-wrap items-center gap-2 pr-6">
             {target.title || (target.apptType === "removal" ? "Removal" : "Survey")}
             <span className={cn("rounded-pill px-2 py-0.5 text-xs font-medium", badge.cls)}>{badge.label}</span>
+            <button
+              type="button"
+              onClick={onEdit}
+              className="focus-ring inline-flex min-h-8 items-center gap-1 rounded-md border border-input bg-card px-2.5 text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
+            >
+              <Pencil className="size-3.5" strokeWidth={1.75} />
+              Edit
+            </button>
           </DialogTitle>
           <DialogDescription className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="inline-flex items-center gap-1">
@@ -155,38 +172,34 @@ export function AppointmentViewDialog({
         </DialogHeader>
 
         <div className="grid gap-4">
-          {/* quick actions — one tap each, internal comms for messaging */}
-          <div className="flex flex-wrap gap-2">
-            {lead?.phone ? (
-              <a href={`tel:${lead.phone}`} className={cn(actionBtn, "text-[#db2777]")}>
-                <Phone className="size-4" strokeWidth={1.75} />
-                Call
-              </a>
-            ) : null}
-            {wa ? (
-              <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={cn(actionBtn, "text-[#16a34a]")}>
-                <MessageCircle className="size-4" strokeWidth={1.75} />
-                WhatsApp
-              </a>
-            ) : null}
-            {lead ? (
+          {/* quick contact actions — one row, equal widths */}
+          {lead ? (
+            <div className="flex gap-2">
+              {lead.phone ? (
+                <a href={`tel:${lead.phone}`} className={cn(actionBtn, "min-w-0 flex-1")}>
+                  <Phone className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
+                  Call
+                </a>
+              ) : null}
+              {wa ? (
+                <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={cn(actionBtn, "min-w-0 flex-1")}>
+                  <MessageCircle className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
+                  WhatsApp
+                </a>
+              ) : null}
               <CommsDialog
                 leadId={lead.id}
                 defaultEmail={lead.email ?? undefined}
                 defaultPhone={lead.phone ?? undefined}
                 trigger={
-                  <button type="button" className={cn(actionBtn, "text-[#2563eb]")}>
-                    <MessageSquare className="size-4" strokeWidth={1.75} />
+                  <button type="button" className={cn(actionBtn, "min-w-0 flex-1")}>
+                    <MessageSquare className="size-4 shrink-0 text-[#2563eb]" strokeWidth={1.75} />
                     Message
                   </button>
                 }
               />
-            ) : null}
-            <button type="button" onClick={onEdit} className={cn(actionBtn, "ml-auto")}>
-              <Pencil className="size-4" strokeWidth={1.75} />
-              Edit
-            </button>
-          </div>
+            </div>
+          ) : null}
 
           {lead ? <LeadContextPanels lead={lead} /> : null}
 
@@ -226,24 +239,32 @@ export function AppointmentViewDialog({
 
           {target.notes ? <p className="text-sm text-mist-500">{target.notes}</p> : null}
 
-          {/* visit outcome — this drives estimator pay + win stats */}
+          {/* visit outcome — quoting IS attending; Mark done covers no-quote visits */}
           <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            {lead && target.apptType === "survey" ? (
+              <Button type="button" onClick={onQuote} disabled={busy} className="h-11">
+                {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <FileText className="size-4" strokeWidth={1.75} />}
+                Quote
+              </Button>
+            ) : null}
             {target.status !== "completed" ? (
               <Button type="button" variant="ghost" onClick={() => setStatus("completed", "Visit marked completed.")} disabled={busy} className="h-11 text-success hover:bg-success-bg hover:text-success">
-                {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <CheckCircle2 className="size-4" strokeWidth={1.75} />}
+                <CheckCircle2 className="size-4" strokeWidth={1.75} />
                 Mark done
               </Button>
             ) : null}
             {target.status === "scheduled" ? (
-              <Button type="button" variant="ghost" onClick={() => setStatus("cancelled", "Visit cancelled.")} disabled={busy} className="h-11 text-mist-500 hover:text-foreground">
-                <Ban className="size-4" strokeWidth={1.75} />
-                Cancel visit
+              <Button type="button" variant="ghost" onClick={onReschedule} disabled={busy} className="h-11 text-mist-500 hover:text-foreground">
+                <CalendarClock className="size-4" strokeWidth={1.75} />
+                Reschedule
               </Button>
             ) : null}
-            <Button type="button" variant="ghost" onClick={onDelete} disabled={busy} className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint ml-auto h-11">
-              <Trash2 className="size-4" strokeWidth={1.75} />
-              Delete
-            </Button>
+            {target.status === "scheduled" ? (
+              <Button type="button" variant="ghost" onClick={onCancelAppointment} disabled={busy} className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint ml-auto h-11">
+                <Ban className="size-4" strokeWidth={1.75} />
+                Cancel appointment
+              </Button>
+            ) : null}
           </div>
         </div>
       </DialogContent>

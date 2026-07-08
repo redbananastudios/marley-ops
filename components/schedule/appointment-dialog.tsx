@@ -158,18 +158,18 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
           {lead.phone ? (
             <a
               href={`tel:${lead.phone}`}
-              className="focus-ring -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#db2777] hover:bg-muted"
+              className="focus-ring -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-foreground hover:bg-muted"
             >
-              <Phone className="size-4 shrink-0" strokeWidth={1.75} />
+              <Phone className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
               {lead.phone}
             </a>
           ) : null}
           {lead.email ? (
             <a
               href={`mailto:${lead.email}`}
-              className="focus-ring -ml-2 inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#2563eb] hover:bg-muted"
+              className="focus-ring -ml-2 inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-foreground hover:bg-muted"
             >
-              <Mail className="size-4 shrink-0" strokeWidth={1.75} />
+              <Mail className="size-4 shrink-0 text-mm-red" strokeWidth={1.75} />
               <span className="truncate">{lead.email}</span>
             </a>
           ) : null}

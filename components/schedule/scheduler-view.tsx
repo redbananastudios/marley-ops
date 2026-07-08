@@ -44,6 +44,7 @@ import {
   type EstimatorOption,
 } from "./appointment-dialog";
 import { AppointmentViewDialog } from "./appointment-view-dialog";
+import { RescheduleDialog } from "./reschedule-dialog";
 
 export type SchedulerKind = "survey" | "removal";
 
@@ -110,6 +111,9 @@ export function SchedulerView({
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
+  const [reschedOpen, setReschedOpen] = useState(false);
+  const [reschedTarget, setReschedTarget] = useState<EditTarget | null>(null);
+  const [reschedPresetDate, setReschedPresetDate] = useState<Date | null>(null);
   const [presetStart, setPresetStart] = useState<string | undefined>();
   const [presetEnd, setPresetEnd] = useState<string | undefined>();
   const [presetAllDay, setPresetAllDay] = useState<boolean | undefined>();
@@ -143,11 +147,12 @@ export function SchedulerView({
     }
   }, [presetLeadId]);
 
+  // Cancelled appointments leave the diary entirely (the lead keeps the history).
   // On the removals calendar, surveys are hidden unless "Show surveys" is on.
-  const shown = useMemo(
-    () => (view === "removal" && !showSurveys ? events.filter((e) => e.appt_type === "removal") : events),
-    [events, view, showSurveys],
-  );
+  const shown = useMemo(() => {
+    const live = events.filter((e) => e.status !== "cancelled");
+    return view === "removal" && !showSurveys ? live.filter((e) => e.appt_type === "removal") : live;
+  }, [events, view, showSurveys]);
 
   const fcEvents: EventInput[] = useMemo(
     () =>
@@ -261,7 +266,41 @@ export function SchedulerView({
   const onEventMove = useCallback(
     async (arg: EventDropArg | EventResizeDoneArg) => {
       const ev = arg.event;
-      if (!ev.start || !ev.end) {
+      if (!ev.start) {
+        arg.revert();
+        return;
+      }
+      // Month view drops give a DATE but no meaningful time — revert the drop and
+      // open the reschedule dialog instead (time entry + that day's availability).
+      if (arg.view.type === "dayGridMonth") {
+        const ep = ev.extendedProps as {
+          apptType: ApptType;
+          leadId: string | null;
+          estimatorId: string | null;
+          status: string | null;
+          location: string | null;
+          title: string | null;
+        };
+        const original = events.find((e) => e.id === ev.id);
+        setReschedTarget({
+          id: ev.id,
+          apptType: ep.apptType,
+          leadId: ep.leadId ?? null,
+          estimatorId: ep.estimatorId ?? null,
+          status: ep.status ?? null,
+          title: ep.title ?? ev.title,
+          location: ep.location ?? null,
+          notes: null,
+          startsAt: original?.starts_at ?? ev.start.toISOString(),
+          endsAt: original?.ends_at ?? ev.end?.toISOString() ?? "",
+        });
+        setReschedPresetDate(ev.start);
+        arg.revert();
+        setReschedOpen(true);
+        return;
+      }
+      // Time-grid drags land on an exact slot with the day's availability visible.
+      if (!ev.end) {
         arg.revert();
         return;
       }
@@ -281,7 +320,7 @@ export function SchedulerView({
         toast.success("Appointment moved.");
       }
     },
-    [],
+    [events],
   );
 
   return (
@@ -382,6 +421,21 @@ export function SchedulerView({
           setEditTarget(viewTarget);
           setDialogOpen(true);
         }}
+        onReschedule={() => {
+          setViewOpen(false);
+          setReschedTarget(viewTarget);
+          setReschedPresetDate(null);
+          setReschedOpen(true);
+        }}
+      />
+
+      <RescheduleDialog
+        open={reschedOpen}
+        onOpenChange={setReschedOpen}
+        target={reschedTarget}
+        estimatorName={reschedTarget?.estimatorId ? estimatorById.get(reschedTarget.estimatorId) ?? null : null}
+        events={events}
+        presetDate={reschedPresetDate}
       />
 
       <AppointmentDialog
