@@ -442,7 +442,7 @@ export function SchedulerView({
         }
         .mm-scheduler .fc .fc-event {
           border-radius: 0.375rem;
-          padding: 3px 6px;
+          padding: 2px 6px;
           font-size: 0.75rem;
           min-height: 44px;
           cursor: pointer;
@@ -451,13 +451,14 @@ export function SchedulerView({
           min-height: 0;
           padding: 2px 5px;
         }
-        /* Event card — white-on-red, readable at a glance */
+        /* Event card — white-on-red, readable at a glance. Tight line metrics so
+           {time} / {name} / {address} all fit inside a 1-hour slot. */
         .mm-evt-card {
           display: flex;
           flex-direction: column;
-          gap: 1px;
+          gap: 0;
           min-width: 0;
-          line-height: 1.3;
+          line-height: 1.25;
         }
         .mm-evt-top {
           display: flex;
@@ -473,13 +474,13 @@ export function SchedulerView({
         }
         .mm-evt-name {
           font-weight: 700;
-          font-size: 0.8125rem;
+          font-size: 0.78rem;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
         .mm-evt-loc {
-          font-size: 0.6875rem;
+          font-size: 0.65rem;
           opacity: 0.85;
           white-space: nowrap;
           overflow: hidden;
