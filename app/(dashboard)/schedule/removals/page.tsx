@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getBusinessSettings } from "@/lib/settings";
 import { PageHeader } from "@/components/page-header";
 import {
   SchedulerView,
@@ -34,6 +35,8 @@ export default async function RemovalsSchedulePage({
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
+  const { baseLocation } = await getBusinessSettings(sb);
+
   // Per-lead survey estimator (a removal inherits it read-only).
   const surveyEst = new Map<string, string>();
   for (const a of appts ?? []) {
@@ -68,6 +71,7 @@ export default async function RemovalsSchedulePage({
         defaultEstimatorId={user?.id ?? null}
         presetLeadId={leadId ?? null}
         presetLocation={presetLocation}
+        baseLocation={baseLocation}
       />
     </div>
   );

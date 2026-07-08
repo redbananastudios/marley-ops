@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, CheckCircle2, Phone, Mail, User, Home, ArrowRight, StickyNote } from "lucide-react";
+import { Loader2, Trash2, Phone, Mail, User, Home, ArrowRight, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -28,13 +28,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  AddressFields,
-  formatAddress,
-  addressFromString,
-  BLANK_ADDRESS,
-  type AddressValue,
-} from "@/components/places/address-fields";
 import { LeadCombobox } from "@/components/schedule/lead-combobox";
 import {
   Select,
@@ -124,8 +117,9 @@ function defaultDuration(type: ApptType): number {
 }
 
 /** Read-only context panels for the selected lead: who the customer is + what the
- *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets). */
-function LeadContextPanels({ lead }: { lead: LeadOption }) {
+ *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets).
+ *  Shared with the view-first appointment modal. */
+export function LeadContextPanels({ lead }: { lead: LeadOption }) {
   // Address + postcode together — the postcode is what the crew navigates by.
   const addrLines = (addr: string | null | undefined, pc: string | null | undefined): string[] => {
     const a = (addr || "").trim();
@@ -249,14 +243,14 @@ export function AppointmentDialog({
 }) {
   const router = useRouter();
   const isEdit = !!edit;
+  // The type is decided by the surface (Surveys page books surveys, Removals page
+  // books removals) — never a form choice.
+  const apptType: ApptType = edit?.apptType ?? defaultType;
 
-  const [apptType, setApptType] = useState<ApptType>(defaultType);
   const [leadId, setLeadId] = useState<string>(NO_LEAD);
   const [estimatorId, setEstimatorId] = useState<string>(NO_EST);
-  const [status, setStatus] = useState<string>("scheduled");
   const [start, setStart] = useState<string>("");
   const [end, setEnd] = useState<string>("");
-  const [address, setAddress] = useState<AddressValue>(BLANK_ADDRESS);
   const [notes, setNotes] = useState<string>("");
   const [allDay, setAllDay] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
@@ -265,18 +259,14 @@ export function AppointmentDialog({
   useEffect(() => {
     if (!open) return;
     if (edit) {
-      setApptType(edit.apptType);
       setLeadId(edit.leadId ?? NO_LEAD);
       setEstimatorId(edit.estimatorId ?? NO_EST);
-      setStatus(edit.status ?? "scheduled");
       setStart(toLocalInput(edit.startsAt));
       setEnd(toLocalInput(edit.endsAt));
-      setAddress(addressFromString(edit.location));
       setNotes(edit.notes ?? "");
       setAllDay(false);
     } else {
       const s = presetStart ?? toLocalInput(roundUpTo15(new Date()));
-      setApptType(defaultType);
       setLeadId(presetLeadId ?? NO_LEAD);
       // Surveys default the estimator to the booker; removals inherit it from the
       // lead's survey (read-only), so they never seed the current user.
@@ -284,10 +274,8 @@ export function AppointmentDialog({
       setEstimatorId(
         defaultType === "removal" ? presetLead?.surveyEstimatorId ?? NO_EST : defaultEstimatorId ?? NO_EST,
       );
-      setStatus("scheduled");
       setStart(s);
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
-      setAddress(addressFromString(presetLocation ?? ""));
       setNotes("");
       setAllDay(!!presetAllDay);
     }
@@ -311,27 +299,13 @@ export function AppointmentDialog({
     setEstimatorId(l?.surveyEstimatorId ?? NO_EST);
   }
 
-  // Switching type re-bases the end on the type's default duration.
-  function onTypeChange(v: ApptType) {
-    setApptType(v);
-    if (start) setEnd(addHoursLocal(start, defaultDuration(v)));
-    // Moving to a removal: pull the estimator from the lead's survey (read-only there).
-    if (v === "removal" && !isEdit) inheritSurveyEstimator(leadId);
-  }
-
   // Surveys are a fixed 1-hour visit (no end field — just a label). Removals use
   // the editable end. Derive the effective end the same way for both submit paths.
   const effectiveEnd = apptType === "survey" ? addHoursLocal(start, SURVEY_HOURS) : end;
   const surveyEndLabel = start ? addHoursLocal(start, SURVEY_HOURS).slice(11, 16) : "";
 
-  // Picking a lead pre-fills the location with its address (unless already set).
   function selectLead(id: string) {
     setLeadId(id);
-    if (id !== NO_LEAD && !formatAddress(address).trim()) {
-      const l = leads.find((x) => x.id === id);
-      const addr = l?.from_address || l?.from_postcode || "";
-      if (addr) setAddress(addressFromString(addr));
-    }
     // A removal inherits the chosen lead's survey estimator (read-only).
     if (apptType === "removal" && !isEdit) inheritSurveyEstimator(id);
   }
@@ -353,11 +327,10 @@ export function AppointmentDialog({
       const endsAt = localToIso(endLocal);
 
       if (isEdit && edit) {
-        // Persist the editable metadata. Title is system-generated — never patched here.
+        // Persist the editable metadata. Title/location/status are managed elsewhere
+        // (system title, lead address, view-modal actions) — never patched here.
         const meta = await updateAppointment(edit.id, {
-          location: formatAddress(address),
           notes,
-          status,
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
         });
         if (!meta.ok) {
@@ -380,7 +353,8 @@ export function AppointmentDialog({
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
           startsAt,
           endsAt,
-          location: formatAddress(address) || undefined,
+          // location intentionally omitted — the server derives it from the lead's
+          // pickup address (the survey happens where the move starts).
           notes: notes.trim() || undefined,
           allDay,
         });
@@ -399,23 +373,6 @@ export function AppointmentDialog({
           toast.success(apptType === "survey" ? "Survey booked." : "Removal scheduled.");
         }
       }
-      onOpenChange(false);
-      router.refresh();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function markCompleted() {
-    if (!edit) return;
-    setBusy(true);
-    try {
-      const r = await updateAppointment(edit.id, { status: "completed" });
-      if (!r.ok) {
-        toast.error(r.error || "Could not update.");
-        return;
-      }
-      toast.success("Visit marked completed.");
       onOpenChange(false);
       router.refresh();
     } finally {
@@ -452,155 +409,96 @@ export function AppointmentDialog({
       >
         <DialogHeader>
           <DialogTitle className="font-display">
-            {isEdit ? "Edit appointment" : "New appointment"}
+            {isEdit ? `Edit ${apptType}` : apptType === "survey" ? "Book a survey" : "Book a removal"}
           </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Update the details, move the time, or remove it."
-              : "Book a survey or removal. Surveys linked to a lead move that lead to survey booked."}
+              ? "Change the estimator, time or notes. The visit happens at the customer's pickup address."
+              : "Pick the customer and time — the visit address comes from their move."}
           </DialogDescription>
         </DialogHeader>
 
-        {/* Two columns on desktop so the form stays short enough to reach the buttons. */}
-        <div className="grid gap-x-6 gap-y-4 py-1 md:grid-cols-2">
+        <div className="grid gap-4 py-1">
           {/* Who + what this visit is about — read-only context for the chosen lead. */}
           {leadId !== NO_LEAD && leads.find((l) => l.id === leadId) ? (
             <LeadContextPanels lead={leads.find((l) => l.id === leadId)!} />
           ) : null}
 
-          {/* Left — the appointment details */}
-          <div className="grid content-start gap-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="appt-type">Type</Label>
-                <Select value={apptType} onValueChange={(v) => onTypeChange(v as ApptType)}>
-                  <SelectTrigger id="appt-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="survey">Survey</SelectItem>
-                    <SelectItem value="removal">Removal</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label htmlFor="appt-estimator">Estimator</Label>
-                {apptType === "removal" ? (
-                  <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-mist-500">
-                    {estimatorName(estimatorId) ?? "From the survey"}
-                  </div>
-                ) : (
-                  <Select value={estimatorId} onValueChange={setEstimatorId}>
-                    <SelectTrigger id="appt-estimator">
-                      <SelectValue placeholder="Unassigned" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NO_EST}>Unassigned</SelectItem>
-                      {estimators.map((e) => (
-                        <SelectItem key={e.id} value={e.id}>
-                          {e.full_name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
+          {/* The customer is fixed once booked — pick only when creating. */}
+          {!isEdit ? (
+            <div className="grid gap-2">
+              <Label htmlFor="appt-lead">
+                Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
+              </Label>
+              <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
             </div>
+          ) : null}
 
-            {/* The customer is fixed once booked — pick only when creating. */}
-            {!isEdit ? (
-              <div className="grid gap-2">
-                <Label htmlFor="appt-lead">
-                  Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
-                </Label>
-                <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
-              </div>
-            ) : null}
-
-            {isEdit ? (
-              <div className="grid gap-2">
-                <Label htmlFor="appt-status">Status</Label>
-                <Select value={status} onValueChange={setStatus}>
-                  <SelectTrigger id="appt-status">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="scheduled">Scheduled</SelectItem>
-                    <SelectItem value="completed">Completed (attended)</SelectItem>
-                    <SelectItem value="cancelled">Cancelled / no-show</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
-
-            <div className={cn("grid gap-3", apptType === "removal" ? "grid-cols-2" : "grid-cols-1")}>
-              <div className="grid gap-2">
-                <Label htmlFor="appt-start">Starts</Label>
-                <Input id="appt-start" type="datetime-local" step={900} value={start} onChange={(e) => onStartChange(e.target.value)} />
-              </div>
+          <div className={cn("grid gap-3", apptType === "removal" ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+            <div className="grid gap-2">
+              <Label htmlFor="appt-estimator">Estimator</Label>
               {apptType === "removal" ? (
-                <div className="grid gap-2">
-                  <Label htmlFor="appt-end">Ends</Label>
-                  <Input id="appt-end" type="datetime-local" step={900} value={end} onChange={(e) => setEnd(e.target.value)} />
+                <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-mist-500">
+                  {estimatorName(estimatorId) ?? "From the survey"}
                 </div>
-              ) : null}
+              ) : (
+                <Select value={estimatorId} onValueChange={setEstimatorId}>
+                  <SelectTrigger id="appt-estimator">
+                    <SelectValue placeholder="Unassigned" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_EST}>Unassigned</SelectItem>
+                    {estimators.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.full_name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
-            {apptType === "survey" ? (
-              <p className="-mt-2 text-xs text-mist-400">
-                Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}.
-              </p>
+            <div className="grid gap-2">
+              <Label htmlFor="appt-start">Starts</Label>
+              <Input id="appt-start" type="datetime-local" step={900} value={start} onChange={(e) => onStartChange(e.target.value)} />
+            </div>
+            {apptType === "removal" ? (
+              <div className="grid gap-2">
+                <Label htmlFor="appt-end">Ends</Label>
+                <Input id="appt-end" type="datetime-local" step={900} value={end} onChange={(e) => setEnd(e.target.value)} />
+              </div>
             ) : null}
-
           </div>
+          {apptType === "survey" ? (
+            <p className="-mt-2 text-xs text-mist-400">
+              Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}. Who does the visit drives their pay + win stats.
+            </p>
+          ) : null}
 
-          {/* Right — location + notes */}
-          <div className="grid content-start gap-4">
-            <div className="grid gap-2">
-              <Label>Location</Label>
-              <AddressFields value={address} onChange={setAddress} idPrefix="appt-loc" />
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="appt-notes">Notes</Label>
-              <textarea
-                id="appt-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                className="border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
-                placeholder="Anything the crew needs to know"
-              />
-            </div>
-            <p className="text-xs text-mist-400">Who does this visit drives their pay + win stats.</p>
+          <div className="grid gap-2">
+            <Label htmlFor="appt-notes">Notes</Label>
+            <textarea
+              id="appt-notes"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={2}
+              className="border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
+              placeholder="Anything the crew needs to know"
+            />
           </div>
         </div>
 
         <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
           {isEdit ? (
-            <div className="flex items-center gap-1">
-              {status !== "completed" ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  onClick={markCompleted}
-                  disabled={busy}
-                  className="h-11 text-success hover:bg-success-bg hover:text-success"
-                >
-                  <CheckCircle2 className="size-4" strokeWidth={1.75} />
-                  Mark done
-                </Button>
-              ) : null}
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={onDelete}
-                disabled={busy}
-                className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint h-11"
-              >
-                <Trash2 className="size-4" strokeWidth={1.75} />
-                Delete
-              </Button>
-            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={onDelete}
+              disabled={busy}
+              className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint h-11"
+            >
+              <Trash2 className="size-4" strokeWidth={1.75} />
+              Delete
+            </Button>
           ) : (
             <span />
           )}

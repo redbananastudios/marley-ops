@@ -87,7 +87,8 @@ export async function createAppointment(input: CreateAppointmentInput) {
       starts_at: input.startsAt,
       ends_at: input.endsAt,
       all_day: input.allDay ?? false,
-      location: input.location || null,
+      // The visit happens where the move starts — derived from the lead, not typed in.
+      location: input.location || (lead ? [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null : null),
       notes: input.notes || null,
       status: "scheduled",
     })

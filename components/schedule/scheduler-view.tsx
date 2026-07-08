@@ -43,6 +43,7 @@ import {
   type LeadOption,
   type EstimatorOption,
 } from "./appointment-dialog";
+import { AppointmentViewDialog } from "./appointment-view-dialog";
 
 export type SchedulerKind = "survey" | "removal";
 
@@ -91,6 +92,7 @@ export function SchedulerView({
   defaultEstimatorId,
   presetLeadId,
   presetLocation,
+  baseLocation,
 }: {
   view: SchedulerKind;
   events: SchedulerEvent[];
@@ -100,10 +102,14 @@ export function SchedulerView({
   /** when navigated from a lead's "Book survey", auto-open the dialog prefilled */
   presetLeadId?: string | null;
   presetLocation?: string | null;
+  /** business base address — origin for the view modal's route map */
+  baseLocation: string;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
   const [presetStart, setPresetStart] = useState<string | undefined>();
   const [presetEnd, setPresetEnd] = useState<string | undefined>();
   const [presetAllDay, setPresetAllDay] = useState<boolean | undefined>();
@@ -226,6 +232,8 @@ export function SchedulerView({
     [openCreate],
   );
 
+  // Clicking an event opens the read-only VIEW modal first — editing is a
+  // deliberate second step from there.
   const onEventClick = useCallback((arg: EventClickArg) => {
     const ep = arg.event.extendedProps as {
       apptType: ApptType;
@@ -235,7 +243,7 @@ export function SchedulerView({
       location: string | null;
       title: string | null;
     };
-    setEditTarget({
+    setViewTarget({
       id: arg.event.id,
       apptType: ep.apptType,
       leadId: ep.leadId ?? null,
@@ -247,7 +255,7 @@ export function SchedulerView({
       startsAt: arg.event.start ? arg.event.start.toISOString() : "",
       endsAt: arg.event.end ? arg.event.end.toISOString() : "",
     });
-    setDialogOpen(true);
+    setViewOpen(true);
   }, []);
 
   const onEventMove = useCallback(
@@ -362,6 +370,20 @@ export function SchedulerView({
         New appointment
       </button>
 
+      <AppointmentViewDialog
+        open={viewOpen}
+        onOpenChange={setViewOpen}
+        target={viewTarget}
+        lead={viewTarget?.leadId ? leads.find((l) => l.id === viewTarget.leadId) ?? null : null}
+        estimatorName={viewTarget?.estimatorId ? estimatorById.get(viewTarget.estimatorId) ?? null : null}
+        baseLocation={baseLocation}
+        onEdit={() => {
+          setViewOpen(false);
+          setEditTarget(viewTarget);
+          setDialogOpen(true);
+        }}
+      />
+
       <AppointmentDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
@@ -442,7 +464,7 @@ export function SchedulerView({
         }
         .mm-scheduler .fc .fc-event {
           border-radius: 0.375rem;
-          padding: 2px 6px;
+          padding: 1px 5px;
           font-size: 0.75rem;
           min-height: 44px;
           cursor: pointer;
@@ -467,20 +489,20 @@ export function SchedulerView({
           gap: 4px;
         }
         .mm-evt-time {
-          font-size: 0.6875rem;
+          font-size: 0.65rem;
           font-weight: 600;
           opacity: 0.9;
           font-variant-numeric: tabular-nums;
         }
         .mm-evt-name {
           font-weight: 700;
-          font-size: 0.78rem;
+          font-size: 0.75rem;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
         }
         .mm-evt-loc {
-          font-size: 0.65rem;
+          font-size: 0.625rem;
           opacity: 0.85;
           white-space: nowrap;
           overflow: hidden;
