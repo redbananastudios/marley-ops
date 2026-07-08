@@ -10,7 +10,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Phone, MessageCircle, MessageSquare, Pencil, FileText, CheckCircle2, Ban, Loader2, Clock, CalendarClock } from "lucide-react";
+import { Phone, MessageCircle, MessageSquare, Pencil, FileText, Ban, Loader2, Clock, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -203,69 +203,72 @@ export function AppointmentViewDialog({
 
           {lead ? <LeadContextPanels lead={lead} /> : null}
 
-          {/* route from base — map + distance/time */}
-          {embedSrc ? (
-            <div className="overflow-hidden rounded-md border border-border">
-              <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-                <p className="text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">Route from base</p>
-                <div className="ml-auto flex items-center gap-1.5">
-                  {route === "loading" ? (
-                    <span className="text-xs text-mist-400">Working out the route…</span>
-                  ) : route === "error" ? (
-                    <span className="text-xs text-mist-400">Distance unavailable</span>
-                  ) : (
-                    <>
-                      <span className="rounded-pill bg-mm-red-tint px-2 py-0.5 text-xs font-semibold tabular text-mm-red-deep">
-                        {route.miles} mi
-                      </span>
-                      {route.durationText ? (
-                        <span className="rounded-pill bg-muted px-2 py-0.5 text-xs font-medium tabular text-mist-500">
-                          {route.durationText}
+          {/* map left, action stack right (full width of its column) */}
+          <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[3fr_2fr]">
+            {/* route from base — map + distance/time */}
+            {embedSrc ? (
+              <div className="overflow-hidden rounded-md border border-border">
+                <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
+                  <p className="text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">Route from base</p>
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {route === "loading" ? (
+                      <span className="text-xs text-mist-400">Working out the route…</span>
+                    ) : route === "error" ? (
+                      <span className="text-xs text-mist-400">Distance unavailable</span>
+                    ) : (
+                      <>
+                        <span className="rounded-pill bg-mm-red-tint px-2 py-0.5 text-xs font-semibold tabular text-mm-red-deep">
+                          {route.miles} mi
                         </span>
-                      ) : null}
-                    </>
-                  )}
+                        {route.durationText ? (
+                          <span className="rounded-pill bg-muted px-2 py-0.5 text-xs font-medium tabular text-mist-500">
+                            {route.durationText}
+                          </span>
+                        ) : null}
+                      </>
+                    )}
+                  </div>
                 </div>
+                <iframe
+                  title={`Route to ${dest}`}
+                  src={embedSrc}
+                  className="h-56 w-full sm:h-64"
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
               </div>
-              <iframe
-                title={`Route to ${dest}`}
-                src={embedSrc}
-                className="h-56 w-full sm:h-64"
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
+            ) : (
+              <div />
+            )}
+
+            {/* action stack — Quote is THE outcome (it marks the visit attended);
+                a full button-height gap below it guards against mis-taps. */}
+            <div className="flex flex-col gap-2">
+              {lead && target.apptType === "survey" ? (
+                <>
+                  <Button type="button" onClick={onQuote} disabled={busy} className="h-12 w-full text-base">
+                    {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <FileText className="size-4" strokeWidth={1.75} />}
+                    Create Quote
+                  </Button>
+                  <div aria-hidden className="h-11" />
+                </>
+              ) : null}
+              {target.status === "scheduled" ? (
+                <Button type="button" variant="outline" onClick={onReschedule} disabled={busy} className="h-11 w-full">
+                  <CalendarClock className="size-4" strokeWidth={1.75} />
+                  Reschedule Appointment
+                </Button>
+              ) : null}
+              {target.status === "scheduled" ? (
+                <Button type="button" variant="outline" onClick={onCancelAppointment} disabled={busy} className="h-11 w-full text-mm-red hover:text-mm-red hover:bg-mm-red-tint">
+                  <Ban className="size-4" strokeWidth={1.75} />
+                  Cancel Appointment
+                </Button>
+              ) : null}
             </div>
-          ) : null}
+          </div>
 
           {target.notes ? <p className="text-sm text-mist-500">{target.notes}</p> : null}
-
-          {/* visit outcome — quoting IS attending; Mark done covers no-quote visits */}
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
-            {lead && target.apptType === "survey" ? (
-              <Button type="button" onClick={onQuote} disabled={busy} className="h-11">
-                {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <FileText className="size-4" strokeWidth={1.75} />}
-                Quote
-              </Button>
-            ) : null}
-            {target.status !== "completed" ? (
-              <Button type="button" variant="ghost" onClick={() => setStatus("completed", "Visit marked completed.")} disabled={busy} className="h-11 text-success hover:bg-success-bg hover:text-success">
-                <CheckCircle2 className="size-4" strokeWidth={1.75} />
-                Mark done
-              </Button>
-            ) : null}
-            {target.status === "scheduled" ? (
-              <Button type="button" variant="ghost" onClick={onReschedule} disabled={busy} className="h-11 text-mist-500 hover:text-foreground">
-                <CalendarClock className="size-4" strokeWidth={1.75} />
-                Reschedule
-              </Button>
-            ) : null}
-            {target.status === "scheduled" ? (
-              <Button type="button" variant="ghost" onClick={onCancelAppointment} disabled={busy} className="text-mm-red hover:text-mm-red hover:bg-mm-red-tint ml-auto h-11">
-                <Ban className="size-4" strokeWidth={1.75} />
-                Cancel appointment
-              </Button>
-            ) : null}
-          </div>
         </div>
       </DialogContent>
     </Dialog>

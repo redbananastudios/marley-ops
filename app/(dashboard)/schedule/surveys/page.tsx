@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
+import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { PageHeader } from "@/components/page-header";
 import {
   SchedulerView,
@@ -29,7 +30,9 @@ export default async function SurveysSchedulePage({
       .order("starts_at", { ascending: true }),
     sb
       .from("leads")
-      .select("id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes")
+      .select(
+        "id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
+      )
       .order("created_at", { ascending: false }),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
@@ -45,6 +48,7 @@ export default async function SurveysSchedulePage({
   const leadOptions = (leads ?? []).map(({ notes, ...l }) => ({
     ...l,
     lead_notes: notes,
+    source: classifySource(l as unknown as LeadLite),
     surveyEstimatorId: surveyEst.get(l.id) ?? null,
   }));
 

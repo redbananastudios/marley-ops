@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { LeadCombobox } from "@/components/schedule/lead-combobox";
+import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   Select,
   SelectContent,
@@ -56,6 +57,8 @@ export interface LeadOption {
   to_address?: string | null;
   property_size?: string | null;
   lead_notes?: string | null;
+  /** Where the lead came from (classified) — shown so the estimator has full context. */
+  source?: SourceKey | null;
   /** Estimator from this lead's booked survey — a removal inherits it (read-only). */
   surveyEstimatorId?: string | null;
 }
@@ -133,6 +136,7 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
   };
   const from = addrLines(lead.from_address, lead.from_postcode);
   const to = addrLines(lead.to_address, lead.to_postcode);
+  const srcMeta = lead.source ? SOURCES.find((s) => s.key === lead.source) ?? null : null;
   const AddrBlock = ({ lines }: { lines: string[] }) =>
     lines.length === 0 ? (
       <span className="text-mist-400">—</span>
@@ -153,7 +157,15 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
           <User className="size-3.5" strokeWidth={2} />
           Customer
         </p>
-        <p className="text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
+          {srcMeta ? (
+            <span className="inline-flex items-center gap-1.5 rounded-pill bg-card px-2 py-0.5 text-xs font-medium text-mist-500 ring-1 ring-border">
+              <span className="size-2 rounded-full" style={{ background: srcMeta.color }} />
+              {srcMeta.label}
+            </span>
+          ) : null}
+        </div>
         <div className="mt-1 flex flex-col items-start">
           {lead.phone ? (
             <a
