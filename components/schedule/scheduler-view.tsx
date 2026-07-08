@@ -458,7 +458,7 @@ export function SchedulerView({
           flex-direction: column;
           gap: 0;
           min-width: 0;
-          line-height: 1.25;
+          line-height: 1.15;
         }
         .mm-evt-top {
           display: flex;
