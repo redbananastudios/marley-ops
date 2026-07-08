@@ -159,8 +159,8 @@ export function SettingsForm({
       {/* VAT default for new quotes */}
       <div className="flex items-center justify-between gap-4 border-t px-5 py-4">
         <div>
-          <p className="text-sm font-medium text-foreground">New quotes default to VAT (20%)</p>
-          <p className="text-xs text-mist-400">Each quote can still be toggled individually on the Review step.</p>
+          <p className="text-sm font-medium text-foreground">Quotes charge VAT (20%)</p>
+          <p className="text-xs text-mist-400">Applied to every new quote — VAT is set here, not per quote.</p>
         </div>
         <label className="relative inline-flex cursor-pointer items-center">
           <input
