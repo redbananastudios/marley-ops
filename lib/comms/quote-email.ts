@@ -62,9 +62,11 @@ export function buildQuoteEmailHtml(
   const customer = values.customer;
   const job = values.job;
 
-  const issued = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  // Customer-facing dates are always UK wall-clock (server runs UTC).
+  const UK = "Europe/London";
+  const issued = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: UK });
   const expiryDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-  const expiry = expiryDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const expiry = expiryDate.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UK });
 
   const parseDate = (s: string) => new Date(s + (s.length === 10 ? "T00:00:00" : ""));
 
@@ -72,13 +74,13 @@ export function buildQuoteEmailHtml(
     if (!job.moveDate) return null;
     const d = parseDate(job.moveDate);
     if (isNaN(d.getTime())) return null;
-    return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" });
+    return d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK });
   })();
   const moveDateForGlance = (() => {
     if (!job.moveDate) return "TBC";
     const d = parseDate(job.moveDate);
     if (isNaN(d.getTime())) return escapeHtml(job.moveDate);
-    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+    return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: UK });
   })();
 
   const firstName = (customer.name || "").trim().split(/\s+/)[0] || null;

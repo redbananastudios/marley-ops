@@ -18,6 +18,7 @@ import { jobCost, boxesFromItems } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
+import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
 
@@ -81,7 +82,7 @@ export default async function DashboardPage() {
   const quotes = quoteData ?? [];
 
   const now = Date.now();
-  const startToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const startToday = startOfUkDay().getTime();
 
   /* progress signals — concrete history, not just current status */
   const prog: ProgressSets = {
@@ -213,7 +214,7 @@ export default async function DashboardPage() {
     needsAction,
     recent,
     recentHeading: todays.length ? "Today's enquiries" : "Latest enquiries",
-    dateLabel: new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" }),
+    dateLabel: new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
   };
 
   return <DashboardView data={data} />;

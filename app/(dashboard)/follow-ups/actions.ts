@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { ukInstant, ukTimeAt } from "@/lib/uk-time";
 
 /** Follow-up work-queue actions. Manual-first: every mutation is a human tap, every
  *  tap lands in the lead's activity log. Escalation is advisory only (never auto-lost). */
@@ -34,12 +35,9 @@ function refresh(leadId?: string | null) {
   if (leadId) revalidatePath(`/leads/${leadId}`);
 }
 
-/** Tomorrow 09:00 local — the standard "try again in the morning" requeue slot. */
+/** Tomorrow 09:00 UK — the standard "try again in the morning" requeue slot. */
 function tomorrowMorning(): string {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  return d.toISOString();
+  return ukTimeAt(9, 0, 1).toISOString();
 }
 
 const createSchema = z.object({
@@ -266,7 +264,9 @@ export async function markPaymentPaidAction(leadId: string, kind: "deposit" | "b
 /** Set the balance (amount + due date) and open a balance chase due on that date. */
 export async function setBalanceAction(leadId: string, amount: number, dueDate: string) {
   if (!Number.isFinite(amount) || amount <= 0) return { ok: false as const, error: "Enter a balance amount" };
-  const due = new Date(dueDate);
+  // dueDate arrives as yyyy-mm-dd; the chase fires 09:00 UK on that day.
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
+  const due = dm ? ukInstant(Number(dm[1]), Number(dm[2]), Number(dm[3]), 9, 0) : new Date(NaN);
   if (Number.isNaN(due.getTime())) return { ok: false as const, error: "Pick a due date" };
   const { sb, userId } = await ctx();
   const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).single();
@@ -285,7 +285,6 @@ export async function setBalanceAction(leadId: string, amount: number, dueDate: 
     .eq("status", "open")
     .limit(1)
     .maybeSingle();
-  due.setHours(9, 0, 0, 0);
   if (!open) {
     await sb.from("follow_ups").insert({
       lead_id: leadId,

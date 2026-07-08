@@ -14,6 +14,7 @@ import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
 import { PaymentsCard } from "@/components/leads/payments-card";
 import { getBusinessSettings } from "@/lib/settings";
+import { UK_TZ } from "@/lib/uk-time";
 import { StatusChanger } from "./status-changer";
 
 const gbp = (n: number | null | undefined): string =>
@@ -34,7 +35,7 @@ function fmtDate(value: string | null | undefined) {
   if (!value) return "—";
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UK_TZ });
 }
 
 function fmtShort(value: string | null | undefined) {
@@ -46,6 +47,7 @@ function fmtShort(value: string | null | undefined) {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
+    timeZone: UK_TZ,
   });
 }
 

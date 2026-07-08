@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { LeadsBoard, type LeadCard } from "@/components/leads/leads-board";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
+import { startOfUkDay } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
 
@@ -65,7 +66,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   }
 
   /* leads with an upcoming (non-cancelled) survey appointment */
-  const startToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).getTime();
+  const startToday = startOfUkDay().getTime();
   const upcomingSurvey = new Set(
     (apptData ?? [])
       .filter(

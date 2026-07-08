@@ -12,6 +12,7 @@ import {
 } from "@/lib/quote/form-types";
 import { getBusinessSettings } from "@/lib/settings";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
+import { ukParts } from "@/lib/uk-time";
 
 async function ctx() {
   const sb = await createClient();
@@ -23,10 +24,8 @@ async function ctx() {
 
 /** MM-YYMMDD-NNN with a per-day sequence (avoids the live tool's random-NNN collision risk). */
 async function nextQuoteRef(sb: Awaited<ReturnType<typeof createClient>>): Promise<string> {
-  const d = new Date();
-  const stamp = `${String(d.getFullYear()).slice(-2)}${String(d.getMonth() + 1).padStart(2, "0")}${String(
-    d.getDate(),
-  ).padStart(2, "0")}`;
+  const d = ukParts(); // ref date = UK calendar day (server runs UTC)
+  const stamp = `${String(d.year).slice(-2)}${String(d.month).padStart(2, "0")}${String(d.day).padStart(2, "0")}`;
   const prefix = `MM-${stamp}-`;
   const { count } = await sb
     .from("quotes")

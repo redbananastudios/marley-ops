@@ -4,6 +4,7 @@ import { ChevronLeft, Phone, MessageCircle, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/card";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
+import { UK_TZ } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,9 @@ const gbp = (n: number | null | undefined): string =>
 function fmtDate(value: string | null | undefined) {
   if (!value) return "—";
   const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: UK_TZ });
 }
 
 function waNumber(phone: string | null): string | null {

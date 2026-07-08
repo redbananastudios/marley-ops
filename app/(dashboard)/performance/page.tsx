@@ -8,6 +8,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { MarkPaidButton } from "@/components/performance/mark-paid-button";
+import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
 
@@ -16,18 +17,19 @@ const pad = (n: number) => String(n).padStart(2, "0");
 
 export default async function PerformancePage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
   const sp = await searchParams;
-  const now = new Date();
+  const nowUk = ukParts();
   const m = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month!.split("-") : null;
-  const year = m ? Number(m[0]) : now.getFullYear();
-  const month0 = m ? Number(m[1]) - 1 : now.getMonth();
-  const monthStart = new Date(year, month0, 1);
-  const monthEnd = new Date(year, month0 + 1, 1);
+  const year = m ? Number(m[0]) : nowUk.year;
+  const month0 = m ? Number(m[1]) - 1 : nowUk.month - 1;
+  // Month boundaries as UK-midnight instants (the panel runs on UK time).
+  const monthStart = ukInstant(year, month0 + 1, 1);
+  const monthEnd = ukInstant(year, month0 + 2, 1);
   const periodMonth = `${year}-${pad(month0 + 1)}-01`;
-  const prev = new Date(year, month0 - 1, 1);
-  const next = new Date(year, month0 + 1, 1);
-  const prevHref = `/performance?month=${prev.getFullYear()}-${pad(prev.getMonth() + 1)}`;
-  const nextHref = `/performance?month=${next.getFullYear()}-${pad(next.getMonth() + 1)}`;
-  const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const prev = new Date(Date.UTC(year, month0 - 1, 1));
+  const next = new Date(Date.UTC(year, month0 + 1, 1));
+  const prevHref = `/performance?month=${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}`;
+  const nextHref = `/performance?month=${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}`;
+  const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UK_TZ });
 
   const sb = await createClient();
   const [{ data: appts }, { data: profiles }, { data: leads }, { data: quotes }, { data: payouts }] =
@@ -203,7 +205,9 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                   </p>
                   <p className="text-xs text-mist-400">
                     {v.estimatorName} ·{" "}
-                    {v.date ? new Date(v.date).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "—"}
+                    {v.date
+                      ? new Date(v.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: UK_TZ })
+                      : "—"}
                   </p>
                 </div>
                 <span

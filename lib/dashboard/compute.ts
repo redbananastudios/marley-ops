@@ -14,6 +14,7 @@
 
 import type { WebsiteFunnel } from "@/lib/posthog";
 import type { EstimatorStat } from "@/lib/estimator";
+import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
 
 export type PeriodKey = "today" | "week" | "month";
 
@@ -177,7 +178,7 @@ interface WindowDef {
 }
 
 function windowFor(key: PeriodKey, now: number): WindowDef {
-  const startToday = new Date(new Date(now).getFullYear(), new Date(now).getMonth(), new Date(now).getDate()).getTime();
+  const startToday = startOfUkDay(new Date(now)).getTime();
   if (key === "today") {
     return {
       curFrom: startToday,
@@ -203,7 +204,7 @@ function windowFor(key: PeriodKey, now: number): WindowDef {
       bucketStart: curFrom,
       chartLabel: "This week vs last week · by day",
       bucketTick: (i, startMs) =>
-        new Date(startMs + i * DAY).toLocaleDateString("en-GB", { weekday: "short" }),
+        new Date(startMs + i * DAY).toLocaleDateString("en-GB", { weekday: "short", timeZone: UK_TZ }),
     };
   }
   const curFrom = startToday - 29 * DAY;
@@ -217,7 +218,9 @@ function windowFor(key: PeriodKey, now: number): WindowDef {
     bucketStart: curFrom,
     chartLabel: "This month vs last month · by day",
     bucketTick: (i, startMs) =>
-      i % 7 === 0 ? new Date(startMs + i * DAY).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : "",
+      i % 7 === 0
+        ? new Date(startMs + i * DAY).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: UK_TZ })
+        : "",
   };
 }
 
