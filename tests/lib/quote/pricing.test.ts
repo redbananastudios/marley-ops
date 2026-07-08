@@ -185,6 +185,42 @@ describe('computeQuote — golden scenarios (pinned to the live tool)', () => {
   });
 });
 
+describe('computeQuote — extra days (charged per day after the first)', () => {
+  const withRate: PricingConfig = { ...DEFAULT_PRICING, extraDayRate: 400 };
+
+  it('days omitted / 1 day charges nothing (default rate 0 keeps history identical)', () => {
+    expect(computeQuote(base()).grandTotal).toBe(850);
+    expect(computeQuote(base({ days: 1 })).grandTotal).toBe(850);
+    expect(computeQuote(base({ days: 3 })).grandTotal).toBe(850); // default rate = 0
+  });
+
+  it('charges (days − 1) × rate', () => {
+    const q = computeQuote(base({ days: 3 }), withRate);
+    expect(q.extraDaysCost).toBe(800);
+    expect(q.subtotal).toBe(1650); // 700 + 150 admin + 2 × 400
+    expect(q.days).toBe(3);
+  });
+
+  it('1 day with a rate set charges nothing', () => {
+    const q = computeQuote(base({ days: 1 }), withRate);
+    expect(q.extraDaysCost).toBe(0);
+    expect(q.grandTotal).toBe(850);
+  });
+
+  it('extra days sit before discount and VAT', () => {
+    const q = computeQuote(base({ days: 2, discount: 100, vatEnabled: true }), withRate);
+    // (700 + 150 + 400 − 100) × 1.2
+    expect(q.total).toBe(1150);
+    expect(q.grandTotal).toBeCloseTo(1380, 10);
+  });
+
+  it('guards bad input: 0 / negative / fractional days clamp sanely', () => {
+    expect(computeQuote(base({ days: 0 }), withRate).extraDaysCost).toBe(0);
+    expect(computeQuote(base({ days: -2 }), withRate).extraDaysCost).toBe(0);
+    expect(computeQuote(base({ days: 2.9 }), withRate).extraDaysCost).toBe(400); // floor → 2 days
+  });
+});
+
 describe('computeQuote — invariants', () => {
   it('vatAmount is 0 and grandTotal === total whenever VAT off', () => {
     for (const v of ['1luton', '2luton', '3luton'] as const) {

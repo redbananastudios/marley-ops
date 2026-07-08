@@ -326,6 +326,16 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
       unit: b.transitVans > 0 ? (b.transitCost ?? 0) / b.transitVans : 0,
       amount: b.transitCost ?? 0,
     });
+  if ((b.extraDaysCost ?? 0) > 0) {
+    const extraDays = Math.max(1, (b.days ?? 1) - 1);
+    items.push({
+      label: "Additional Days",
+      detail: `${extraDays} day${extraDays > 1 ? "s" : ""} beyond the first`,
+      qty: extraDays,
+      unit: (b.extraDaysCost ?? 0) / extraDays,
+      amount: b.extraDaysCost ?? 0,
+    });
+  }
   if (b.packCost + b.addon75PackCost > 0)
     items.push({ label: "Packing Service", detail: packLabel, qty: 1, unit: b.packCost + b.addon75PackCost });
   if (b.mileageCost !== null)

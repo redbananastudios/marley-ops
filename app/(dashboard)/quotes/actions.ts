@@ -7,9 +7,9 @@ import {
   deriveInputs,
   defaultQuoteValues,
   composeAddr,
-  BLANK_QUOTE_ADDRESS,
   type QuoteFormValues,
 } from "@/lib/quote/form-types";
+import { addressFromString } from "@/lib/places/parse";
 import { getBusinessSettings } from "@/lib/settings";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { ukParts } from "@/lib/uk-time";
@@ -51,16 +51,12 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
   seed.vatEnabled = settings.vatDefault; // VAT default from settings
   if (lead) {
     seed.customer = { name: lead.name ?? "", phone: lead.phone ?? "", email: lead.email ?? "" };
-    seed.job.collectAddress = {
-      ...BLANK_QUOTE_ADDRESS,
-      line1: lead.from_address ?? "",
-      postcode: lead.from_postcode ?? "",
-    };
-    seed.job.destAddress = {
-      ...BLANK_QUOTE_ADDRESS,
-      line1: lead.to_address ?? "",
-      postcode: lead.to_postcode ?? "",
-    };
+    // Parse "street, town" + postcode into the structured fields so the form opens
+    // with each part in its own input (not everything dumped into Street address).
+    seed.job.collectAddress = addressFromString(
+      [lead.from_address, lead.from_postcode].filter(Boolean).join(", "),
+    );
+    seed.job.destAddress = addressFromString([lead.to_address, lead.to_postcode].filter(Boolean).join(", "));
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
   }

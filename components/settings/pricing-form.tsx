@@ -138,6 +138,20 @@ export function PricingForm({ initial, canEdit }: { initial: EditablePricing; ca
                 Flat per Transit, its 1 man included
               </td>
             </tr>
+            <tr>
+              <td className="pr-3 text-sm font-medium text-foreground">Extra day on the job</td>
+              <td className="pr-3">
+                <PriceCell
+                  prefix=""
+                  value={String(p.extraDayRate ?? 0)}
+                  disabled={!canEdit || busy}
+                  onChange={(v) => setP((s) => ({ ...s, extraDayRate: Number(v) || 0 }))}
+                />
+              </td>
+              <td className="pr-3 text-xs text-mist-400" colSpan={2}>
+                Added to the quote per day after the first
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>

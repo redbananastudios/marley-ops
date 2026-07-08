@@ -1,13 +1,14 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { Users } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
+import { getBusinessSettings } from "@/lib/settings";
+import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
+import { ViewLeadDialog } from "@/components/quote/view-lead-dialog";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -47,8 +48,26 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
     (user?.user_metadata?.full_name as string | undefined) ?? user?.email ?? null;
 
   const initialValues = normalizeQuoteValues(quote.state_blob);
-  const pricing = await getPricingConfig(sb);
+  const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
   const emailedCount = quote.email_send_count ?? 0;
+
+  // The linked lead's context for the View-lead modal (no navigation away from the form).
+  let leadOption = null;
+  let leadStatus: string | null = null;
+  if (quote.lead_id) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select(
+        "id,name,phone,email,status,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
+      )
+      .eq("id", quote.lead_id)
+      .maybeSingle();
+    if (lead) {
+      const { notes, status, ...l } = lead;
+      leadStatus = status;
+      leadOption = { ...l, lead_notes: notes, source: classifySource(l as unknown as LeadLite) };
+    }
+  }
 
   return (
     <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
@@ -59,15 +78,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         backLabel="Quotes"
       >
         <div className="flex items-center gap-3">
-          {quote.lead_id ? (
-            <Link
-              href={`/leads/${quote.lead_id}`}
-              className="focus-ring inline-flex items-center gap-1 rounded-sm text-sm text-mist-400 transition-colors hover:text-foreground"
-            >
-              <Users className="size-4" strokeWidth={1.75} />
-              View lead
-            </Link>
-          ) : null}
+          {leadOption ? <ViewLeadDialog lead={leadOption} status={leadStatus} /> : null}
           {emailedCount > 0 ? (
             <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
               Emailed ×{emailedCount}
@@ -78,9 +89,6 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
               Agreed {gbp(quote.agreed_price)}
             </span>
           ) : null}
-          <span className="tabular font-display text-xl font-bold text-foreground">
-            {gbp(quote.grand_total)}
-          </span>
           <QuoteStatusBadge status={quote.status ?? "draft"} />
           <AcceptQuoteButton
             quoteId={quote.id}
@@ -103,6 +111,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         clientId={quote.client_id}
         estimatorName={estimatorName}
         pricing={pricing}
+        settings={settings}
       />
     </main>
   );

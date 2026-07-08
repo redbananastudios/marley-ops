@@ -63,3 +63,7 @@ export const ADMIN_FEE = 150;
 export const MILEAGE_RATE = 2.0;
 export const CONGESTION_PER_VAN = 20;
 export const VAT_RATE = 0.2;
+
+/** Charge per day AFTER the first on multi-day jobs. 0 by default (no charge until
+ *  a real rate is set in Settings > Quote prices) so historical totals are unchanged. */
+export const EXTRA_DAY_RATE = 0;

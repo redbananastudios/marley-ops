@@ -12,6 +12,7 @@ import { Check, ChevronLeft, ChevronRight, Download, Loader2, Mail } from "lucid
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
+import type { BusinessSettings } from "@/lib/settings";
 import { deriveInputs, defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
 import { saveQuoteDraft } from "@/app/(dashboard)/quotes/actions";
 import { PdfLoader } from "@/components/quote/pdf-loader";
@@ -83,6 +84,7 @@ export function QuoteBuilder({
   estimatorName,
   readOnly,
   pricing = DEFAULT_PRICING,
+  settings,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -93,6 +95,8 @@ export function QuoteBuilder({
   readOnly?: boolean;
   /** Active (settings-driven) prices for the live total + step labels. */
   pricing?: PricingConfig;
+  /** Cost rates — powers the internal margin % on Review & Send. */
+  settings?: BusinessSettings | null;
 }) {
   const [values, setValues] = useState<QuoteFormValues>(() => ({
     ...defaultQuoteValues(),
@@ -245,13 +249,19 @@ export function QuoteBuilder({
       {/* current step body */}
       <div className="rounded-lg border border-border bg-card p-6 md:p-7">
         {step === 1 && <Step1Customer values={values} set={set} showErrors={showStep1Errors} />}
-        {step === 2 && <Step2Job values={values} set={set} />}
+        {step === 2 && <Step2Job values={values} set={set} pricing={pricing} />}
         {step === 3 && <Step3Vehicle values={values} set={set} pricing={pricing} />}
         {step === 4 && <Step4Access values={values} set={set} leadId={leadId} />}
         {step === 5 && <Step5Extras values={values} set={set} />}
         {step === 6 && <Step6Items values={values} set={set} leadId={leadId} />}
         {step === 7 && (
-          <Step7Review values={values} set={set} breakdown={breakdown} actions={reviewActions} />
+          <Step7Review
+            values={values}
+            set={set}
+            breakdown={breakdown}
+            actions={reviewActions}
+            settings={settings}
+          />
         )}
       </div>
 

@@ -32,7 +32,9 @@ import {
   type QuoteItems,
   type RouteLeg,
 } from "@/lib/quote/form-types";
-import type { PricingConfig } from "@/lib/quote/pricing";
+import type { PricingConfig, QuoteBreakdown } from "@/lib/quote/pricing";
+import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
+import type { BusinessSettings } from "@/lib/settings";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
 import {
   Select,
@@ -244,11 +246,14 @@ function CurrencyField({
   );
 }
 
-function StepHeader({ title, sub }: { title: string; sub: string }) {
+function StepHeader({ title, sub, right }: { title: string; sub: string; right?: React.ReactNode }) {
   return (
-    <div className="mb-6">
-      <h2 className="font-display text-2xl text-foreground">{title}</h2>
-      <p className="mt-0.5 text-sm text-mist-400">{sub}</p>
+    <div className="mb-6 flex items-start justify-between gap-3">
+      <div>
+        <h2 className="font-display text-2xl text-foreground">{title}</h2>
+        <p className="mt-0.5 text-sm text-mist-400">{sub}</p>
+      </div>
+      {right}
     </div>
   );
 }
@@ -350,9 +355,10 @@ export function Step1Customer({
 
 /* ---------- STEP 2 — JOB DETAILS + mileage ---------- */
 
-export function Step2Job({ values, set }: StepProps) {
+export function Step2Job({ values, set, pricing }: StepProps) {
   const j = values.job;
   const route = values.route;
+  const extraDayRate = pricing?.extraDayRate ?? 0;
   const [calc, setCalc] = useState<{ loading: boolean; error: string | null }>({ loading: false, error: null });
 
   // Back-compat: quotes saved before structured addresses only have the string —
@@ -476,7 +482,11 @@ export function Step2Job({ values, set }: StepProps) {
           onChange={(e) => set("job", { ...j, days: e.target.value === "" ? 1 : Math.max(1, Number(e.target.value)) })}
           className="h-14 w-full rounded-md border border-input bg-card px-4 text-base text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
         />
-        <p className="mt-1.5 text-xs text-mist-400">For internal costing (labour + vans). Not shown to the customer.</p>
+        <p className="mt-1.5 text-xs text-mist-400">
+          {extraDayRate > 0
+            ? `Each day after the first adds ${gbp(extraDayRate)} to the quote.`
+            : "Also feeds internal costing (labour + vans). Set an extra-day price in Settings to charge for additional days."}
+        </p>
       </div>
 
       <div className="mb-5">
@@ -779,21 +789,19 @@ export function Step6Items({ values, set, leadId }: StepProps) {
 
 /* ---------- STEP 7 — REVIEW & SEND ---------- */
 
+const DISCOUNT_PCTS = [5, 10, 15, 20, 25] as const;
+
 export function Step7Review({
   values,
   set,
   breakdown,
   actions,
+  settings,
 }: StepProps & {
-  breakdown: {
-    grandTotal: number;
-    subtotal: number;
-    total: number;
-    vatEnabled: boolean;
-    vatAmount: number;
-    discount: number;
-  };
+  breakdown: QuoteBreakdown;
   actions: React.ReactNode;
+  /** Cost rates for the internal margin figure. Absent → no margin shown. */
+  settings?: BusinessSettings | null;
 }) {
   const r = values.review;
   const b = breakdown;
@@ -802,9 +810,75 @@ export function Step7Review({
     month: "short",
     year: "numeric",
   });
+
+  // Internal margin on the ex-VAT total vs the job's cost from the Settings rate card.
+  const margin = settings
+    ? marginPct(
+        b.total,
+        jobCost(
+          {
+            vehicle: values.vehicle,
+            sevenFiveT: values.sevenFiveT ?? 0,
+            transitVans: values.transitVans ?? 0,
+            totalMiles: b.totalMiles ?? 0,
+            boxes: boxesFromItems(values.items as unknown as Record<string, number>),
+            days: Number(values.job.days) || 1,
+          },
+          settings,
+        ).total,
+      )
+    : null;
+
+  const pctAmount = (pct: number) => Math.round(b.subtotal * pct) / 100; // pct of subtotal, 2dp
+  const activePct = DISCOUNT_PCTS.find((pct) => Math.abs(r.discount - pctAmount(pct)) < 0.005) ?? null;
+
   return (
     <div>
-      <StepHeader title="Review &amp; Send" sub="Confirm the figures, then send the quote." />
+      <StepHeader
+        title="Review &amp; Send"
+        sub="Confirm the figures, then send the quote."
+        right={
+          margin != null ? (
+            <span
+              className={cn(
+                "tabular font-display text-xl font-semibold",
+                margin < 0 ? "text-mm-red" : "text-mist-500",
+              )}
+              title="Margin"
+            >
+              {margin}%
+            </span>
+          ) : null
+        }
+      />
+
+      <div className="mb-3">
+        <FieldLabel>Discount %</FieldLabel>
+        <div className="grid grid-cols-5 gap-2">
+          {DISCOUNT_PCTS.map((pct) => {
+            const active = activePct === pct;
+            return (
+              <button
+                key={pct}
+                type="button"
+                aria-pressed={active}
+                onClick={() =>
+                  set("review", { ...r, discount: active ? 0 : pctAmount(pct) })
+                }
+                className={cn(
+                  "focus-ring flex min-h-11 items-center justify-center rounded-md border text-sm font-semibold transition-colors",
+                  active
+                    ? "border-mm-red bg-mm-red text-white"
+                    : "border-input bg-card text-foreground hover:bg-muted active:bg-muted",
+                )}
+              >
+                {pct}%
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-1.5 text-xs text-mist-400">Fills the discount below as a percentage of the subtotal. Tap again to clear.</p>
+      </div>
 
       <CurrencyField
         label="Discount"
@@ -812,25 +886,6 @@ export function Step7Review({
         onChange={(v) => set("review", { ...r, discount: v })}
         help="Subtracted from the total. Goodwill or returning-customer adjustments live here."
       />
-
-      <div className="mb-5 flex items-center justify-between rounded-md border border-input bg-card p-4">
-        <span>
-          <span className="block text-sm font-semibold text-foreground">Add VAT @ 20%</span>
-          <span className="block text-xs text-mist-400">Single final line on the quote</span>
-        </span>
-        <label className="relative inline-flex cursor-pointer items-center">
-          <input
-            type="checkbox"
-            role="switch"
-            aria-label="Add VAT at 20%"
-            className="peer sr-only"
-            checked={values.vatEnabled}
-            onChange={(e) => set("vatEnabled", e.target.checked)}
-          />
-          <span className="h-7 w-12 rounded-full bg-mist-200 transition-colors peer-checked:bg-mm-red" />
-          <span className="absolute left-1 size-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
-        </label>
-      </div>
 
       {/* Total card */}
       <div className="mb-6 overflow-hidden rounded-md border border-border">

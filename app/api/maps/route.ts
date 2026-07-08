@@ -2,11 +2,41 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import { requireApiUser } from "@/lib/api-auth";
+import { UK_POSTCODE_FULL } from "@/lib/places/parse";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const METRES_PER_MILE = 1609.344;
+
+/**
+ * Resolve an address string to "lat,lng", anchored to its UK postcode. Directions'
+ * own geocoder weighs the street name over a conflicting postcode — so editing just
+ * the postcode on the quote form used to return the OLD route. The components filter
+ * pins the result inside the given postcode (falling back to the postcode centroid
+ * when the street doesn't match). No postcode → let Directions geocode the string.
+ */
+async function resolvePoint(addr: string, key: string): Promise<string> {
+  const m = addr.match(UK_POSTCODE_FULL);
+  if (!m) return addr;
+  const pc = `${m[1]} ${m[2]}`.toUpperCase();
+  try {
+    const url =
+      `https://maps.googleapis.com/maps/api/geocode/json` +
+      `?address=${encodeURIComponent(addr)}` +
+      `&components=${encodeURIComponent(`postal_code:${pc}|country:GB`)}&key=${key}`;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) return addr;
+    const json = (await res.json()) as {
+      status?: string;
+      results?: { geometry?: { location?: { lat?: number; lng?: number } } }[];
+    };
+    const loc = json.results?.[0]?.geometry?.location;
+    return loc?.lat != null && loc?.lng != null ? `${loc.lat},${loc.lng}` : addr;
+  } catch {
+    return addr;
+  }
+}
 
 async function legMiles(origin: string, destination: string, key: string): Promise<number | null> {
   const url =
@@ -50,10 +80,16 @@ export async function POST(req: Request) {
   const { baseLocation } = await getBusinessSettings(sb);
 
   try {
+    // Postcode-anchor every endpoint once, then run the three legs off the points.
+    const [basePt, collectPt, destPt] = await Promise.all([
+      resolvePoint(baseLocation, key),
+      resolvePoint(collectAddr, key),
+      resolvePoint(destAddr, key),
+    ]);
     const [leg1, leg2, leg3] = await Promise.all([
-      legMiles(baseLocation, collectAddr, key),
-      legMiles(collectAddr, destAddr, key),
-      legMiles(destAddr, baseLocation, key),
+      legMiles(basePt, collectPt, key),
+      legMiles(collectPt, destPt, key),
+      legMiles(destPt, basePt, key),
     ]);
     if (leg1 == null || leg2 == null || leg3 == null) {
       return NextResponse.json(

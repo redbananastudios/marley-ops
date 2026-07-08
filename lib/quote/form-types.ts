@@ -1,5 +1,6 @@
 import type { QuoteInputs } from "./pricing";
 import type { FloorKey, PackingKey, PropertyType, VehicleKey } from "./constants";
+import { addressFromString } from "@/lib/places/parse";
 
 /** Structured address (matches the shared AddressFields shape, kept in a server-safe
  *  lib so form-types stays importable from server actions). */
@@ -36,7 +37,7 @@ export interface QuoteFormValues {
     destAddr: string;
     moveDate: string;
     moveDateEstimated: boolean;
-    /** Estimated days on the job — internal costing only (labour/van), not charged. */
+    /** Days on the job — feeds costing AND the quote (each extra day charges extraDayRate). */
     days: number;
     scope: "rented" | "owned";
     bedsOvernight: "no" | "yes";
@@ -143,9 +144,10 @@ export function normalizeQuoteValues(raw: unknown): QuoteFormValues {
     job?: Partial<QuoteFormValues["job"]>;
   };
   const job = { ...d.job, ...(r.job ?? {}) };
-  // Structured addresses: seed from the old single string when absent.
-  if (!r.job?.collectAddress) job.collectAddress = { ...BLANK_QUOTE_ADDRESS, line1: job.collectAddr || "" };
-  if (!r.job?.destAddress) job.destAddress = { ...BLANK_QUOTE_ADDRESS, line1: job.destAddr || "" };
+  // Structured addresses: parse the old single string when absent, so the street /
+  // town / postcode land in their own fields instead of everything in line1.
+  if (!r.job?.collectAddress) job.collectAddress = addressFromString(job.collectAddr);
+  if (!r.job?.destAddress) job.destAddress = addressFromString(job.destAddr);
 
   return {
     ...d,
@@ -172,6 +174,7 @@ export function deriveInputs(v: QuoteFormValues): QuoteInputs {
     packing: v.packing,
     sevenFiveT: v.sevenFiveT ?? 0,
     transitVans: v.transitVans ?? 0,
+    days: Number(v.job.days) || 1,
     deadMiles: v.route.deadMiles,
     jobMiles: v.route.jobMiles,
     collectAccessM: Number(v.collect.accessM) || 0,

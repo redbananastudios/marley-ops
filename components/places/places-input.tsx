@@ -44,10 +44,10 @@ export function PlacesInput({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [active, setActive] = useState(-1);
-  // Suppress the fetch fired by our own onValueChange after a pick.
-  const skipNext = useRef(false);
   // Only search after a real keystroke — never auto-open on a prefilled value
-  // (robust against React StrictMode's double-mount in dev).
+  // (robust against React StrictMode's double-mount in dev). Picking a suggestion
+  // resets this, so the pick's own value writes (including the async Place Details
+  // fill that follows) never re-trigger a search and reopen the list.
   const dirty = useRef(false);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const listId = useId();
@@ -55,10 +55,6 @@ export function PlacesInput({
   // Debounced lookup as the user types.
   useEffect(() => {
     if (!dirty.current) return;
-    if (skipNext.current) {
-      skipNext.current = false;
-      return;
-    }
     const q = value.trim();
     if (q.length < 3) {
       setItems([]);
@@ -99,7 +95,7 @@ export function PlacesInput({
   }, []);
 
   function pick(p: Prediction) {
-    skipNext.current = true;
+    dirty.current = false;
     onValueChange(kind === "postcode" ? p.main : p.description);
     onPick?.(p);
     setItems([]);

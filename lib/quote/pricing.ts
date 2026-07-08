@@ -18,6 +18,7 @@ import {
   ADMIN_FEE,
   BASE_PRICES,
   CONGESTION_PER_VAN,
+  EXTRA_DAY_RATE,
   FLOOR_PRICES,
   MILEAGE_RATE,
   PACK_PRICES,
@@ -45,6 +46,8 @@ export interface PricingConfig {
   adminFee: number;
   mileageRate: number;
   congestionPerVan: number;
+  /** Charge per day AFTER the first on multi-day jobs. */
+  extraDayRate: number;
 }
 
 export const DEFAULT_PRICING: PricingConfig = {
@@ -57,6 +60,7 @@ export const DEFAULT_PRICING: PricingConfig = {
   adminFee: ADMIN_FEE,
   mileageRate: MILEAGE_RATE,
   congestionPerVan: CONGESTION_PER_VAN,
+  extraDayRate: EXTRA_DAY_RATE,
 };
 
 export interface QuoteInputs {
@@ -68,6 +72,8 @@ export interface QuoteInputs {
   sevenFiveT?: number;
   /** Number of add-on Transit vans (0..MAX_TRANSIT). Flat per van + counts as a vehicle. */
   transitVans?: number;
+  /** Days on the job (≥1). Each day after the first adds extraDayRate to the quote. */
+  days?: number;
   /** Dead miles (base→collect + dest→base). null until the 3-leg route is calculated. */
   deadMiles: number | null;
   /** Job miles (collect→dest). null until calculated. */
@@ -100,6 +106,10 @@ export interface QuoteBreakdown {
   addon75PackCost: number;
   /** Add-on Transit vans cost (count × addonTransitBase). */
   transitCost: number;
+  /** Days on the job (≥1). */
+  days: number;
+  /** (days − 1) × extraDayRate — additional-day charge on multi-day jobs. */
+  extraDaysCost: number;
   mileageCost: number | null;
   totalMiles: number | null;
   collectAccessM: number;
@@ -161,6 +171,8 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
   const addon75Cost = sevenFiveT * pricing.addon75Base;
   const addon75PackCost = sevenFiveT * pricing.addon75Pack[packing];
   const transitCost = transitVans * pricing.addonTransitBase;
+  const days = Math.max(1, Math.floor(i.days ?? 1) || 1);
+  const extraDaysCost = (days - 1) * (pricing.extraDayRate ?? 0);
 
   let mileageCost: number | null = null;
   let totalMiles: number | null = null;
@@ -192,6 +204,7 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     addon75Cost +
     addon75PackCost +
     transitCost +
+    extraDaysCost +
     (mileageCost || 0) +
     collectAccessCost +
     destAccessCost +
@@ -218,6 +231,8 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     addon75Cost,
     addon75PackCost,
     transitCost,
+    days,
+    extraDaysCost,
     mileageCost,
     totalMiles,
     collectAccessM,

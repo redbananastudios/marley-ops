@@ -25,6 +25,7 @@ const pricingSchema = z.object({
   addon75Base: money,
   addon75Pack: tierPack,
   addonTransitBase: money,
+  extraDayRate: money,
 });
 
 /** Save the editable quote prices (admin only). Validated + normalised before write. */
@@ -46,6 +47,7 @@ export async function savePricingAction(input: EditablePricing) {
     addon75Base: config.addon75Base,
     addon75Pack: { full: config.addon75Pack.full, fragile: config.addon75Pack.fragile },
     addonTransitBase: config.addonTransitBase,
+    extraDayRate: config.extraDayRate,
   };
 
   const { error: dbErr } = await sb
