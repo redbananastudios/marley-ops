@@ -146,7 +146,7 @@ export function AppointmentViewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="max-h-[92vh] overflow-y-auto sm:max-w-2xl"
+        className="max-h-[92vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-3xl lg:max-w-5xl"
         onInteractOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
@@ -232,7 +232,7 @@ export function AppointmentViewDialog({
                 <iframe
                   title={`Route to ${dest}`}
                   src={embedSrc}
-                  className="h-56 w-full sm:h-64"
+                  className="h-56 w-full sm:h-72 lg:h-80"
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
                 />
