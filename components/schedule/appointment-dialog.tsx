@@ -150,7 +150,7 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
       </span>
     );
   return (
-    <div className="grid gap-3 sm:grid-cols-[3fr_4fr_3fr] md:col-span-2">
+    <div className="grid gap-3 sm:grid-cols-[3fr_4fr_3fr]">
       {/* Customer */}
       <div className="rounded-md border border-border bg-muted/30 p-3">
         <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
