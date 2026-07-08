@@ -16,16 +16,20 @@ export async function GET(req: Request) {
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return NextResponse.json({ ok: false, error: "Maps not configured" }, { status: 200 });
 
-  const dest = (new URL(req.url).searchParams.get("dest") ?? "").trim();
+  const params = new URL(req.url).searchParams;
+  const dest = (params.get("dest") ?? "").trim();
   if (!dest) return NextResponse.json({ ok: false, error: "No destination" }, { status: 200 });
+  // Optional custom origin (e.g. the job route pickup -> destination); defaults to base.
+  const originParam = (params.get("origin") ?? "").trim();
 
   const sb = await createClient();
   const { baseLocation } = await getBusinessSettings(sb);
+  const origin = originParam || baseLocation;
 
   try {
     const url =
       `https://maps.googleapis.com/maps/api/directions/json` +
-      `?origin=${encodeURIComponent(baseLocation)}&destination=${encodeURIComponent(dest)}` +
+      `?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(dest)}` +
       `&mode=driving&region=gb&key=${key}`;
     const res = await fetch(url, { cache: "no-store" });
     if (!res.ok) return NextResponse.json({ ok: false, error: "Lookup failed" }, { status: 200 });

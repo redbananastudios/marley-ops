@@ -61,16 +61,35 @@ export function AppointmentViewDialog({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [route, setRoute] = useState<"loading" | "error" | { miles: number; durationText: string | null }>("loading");
+  // Which journey the map shows: the JOB (pickup -> destination, the default —
+  // that's the move being quoted) or TO PICKUP (base -> pickup, the drive out).
+  const [routeMode, setRouteMode] = useState<"job" | "pickup">("job");
 
-  const dest = target?.location || lead?.from_address || lead?.from_postcode || null;
+  const pickupFull =
+    [lead?.from_address, lead?.from_postcode].filter(Boolean).join(", ") ||
+    target?.location ||
+    null;
+  const destFull = [lead?.to_address, lead?.to_postcode].filter(Boolean).join(", ") || null;
+  const hasJobRoute = !!(pickupFull && destFull);
 
-  // Distance + drive time from base — same pattern as the Clients map dialog.
+  // Reset to the job view (when available) each time a new appointment opens.
+  useEffect(() => {
+    if (open) setRouteMode(hasJobRoute ? "job" : "pickup");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, target?.id]);
+
+  const showJob = routeMode === "job" && hasJobRoute;
+  const legOrigin = showJob ? pickupFull : null; // null -> API defaults to base
+  const legDest = showJob ? destFull : pickupFull;
+
+  // Distance + drive time for the shown leg — same pattern as the Clients map dialog.
   // `route` is deliberately NOT a dependency (setting "loading" must not cancel the fetch).
   useEffect(() => {
-    if (!open || !dest) return;
+    if (!open || !legDest) return;
     let cancelled = false;
     setRoute("loading");
-    fetch(`/api/maps/route-to?dest=${encodeURIComponent(dest)}`)
+    const qs = `dest=${encodeURIComponent(legDest)}${legOrigin ? `&origin=${encodeURIComponent(legOrigin)}` : ""}`;
+    fetch(`/api/maps/route-to?${qs}`)
       .then((r) => r.json())
       .then((d: { ok: boolean; miles?: number; durationText?: string | null }) => {
         if (cancelled) return;
@@ -81,7 +100,7 @@ export function AppointmentViewDialog({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, dest]);
+  }, [open, legDest, legOrigin]);
 
   if (!target) return null;
 
@@ -91,12 +110,14 @@ export function AppointmentViewDialog({
     : "—";
   const badge = STATUS_BADGE[target.status ?? "scheduled"] ?? STATUS_BADGE.scheduled;
   const wa = waNumber(lead?.phone);
-  // Anchor the embed's origin to the base POSTCODE — the keyless embed fuzzy-matches
-  // house names ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
-  const origin = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
-  const embedSrc = dest
-    ? `https://www.google.com/maps?saddr=${encodeURIComponent(origin)}&daddr=${encodeURIComponent(dest)}&output=embed`
-    : null;
+  // Anchor the base origin to its POSTCODE — the keyless embed fuzzy-matches house
+  // names ("Ash Cottage" exists all over Dorset); a postcode geocodes exactly.
+  const basePc = baseLocation.match(/\b[A-Z]{1,2}\d[A-Z\d]?\s*\d[A-Z]{2}\b/i)?.[0] ?? baseLocation;
+  const embedOrigin = showJob ? pickupFull : basePc;
+  const embedSrc =
+    embedOrigin && legDest
+      ? `https://www.google.com/maps?saddr=${encodeURIComponent(embedOrigin)}&daddr=${encodeURIComponent(legDest)}&output=embed`
+      : null;
 
   async function setStatus(status: "completed" | "cancelled", doneMsg: string) {
     if (!target) return;
@@ -209,7 +230,31 @@ export function AppointmentViewDialog({
             {embedSrc ? (
               <div className="overflow-hidden rounded-md border border-border">
                 <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
-                  <p className="text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">Route from base</p>
+                  {hasJobRoute ? (
+                    <div className="inline-flex rounded-md border border-border bg-card p-0.5">
+                      {(
+                        [
+                          { key: "job" as const, label: "Job route" },
+                          { key: "pickup" as const, label: "To pickup" },
+                        ]
+                      ).map((m) => (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => setRouteMode(m.key)}
+                          aria-pressed={routeMode === m.key}
+                          className={cn(
+                            "focus-ring rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
+                            routeMode === m.key ? "bg-mm-red-tint text-mm-red-deep" : "text-mist-400 hover:text-foreground",
+                          )}
+                        >
+                          {m.label}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">Route from base</p>
+                  )}
                   <div className="ml-auto flex items-center gap-1.5">
                     {route === "loading" ? (
                       <span className="text-xs text-mist-400">Working out the route…</span>
@@ -230,7 +275,8 @@ export function AppointmentViewDialog({
                   </div>
                 </div>
                 <iframe
-                  title={`Route to ${dest}`}
+                  key={embedSrc}
+                  title={`Route to ${legDest}`}
                   src={embedSrc}
                   className="h-56 w-full sm:h-72 lg:h-80"
                   loading="lazy"
