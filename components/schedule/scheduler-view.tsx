@@ -24,6 +24,7 @@ import interactionPlugin from "@fullcalendar/interaction";
 import type {
   DateSelectArg,
   EventClickArg,
+  EventContentArg,
   EventDropArg,
   EventInput,
 } from "@fullcalendar/core";
@@ -60,11 +61,13 @@ export interface SchedulerEvent {
 
 const CHARCOAL = "#1A1A1A";
 const MM_RED = "#c03838";
+// Peter's pick for calendar legibility (2026-07-08): solid red, white text.
+const EVENT_RED = "#ec0c0c";
 
 const SURVEY_STYLE = {
-  backgroundColor: "#ffffff",
-  borderColor: MM_RED,
-  textColor: MM_RED,
+  backgroundColor: EVENT_RED,
+  borderColor: EVENT_RED,
+  textColor: "#ffffff",
 } as const;
 
 const REMOVAL_STYLE = {
@@ -166,6 +169,34 @@ export function SchedulerView({
     [shown],
   );
 
+  // Custom event card: time, customer/title, and WHO is doing the visit —
+  // an initial-avatar chip so the estimator is readable at a glance.
+  const estimatorById = useMemo(() => new Map(estimators.map((e) => [e.id, e.full_name])), [estimators]);
+  const renderEvent = useCallback(
+    (arg: EventContentArg) => {
+      const ep = arg.event.extendedProps as { estimatorId: string | null };
+      const estimator = ep.estimatorId ? estimatorById.get(ep.estimatorId) ?? null : null;
+      const firstName = estimator ? estimator.split(/\s+/)[0] : null;
+      const compact = arg.view.type === "dayGridMonth";
+      return (
+        <div className="mm-evt-card">
+          <div className="mm-evt-top">
+            {arg.timeText ? <span className="mm-evt-time">{arg.timeText}</span> : null}
+            {compact && firstName ? <span className="mm-evt-est-chip">{firstName[0]}</span> : null}
+          </div>
+          <div className="mm-evt-title">{arg.event.title}</div>
+          {!compact && firstName ? (
+            <div className="mm-evt-est">
+              <span className="mm-evt-est-chip">{firstName[0]}</span>
+              {firstName}
+            </div>
+          ) : null}
+        </div>
+      );
+    },
+    [estimatorById],
+  );
+
   const openCreate = useCallback(
     (start?: string, end?: string, allDay?: boolean) => {
       setEditTarget(null);
@@ -263,7 +294,7 @@ export function SchedulerView({
           {showSurveys ? (
             <div className="flex items-center gap-4 text-xs text-mist-500">
               <span className="inline-flex items-center gap-1.5">
-                <span className="inline-block size-3 rounded-[3px] border bg-white" style={{ borderColor: MM_RED }} />
+                <span className="inline-block size-3 rounded-[3px]" style={{ backgroundColor: EVENT_RED }} />
                 Survey
               </span>
               <span className="inline-flex items-center gap-1.5">
@@ -308,6 +339,7 @@ export function SchedulerView({
           eventStartEditable
           eventDurationEditable
           events={fcEvents}
+          eventContent={renderEvent}
           dateClick={onDateClick}
           select={onSelect}
           eventClick={onEventClick}
@@ -408,14 +440,62 @@ export function SchedulerView({
         }
         .mm-scheduler .fc .fc-event {
           border-radius: 0.375rem;
-          padding: 2px 4px;
+          padding: 3px 6px;
           font-size: 0.75rem;
           min-height: 44px;
           cursor: pointer;
         }
         .mm-scheduler .fc .fc-daygrid-event {
           min-height: 0;
-          padding: 1px 4px;
+          padding: 2px 5px;
+        }
+        /* Event card — white-on-red, readable at a glance */
+        .mm-evt-card {
+          display: flex;
+          flex-direction: column;
+          gap: 1px;
+          min-width: 0;
+          line-height: 1.3;
+        }
+        .mm-evt-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 4px;
+        }
+        .mm-evt-time {
+          font-size: 0.6875rem;
+          font-weight: 600;
+          opacity: 0.9;
+          font-variant-numeric: tabular-nums;
+        }
+        .mm-evt-title {
+          font-weight: 600;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .mm-evt-est {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          font-size: 0.6875rem;
+          font-weight: 500;
+          opacity: 0.95;
+          margin-top: 1px;
+        }
+        .mm-evt-est-chip {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          flex: none;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.28);
+          color: #fff;
+          font-size: 0.625rem;
+          font-weight: 700;
         }
         .mm-scheduler .fc .mm-evt-cancelled {
           opacity: 0.45;

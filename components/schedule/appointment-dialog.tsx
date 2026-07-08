@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, CheckCircle2 } from "lucide-react";
+import { Loader2, Trash2, CheckCircle2, Phone, Mail, User, Home, ArrowRight, StickyNote } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -59,6 +59,10 @@ export interface LeadOption {
   email?: string | null;
   from_postcode?: string | null;
   from_address?: string | null;
+  to_postcode?: string | null;
+  to_address?: string | null;
+  property_size?: string | null;
+  lead_notes?: string | null;
   /** Estimator from this lead's booked survey — a removal inherits it (read-only). */
   surveyEstimatorId?: string | null;
 }
@@ -117,6 +121,66 @@ function addHoursLocal(local: string, hours: number): string {
 
 function defaultDuration(type: ApptType): number {
   return type === "removal" ? 3 : 1;
+}
+
+/** Read-only context panels for the selected lead: who the customer is + what the
+ *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets). */
+function LeadContextPanels({ lead }: { lead: LeadOption }) {
+  const from = lead.from_address || lead.from_postcode;
+  const to = lead.to_address || lead.to_postcode;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
+      {/* Customer */}
+      <div className="rounded-md border border-border bg-muted/30 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
+          <User className="size-3.5" strokeWidth={2} />
+          Customer
+        </p>
+        <p className="text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+          {lead.phone ? (
+            <a
+              href={`tel:${lead.phone}`}
+              className="focus-ring -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#db2777] hover:bg-muted"
+            >
+              <Phone className="size-4" strokeWidth={1.75} />
+              {lead.phone}
+            </a>
+          ) : null}
+          {lead.email ? (
+            <a
+              href={`mailto:${lead.email}`}
+              className="focus-ring -ml-2 inline-flex min-h-11 min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-[#2563eb] hover:bg-muted sm:ml-0"
+            >
+              <Mail className="size-4 shrink-0" strokeWidth={1.75} />
+              <span className="truncate">{lead.email}</span>
+            </a>
+          ) : null}
+          {!lead.phone && !lead.email ? <p className="text-sm text-mist-400">No contact details on the lead.</p> : null}
+        </div>
+      </div>
+
+      {/* Move */}
+      <div className="rounded-md border border-border bg-muted/30 p-3">
+        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
+          <Home className="size-3.5" strokeWidth={2} />
+          Move
+        </p>
+        <div className="flex items-start gap-2 text-sm text-foreground">
+          <span className="min-w-0 flex-1">{from ?? "—"}</span>
+          <ArrowRight className="mt-0.5 size-4 shrink-0 text-mm-red" strokeWidth={2} />
+          <span className="min-w-0 flex-1">{to ?? "—"}</span>
+        </div>
+        {lead.property_size ? <p className="mt-1.5 text-xs font-medium text-[#16a34a]">{lead.property_size}</p> : null}
+        {lead.lead_notes ? (
+          <p className="mt-1.5 flex items-start gap-1.5 text-xs text-mist-500">
+            <StickyNote className="mt-0.5 size-3.5 shrink-0" strokeWidth={1.75} />
+            <span className="line-clamp-3">{lead.lead_notes}</span>
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 /** Round a time up to the next 15-minute boundary (keeps "now" defaults on-grid). */
@@ -318,9 +382,16 @@ export function AppointmentDialog({
           toast.error(res.error || "Could not create appointment.");
           return;
         }
-        toast.success(
-          apptType === "survey" ? "Survey booked." : "Removal scheduled.",
-        );
+        if (apptType === "survey" && "comms" in res && res.comms) {
+          const { email, sms } = res.comms;
+          const sent = [email === "sent" ? "email" : null, sms === "sent" ? "SMS" : null].filter(Boolean);
+          const failed = [email === "failed" ? "email" : null, sms === "failed" ? "SMS" : null].filter(Boolean);
+          if (sent.length) toast.success(`Survey booked — confirmation ${sent.join(" + ")} sent to the customer.`);
+          else toast.success("Survey booked.");
+          if (failed.length) toast.error(`Confirmation ${failed.join(" + ")} failed — send it from the lead's Comms tab.`);
+        } else {
+          toast.success(apptType === "survey" ? "Survey booked." : "Removal scheduled.");
+        }
       }
       onOpenChange(false);
       router.refresh();
@@ -380,6 +451,11 @@ export function AppointmentDialog({
 
         {/* Two columns on desktop so the form stays short enough to reach the buttons. */}
         <div className="grid gap-x-6 gap-y-4 py-1 md:grid-cols-2">
+          {/* Who + what this visit is about — read-only context for the chosen lead. */}
+          {leadId !== NO_LEAD && leads.find((l) => l.id === leadId) ? (
+            <LeadContextPanels lead={leads.find((l) => l.id === leadId)!} />
+          ) : null}
+
           {/* Left — the appointment details */}
           <div className="grid content-start gap-4">
             <div className="grid grid-cols-2 gap-3">

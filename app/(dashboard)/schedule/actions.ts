@@ -2,6 +2,14 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendCommunication } from "@/app/(dashboard)/comms-actions";
+import {
+  surveyConfirmEmailHtml,
+  surveyConfirmEmailText,
+  surveyConfirmSms,
+  surveyConfirmSubject,
+} from "@/lib/comms/survey-email";
+import { UK_TZ } from "@/lib/uk-time";
 
 async function ctx() {
   const sb = await createClient();
@@ -28,16 +36,31 @@ export interface CreateAppointmentInput {
   allDay?: boolean;
 }
 
+export type ConfirmSendState = "sent" | "failed" | "skipped";
+
 export async function createAppointment(input: CreateAppointmentInput) {
   const { sb, userId } = await ctx();
   // Who actually does this visit — chosen in the dialog, defaults to the creator.
   // This is what attributes visits to Connor vs Luke for pay + win stats.
   const estimatorId = input.estimatorId ?? userId;
 
-  // Pull the lead (for client_id + status + a default title).
-  let lead: { id: string; client_id: string | null; status: string; name: string | null } | null = null;
+  // Pull the lead (for client_id + status + a default title + the confirmation send).
+  let lead: {
+    id: string;
+    client_id: string | null;
+    status: string;
+    name: string | null;
+    phone: string | null;
+    email: string | null;
+    from_address: string | null;
+    from_postcode: string | null;
+  } | null = null;
   if (input.leadId) {
-    const { data } = await sb.from("leads").select("id, client_id, status, name").eq("id", input.leadId).single();
+    const { data } = await sb
+      .from("leads")
+      .select("id, client_id, status, name, phone, email, from_address, from_postcode")
+      .eq("id", input.leadId)
+      .single();
     lead = data;
   }
 
@@ -88,8 +111,47 @@ export async function createAppointment(input: CreateAppointmentInput) {
     revalidatePath("/leads");
   }
 
+  // Customer confirmation (survey only): SMS + branded email, fail-soft — a comms
+  // hiccup never unbooks the survey. Both go through sendCommunication so they are
+  // duplicate-guarded and land on the lead's Comms tab.
+  const comms: { email: ConfirmSendState; sms: ConfirmSendState } = { email: "skipped", sms: "skipped" };
+  if (input.apptType === "survey" && lead) {
+    const starts = new Date(input.startsAt);
+    const confirm = {
+      customerName: lead.name,
+      dateLabel: starts.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
+      timeLabel: starts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ }),
+      estimatorName: estimatorId
+        ? (await sb.from("profiles").select("full_name").eq("id", estimatorId).single()).data?.full_name ?? null
+        : null,
+      address: input.location || lead.from_address || lead.from_postcode || null,
+    };
+    if (lead.email) {
+      const r = await sendCommunication({
+        channel: "email",
+        to: lead.email,
+        subject: surveyConfirmSubject(confirm),
+        bodyText: surveyConfirmEmailText(confirm),
+        bodyHtml: surveyConfirmEmailHtml(confirm),
+        leadId: lead.id,
+        clientId: lead.client_id ?? undefined,
+      }).catch(() => ({ ok: false as const, error: "send crashed" }));
+      comms.email = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "sent" : "failed";
+    }
+    if (lead.phone) {
+      const r = await sendCommunication({
+        channel: "sms",
+        to: lead.phone,
+        bodyText: surveyConfirmSms(confirm),
+        leadId: lead.id,
+        clientId: lead.client_id ?? undefined,
+      }).catch(() => ({ ok: false as const, error: "send crashed" }));
+      comms.sms = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "sent" : "failed";
+    }
+  }
+
   revalidateSchedule();
-  return { ok: true as const, id: appt.id };
+  return { ok: true as const, id: appt.id, comms };
 }
 
 export async function rescheduleAppointment(id: string, startsAt: string, endsAt: string) {

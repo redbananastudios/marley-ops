@@ -28,7 +28,7 @@ export default async function SurveysSchedulePage({
       .order("starts_at", { ascending: true }),
     sb
       .from("leads")
-      .select("id,name,phone,email,from_postcode,from_address")
+      .select("id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes")
       .order("created_at", { ascending: false }),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
@@ -39,7 +39,11 @@ export default async function SurveysSchedulePage({
     if (a.appt_type === "survey" && a.status !== "cancelled" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
       surveyEst.set(a.lead_id, a.estimator_id);
   }
-  const leadOptions = (leads ?? []).map((l) => ({ ...l, surveyEstimatorId: surveyEst.get(l.id) ?? null }));
+  const leadOptions = (leads ?? []).map(({ notes, ...l }) => ({
+    ...l,
+    lead_notes: notes,
+    surveyEstimatorId: surveyEst.get(l.id) ?? null,
+  }));
 
   // Booked from a lead ("Book survey") — auto-open the dialog prefilled with that
   // lead + its pickup address as the location.
