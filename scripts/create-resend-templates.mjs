@@ -54,7 +54,7 @@ const surveyConfirmationHtml = `<!DOCTYPE html>
   </td></tr>
 
   <tr><td align="center" style="padding:0 36px 6px;">
-    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">You're in the diary, {{{FIRST_NAME}}}</h1>
+    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">You're in the diary, {{{CUSTOMER_FIRST_NAME}}}</h1>
   </td></tr>
   <tr><td align="center" style="padding:14px 36px 22px;">
     <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">We'll come and take a proper look at your move so your fixed quote covers everything. The visit takes about an hour and there is nothing to prepare.</p>
@@ -101,7 +101,7 @@ const TEMPLATES = [
     reply_to: "hello@marleymoves.co.uk",
     html: surveyConfirmationHtml,
     variables: [
-      { key: "FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
       { key: "DATE_LABEL", type: "string", fallback_value: "your booked date" },
       { key: "TIME_LABEL", type: "string", fallback_value: "the agreed time" },
       { key: "ESTIMATOR", type: "string", fallback_value: "One of our team" },

@@ -126,8 +126,15 @@ function defaultDuration(type: ApptType): number {
 /** Read-only context panels for the selected lead: who the customer is + what the
  *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets). */
 function LeadContextPanels({ lead }: { lead: LeadOption }) {
-  const from = lead.from_address || lead.from_postcode;
-  const to = lead.to_address || lead.to_postcode;
+  // Address + postcode together — the postcode is what the crew navigates by.
+  const withPc = (addr: string | null | undefined, pc: string | null | undefined) => {
+    const a = (addr || "").trim();
+    const p = (pc || "").trim();
+    if (a && p) return a.toUpperCase().includes(p.toUpperCase()) ? a : `${a}, ${p}`;
+    return a || p || null;
+  };
+  const from = withPc(lead.from_address, lead.from_postcode);
+  const to = withPc(lead.to_address, lead.to_postcode);
   return (
     <div className="grid gap-3 sm:grid-cols-2 md:col-span-2">
       {/* Customer */}

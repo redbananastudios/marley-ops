@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/card";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { UK_TZ } from "@/lib/uk-time";
+import { ukPhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +57,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .order("created_at", { ascending: false }),
   ]);
 
-  const phone = client.phone_e164 ?? client.phone_raw;
+  const phone = ukPhone(client.phone_raw ?? client.phone_e164);
   const email = client.email;
   const wa = waNumber(phone);
   const leadRows = leads ?? [];

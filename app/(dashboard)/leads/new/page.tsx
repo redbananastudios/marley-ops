@@ -1,6 +1,7 @@
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { ukPhone } from "@/lib/phone";
 import { AddLeadForm } from "./add-lead-form";
 import type { ClientOption } from "@/components/clients/client-combobox";
 
@@ -19,7 +20,7 @@ export default async function NewLeadPage() {
     id: c.id,
     display_name: c.display_name,
     email: c.email,
-    phone: c.phone_e164 ?? c.phone_raw,
+    phone: ukPhone(c.phone_raw ?? c.phone_e164),
     postcode: c.postcode_home,
   }));
 

@@ -4,6 +4,7 @@ import { ClientsView, type ClientRow } from "@/components/clients/clients-view";
 import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import { classifySource, type SourceKey } from "@/lib/dashboard/compute";
 import { getBusinessSettings } from "@/lib/settings";
+import { ukPhone } from "@/lib/phone";
 
 export const dynamic = "force-dynamic";
 
@@ -57,7 +58,7 @@ export default async function ClientsPage() {
         display_name: c.display_name,
         isCompany: !!c.is_company,
         email: c.email,
-        phone: c.phone_e164 ?? c.phone_raw,
+        phone: ukPhone(c.phone_raw ?? c.phone_e164),
         postcode: c.postcode_home,
         address,
         leadCount: a?.count ?? 0,

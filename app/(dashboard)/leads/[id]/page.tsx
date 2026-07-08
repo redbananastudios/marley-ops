@@ -15,6 +15,7 @@ import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
 import { PaymentsCard } from "@/components/leads/payments-card";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
+import { ukPhone } from "@/lib/phone";
 import { StatusChanger } from "./status-changer";
 
 const gbp = (n: number | null | undefined): string =>
@@ -189,7 +190,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               leadId={lead.id}
               initial={{
                 name: lead.name ?? "",
-                phone: client?.phone_e164 ?? client?.phone_raw ?? lead.phone ?? "",
+                phone: ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone) ?? "",
                 email: client?.email ?? lead.email ?? "",
                 from_postcode: lead.from_postcode ?? "",
                 to_postcode: lead.to_postcode ?? "",
@@ -223,7 +224,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         <LeadActionBar
           leadId={lead.id}
-          phone={client?.phone_e164 ?? client?.phone_raw ?? lead.phone}
+          phone={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone)}
           email={client?.email ?? lead.email}
           status={lead.status}
           firstContactedAt={lead.first_contacted_at}
@@ -254,7 +255,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </div>
               <div className="grid gap-4 p-5 sm:grid-cols-2">
                 <Fact label="Name" value={client?.display_name ?? lead.name} />
-                <Fact label="Phone" value={client?.phone_e164 ?? client?.phone_raw ?? lead.phone} />
+                <Fact label="Phone" value={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone)} />
                 <Fact label="Email" value={client?.email ?? lead.email} />
                 <Fact label="Postcode" value={client?.postcode_home ?? lead.from_postcode} />
               </div>
@@ -437,7 +438,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 leadId={lead.id}
                 clientId={lead.client_id ?? undefined}
                 defaultEmail={client?.email ?? lead.email ?? undefined}
-                defaultPhone={client?.phone_e164 ?? lead.phone ?? undefined}
+                defaultPhone={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone) ?? undefined}
               />
             </div>
             {commsRows.length === 0 ? (
