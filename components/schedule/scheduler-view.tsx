@@ -182,15 +182,14 @@ export function SchedulerView({
         <div className="mm-evt-card">
           <div className="mm-evt-top">
             {arg.timeText ? <span className="mm-evt-time">{arg.timeText}</span> : null}
-            {compact && firstName ? <span className="mm-evt-est-chip">{firstName[0]}</span> : null}
+            {firstName ? (
+              <span className="mm-evt-est">
+                <span className="mm-evt-est-chip">{firstName[0]}</span>
+                {!compact ? firstName : null}
+              </span>
+            ) : null}
           </div>
           <div className="mm-evt-title">{arg.event.title}</div>
-          {!compact && firstName ? (
-            <div className="mm-evt-est">
-              <span className="mm-evt-est-chip">{firstName[0]}</span>
-              {firstName}
-            </div>
-          ) : null}
         </div>
       );
     },
