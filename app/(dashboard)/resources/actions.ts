@@ -13,7 +13,9 @@ async function actor() {
 }
 
 const optDate = z.string().trim().optional().or(z.literal(""));
-const optMoney = z.union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")]).optional();
+// Literal "" FIRST — z.coerce.number() turns "" into 0, so an empty money field
+// would silently store £0 instead of null if the union tried the number branch first.
+const optMoney = z.union([z.literal(""), z.coerce.number().nonnegative("Must be 0 or more")]).optional();
 
 /* -------------------------------------------------------------- vehicles */
 
