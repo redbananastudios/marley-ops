@@ -36,6 +36,12 @@ import {
   round2,
 } from "@/lib/quote/payments";
 import {
+  chaseTextToHtml,
+  depositChaseEmail,
+  expiryLabelFrom,
+  replyAddressFor,
+} from "@/lib/quote/chase";
+import {
   createInvoice,
   findInvoiceByReference,
   findOrCreateContact,
@@ -241,6 +247,161 @@ export async function acceptQuoteOnline(
   ]);
 
   return { ok: true, alreadyAccepted: false };
+}
+
+/* ------------------------------------------------------------- staff accept */
+
+export type StaffAcceptOutcome =
+  | { ok: true; alreadyAccepted: boolean; agreed: number; deposit: number; emailed: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Staff-side acceptance ("Mark accepted" / "Mark won" — the customer said yes
+ * on the phone). Runs the SAME machine as the online accept page so both paths
+ * are indistinguishable downstream: quote accepted at the agreed price, lead
+ * PROVISIONAL (confirmed only when the deposit lands), deposit requested +
+ * Zoho deposit invoice raised, day-5 call task queued, and the customer
+ * emailed their payment link immediately (they are not on the accept page,
+ * unlike the online path — the email IS their payment surface).
+ */
+export async function acceptQuoteByStaff(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+  agreedPrice?: number,
+): Promise<StaffAcceptOutcome> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+  const settings = await getBusinessSettings(sb);
+  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+
+  if (quote.status === "accepted") {
+    await ensureDepositInvoice(sb, quote.id); // self-heal, then no-op
+    return {
+      ok: true,
+      alreadyAccepted: true,
+      agreed: quote.agreed_price ?? Number(quote.grand_total ?? 0),
+      deposit,
+      emailed: false,
+    };
+  }
+  if (quote.status !== "draft" && quote.status !== "sent") {
+    return { ok: false, error: `A ${quote.status} quote can't be accepted.` };
+  }
+
+  const agreed =
+    typeof agreedPrice === "number" && Number.isFinite(agreedPrice) && agreedPrice > 0
+      ? round2(agreedPrice)
+      : (quote.agreed_price ?? Number(quote.grand_total ?? 0));
+
+  // The payment link (accept page in its post-accept state) + reply routing
+  // both hang off the token — make sure it exists before anything sends.
+  const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
+
+  const { data: won } = await sb
+    .from("quotes")
+    .update({
+      status: "accepted",
+      accepted_at: new Date().toISOString(),
+      agreed_price: agreed,
+      deposit_amount: deposit,
+    } as never)
+    .eq("id", quote.id)
+    .in("status", ["draft", "sent"]) // double-tap / online-accept race: one winner
+    .select("id");
+  if (!won?.length) {
+    await ensureDepositInvoice(sb, quote.id);
+    return { ok: true, alreadyAccepted: true, agreed, deposit, emailed: false };
+  }
+
+  if (quote.lead_id) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("status, first_contacted_at, client_id")
+      .eq("id", quote.lead_id)
+      .single();
+    const patch: Record<string, unknown> = {
+      deposit_amount: deposit,
+      deposit_requested_at: new Date().toISOString(),
+      chase_paused: false,
+      deposit_chase_step: 0,
+    };
+    if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
+    if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
+    await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+
+    // One open deposit CALL task max — day 5, after the day-1/3 auto reminders.
+    const { data: open } = await sb
+      .from("follow_ups")
+      .select("id")
+      .eq("lead_id", quote.lead_id)
+      .eq("reason", "deposit")
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+    if (!open) {
+      await sb.from("follow_ups").insert({
+        lead_id: quote.lead_id,
+        client_id: lead?.client_id ?? quote.client_id,
+        quote_id: quote.id,
+        reason: "deposit",
+        due_at: ukTimeAt(9, 0, 5).toISOString(),
+        assigned_to: quote.estimator_id ?? actorId,
+        created_by: actorId,
+        source: "staff_accept",
+        notes: "Deposit still unpaid after two automatic reminders — give them a call.",
+        metadata: { amount: deposit },
+      } as never);
+    }
+
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: lead?.client_id ?? quote.client_id,
+      actor_id: actorId,
+      type: "status_change",
+      summary: `Quote ${quote.quote_ref} accepted — agreed £${agreed.toFixed(0)}, £${deposit.toFixed(0)} deposit requested`,
+      meta: { quote_id: quote.id, agreed_price: agreed, via: "staff_accept" },
+    });
+  }
+
+  await ensureDepositInvoice(sb, quote.id);
+
+  // Payment instructions to the customer, right now (dup-guarded). Reuses the
+  // day-1 reminder copy — sending it here advances the chase to step 1 so the
+  // engine's next touch is day 3.
+  let emailed = false;
+  if (quote.customer_email && token) {
+    const email = depositChaseEmail(1, {
+      firstName: quote.customer_name,
+      quoteRef: quote.quote_ref,
+      acceptUrl: acceptUrlFor(token),
+      expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
+    });
+    const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
+    const res = await dispatchComm(sb, actorId, {
+      channel: "email",
+      to: quote.customer_email,
+      subject: email.subject,
+      bodyText: email.text,
+      ...(templateId
+        ? { template: { id: templateId, variables: email.variables } }
+        : { bodyHtml: chaseTextToHtml(email.text) }),
+      replyTo: replyAddressFor(token),
+      from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
+      leadId: quote.lead_id ?? undefined,
+      quoteId: quote.id,
+      clientId: quote.client_id ?? undefined,
+    });
+    emailed = "ok" in res && res.ok;
+    if (emailed && quote.lead_id) {
+      await sb
+        .from("leads")
+        .update({ deposit_chase_step: 1, deposit_chase_at: new Date().toISOString() } as never)
+        .eq("id", quote.lead_id);
+    }
+  }
+
+  return { ok: true, alreadyAccepted: false, agreed, deposit, emailed };
 }
 
 /* ------------------------------------------------------------- deposit invoice */

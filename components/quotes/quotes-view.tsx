@@ -10,9 +10,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, Users } from "lucide-react";
+import { ClipboardCheck, Search, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 
 export interface QuoteRow {
   id: string;
@@ -28,6 +29,7 @@ export interface QuoteRow {
   lead_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+  deposit_paid_at?: string | null;
 }
 
 type PresetKey = "all" | "draft" | "sent" | "accepted";
@@ -92,7 +94,13 @@ function routeLine(q: QuoteRow): string {
   return "—";
 }
 
-export function QuotesView({ quotes }: { quotes: QuoteRow[] }) {
+export function QuotesView({
+  quotes,
+  defaultDeposit = 100,
+}: {
+  quotes: QuoteRow[];
+  defaultDeposit?: number;
+}) {
   const [preset, setPreset] = useState<PresetKey>("all");
   const [search, setSearch] = useState("");
 
@@ -206,6 +214,30 @@ export function QuotesView({ quotes }: { quotes: QuoteRow[] }) {
                   <span className="tabular hidden shrink-0 text-xs text-mist-400 md:inline">×{q.email_send_count}</span>
                 ) : null}
                 <span className="tabular hidden w-14 shrink-0 text-right text-xs text-mist-400 md:inline">{dateShort(q.created_at)}</span>
+                {/* Convert: live quotes accept in place; accepted ones hand over to Bookings. */}
+                {q.status === "draft" || q.status === "sent" ? (
+                  <AcceptQuoteButton
+                    quoteId={q.id}
+                    grandTotal={Number(q.grand_total ?? 0)}
+                    status={q.status}
+                    depositAmount={defaultDeposit}
+                    compact
+                  />
+                ) : q.status === "accepted" ? (
+                  <Link
+                    href="/bookings"
+                    className={cn(
+                      "focus-ring inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold",
+                      q.deposit_paid_at
+                        ? "border-success-border bg-success-bg text-success"
+                        : "border-warn-border bg-warn-bg text-warn",
+                    )}
+                    title="Manage in Bookings"
+                  >
+                    <ClipboardCheck className="size-3.5" strokeWidth={2} />
+                    {q.deposit_paid_at ? "Deposit paid" : "Awaiting deposit"}
+                  </Link>
+                ) : null}
                 {q.lead_id ? (
                   <Link
                     href={`/leads/${q.lead_id}`}

@@ -10,6 +10,7 @@ import {
   type QuoteFormValues,
 } from "@/lib/quote/form-types";
 import { addressFromString } from "@/lib/places/parse";
+import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
 import { getBusinessSettings } from "@/lib/settings";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { ukParts } from "@/lib/uk-time";
@@ -189,55 +190,35 @@ export async function setQuoteStatus(id: string, status: string) {
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 /**
- * Accept a quote: record the agreed price (the booked revenue — may differ from
- * the quoted total), stamp accepted_at, advance the linked lead to Confirmed
- * (never regressing), stamp first contact if missing, and log it.
+ * Accept a quote (staff-side: "Mark accepted" on the quote, "Mark won" on the
+ * lead, or the status control). Runs the SAME machine as the customer's online
+ * accept — lead to PROVISIONAL, £deposit requested + Zoho deposit invoice,
+ * payment email to the customer, day-5 call task — so every accepted quote
+ * lands in Bookings → Awaiting deposit and confirms itself when the money
+ * arrives. The full pipeline lives in lib/quote/accept-flow.ts.
  */
 export async function acceptQuote(id: string, agreedPrice?: number) {
   const { sb, userId } = await ctx();
-  const { data: q, error: qErr } = await sb
-    .from("quotes")
-    .select("lead_id, client_id, grand_total")
-    .eq("id", id)
-    .single();
-  if (qErr || !q) return { ok: false as const, error: qErr?.message ?? "Quote not found" };
+  if (!userId) return { ok: false as const, error: "Not signed in" };
 
-  const price =
-    typeof agreedPrice === "number" && Number.isFinite(agreedPrice) && agreedPrice > 0
-      ? agreedPrice
-      : Number(q.grand_total ?? 0);
+  const res = await acceptQuoteByStaff(sb, id, userId, agreedPrice);
+  if (!res.ok) return { ok: false as const, error: res.error };
 
-  const { error } = await sb
-    .from("quotes")
-    .update({ status: "accepted" as never, agreed_price: price, accepted_at: new Date().toISOString() })
-    .eq("id", id);
-  if (error) return { ok: false as const, error: error.message };
-
-  if (q.lead_id) {
-    const { data: lead } = await sb
-      .from("leads")
-      .select("status, first_contacted_at")
-      .eq("id", q.lead_id)
-      .single();
-    const patch: Record<string, unknown> = {};
-    if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("confirmed")) patch.status = "confirmed";
-    if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
-    if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", q.lead_id);
-
-    await sb.from("activities").insert({
-      lead_id: q.lead_id,
-      client_id: q.client_id,
-      actor_id: userId,
-      type: "status_change",
-      summary: `Quote accepted — agreed £${price.toFixed(0)}`,
-      meta: { quote_id: id, agreed_price: price },
-    });
+  const { data: q } = await sb.from("quotes").select("lead_id").eq("id", id).single();
+  if (q?.lead_id) {
     revalidatePath(`/leads/${q.lead_id}`);
     revalidatePath("/leads");
   }
-
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
+  revalidatePath("/bookings");
+  revalidatePath("/follow-ups");
   revalidatePath("/");
-  return { ok: true as const, agreedPrice: price };
+  return {
+    ok: true as const,
+    agreedPrice: res.agreed,
+    deposit: res.deposit,
+    emailed: res.emailed,
+    alreadyAccepted: res.alreadyAccepted,
+  };
 }

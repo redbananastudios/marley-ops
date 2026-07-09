@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ClipboardCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
@@ -34,7 +36,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name",
+      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -95,11 +97,27 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
               Agreed {gbp(quote.agreed_price)}
             </span>
           ) : null}
+          {quote.status === "accepted" ? (
+            <Link
+              href="/bookings"
+              className={`focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold ${
+                quote.deposit_paid_at
+                  ? "border-success-border bg-success-bg text-success"
+                  : "border-warn-border bg-warn-bg text-warn"
+              }`}
+            >
+              <ClipboardCheck className="size-3.5" strokeWidth={2} />
+              {quote.deposit_paid_at
+                ? "Deposit paid · Bookings"
+                : `Awaiting ${gbp(quote.deposit_amount ?? settings.defaultDeposit)} deposit · Bookings`}
+            </Link>
+          ) : null}
           <QuoteStatusBadge status={quote.status ?? "draft"} />
           <AcceptQuoteButton
             quoteId={quote.id}
             grandTotal={Number(quote.grand_total ?? 0)}
             status={quote.status ?? "draft"}
+            depositAmount={settings.defaultDeposit}
           />
           <DeleteQuoteButton
             quoteId={quote.id}

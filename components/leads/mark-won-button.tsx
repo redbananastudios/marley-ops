@@ -92,7 +92,11 @@ export function MarkWonButton({
       toast.error(res.error || "Could not mark won.");
       return;
     }
-    toast.success(`Won — ${gbp(value)} booked.`);
+    toast.success(
+      `Won — ${gbp(value)} booked. ${
+        res.emailed ? "Deposit payment email sent." : "No email on file — send the payment link from Bookings."
+      }`,
+    );
     setOpen(false);
     router.refresh();
   }
@@ -125,7 +129,7 @@ export function MarkWonButton({
             <DialogTitle className="font-display text-xl">Mark won</DialogTitle>
             <DialogDescription>
               {hasQuote
-                ? "Record the price the customer agreed to. This becomes the booked revenue and confirms the lead."
+                ? "Records the agreed price and starts the booking: the customer gets their deposit payment link by email, and the lead sits in Provisional until the deposit lands (then confirms itself). Track it in Bookings."
                 : "There's no quote on this lead yet. Build one so the win carries a value, or confirm without a recorded figure."}
             </DialogDescription>
           </DialogHeader>
