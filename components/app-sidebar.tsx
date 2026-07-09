@@ -6,6 +6,7 @@ import {
   BarChart3,
   BellRing,
   CalendarCheck,
+  ClipboardCheck,
   Contact,
   FileText,
   KanbanSquare,
@@ -40,7 +41,13 @@ export const NAV: NavGroup[] = [
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
     ],
   },
-  { group: "Sales", items: [{ href: "/quotes", label: "Quotes", icon: FileText, live: true }] },
+  {
+    group: "Sales",
+    items: [
+      { href: "/quotes", label: "Quotes", icon: FileText, live: true },
+      { href: "/bookings", label: "Bookings", icon: ClipboardCheck, live: true },
+    ],
+  },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3, live: true }] },
   { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: true }] },
 ];

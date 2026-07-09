@@ -42,7 +42,9 @@ export async function updateSession(request: NextRequest) {
     // secret INSIDE the route (requireUserOrCronSecret); a redirect-to-login
     // here would silently break them.
     path.startsWith("/api/cron/") ||
-    path.startsWith("/api/sync/");
+    path.startsWith("/api/sync/") ||
+    // Provider webhooks (svix-signature verified inside the route).
+    path.startsWith("/api/webhooks/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

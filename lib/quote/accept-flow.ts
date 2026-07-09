@@ -41,7 +41,6 @@ import {
   findOrCreateContact,
   getInvoicePdfBase64,
   getInvoiceStatus,
-  isPaymentGatewayActive,
   recordInvoicePayment,
 } from "@/lib/zoho";
 
@@ -190,12 +189,17 @@ export async function acceptQuoteOnline(
     const patch: Record<string, unknown> = {
       deposit_amount: deposit,
       deposit_requested_at: new Date().toISOString(),
+      // Fresh chase context: acceptance ends the quote chase and arms the
+      // deposit cadence, even if a reply had paused chasing earlier.
+      chase_paused: false,
+      deposit_chase_step: 0,
     };
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
     await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
 
-    // One open deposit chase max, due tomorrow 9am UK.
+    // One open deposit CALL task max — due day 5 (the chase engine emails
+    // automatically on days 1 and 3, so the human only steps in after those).
     const { data: open } = await sb
       .from("follow_ups")
       .select("id")
@@ -210,9 +214,10 @@ export async function acceptQuoteOnline(
         client_id: lead?.client_id ?? quote.client_id,
         quote_id: quote.id,
         reason: "deposit",
-        due_at: ukTimeAt(9, 0, 1).toISOString(),
+        due_at: ukTimeAt(9, 0, 5).toISOString(),
         assigned_to: quote.estimator_id,
         source: "online_accept",
+        notes: "Deposit still unpaid after two automatic reminders — give them a call.",
         metadata: { amount: deposit },
       } as never);
     }
@@ -312,12 +317,15 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
 /* ------------------------------------------------------------- deposit paid */
 
 export interface DepositPaidOpts {
-  method: "bank_transfer" | "card";
+  method: "bank_transfer" | "card" | "cash";
   actorId: string | null; // null = system (cron / customer card payment)
-  /** Record the payment in Zoho too (BACS one-tap). Card payments are already
-   *  in Zoho — pass false. */
+  /** Record the payment in Zoho too (BACS/cash one-tap). Card payments are
+   *  already in Zoho — pass false. */
   recordInZoho: boolean;
 }
+
+const zohoMode = (method: string): "banktransfer" | "cash" =>
+  method === "cash" ? "cash" : "banktransfer";
 
 /** Deposit landed: confirm the lead, close the chase, record in Zoho (BACS),
  *  email the customer, alert ops. Idempotent — a second call is a no-op. */
@@ -356,7 +364,7 @@ export async function markDepositPaid(
           customerId: quote.zoho_contact_id,
           invoiceId: quote.zoho_deposit_invoice_id,
           amount: Math.min(deposit, status.balance),
-          mode: "banktransfer",
+          mode: zohoMode(opts.method),
           reference: quote.quote_ref,
         });
       }
@@ -490,7 +498,8 @@ export async function createBalanceInvoiceFlow(
         reference: ref,
         description: `Removal services — quote ${quote.quote_ref} (balance after £${deposit.toFixed(2)} booking deposit)`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)} less the £${deposit.toFixed(2)} booking deposit already invoiced. Payment in full is due before move day.`,
+        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)} less the £${deposit.toFixed(2)} booking deposit already invoiced. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash.`,
+        disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
     const dueDate = balanceDueDate(quote.moving_date);
@@ -554,7 +563,6 @@ export async function createBalanceInvoiceFlow(
       } catch {
         pdfBase64 = undefined; // send without the attachment rather than not at all
       }
-      const cardOk = await isPaymentGatewayActive().catch(() => false);
       const res = await dispatchComm(sb, actorId, {
         channel: "email",
         to: quote.customer_email,
@@ -567,7 +575,6 @@ export async function createBalanceInvoiceFlow(
           moveDateLabel: moveDateLabel(quote.moving_date),
           invoiceUrl: inv.invoiceUrl,
           invoiceNumber: inv.invoiceNumber,
-          cardPaymentsEnabled: cardOk,
         }),
         attachmentBase64: pdfBase64,
         attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
@@ -597,13 +604,14 @@ export async function createBalanceInvoiceFlow(
 
 /** Balance landed (seen in Zoho, or one-tap in ops): stamp the lead, close the
  *  chase, confirm to the customer. Idempotent via the lead's balance_paid_at.
- *  `recordInZoho` records the BACS payment against the balance invoice (ops
- *  one-tap); pass false when Zoho already knows (card / cron). */
+ *  `recordInZoho` records the BACS/cash payment against the balance invoice
+ *  (ops one-tap); pass false when Zoho already knows (cron). */
 export async function markBalancePaid(
   sb: Sb,
   quoteId: string,
   actorId: string | null,
   recordInZoho = false,
+  method: "bank_transfer" | "cash" = "bank_transfer",
 ): Promise<{ ok: boolean; already?: boolean; error?: string }> {
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote?.lead_id) return { ok: false, error: "Quote or lead not found" };
@@ -630,7 +638,7 @@ export async function markBalancePaid(
           customerId: quote.zoho_contact_id,
           invoiceId: quote.zoho_balance_invoice_id,
           amount: status.balance,
-          mode: "banktransfer",
+          mode: zohoMode(method),
           reference: quote.quote_ref,
         });
       }

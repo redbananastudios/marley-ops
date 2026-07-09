@@ -18,6 +18,9 @@ export async function sendEmail(input: {
    *  Templates are managed in the Resend dashboard/API — see scripts/create-resend-templates.mjs. */
   template?: { id: string; variables?: Record<string, string | number> };
   attachments?: { filename: string; content: string }[]; // content = base64
+  /** Override Reply-To (default hello@) — chase emails use the per-lead
+   *  q-<token>@reply.marleymoves.co.uk address so replies route back in. */
+  replyTo?: string;
 }): Promise<SendResult> {
   if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}` };
   const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
@@ -31,7 +34,7 @@ export async function sendEmail(input: {
       body: JSON.stringify({
         from,
         to: [input.to],
-        reply_to: "hello@marleymoves.co.uk",
+        reply_to: input.replyTo || "hello@marleymoves.co.uk",
         subject: input.subject,
         ...(input.template ? { template: input.template } : { html: input.html }),
         attachments: input.attachments,

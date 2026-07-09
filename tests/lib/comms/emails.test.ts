@@ -82,7 +82,7 @@ describe("payment emails", () => {
     NO_EM_DASH(html);
   });
 
-  it("balance invoice: amount, bank details with the QUOTE ref (not the -BAL ref), hosted link", () => {
+  it("balance invoice: amount, bank details with the QUOTE ref (not the -BAL ref), hosted link, NEVER card", () => {
     const html = buildBalanceInvoiceEmailHtml({
       firstName: "Jane",
       quoteRef: "MM-T-1",
@@ -90,7 +90,6 @@ describe("payment emails", () => {
       moveDateLabel: "Monday 20 July",
       invoiceUrl: "https://zohoinvoicepay.eu/invoice/x",
       invoiceNumber: "INV-000200",
-      cardPaymentsEnabled: false,
     });
     expect(html).toContain("£1,340");
     expect(html).toContain(BANK_DETAILS.sortCode);
@@ -98,18 +97,10 @@ describe("payment emails", () => {
     expect(html).toContain(">MM-T-1<"); // BACS reference = quote ref, exact
     expect(html).toContain("INV-000200");
     expect(html).toContain("View your invoice");
-    expect(html).not.toContain("pay by card"); // gateway off → no card copy
+    // The balance is BACS/cash only (card fees) — card copy must never appear,
+    // Stripe or no Stripe.
+    expect(html.toLowerCase()).not.toContain("card");
     NO_EM_DASH(html);
-  });
-
-  it("balance invoice with the gateway live offers card payment", () => {
-    const html = buildBalanceInvoiceEmailHtml({
-      quoteRef: "MM-T-1",
-      amount: 500,
-      invoiceUrl: "https://zohoinvoicepay.eu/invoice/x",
-      cardPaymentsEnabled: true,
-    });
-    expect(html).toContain("pay by card");
   });
 
   it("balance received: settled confirmation", () => {

@@ -611,6 +611,14 @@ export type Database = {
           deposit_amount: number | null
           deposit_paid_at: string | null
           deposit_requested_at: string | null
+          chase_paused: boolean
+          deposit_chase_at: string | null
+          deposit_chase_step: number
+          lost_at: string | null
+          lost_note: string | null
+          lost_reason: string | null
+          quote_chase_at: string | null
+          quote_chase_step: number
           email: string | null
           entry_channel: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given: number | null
@@ -663,6 +671,14 @@ export type Database = {
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_requested_at?: string | null
+          chase_paused?: boolean
+          deposit_chase_at?: string | null
+          deposit_chase_step?: number
+          lost_at?: string | null
+          lost_note?: string | null
+          lost_reason?: string | null
+          quote_chase_at?: string | null
+          quote_chase_step?: number
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null
@@ -715,6 +731,14 @@ export type Database = {
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_requested_at?: string | null
+          chase_paused?: boolean
+          deposit_chase_at?: string | null
+          deposit_chase_step?: number
+          lost_at?: string | null
+          lost_note?: string | null
+          lost_reason?: string | null
+          quote_chase_at?: string | null
+          quote_chase_step?: number
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null

@@ -91,6 +91,26 @@ const surveyConfirmationHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/* ------------------------------------------------- chase emails (plain look)
+   Personal plain-text voice from Connor — canonical copy lives in
+   lib/quote/chase.ts (approved by Peter 2026-07-09); keep both in sync.
+   NO template-level reply_to: the chase engine sets the per-lead
+   q-<token>@reply.marleymoves.co.uk address on each send. */
+
+const plain = (text) =>
+  `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;white-space:pre-wrap;">${text.replace(
+    /\{\{\{ACCEPT_LINK\}\}\}/g,
+    '<a href="{{{ACCEPT_LINK}}}" style="color:#1a56db;">{{{ACCEPT_LINK}}}</a>',
+  )}</div>`;
+
+const CHASE_FROM = "Connor at Marley Moves <quotes@marleymoves.co.uk>";
+const CHASE_VARS = [
+  { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+  { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
+  { key: "ACCEPT_LINK", type: "string", fallback_value: "https://marleymoves.co.uk/quote/" },
+  { key: "EXPIRY_DATE", type: "string", fallback_value: "the expiry date on your quote" },
+];
+
 /** The registry: add future templates here and re-run. envVar is what the panel reads. */
 const TEMPLATES = [
   {
@@ -107,6 +127,95 @@ const TEMPLATES = [
       { key: "ESTIMATOR", type: "string", fallback_value: "One of our team" },
       { key: "ADDRESS", type: "string", fallback_value: "your address" },
     ],
+  },
+  {
+    name: "chase-quote-1",
+    envVar: "RESEND_TEMPLATE_CHASE_QUOTE_1",
+    subject: "Did the quote come through okay, {{{CUSTOMER_FIRST_NAME}}}?",
+    from: CHASE_FROM,
+    html: plain(`Hi {{{CUSTOMER_FIRST_NAME}}},
+
+Connor here from Marley Moves. Just checking the quote for your move landed safely and seeing if you had any questions about it.
+
+If you're happy with everything, you can accept it online in about 30 seconds and that reserves your date:
+{{{ACCEPT_LINK}}}
+
+Anything you'd like changing, just reply to this email or ring me on 01747 637070.
+
+Thanks,
+Connor
+Marley Moves`),
+    variables: CHASE_VARS,
+  },
+  {
+    name: "chase-quote-2",
+    envVar: "RESEND_TEMPLATE_CHASE_QUOTE_2",
+    subject: "Shall I pencil your date in?",
+    from: CHASE_FROM,
+    html: plain(`Hi {{{CUSTOMER_FIRST_NAME}}},
+
+Dates are starting to fill for the coming weeks (month-end and Fridays always go first), so I wanted to check where you're at with your quote.
+
+Accepting online takes half a minute and the £100 deposit locks the crew and date in for you:
+{{{ACCEPT_LINK}}}
+
+If something in the quote doesn't look right, tell me and I'll sort it before anything is booked.
+
+Thanks,
+Connor`),
+    variables: CHASE_VARS,
+  },
+  {
+    name: "chase-quote-3",
+    envVar: "RESEND_TEMPLATE_CHASE_QUOTE_3",
+    subject: "Your quote is valid until {{{EXPIRY_DATE}}}",
+    from: CHASE_FROM,
+    html: plain(`Hi {{{CUSTOMER_FIRST_NAME}}},
+
+A last note from me. Your quote {{{QUOTE_REF}}} stays valid until {{{EXPIRY_DATE}}}, after that I'd need to re-check the price.
+
+If you'd like the date held it's one click here:
+{{{ACCEPT_LINK}}}
+
+And if you've decided to go another way, no hard feelings at all. A one-line reply telling me what swung it would genuinely help us do better.
+
+All the best with the move either way,
+Connor
+01747 637070`),
+    variables: CHASE_VARS,
+  },
+  {
+    name: "chase-deposit-1",
+    envVar: "RESEND_TEMPLATE_CHASE_DEPOSIT_1",
+    subject: "Locking in your move date ({{{QUOTE_REF}}})",
+    from: CHASE_FROM,
+    html: plain(`Hi {{{CUSTOMER_FIRST_NAME}}},
+
+Great to have you booked in. Your date is reserved, and the £100 deposit is what makes it firm on our side.
+
+Everything you need is on your quote page, card or bank transfer:
+{{{ACCEPT_LINK}}}
+
+Bank transfer reference: {{{QUOTE_REF}}}
+
+Thanks,
+Connor`),
+    variables: CHASE_VARS,
+  },
+  {
+    name: "chase-deposit-2",
+    envVar: "RESEND_TEMPLATE_CHASE_DEPOSIT_2",
+    subject: "Your date is still waiting ({{{QUOTE_REF}}})",
+    from: CHASE_FROM,
+    html: plain(`Hi {{{CUSTOMER_FIRST_NAME}}},
+
+Just a nudge, we're holding your move date but I can't guarantee it much longer without the £100 deposit ({{{ACCEPT_LINK}}}).
+
+If timing is tricky or plans have shifted, reply and tell me, I'd rather help than chase.
+
+Thanks,
+Connor`),
+    variables: CHASE_VARS,
   },
 ];
 

@@ -201,6 +201,10 @@ export async function createInvoice(input: {
   /** Customer-facing total, VAT-inclusive. */
   amount: number;
   notes?: string;
+  /** Balance invoices are BACS/cash only (card fees too high at those values —
+   *  Peter, 2026-07-09): strip online gateways so even the hosted page can't
+   *  take a card once Stripe is connected. Deposit invoices keep the default. */
+  disableOnlinePayments?: boolean;
 }): Promise<ZohoInvoiceRef> {
   const taxId = await getVatTaxId();
   const line: Record<string, unknown> = {
@@ -214,6 +218,7 @@ export async function createInvoice(input: {
     customer_id: input.customerId,
     reference_number: input.reference,
     ...(taxId ? { is_inclusive_tax: true } : {}),
+    ...(input.disableOnlinePayments ? { payment_options: { payment_gateways: [] } } : {}),
     line_items: [line],
     notes: input.notes,
   });

@@ -174,12 +174,11 @@ export interface BalanceInvoiceMeta {
   quoteRef: string;
   amount: number;
   moveDateLabel?: string | null;
-  /** Hosted Zoho invoice page — always a "view your invoice" link; becomes the
-   *  card-payment page once a gateway is live. */
+  /** Hosted Zoho invoice page — a "view your invoice" link only. The balance
+   *  is deliberately BACS/cash-only (card fees are too high at these values;
+   *  Peter, 2026-07-09) — never card copy here, even once Stripe is live. */
   invoiceUrl?: string | null;
   invoiceNumber?: string | null;
-  /** Show card copy on the button (gateway active). */
-  cardPaymentsEnabled?: boolean;
 }
 
 export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
@@ -190,9 +189,7 @@ export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
   const btn = m.invoiceUrl
     ? `  <tr><td align="center" style="padding:0 36px 22px;">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
-      <a href="${m.invoiceUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">${
-        m.cardPaymentsEnabled ? "View invoice &amp; pay by card &rarr;" : "View your invoice &rarr;"
-      }</a>
+      <a href="${m.invoiceUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">View your invoice &rarr;</a>
     </td></tr></table>
   </td></tr>`
     : "";

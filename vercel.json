@@ -7,6 +7,10 @@
     {
       "path": "/api/cron/zoho-deposits",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/chase",
+      "schedule": "0 9 * * *"
     }
   ]
 }

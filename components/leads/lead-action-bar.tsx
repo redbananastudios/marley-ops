@@ -24,7 +24,6 @@ import {
   Check,
   FileText,
   CalendarPlus,
-  X,
   CheckCircle2,
   RotateCcw,
   Loader2,
@@ -36,6 +35,7 @@ import {
 } from "@/app/(dashboard)/leads/actions";
 import { noReplyForLeadAction } from "@/app/(dashboard)/follow-ups/actions";
 import { MarkWonButton, type WonQuote } from "@/components/leads/mark-won-button";
+import { MarkLostButton } from "@/components/leads/mark-lost-button";
 
 const CLOSED = new Set(["completed", "declined"]);
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
@@ -160,17 +160,7 @@ export function LeadActionBar({
         {quoting ? (
           <>
             <MarkWonButton leadId={leadId} quotes={quotes} className={primaryBtn} />
-            <button
-              type="button"
-              onClick={() => {
-                if (confirm("Mark this lead as lost?")) setStatus("declined", "Marked lost.");
-              }}
-              disabled={pending}
-              className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
-            >
-              <X className="size-4" strokeWidth={1.75} />
-              Mark lost
-            </button>
+            <MarkLostButton leadId={leadId} />
             <Link href={`/quotes/new?leadId=${leadId}`} prefetch={false} className={btn}>
               <FileText className="size-4 text-mm-red" strokeWidth={1.75} />
               New quote

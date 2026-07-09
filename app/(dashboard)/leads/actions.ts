@@ -284,12 +284,18 @@ export async function updateLeadStatusAction(leadId: string, status: string) {
   // Powers the dashboard "median response time" metric.
   const stampContact = !current?.first_contacted_at;
 
+  // Reopening a lost lead: clear the loss record and PAUSE chasing — a
+  // reopened lead is hand-managed (its old quote dates would instantly
+  // re-trip the 30-day auto-lapse otherwise).
+  const reopening = from === "declined" && status !== "declined";
+
   const { error } = await sb
     .from("leads")
     .update({
       status: status as never,
       ...(stampContact ? { first_contacted_at: new Date().toISOString() } : {}),
-    })
+      ...(reopening ? { lost_reason: null, lost_note: null, lost_at: null, chase_paused: true } : {}),
+    } as never)
     .eq("id", leadId);
   if (error) return { ok: false as const, error: error.message };
 
@@ -304,6 +310,60 @@ export async function updateLeadStatusAction(leadId: string, status: string) {
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
+  revalidatePath("/");
+  return { ok: true as const };
+}
+
+/**
+ * Mark a lead lost with a structured reason (+ optional note) — feeds the
+ * Performance "why we lose quotes" breakdown. Never deletes: lost leads stay
+ * in the data for dedupe + analysis. Also stops the chase engine and cancels
+ * any open follow-ups.
+ */
+export async function markLeadLostAction(leadId: string, reason: string, note?: string) {
+  const VALID = ["too_expensive", "chose_competitor", "move_fell_through", "dates_didnt_work", "no_response", "other"];
+  if (!VALID.includes(reason)) return { ok: false as const, error: "Pick a reason" };
+  const { sb, userId } = await actor();
+  const { data: current } = await sb
+    .from("leads")
+    .select("status, client_id")
+    .eq("id", leadId)
+    .single();
+
+  const { error } = await sb
+    .from("leads")
+    .update({
+      status: "declined",
+      lost_reason: reason,
+      lost_note: note?.trim() || null,
+      lost_at: new Date().toISOString(),
+      chase_paused: true,
+    } as never)
+    .eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+
+  const { data: open } = await sb
+    .from("follow_ups")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("status", "open");
+  for (const fu of open ?? []) {
+    await sb.from("follow_ups").update({ status: "cancelled", outcome: "declined" }).eq("id", fu.id);
+  }
+
+  const label = reason.replace(/_/g, " ");
+  await sb.from("activities").insert({
+    client_id: current?.client_id ?? null,
+    lead_id: leadId,
+    actor_id: userId,
+    type: "status_change",
+    summary: `Marked lost — ${label}${note?.trim() ? ` ("${note.trim()}")` : ""}`,
+    meta: { from: current?.status ?? null, to: "declined", lost_reason: reason },
+  });
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/bookings");
   revalidatePath("/");
   return { ok: true as const };
 }

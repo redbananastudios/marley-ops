@@ -6,6 +6,7 @@ import { Card } from "@/components/ui/card";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
+import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { MarkPaidButton } from "@/components/performance/mark-paid-button";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
@@ -55,6 +56,21 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     .gte("accepted_at", monthStart.toISOString())
     .lt("accepted_at", monthEnd.toISOString())
     .order("accepted_at", { ascending: false });
+
+  // Losses this month, grouped by reason (mark-lost dialog + 30-day auto-lapse).
+  const { data: lostLeads } = await sb
+    .from("leads")
+    .select("lost_reason")
+    .eq("status", "declined")
+    .gte("lost_at", monthStart.toISOString())
+    .lt("lost_at", monthEnd.toISOString());
+  const lostCounts = new Map<string, number>();
+  for (const l of lostLeads ?? []) {
+    const r = (l.lost_reason as string | null) ?? "unrecorded";
+    lostCounts.set(r, (lostCounts.get(r) ?? 0) + 1);
+  }
+  const lostRows = [...lostCounts.entries()].sort((a, b) => b[1] - a[1]);
+  const lostTotal = lostRows.reduce((s, [, n]) => s + n, 0);
 
   const profileName = new Map((profiles ?? []).map((p) => [p.id, p.full_name as string]));
   const leadName = new Map((leads ?? []).map((l) => [l.id, l.name ?? "—"]));
@@ -270,6 +286,35 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                 </tr>
               </tfoot>
             </table>
+          </div>
+        )}
+      </Card>
+
+      {/* Why we lose quotes — the improvement loop from the mark-lost reasons. */}
+      <Card className="p-0">
+        <div className="flex items-baseline gap-3 border-b px-5 py-3.5">
+          <h2 className="font-display text-lg text-foreground">Lost quotes — why</h2>
+          <span className="text-xs text-mist-400">{monthLabel}</span>
+        </div>
+        {lostRows.length === 0 ? (
+          <p className="px-5 py-6 text-sm text-mist-400">No losses recorded this month.</p>
+        ) : (
+          <div className="space-y-2 p-5">
+            {lostRows.map(([reason, count]) => (
+              <div key={reason} className="flex items-center gap-3">
+                <span className="w-44 shrink-0 text-sm text-foreground">{lossReasonLabel(reason)}</span>
+                <div className="h-2 flex-1 overflow-hidden rounded-pill bg-mist-100">
+                  <div
+                    className="h-full rounded-pill bg-mm-red"
+                    style={{ width: `${Math.round((count / lostTotal) * 100)}%` }}
+                  />
+                </div>
+                <span className="tabular w-8 text-right text-sm font-semibold text-foreground">{count}</span>
+              </div>
+            ))}
+            <p className="pt-1 text-xs text-mist-400">
+              {lostTotal} lost · &quot;No response&quot; includes quotes that lapsed after the full chase sequence.
+            </p>
           </div>
         )}
       </Card>
