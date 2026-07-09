@@ -81,6 +81,8 @@ export async function createLeadAction(input: NewLeadInput) {
       email: v.email || null,
       from_postcode: v.from_postcode || null,
       to_postcode: v.to_postcode || null,
+      from_address: v.from_address || null,
+      to_address: v.to_address || null,
       property_size: v.property_size || null,
       preferred_date: v.preferred_date || null,
       notes: v.notes || null,

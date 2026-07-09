@@ -40,6 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Pager, usePager } from "@/components/ui/pager";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -126,16 +127,21 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
     return [...filtered].sort(sort === "name" ? byName : sort === "oldest" ? (a, b) => byLast(b, a) : byLast);
   }, [clients, search, sort]);
 
-  // A–Z sections only make sense when sorted by name (grid view).
+  // Render is paged (25/page) so hundreds of clients stay fast; search/sort still
+  // operate on the full set.
+  const pager = usePager(visible, 25);
+
+  // A–Z sections only make sense when sorted by name (grid view) — sections are
+  // built from the current page so the jump rail always matches what's on screen.
   const groups = useMemo(() => {
     if (sort !== "name") return null;
     const map = new Map<string, ClientRow[]>();
-    for (const c of visible) {
+    for (const c of pager.paged) {
       const k = letterOf(c.display_name);
       (map.get(k) ?? map.set(k, []).get(k)!).push(c);
     }
     return ALPHABET.filter((l) => map.has(l)).map((l) => ({ letter: l, rows: map.get(l)! }));
-  }, [visible, sort]);
+  }, [pager.paged, sort]);
 
   const present = useMemo(() => new Set((groups ?? []).map((g) => g.letter)), [groups]);
 
@@ -208,7 +214,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
               </tr>
             </thead>
             <tbody className="divide-y">
-              {visible.map((c) => (
+              {pager.paged.map((c) => (
                 <tr
                   key={c.id}
                   onClick={() => router.push(`/clients/${c.id}`)}
@@ -309,11 +315,20 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
       ) : (
         /* ——— Grid view, date sorts: flat grid ——— */
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((c) => (
+          {pager.paged.map((c) => (
             <ClientCard key={c.id} c={c} baseLocation={baseLocation} />
           ))}
         </div>
       )}
+
+      <Pager
+        page={pager.page}
+        pages={pager.pages}
+        total={pager.total}
+        pageSize={pager.pageSize}
+        onPage={pager.setPage}
+        className="mt-4"
+      />
     </div>
   );
 }

@@ -41,6 +41,8 @@ export const newLeadSchema = z.object({
   referrer_answer: z.string().trim().optional().or(z.literal("")),
   from_postcode: z.string().trim().optional().or(z.literal("")),
   to_postcode: z.string().trim().optional().or(z.literal("")),
+  from_address: z.string().trim().optional().or(z.literal("")),
+  to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
   preferred_date: z.string().trim().optional().or(z.literal("")),
   notes: z.string().trim().optional().or(z.literal("")),

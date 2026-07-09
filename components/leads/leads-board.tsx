@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { LeadStatusBadge, LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
+import { Pager, usePager } from "@/components/ui/pager";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   markLeadContactedAction,
@@ -206,6 +207,8 @@ export function LeadsBoard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [base, preset, status, search, sort]);
 
+  const pager = usePager(visible, 24);
+
   const PRESETS: { key: PresetKey; label: string }[] = [
     { key: "all", label: "All" },
     { key: "new", label: "New" },
@@ -307,17 +310,27 @@ export function LeadsBoard({
         <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
       </div>
 
-      {/* card grid — 3 per row on desktop */}
+      {/* card grid — 3 per row on desktop, paged so big datasets stay fast */}
       {visible.length === 0 ? (
         <div className="mt-4 rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-400">
           No leads match.
         </div>
       ) : (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {visible.map((l) => (
-            <LeadCardItem key={l.id} lead={l} />
-          ))}
-        </div>
+        <>
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {pager.paged.map((l) => (
+              <LeadCardItem key={l.id} lead={l} />
+            ))}
+          </div>
+          <Pager
+            page={pager.page}
+            pages={pager.pages}
+            total={pager.total}
+            pageSize={pager.pageSize}
+            onPage={pager.setPage}
+            className="mt-4"
+          />
+        </>
       )}
     </div>
   );

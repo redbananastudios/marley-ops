@@ -8,6 +8,7 @@ import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { LeadsBoard, type LeadCard } from "@/components/leads/leads-board";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { startOfUkDay } from "@/lib/uk-time";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
@@ -28,24 +29,32 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: leadsData }, { data: quoteData }, { data: apptData }, { data: retryData }] = await Promise.all([
-    supabase
-      .from("leads")
-      .select(
-        "id, name, status, entry_channel, from_postcode, to_postcode, property_size, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
-      )
-      .order("submitted_at", { ascending: false }),
-    supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at"),
-    supabase.from("appointments").select("lead_id, appt_type, starts_at, status, estimator_id"),
+  // Unbounded tables go through fetchAllRows (PostgREST truncates at 1000 rows);
+  // the open no-reply set is small by nature so a plain select is fine.
+  const [leads, quoteData, apptData, { data: retryData }] = await Promise.all([
+    fetchAllRows((f, t) =>
+      supabase
+        .from("leads")
+        .select(
+          "id, name, status, entry_channel, from_postcode, to_postcode, property_size, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+        )
+        .order("submitted_at", { ascending: false })
+        .order("id")
+        .range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at").order("id").range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      supabase.from("appointments").select("lead_id, appt_type, starts_at, status, estimator_id").order("id").range(f, t),
+    ),
     // Open "no reply" retries — surfaces as an amber badge + the Awaiting-retry filter.
     supabase.from("follow_ups").select("lead_id, due_at, attempt_count").eq("reason", "no_answer").eq("status", "open"),
   ]);
 
-  const leads = leadsData ?? [];
-
   /* per-lead best value: accepted agreed price, else latest quoted total */
   const valueMap = new Map<string, { accepted: number | null; latest: number | null; latestAt: number }>();
-  for (const q of quoteData ?? []) {
+  for (const q of quoteData) {
     if (!q.lead_id) continue;
     const cur = valueMap.get(q.lead_id) ?? { accepted: null, latest: null, latestAt: 0 };
     if (q.status === "accepted") cur.accepted = Number(q.agreed_price ?? q.grand_total ?? 0);
@@ -60,7 +69,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   /* estimator is survey-derived: whoever is assigned the booked survey owns the lead.
      null until a survey exists — there's no estimator at the enquiry stage. */
   const surveyEstimator = new Map<string, string>();
-  for (const a of apptData ?? []) {
+  for (const a of apptData) {
     if (a.appt_type !== "survey" || a.status === "cancelled" || !a.lead_id || !a.estimator_id) continue;
     if (!surveyEstimator.has(a.lead_id)) surveyEstimator.set(a.lead_id, a.estimator_id);
   }
@@ -69,7 +78,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
      so the card can show WHEN the survey is, not just that one exists */
   const startToday = startOfUkDay().getTime();
   const upcomingSurveyAt = new Map<string, string>();
-  for (const a of apptData ?? []) {
+  for (const a of apptData) {
     if (
       a.appt_type !== "survey" ||
       a.status === "cancelled" ||

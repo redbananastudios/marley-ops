@@ -13,7 +13,12 @@ import { checkDuplicateAction, createLeadAction } from "@/app/(dashboard)/leads/
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PlacesInput } from "@/components/places/places-input";
+import {
+  AddressFields,
+  BLANK_ADDRESS,
+  formatAddress,
+  type AddressValue,
+} from "@/components/places/address-fields";
 import { ClientCombobox, type ClientOption } from "@/components/clients/client-combobox";
 import {
   Select,
@@ -65,6 +70,10 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
   const router = useRouter();
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
+  // Full pickup/destination addresses (street/town/county/postcode with Places
+  // autofill) — stored on the lead as a one-line address + the postcode column.
+  const [fromAddr, setFromAddr] = useState<AddressValue>(BLANK_ADDRESS);
+  const [toAddr, setToAddr] = useState<AddressValue>(BLANK_ADDRESS);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
@@ -131,11 +140,18 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
     setValue("name", c?.display_name ?? "", { shouldValidate: !!c });
     setValue("phone", c?.phone ?? "", { shouldValidate: !!c });
     setValue("email", c?.email ?? "", { shouldValidate: !!c });
-    setValue("from_postcode", c?.postcode ?? "");
+    setFromAddr({ ...BLANK_ADDRESS, postcode: c?.postcode ?? "" });
   }
 
   const onSubmit = async (values: NewLeadInput) => {
-    const res = await createLeadAction({ ...values, client_id: clientId || undefined });
+    const res = await createLeadAction({
+      ...values,
+      client_id: clientId || undefined,
+      from_postcode: fromAddr.postcode.trim(),
+      to_postcode: toAddr.postcode.trim(),
+      from_address: formatAddress(fromAddr),
+      to_address: formatAddress(toAddr),
+    });
     if (!res.ok) {
       toast.error(res.error);
       return;
@@ -234,27 +250,17 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
         </Field>
       ) : null}
 
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field htmlFor="from_postcode" label="From postcode" error={errors.from_postcode?.message}>
-          <PlacesInput
-            id="from_postcode"
-            kind="postcode"
-            className={INPUT_H}
-            placeholder="SP7 9PX"
-            value={watch("from_postcode") ?? ""}
-            onValueChange={(v) => setValue("from_postcode", v, { shouldValidate: true })}
-          />
-        </Field>
-        <Field htmlFor="to_postcode" label="To postcode" error={errors.to_postcode?.message}>
-          <PlacesInput
-            id="to_postcode"
-            kind="postcode"
-            className={INPUT_H}
-            placeholder="BA8 0TG"
-            value={watch("to_postcode") ?? ""}
-            onValueChange={(v) => setValue("to_postcode", v, { shouldValidate: true })}
-          />
-        </Field>
+      {/* Full pickup + destination addresses — a postcode alone is enough to save,
+          but the street lookup autofills everything for a complete record. */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <section className="rounded-lg border border-border bg-muted/30 p-4">
+          <p className="mb-3 text-sm font-semibold text-foreground">Moving from</p>
+          <AddressFields idPrefix="from" value={fromAddr} onChange={setFromAddr} />
+        </section>
+        <section className="rounded-lg border border-border bg-muted/30 p-4">
+          <p className="mb-3 text-sm font-semibold text-foreground">Moving to</p>
+          <AddressFields idPrefix="to" value={toAddr} onChange={setToAddr} />
+        </section>
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">

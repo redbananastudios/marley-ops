@@ -5,6 +5,7 @@ import { AddClientDialog } from "@/components/clients/add-client-dialog";
 import { classifySource, type SourceKey } from "@/lib/dashboard/compute";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukPhone } from "@/lib/phone";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
@@ -12,19 +13,28 @@ export default async function ClientsPage() {
   const supabase = await createClient();
   const { baseLocation } = await getBusinessSettings(supabase);
 
-  const [{ data: clients }, { data: leads }] = await Promise.all([
-    supabase
-      .from("clients")
-      .select(
-        "id, display_name, email, phone_e164, phone_raw, postcode_home, is_company, address_line1, town, county, created_at",
-      )
-      .is("merged_into_id", null)
-      .eq("is_active", true),
-    supabase
-      .from("leads")
-      .select(
-        "client_id, submitted_at, created_at, entry_channel, phone, email, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
-      ),
+  // Unbounded tables page through fetchAllRows (PostgREST truncates at 1000 rows).
+  const [clients, leads] = await Promise.all([
+    fetchAllRows((f, t) =>
+      supabase
+        .from("clients")
+        .select(
+          "id, display_name, email, phone_e164, phone_raw, postcode_home, is_company, address_line1, town, county, created_at",
+        )
+        .is("merged_into_id", null)
+        .eq("is_active", true)
+        .order("id")
+        .range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      supabase
+        .from("leads")
+        .select(
+          "client_id, submitted_at, created_at, entry_channel, phone, email, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
+        )
+        .order("id")
+        .range(f, t),
+    ),
   ]);
 
   // per-client: lead count, last enquiry, first-touch origin (earliest lead's source),
@@ -41,7 +51,7 @@ export default async function ClientsPage() {
     emailTs: number;
   };
   const agg = new Map<string, Agg>();
-  for (const l of leads ?? []) {
+  for (const l of leads) {
     if (!l.client_id) continue;
     const ts = new Date(l.submitted_at || l.created_at || 0).getTime();
     const cur = agg.get(l.client_id);
@@ -75,7 +85,7 @@ export default async function ClientsPage() {
     }
   }
 
-  const rows: ClientRow[] = (clients ?? [])
+  const rows: ClientRow[] = clients
     .map((c) => {
       const a = agg.get(c.id);
       // One-line address summary for the card (line1 · town · postcode).

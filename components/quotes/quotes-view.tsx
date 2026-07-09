@@ -13,6 +13,7 @@ import Link from "next/link";
 import { ClipboardCheck, Search, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Pager, usePager } from "@/components/ui/pager";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 
 export interface QuoteRow {
@@ -138,6 +139,8 @@ export function QuotesView({
       });
   }, [quotes, preset, search]);
 
+  const pager = usePager(visible, 25);
+
   const PRESETS: { key: PresetKey; label: string }[] = [
     { key: "all", label: "All" },
     { key: "draft", label: "Draft" },
@@ -183,12 +186,12 @@ export function QuotesView({
         </div>
       </div>
 
-      {/* list */}
+      {/* list — paged so big datasets stay fast */}
       <ul className="mt-4 divide-y rounded-lg border border-border bg-card">
         {visible.length === 0 ? (
           <li className="px-5 py-12 text-center text-sm text-mist-400">No quotes match.</li>
         ) : (
-          visible.map((q) => (
+          pager.paged.map((q) => (
             <li key={q.id} className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
               <Link href={`/quotes/${q.id}`} className="flex min-w-0 items-center gap-3 sm:flex-1">
                 <span className="min-w-0 flex-1">
@@ -253,6 +256,14 @@ export function QuotesView({
           ))
         )}
       </ul>
+      <Pager
+        page={pager.page}
+        pages={pager.pages}
+        total={pager.total}
+        pageSize={pager.pageSize}
+        onPage={pager.setPage}
+        className="mt-4"
+      />
     </div>
   );
 }
