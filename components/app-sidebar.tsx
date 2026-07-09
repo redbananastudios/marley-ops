@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -12,6 +13,8 @@ import {
   KanbanSquare,
   LayoutDashboard,
   LogOut,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Truck,
   Users,
@@ -53,19 +56,29 @@ export const NAV: NavGroup[] = [
 ];
 
 /** The grouped nav links — shared by the desktop sidebar and the mobile drawer.
-    `onNavigate` lets the drawer close itself when a link is tapped. */
+    `onNavigate` lets the drawer close itself when a link is tapped. When
+    `collapsed`, labels/eyebrows hide and icons centre in a 44px rail target
+    (label survives as title + aria-label for discoverability). */
 export function SidebarNavList({
   pathname,
   onNavigate,
+  collapsed = false,
 }: {
   pathname: string;
   onNavigate?: () => void;
+  collapsed?: boolean;
 }) {
   return (
     <>
-      {NAV.map((g) => (
-        <div key={g.group} className="mb-5">
-          <p className="eyebrow px-2 pb-2">{g.group}</p>
+      {NAV.map((g, gi) => (
+        <div key={g.group} className={cn(collapsed ? "mb-2" : "mb-5")}>
+          {collapsed ? (
+            gi > 0 ? (
+              <div className="mx-2 mb-2 border-t border-border" aria-hidden />
+            ) : null
+          ) : (
+            <p className="eyebrow px-2 pb-2">{g.group}</p>
+          )}
           <ul className="space-y-0.5">
             {g.items.map((it) => {
               const active = it.href === "/" ? pathname === "/" : pathname.startsWith(it.href);
@@ -75,11 +88,19 @@ export function SidebarNavList({
                   <li key={it.href}>
                     <span
                       aria-disabled="true"
-                      className="flex min-h-11 cursor-not-allowed items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-mist-400"
+                      title={collapsed ? `${it.label} — soon` : undefined}
+                      className={cn(
+                        "flex min-h-11 cursor-not-allowed items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-mist-400",
+                        collapsed && "justify-center px-0",
+                      )}
                     >
                       <Icon className="size-[18px]" strokeWidth={1.75} />
-                      {it.label}
-                      <span className="ml-auto text-[10px] uppercase tracking-wide text-mist-400">soon</span>
+                      {collapsed ? null : (
+                        <>
+                          {it.label}
+                          <span className="ml-auto text-[10px] uppercase tracking-wide text-mist-400">soon</span>
+                        </>
+                      )}
                     </span>
                   </li>
                 );
@@ -89,8 +110,12 @@ export function SidebarNavList({
                   <Link
                     href={it.href}
                     onClick={onNavigate}
+                    title={collapsed ? it.label : undefined}
+                    aria-label={collapsed ? it.label : undefined}
+                    aria-current={active ? "page" : undefined}
                     className={cn(
                       "focus-ring relative flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
+                      collapsed && "justify-center px-0",
                       active
                         ? // Modern active state: soft crimson pill + floating rounded indicator
                           // (no border-l, so nothing shifts) + the icon carries the accent.
@@ -99,10 +124,10 @@ export function SidebarNavList({
                     )}
                   >
                     <Icon
-                      className={cn("size-[18px]", active ? "text-crimson" : "text-mist-400")}
+                      className={cn("size-[18px] shrink-0", active ? "text-crimson" : "text-mist-400")}
                       strokeWidth={active ? 2 : 1.75}
                     />
-                    {it.label}
+                    {collapsed ? null : it.label}
                   </Link>
                 </li>
               );
@@ -114,8 +139,15 @@ export function SidebarNavList({
   );
 }
 
-/** Profile + sign-out footer — shared by the sidebar and the drawer. */
-export function NavFooter({ profile }: { profile: { full_name: string; role: string } }) {
+/** Profile + sign-out footer — shared by the sidebar and the drawer. Collapsed:
+    just the sign-out icon (the name lives in the expanded view). */
+export function NavFooter({
+  profile,
+  collapsed = false,
+}: {
+  profile: { full_name: string; role: string };
+  collapsed?: boolean;
+}) {
   const router = useRouter();
   async function signOut() {
     await createClient().auth.signOut();
@@ -123,15 +155,18 @@ export function NavFooter({ profile }: { profile: { full_name: string; role: str
     router.refresh();
   }
   return (
-    <div className="border-t p-3">
-      <div className="flex items-center gap-2 px-2 py-1.5">
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-medium text-foreground">{profile.full_name}</p>
-          <p className="text-xs capitalize text-mist-400">{profile.role}</p>
-        </div>
+    <div className={cn("border-t", collapsed ? "p-2" : "p-3")}>
+      <div className={cn("flex items-center gap-2", collapsed ? "justify-center" : "px-2 py-1.5")}>
+        {collapsed ? null : (
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-foreground">{profile.full_name}</p>
+            <p className="text-xs capitalize text-mist-400">{profile.role}</p>
+          </div>
+        )}
         <button
           onClick={signOut}
           aria-label="Sign out"
+          title={collapsed ? `Sign out (${profile.full_name})` : undefined}
           className="focus-ring flex size-11 items-center justify-center rounded-sm text-mist-400 hover:bg-muted hover:text-foreground"
         >
           <LogOut className="size-[18px]" strokeWidth={1.75} />
@@ -141,22 +176,68 @@ export function NavFooter({ profile }: { profile: { full_name: string; role: str
   );
 }
 
+const COLLAPSE_STORE = "mm-sidebar-collapsed";
+
 export function AppSidebar({ profile }: { profile: { full_name: string; role: string } }) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(false);
+
+  // After mount: the device's saved preference wins; with none saved, smaller
+  // tablets (< 1024px) start collapsed so content gets the width (adaptive nav —
+  // the drawer still covers < 768px).
+  useEffect(() => {
+    const stored = window.localStorage.getItem(COLLAPSE_STORE);
+    if (stored === "1") setCollapsed(true);
+    else if (stored === "0") setCollapsed(false);
+    else if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
+  }, []);
+
+  function toggle() {
+    setCollapsed((c) => {
+      window.localStorage.setItem(COLLAPSE_STORE, c ? "0" : "1");
+      return !c;
+    });
+  }
 
   return (
-    <aside className="hidden w-60 shrink-0 flex-col border-r bg-sidebar md:flex">
-      <div className="flex h-16 items-center border-b px-5">
-        <span className="font-display text-xl text-foreground">
-          Marley <span className="text-mm-red">Ops</span>
-        </span>
+    <aside
+      className={cn(
+        "hidden shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex",
+        collapsed ? "w-[68px]" : "w-60",
+      )}
+    >
+      <div
+        className={cn(
+          "flex h-16 shrink-0 items-center border-b",
+          collapsed ? "justify-center px-2" : "justify-between pl-5 pr-3",
+        )}
+      >
+        {collapsed ? null : (
+          <span className="truncate font-display text-xl text-foreground">
+            Marley <span className="text-mm-red">Ops</span>
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={collapsed ? "Expand menu" : "Collapse menu"}
+          aria-expanded={!collapsed}
+          title={collapsed ? "Expand menu" : "Collapse menu"}
+          className="focus-ring flex size-11 shrink-0 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+        >
+          {collapsed ? (
+            <PanelLeftOpen className="size-5" strokeWidth={1.75} />
+          ) : (
+            <PanelLeftClose className="size-5" strokeWidth={1.75} />
+          )}
+        </button>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-4">
-        <SidebarNavList pathname={pathname} />
+      <nav className={cn("flex-1 overflow-y-auto py-4", collapsed ? "px-2" : "px-3")}>
+        <SidebarNavList pathname={pathname} collapsed={collapsed} />
       </nav>
 
-      <NavFooter profile={profile} />
+      <NavFooter profile={profile} collapsed={collapsed} />
     </aside>
   );
 }
