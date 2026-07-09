@@ -137,8 +137,9 @@ export async function POST(req: Request) {
   }
 
   // 4. Forward to the real mailbox so Connor sees it where he works.
+  //    (INBOUND_FORWARD_EMAIL points at Peter during comms testing.)
   await sendEmail({
-    to: "hello@marleymoves.co.uk",
+    to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
     subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
       <p><strong>${quote.customer_name ?? "Customer"}</strong> (${from}) replied about quote <strong>${quote.quote_ref}</strong>. Chasing is paused.</p>
