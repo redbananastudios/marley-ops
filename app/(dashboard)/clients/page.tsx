@@ -23,12 +23,23 @@ export default async function ClientsPage() {
     supabase
       .from("leads")
       .select(
-        "client_id, submitted_at, created_at, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
+        "client_id, submitted_at, created_at, entry_channel, phone, email, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
       ),
   ]);
 
-  // per-client: lead count, last enquiry, and first-touch origin (earliest lead's source)
-  type Agg = { count: number; last: number; firstTs: number; origin: SourceKey };
+  // per-client: lead count, last enquiry, first-touch origin (earliest lead's source),
+  // and latest lead contact — the fallback when the client record carries none (the
+  // one-live-client-per-phone/email dedupe means contact can live only on the lead).
+  type Agg = {
+    count: number;
+    last: number;
+    firstTs: number;
+    origin: SourceKey;
+    phone: string | null;
+    phoneTs: number;
+    email: string | null;
+    emailTs: number;
+  };
   const agg = new Map<string, Agg>();
   for (const l of leads ?? []) {
     if (!l.client_id) continue;
@@ -36,13 +47,30 @@ export default async function ClientsPage() {
     const cur = agg.get(l.client_id);
     const source = classifySource(l);
     if (!cur) {
-      agg.set(l.client_id, { count: 1, last: ts, firstTs: ts, origin: source });
+      agg.set(l.client_id, {
+        count: 1,
+        last: ts,
+        firstTs: ts,
+        origin: source,
+        phone: l.phone ?? null,
+        phoneTs: l.phone ? ts : 0,
+        email: l.email ?? null,
+        emailTs: l.email ? ts : 0,
+      });
     } else {
       cur.count += 1;
       if (ts > cur.last) cur.last = ts;
       if (ts < cur.firstTs) {
         cur.firstTs = ts;
         cur.origin = source; // first-touch acquisition channel
+      }
+      if (l.phone && ts >= cur.phoneTs) {
+        cur.phone = l.phone;
+        cur.phoneTs = ts;
+      }
+      if (l.email && ts >= cur.emailTs) {
+        cur.email = l.email;
+        cur.emailTs = ts;
       }
     }
   }
@@ -57,8 +85,8 @@ export default async function ClientsPage() {
         id: c.id,
         display_name: c.display_name,
         isCompany: !!c.is_company,
-        email: c.email,
-        phone: ukPhone(c.phone_raw ?? c.phone_e164),
+        email: c.email ?? a?.email ?? null,
+        phone: ukPhone(c.phone_raw ?? c.phone_e164) ?? ukPhone(a?.phone ?? null),
         postcode: c.postcode_home,
         address,
         leadCount: a?.count ?? 0,

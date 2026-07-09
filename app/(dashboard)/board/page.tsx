@@ -65,10 +65,16 @@ export default async function BoardPage() {
     };
   });
 
+  // Monday of the current UK week — the board's default Mon–Sun window.
+  const ukToday = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const t = new Date(`${ukToday}T00:00:00Z`);
+  t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+  const thisWeekStart = t.toISOString().slice(0, 10);
+
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
       <PageHeader eyebrow="Pipeline" title="Board" />
-      <StatusBoard leads={cards} meId={user?.id ?? null} />
+      <StatusBoard leads={cards} meId={user?.id ?? null} thisWeekStart={thisWeekStart} />
     </main>
   );
 }

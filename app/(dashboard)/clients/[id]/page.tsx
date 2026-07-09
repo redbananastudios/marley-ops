@@ -48,7 +48,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const [{ data: leads }, { data: quotes }] = await Promise.all([
     sb
       .from("leads")
-      .select("id, name, status, from_postcode, to_postcode, submitted_at, created_at")
+      .select("id, name, status, phone, email, from_postcode, to_postcode, submitted_at, created_at")
       .eq("client_id", id)
       .order("submitted_at", { ascending: false }),
     sb
@@ -58,11 +58,16 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .order("created_at", { ascending: false }),
   ]);
 
-  const phone = ukPhone(client.phone_raw ?? client.phone_e164);
-  const email = client.email;
-  const wa = waNumber(phone);
   const leadRows = leads ?? [];
   const quoteRows = quotes ?? [];
+
+  // Contact fallback: the one-live-client-per-phone/email dedupe means a client
+  // record can carry no contact while its leads do — show the latest lead's.
+  const phone =
+    ukPhone(client.phone_raw ?? client.phone_e164) ??
+    ukPhone(leadRows.find((l) => l.phone)?.phone ?? null);
+  const email = client.email ?? leadRows.find((l) => l.email)?.email ?? null;
+  const wa = waNumber(phone);
 
   // Their live enquiry (if any) — "Book survey" reuses it rather than duplicating.
   const OPEN = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed"];

@@ -12,7 +12,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoveHorizontal, Phone, MessageCircle, FileText, Search, Calendar, Home } from "lucide-react";
+import { MoveHorizontal, Phone, MessageCircle, FileText, Search, Calendar, Home, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { updateLeadStatusAction } from "@/app/(dashboard)/leads/actions";
@@ -111,7 +111,35 @@ function routeLine(l: BoardLead): string {
   return "no postcodes";
 }
 
-export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[]; meId: string | null }) {
+/** yyyy-mm-dd ± n days (UTC-safe — the strings are pure dates). */
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** "Mon 6 – Sun 12 Jul 2026" style label for a Monday-start week. */
+function weekLabel(start: string): string {
+  const s = new Date(`${start}T00:00:00Z`);
+  const e = new Date(`${addDays(start, 6)}T00:00:00Z`);
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone: "UTC" };
+  const sameMonth = s.getUTCMonth() === e.getUTCMonth() && s.getUTCFullYear() === e.getUTCFullYear();
+  const from = sameMonth ? String(s.getUTCDate()) : s.toLocaleDateString("en-GB", opts);
+  const to = e.toLocaleDateString("en-GB", { ...opts, year: "numeric" });
+  return `${from} – ${to}`;
+}
+
+type WeekBasis = "enquiry" | "move";
+
+export function StatusBoard({
+  leads: initialLeads,
+  meId,
+  thisWeekStart,
+}: {
+  leads: BoardLead[];
+  meId: string | null;
+  thisWeekStart: string;
+}) {
   const router = useRouter();
   const [leads, setLeads] = useState<BoardLead[]>(initialLeads);
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -122,6 +150,9 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
   const [mine, setMine] = useState(false);
   const [showDeclined, setShowDeclined] = useState(false);
   const [mobileCol, setMobileCol] = useState<string>("website_enquiry");
+  // Default view: the current Mon–Sun week (null = all time).
+  const [weekStart, setWeekStart] = useState<string | null>(thisWeekStart);
+  const [basis, setBasis] = useState<WeekBasis>("enquiry");
 
   const columns = useMemo(
     () => [...STATUSES.filter((s) => s !== "declined"), ...(showDeclined ? ["declined"] : [])],
@@ -130,7 +161,18 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
+    const weekEnd = weekStart ? addDays(weekStart, 6) : null;
     return leads.filter((l) => {
+      if (weekStart && weekEnd) {
+        // "enquiry" = when the lead came in; "move" = the preferred move date.
+        const day =
+          basis === "move"
+            ? (l.preferred_date?.slice(0, 10) ?? null)
+            : l.submitted_at || l.created_at
+              ? new Date(l.submitted_at ?? l.created_at ?? 0).toLocaleDateString("en-CA", { timeZone: "Europe/London" })
+              : null;
+        if (!day || day < weekStart || day > weekEnd) return false;
+      }
       if (source && l.source !== source) return false;
       if (mine && l.estimator_id !== meId) return false;
       if (term) {
@@ -139,7 +181,7 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
       }
       return true;
     });
-  }, [leads, search, source, mine, meId]);
+  }, [leads, search, source, mine, meId, weekStart, basis]);
 
   async function move(leadId: string, toStatus: string) {
     const current = leads.find((l) => l.id === leadId);
@@ -160,6 +202,56 @@ export function StatusBoard({ leads: initialLeads, meId }: { leads: BoardLead[];
     <div className="flex flex-1 flex-col">
       {/* filters */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        {/* week navigator — Mon–Sun window, arrows step a week at a time */}
+        <div className="inline-flex items-stretch overflow-hidden rounded-md border border-input bg-card">
+          <button
+            type="button"
+            onClick={() => setWeekStart((w) => addDays(w ?? thisWeekStart, -7))}
+            aria-label="Previous week"
+            className="focus-ring flex min-h-9 w-9 items-center justify-center text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronLeft className="size-4" strokeWidth={1.75} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setWeekStart(thisWeekStart)}
+            title="Back to this week"
+            className="focus-ring min-w-[136px] border-x border-input px-3 text-sm font-medium tabular text-foreground transition-colors hover:bg-muted"
+          >
+            {weekStart ? weekLabel(weekStart) : "All time"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setWeekStart((w) => addDays(w ?? thisWeekStart, 7))}
+            aria-label="Next week"
+            className="focus-ring flex min-h-9 w-9 items-center justify-center text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <ChevronRight className="size-4" strokeWidth={1.75} />
+          </button>
+        </div>
+        <Select value={basis} onValueChange={(v) => setBasis(v as WeekBasis)}>
+          <SelectTrigger className="h-9 w-[132px]" aria-label="Week filters by">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="enquiry">Enquiry week</SelectItem>
+            <SelectItem value="move">Move week</SelectItem>
+          </SelectContent>
+        </Select>
+        <button
+          type="button"
+          onClick={() => setWeekStart((w) => (w ? null : thisWeekStart))}
+          aria-pressed={weekStart === null}
+          className={cn(
+            "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
+            weekStart === null
+              ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+              : "border-input bg-card text-mist-500 hover:bg-muted",
+          )}
+        >
+          All
+        </button>
+
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search strokeWidth={1.75} className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-mist-400" />
           <Input
