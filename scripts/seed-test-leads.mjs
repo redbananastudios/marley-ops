@@ -1,7 +1,10 @@
 /**
- * Seed the 3 comms-testing clients + leads (Peter's own phone/email as recipients,
+ * Seed the 5 comms-testing clients + leads (Peter's own phone/email as recipients,
  * so live email/SMS sends are safe). Pair with reset-data.mjs + SANITY_SYNC_DISABLED=true
  * so no real customer data is present while testing send formats.
+ *
+ * Grace Holloway is deliberately PHONE-ONLY (no email) to exercise the chase
+ * engine's hand-to-human call-task path.
  *
  * All 3 contacts share one phone/email and the clients table enforces one live client
  * per phone/email, so only the first client carries them; every LEAD carries full
@@ -58,6 +61,27 @@ const TESTS = [
     to_postcode: "SP8 5BB",
     spec: "2 x Luton Van + Fragile pack",
   },
+  {
+    name: "Grace Holloway",
+    withContactOnClient: false,
+    phoneOnly: true, // no email → chase engine must raise a call task, not silently skip
+    from_address: "14 Bimport, Shaftesbury",
+    from_postcode: "SP7 8AY",
+    to_address: "27 Cardigan Road, Leeds",
+    to_postcode: "LS6 1LJ",
+    property_size: "4-5 bedroom",
+    spec: "7.5t lorry + Full pack (long distance)",
+  },
+  {
+    name: "Tom Beckett",
+    withContactOnClient: false,
+    from_address: "3 Castle Street, Mere",
+    from_postcode: "BA12 6JE",
+    to_address: "8 George Street, Warminster",
+    to_postcode: "BA12 8QA",
+    property_size: "1 bedroom",
+    spec: "1 x Luton Van, no pack (small move)",
+  },
 ];
 
 const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
@@ -98,12 +122,12 @@ for (const t of TESTS) {
     source_system: "marley_ops",
     name: t.name,
     phone: PHONE,
-    email: EMAIL,
+    email: t.phoneOnly ? null : EMAIL,
     from_address: t.from_address,
     from_postcode: t.from_postcode,
     to_address: t.to_address,
     to_postcode: t.to_postcode,
-    property_size: "3 bedroom",
+    property_size: t.property_size ?? "3 bedroom",
     notes: `TEST LEAD — comms format testing. Quote spec: ${t.spec}`,
   });
   if (lErr) {
