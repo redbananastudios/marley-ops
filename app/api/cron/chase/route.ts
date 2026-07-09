@@ -98,6 +98,7 @@ async function sendChase(
       ? { template: { id: templateId, variables: email.variables } }
       : { bodyHtml: chaseTextToHtml(email.text) }),
     replyTo: replyAddressFor(replyToken),
+    from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
     leadId: lead.id,
     quoteId: quote.id,
     clientId: lead.client_id ?? undefined,

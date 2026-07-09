@@ -26,6 +26,8 @@ export interface DispatchCommInput {
   attachmentName?: string;
   /** Reply-To override (chase emails: the per-lead reply-routing address). */
   replyTo?: string;
+  /** Sender display override (chase emails: "Connor at Marley Moves"). */
+  from?: string;
   leadId?: string;
   quoteId?: string;
   clientId?: string;
@@ -84,6 +86,7 @@ export async function dispatchComm(
             ? [{ filename: input.attachmentName ?? "attachment.pdf", content: input.attachmentBase64 }]
             : undefined,
           replyTo: input.replyTo,
+          from: input.from,
         })
       : await sendSms({ to: input.to, body: input.bodyText });
 

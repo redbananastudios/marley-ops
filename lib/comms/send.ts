@@ -21,12 +21,15 @@ export async function sendEmail(input: {
   /** Override Reply-To (default hello@) — chase emails use the per-lead
    *  q-<token>@reply.marleymoves.co.uk address so replies route back in. */
   replyTo?: string;
+  /** Override the display sender (must stay on the verified domain) — the
+   *  personal chase emails send as "Connor at Marley Moves". */
+  from?: string;
 }): Promise<SendResult> {
   if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}` };
   const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: "Resend API key not configured" };
   if (!input.template && !input.html) return { ok: false, error: "No email body (html or template) given" };
-  const from = process.env.RESEND_FROM_EMAIL || "Marley Moves <quotes@marleymoves.co.uk>";
+  const from = input.from || process.env.RESEND_FROM_EMAIL || "Marley Moves <quotes@marleymoves.co.uk>";
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
