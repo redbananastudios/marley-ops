@@ -5,6 +5,7 @@ import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
+import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -50,6 +51,11 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
   const initialValues = normalizeQuoteValues(quote.state_blob);
   const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
   const emailedCount = quote.email_send_count ?? 0;
+
+  // Every quote gets its accept token here (lazily, idempotent) so the PDF QR
+  // codes and the email CTA always point at the live /q/<token> page.
+  const acceptToken = await ensureAcceptToken(sb, quote.id);
+  const acceptUrl = acceptToken ? acceptUrlFor(acceptToken) : undefined;
 
   // The linked lead's context for the View-lead modal (no navigation away from the form).
   let leadOption = null;
@@ -112,6 +118,7 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         estimatorName={estimatorName}
         pricing={pricing}
         settings={settings}
+        acceptUrl={acceptUrl}
       />
     </main>
   );

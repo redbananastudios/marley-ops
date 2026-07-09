@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { ukInstant, ukTimeAt } from "@/lib/uk-time";
+import { markBalancePaid, markDepositPaid } from "@/lib/quote/accept-flow";
 
 /** Follow-up work-queue actions. Manual-first: every mutation is a human tap, every
  *  tap lands in the lead's activity log. Escalation is advisory only (never auto-lost). */
@@ -232,10 +233,38 @@ export async function requestDepositAction(leadId: string, amount: number) {
   return { ok: true as const };
 }
 
-/** Mark deposit/balance paid: stamps the lead and closes any open matching chase. */
+/** Mark deposit/balance paid: stamps the lead and closes any open matching chase.
+ *  When the lead has an accepted quote in the Zoho flow, this routes through the
+ *  full paid pipeline instead — Zoho payment record (BACS), customer confirmation
+ *  email, lead Confirmed — so the one-tap does everything, not just the stamp. */
 export async function markPaymentPaidAction(leadId: string, kind: "deposit" | "balance") {
   const { sb, userId } = await ctx();
   const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).single();
+
+  // Zoho-flow path: an accepted quote owns the payment lifecycle.
+  const { data: acceptedQuote } = await sb
+    .from("quotes")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("status", "accepted")
+    .order("accepted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (acceptedQuote) {
+    const res =
+      kind === "deposit"
+        ? await markDepositPaid(sb, acceptedQuote.id, {
+            method: "bank_transfer",
+            actorId: userId,
+            recordInZoho: true,
+          })
+        : await markBalancePaid(sb, acceptedQuote.id, userId);
+    if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
+    // markDepositPaid stamps the quote+lead; mirror the lead stamp for the
+    // manual-deposit case where only the quote knew the amount.
+    refresh(leadId);
+    return { ok: true as const };
+  }
 
   const patch = kind === "deposit" ? { deposit_paid_at: new Date().toISOString() } : { balance_paid_at: new Date().toISOString() };
   const { error } = await sb.from("leads").update(patch).eq("id", leadId);

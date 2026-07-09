@@ -33,7 +33,16 @@ export async function updateSession(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith("/login") || path.startsWith("/auth");
+  const isPublic =
+    path.startsWith("/login") ||
+    path.startsWith("/auth") ||
+    // Customer accept/pay page — the unguessable token IS the credential.
+    path.startsWith("/q/") ||
+    // Scheduled callers (Vercel cron / i9 tasks) authenticate with a bearer
+    // secret INSIDE the route (requireUserOrCronSecret); a redirect-to-login
+    // here would silently break them.
+    path.startsWith("/api/cron/") ||
+    path.startsWith("/api/sync/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

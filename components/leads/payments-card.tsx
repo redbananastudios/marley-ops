@@ -18,6 +18,7 @@ import {
   markPaymentPaidAction,
   setBalanceAction,
 } from "@/app/(dashboard)/follow-ups/actions";
+import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 
 export interface PaymentState {
   depositAmount: number | null;
@@ -138,27 +139,31 @@ export function PaymentsCard({
               </Button>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex h-9 w-28 items-center rounded-md border border-input bg-card px-2">
-                <span className="mr-1 text-xs text-mist-400">£</span>
-                <input
-                  type="number"
-                  inputMode="decimal"
-                  min={0}
-                  value={balance}
-                  onChange={(e) => setBalance(e.target.value)}
-                  className="tabular h-full w-full bg-transparent text-sm focus:outline-none"
-                  aria-label="Balance amount"
-                />
+            <div className="space-y-2">
+              <BalanceInvoiceButton leadId={leadId} />
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex h-9 w-28 items-center rounded-md border border-input bg-card px-2">
+                  <span className="mr-1 text-xs text-mist-400">£</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    value={balance}
+                    onChange={(e) => setBalance(e.target.value)}
+                    className="tabular h-full w-full bg-transparent text-sm focus:outline-none"
+                    aria-label="Balance amount"
+                  />
+                </div>
+                <Input type="date" value={balanceDue} onChange={(e) => setBalanceDue(e.target.value)} className="h-9 w-[150px]" aria-label="Balance due date" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy || !Number(balance) || !balanceDue}
+                  onClick={() => run(() => setBalanceAction(leadId, Number(balance), balanceDue), "Balance set — chase queued for the due date.")}
+                >
+                  Set manually
+                </Button>
               </div>
-              <Input type="date" value={balanceDue} onChange={(e) => setBalanceDue(e.target.value)} className="h-9 w-[150px]" aria-label="Balance due date" />
-              <Button
-                size="sm"
-                disabled={busy || !Number(balance) || !balanceDue}
-                onClick={() => run(() => setBalanceAction(leadId, Number(balance), balanceDue), "Balance set — chase queued for the due date.")}
-              >
-                Set balance
-              </Button>
             </div>
           )}
         </div>

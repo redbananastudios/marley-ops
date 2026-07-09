@@ -85,6 +85,7 @@ export function QuoteBuilder({
   readOnly,
   pricing = DEFAULT_PRICING,
   settings,
+  acceptUrl,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -97,6 +98,8 @@ export function QuoteBuilder({
   pricing?: PricingConfig;
   /** Cost rates — powers the internal margin % on Review & Send. */
   settings?: BusinessSettings | null;
+  /** Customer accept page (/q/<token>) — renders the PDF QR codes + email CTA. */
+  acceptUrl?: string;
 }) {
   const [values, setValues] = useState<QuoteFormValues>(() => ({
     ...defaultQuoteValues(),
@@ -160,6 +163,7 @@ export function QuoteBuilder({
         estimatorName: estimatorName ?? undefined,
         vatNumber: settings?.vatNumber || undefined,
         depositAmount: settings?.defaultDeposit || undefined,
+        acceptUrl,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the PDF.");
@@ -328,6 +332,7 @@ export function QuoteBuilder({
         estimatorName={estimatorName}
         vatNumber={settings?.vatNumber || undefined}
         depositAmount={settings?.defaultDeposit || undefined}
+        acceptUrl={acceptUrl}
       />
     </div>
   );

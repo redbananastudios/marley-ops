@@ -49,6 +49,7 @@ export function SendQuoteDialog({
   estimatorName,
   vatNumber,
   depositAmount,
+  acceptUrl,
   onSent,
 }: {
   open: boolean;
@@ -64,6 +65,8 @@ export function SendQuoteDialog({
   vatNumber?: string;
   /** Deposit £ (Settings) — used in the attached PDF's acceptance wording. */
   depositAmount?: number;
+  /** Customer accept page (/q/<token>) — email CTA + the PDF's QR codes. */
+  acceptUrl?: string;
   onSent?: () => void;
 }) {
   const [email, setEmail] = useState(values.customer.email || "");
@@ -88,12 +91,13 @@ export function SendQuoteDialog({
     }
     setSending(true);
     try {
-      const bodyHtml = buildQuoteEmailHtml(values, breakdown, { quoteRef });
+      const bodyHtml = buildQuoteEmailHtml(values, breakdown, { quoteRef, acceptUrl, depositAmount });
       const attachmentBase64 = await quotePdfBase64(values, breakdown, {
         quoteRef,
         estimatorName: estimatorName ?? undefined,
         vatNumber,
         depositAmount,
+        acceptUrl,
       });
 
       const result = await sendCommunication({

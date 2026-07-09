@@ -51,6 +51,11 @@ const PACKING_LABEL: Record<string, string> = {
 
 export interface QuoteEmailMeta {
   quoteRef: string;
+  /** Online accept page (/q/<token>) — the primary CTA when present; the email
+   *  falls back to reply-to-confirm without it. */
+  acceptUrl?: string;
+  /** Booking deposit £ (Settings) — used in the "what happens next" copy. */
+  depositAmount?: number;
 }
 
 export function buildQuoteEmailHtml(
@@ -89,11 +94,12 @@ export function buildQuoteEmailHtml(
     ? ' <span style="color:#92400E;font-weight:400;font-size:11px;">(estimated)</span>'
     : "";
 
+  const lockIn = meta.acceptUrl ? "Accept online in 30 seconds to lock it in" : "Reply to lock it in";
   const subline = moveDateForSubline
     ? `Here is the full price for your move on <strong style="color:#1A1A1A;">${moveDateForSubline}${
         job.moveDateEstimated ? " (estimated)" : ""
-      }</strong>. Reply to lock it in, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`
-    : `Here is the full price for your move. Reply to lock it in, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`;
+      }</strong>. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`
+    : `Here is the full price for your move. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`;
 
   const totalCostNote = b.vatEnabled ? "Includes admin fee · VAT @ 20%" : "Includes admin fee · no VAT";
 
@@ -108,12 +114,15 @@ export function buildQuoteEmailHtml(
   const packingLabel = PACKING_LABEL[values.packing] || "—";
 
   const replyHref = `mailto:hello@marleymoves.co.uk?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`;
+  const ctaHref = meta.acceptUrl ?? replyHref;
+  const ctaLabel = meta.acceptUrl ? "Accept your quote online &rarr;" : "Reply to confirm this quote &rarr;";
+  const depositLabel = gbp(meta.depositAmount ?? 100);
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Quote — Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Quote from Marley Moves</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your removal quote from Marley Moves — ${gbp(b.grandTotal)}. PDF attached.</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your removal quote from Marley Moves: ${gbp(b.grandTotal)}. PDF attached.</div>
 
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
@@ -183,24 +192,39 @@ export function buildQuoteEmailHtml(
     </table>
   </td></tr>
 
-  <tr><td align="center" style="padding:0 36px 22px;">
+  <tr><td align="center" style="padding:0 36px ${meta.acceptUrl ? "10px" : "22px"};">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
-      <a href="${replyHref}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Reply to confirm this quote &rarr;</a>
+      <a href="${ctaHref}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">${ctaLabel}</a>
     </td></tr></table>
-  </td></tr>
+  </td></tr>${
+    meta.acceptUrl
+      ? `
+  <tr><td align="center" style="padding:0 36px 22px;">
+    <p style="font-size:11px;color:#9CA3AF;margin:0;">Prefer email? <a href="${replyHref}" style="color:#6E6A65;">Reply to confirm</a> instead.</p>
+  </td></tr>`
+      : ""
+  }
 
   <tr><td style="padding:8px 36px 28px;">
     <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:14px;">What happens next</div>
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       <td style="width:33%;vertical-align:top;padding-right:10px;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">1</div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">Reply to confirm</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">Just hit reply and let us know you are happy with the price.</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${meta.acceptUrl ? "Accept your quote" : "Reply to confirm"}</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
+          meta.acceptUrl
+            ? "Tap the button above (takes about 30 seconds) and your date is reserved."
+            : "Just hit reply and let us know you are happy with the price."
+        }</div>
       </td>
       <td style="width:34%;vertical-align:top;padding-right:10px;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">2</div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">£100 deposit</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">Secures the date and the team. Bank details are on the attached PDF.</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${depositLabel} deposit</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
+          meta.acceptUrl
+            ? "Pay by card or bank transfer straight after accepting. This locks the booking in."
+            : "Secures the date and the team. Bank details are on the attached PDF."
+        }</div>
       </td>
       <td style="width:33%;vertical-align:top;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">3</div>

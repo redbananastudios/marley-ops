@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CommsDialog } from "@/components/comms/comms-dialog";
+import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 import { updateAppointment } from "@/app/(dashboard)/schedule/actions";
 import { LeadContextPanels, type EditTarget, type LeadOption } from "./appointment-dialog";
 
@@ -340,6 +341,14 @@ export function AppointmentViewDialog({
                     {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <FileText className="size-4" strokeWidth={1.75} />}
                     Create Quote
                   </Button>
+                  <div aria-hidden className="h-11" />
+                </>
+              ) : null}
+              {lead && target.apptType === "removal" ? (
+                <>
+                  {/* Payment in full is due BEFORE the job — trigger the balance
+                      invoice from the diary the day before (or sooner). */}
+                  <BalanceInvoiceButton leadId={lead.id} size="default" variant="default" className="h-12 w-full text-base" />
                   <div aria-hidden className="h-11" />
                 </>
               ) : null}

@@ -806,8 +806,13 @@ export type Database = {
       }
       quotes: {
         Row: {
+          accept_token: string | null
           accepted_at: string | null
+          accepted_ip: string | null
+          accepted_name: string | null
           agreed_price: number | null
+          balance_invoice_amount: number | null
+          balance_invoice_created_at: string | null
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
@@ -815,6 +820,9 @@ export type Database = {
           customer_email: string | null
           customer_name: string | null
           customer_phone: string | null
+          deposit_amount: number | null
+          deposit_paid_at: string | null
+          deposit_paid_method: string | null
           dest_addr: string | null
           discount: number
           email_error: string | null
@@ -840,10 +848,23 @@ export type Database = {
           vat_amount: number
           vat_enabled: boolean
           vehicle: string | null
+          zoho_balance_invoice_id: string | null
+          zoho_balance_invoice_number: string | null
+          zoho_balance_invoice_url: string | null
+          zoho_contact_id: string | null
+          zoho_deposit_error: string | null
+          zoho_deposit_invoice_id: string | null
+          zoho_deposit_invoice_number: string | null
+          zoho_deposit_invoice_url: string | null
         }
         Insert: {
+          accept_token?: string | null
           accepted_at?: string | null
+          accepted_ip?: string | null
+          accepted_name?: string | null
           agreed_price?: number | null
+          balance_invoice_amount?: number | null
+          balance_invoice_created_at?: string | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -851,6 +872,9 @@ export type Database = {
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          deposit_amount?: number | null
+          deposit_paid_at?: string | null
+          deposit_paid_method?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null
@@ -876,10 +900,23 @@ export type Database = {
           vat_amount?: number
           vat_enabled?: boolean
           vehicle?: string | null
+          zoho_balance_invoice_id?: string | null
+          zoho_balance_invoice_number?: string | null
+          zoho_balance_invoice_url?: string | null
+          zoho_contact_id?: string | null
+          zoho_deposit_error?: string | null
+          zoho_deposit_invoice_id?: string | null
+          zoho_deposit_invoice_number?: string | null
+          zoho_deposit_invoice_url?: string | null
         }
         Update: {
+          accept_token?: string | null
           accepted_at?: string | null
+          accepted_ip?: string | null
+          accepted_name?: string | null
           agreed_price?: number | null
+          balance_invoice_amount?: number | null
+          balance_invoice_created_at?: string | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -887,6 +924,9 @@ export type Database = {
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          deposit_amount?: number | null
+          deposit_paid_at?: string | null
+          deposit_paid_method?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null
@@ -912,6 +952,14 @@ export type Database = {
           vat_amount?: number
           vat_enabled?: boolean
           vehicle?: string | null
+          zoho_balance_invoice_id?: string | null
+          zoho_balance_invoice_number?: string | null
+          zoho_balance_invoice_url?: string | null
+          zoho_contact_id?: string | null
+          zoho_deposit_error?: string | null
+          zoho_deposit_invoice_id?: string | null
+          zoho_deposit_invoice_number?: string | null
+          zoho_deposit_invoice_url?: string | null
         }
         Relationships: [
           {
