@@ -101,6 +101,61 @@ function bankCard(reference: string): string {
   </td></tr>`;
 }
 
+/* ------------------------------------------------- template variables
+   Each customer email prefers its published Resend template (copy editable in
+   the dashboard, no deploy); these helpers compose the send-time variables so
+   the template path and the in-repo fallback builders below stay in step. */
+
+const firstNameOf = (name: string | null | undefined): string =>
+  (name ?? "").trim().split(/\s+/)[0] || "there";
+
+export function depositReceivedTemplateVars(m: DepositReceivedMeta): Record<string, string> {
+  const balanceLine =
+    m.balanceAmount != null && m.balanceAmount > 0
+      ? `The remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due before move day. We will send your final invoice nearer the time.`
+      : `We will send your final invoice nearer the time. The balance is due before move day.`;
+  return {
+    CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
+    QUOTE_REF: escapeHtml(m.quoteRef),
+    AMOUNT: gbp(m.amount),
+    MOVE_DATE_LABEL: escapeHtml(m.moveDateLabel ?? "your booked date"),
+    BALANCE_LINE: balanceLine,
+  };
+}
+
+export function balanceInvoiceTemplateVars(m: BalanceInvoiceMeta): Record<string, string> {
+  return {
+    CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
+    QUOTE_REF: escapeHtml(m.quoteRef),
+    AMOUNT: gbp(m.amount),
+    MOVE_DATE_CLAUSE: m.moveDateLabel
+      ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
+      : "",
+    INVOICE_META: m.invoiceNumber ? ` · Invoice ${escapeHtml(m.invoiceNumber)}` : "",
+    INVOICE_BUTTON: m.invoiceUrl
+      ? `  <tr><td align="center" style="padding:0 36px 22px;">
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
+      <a href="${m.invoiceUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">View your invoice &rarr;</a>
+    </td></tr></table>
+  </td></tr>`
+      : "",
+  };
+}
+
+export function balanceReceivedTemplateVars(m: {
+  firstName?: string | null;
+  quoteRef: string;
+  amount: number;
+  moveDateLabel?: string | null;
+}): Record<string, string> {
+  return {
+    CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
+    QUOTE_REF: escapeHtml(m.quoteRef),
+    AMOUNT: gbp(m.amount),
+    MOVE_DAY_LABEL: escapeHtml(m.moveDateLabel ?? "move day"),
+  };
+}
+
 /* ------------------------------------------------- deposit received */
 
 export interface DepositReceivedMeta {

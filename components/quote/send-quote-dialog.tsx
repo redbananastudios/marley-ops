@@ -23,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
-import { buildQuoteEmailHtml } from "@/lib/comms/quote-email";
+import { buildQuoteEmailHtml, quoteEmailTemplateVars } from "@/lib/comms/quote-email";
 import { quotePdfBase64 } from "@/lib/quote/pdf-client";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -91,7 +91,11 @@ export function SendQuoteDialog({
     }
     setSending(true);
     try {
-      const bodyHtml = buildQuoteEmailHtml(values, breakdown, { quoteRef, acceptUrl, depositAmount });
+      const emailMeta = { quoteRef, acceptUrl, depositAmount };
+      const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
+      // Server prefers the published Resend template (dashboard-editable copy)
+      // when its env id is set; bodyHtml stays as the fallback body.
+      const templateVariables = quoteEmailTemplateVars(values, breakdown, emailMeta);
       const attachmentBase64 = await quotePdfBase64(values, breakdown, {
         quoteRef,
         estimatorName: estimatorName ?? undefined,
@@ -105,6 +109,7 @@ export function SendQuoteDialog({
         to: email.trim(),
         subject: `Your removal quote from Marley Moves — ${quoteRef}`,
         bodyHtml,
+        ...(templateVariables ? { templateKey: "quote-email" as const, templateVariables } : {}),
         bodyText: "Your removal quote is attached.",
         attachmentBase64,
         attachmentName: `MarleyMoves-Quote-${quoteRef}.pdf`,

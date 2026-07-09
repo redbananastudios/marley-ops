@@ -58,6 +58,66 @@ export interface QuoteEmailMeta {
   depositAmount?: number;
 }
 
+/**
+ * Send-time variables for the published `quote-email` Resend template (copy
+ * editable in the dashboard, no deploy). Accept-link variant only — returns
+ * null without an acceptUrl so the caller falls back to buildQuoteEmailHtml.
+ * Keep the slot names in step with scripts/create-resend-templates.mjs.
+ */
+export function quoteEmailTemplateVars(
+  values: QuoteFormValues,
+  b: QuoteBreakdown,
+  meta: QuoteEmailMeta,
+): Record<string, string> | null {
+  if (!meta.acceptUrl) return null;
+  const UK = "Europe/London";
+  const job = values.job;
+  const parseDate = (s: string) => new Date(s + (s.length === 10 ? "T00:00:00" : ""));
+  const moveDate = job.moveDate ? parseDate(job.moveDate) : null;
+  const moveDateValid = !!moveDate && !isNaN(moveDate.getTime());
+
+  const moveDateClause = moveDateValid
+    ? ` on <strong style="color:#1A1A1A;">${moveDate!.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK })}${
+        job.moveDateEstimated ? " (estimated)" : ""
+      }</strong>`
+    : "";
+  const estSuffix = job.moveDateEstimated
+    ? ' <span style="color:#92400E;font-weight:400;font-size:11px;">(estimated)</span>'
+    : "";
+  const moveDateGlance = !job.moveDate
+    ? "TBC"
+    : moveDateValid
+      ? moveDate!.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: UK }) + estSuffix
+      : escapeHtml(job.moveDate) + estSuffix;
+
+  const [c1, c2] = splitAddr(job.collectAddr);
+  const [d1, d2] = splitAddr(job.destAddr);
+  const expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: UK,
+  });
+
+  return {
+    CUSTOMER_FIRST_NAME: (values.customer.name || "").trim().split(/\s+/)[0] || "there",
+    QUOTE_REF: escapeHtml(meta.quoteRef || ""),
+    GRAND_TOTAL: gbp(b.grandTotal),
+    TOTAL_COST_NOTE: b.vatEnabled ? "Includes admin fee · VAT @ 20%" : "Includes admin fee · no VAT",
+    EXPIRY_DATE: expiry,
+    MOVE_DATE_CLAUSE: moveDateClause,
+    COLLECTION_HTML: escapeHtml(c1) + (c2 ? "<br>" + escapeHtml(c2) : ""),
+    DESTINATION_HTML: escapeHtml(d1) + (d2 ? "<br>" + escapeHtml(d2) : ""),
+    MOVE_DATE_GLANCE: moveDateGlance,
+    VEHICLE: escapeHtml(VEHICLE_LABEL[values.vehicle] || "—"),
+    PACKING: escapeHtml(PACKING_LABEL[values.packing] || "—"),
+    ACCEPT_URL: meta.acceptUrl,
+    REPLY_HREF: `mailto:hello@marleymoves.co.uk?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`,
+    DEPOSIT_AMOUNT: gbp(meta.depositAmount ?? 100),
+    ISSUED_DATE: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: UK }),
+  };
+}
+
 export function buildQuoteEmailHtml(
   values: QuoteFormValues,
   b: QuoteBreakdown,

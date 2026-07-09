@@ -25,6 +25,11 @@ import {
   buildDepositReceivedEmailHtml,
   buildBalanceInvoiceEmailHtml,
   buildBalanceReceivedEmailHtml,
+  depositReceivedTemplateVars,
+  balanceInvoiceTemplateVars,
+  balanceReceivedTemplateVars,
+  type DepositReceivedMeta,
+  type BalanceInvoiceMeta,
 } from "@/lib/comms/payment-email";
 import {
   balanceDue,
@@ -898,21 +903,26 @@ export async function markDepositPaid(
     });
   }
 
-  // Customer confirmation (duplicate-guarded).
+  // Customer confirmation (duplicate-guarded). Prefers the published Resend
+  // template (dashboard-editable copy); the in-repo HTML is the fallback.
   if (quote.customer_email) {
     const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+    const meta: DepositReceivedMeta = {
+      firstName: quote.customer_name,
+      quoteRef: quote.quote_ref,
+      amount: deposit,
+      moveDateLabel: moveDateLabel(quote.moving_date),
+      balanceAmount: balanceDue(agreed, deposit),
+    };
+    const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIVED;
     await dispatchComm(sb, opts.actorId, {
       channel: "email",
       to: quote.customer_email,
       subject: `Deposit received — you're booked in (${quote.quote_ref})`,
       bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref}. Your move date is secured.`,
-      bodyHtml: buildDepositReceivedEmailHtml({
-        firstName: quote.customer_name,
-        quoteRef: quote.quote_ref,
-        amount: deposit,
-        moveDateLabel: moveDateLabel(quote.moving_date),
-        balanceAmount: balanceDue(agreed, deposit),
-      }),
+      ...(templateId
+        ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) } }
+        : { bodyHtml: buildDepositReceivedEmailHtml(meta) }),
       // Replies route back into the panel (pause chase, log, follow-up).
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id ?? undefined,
@@ -1056,19 +1066,23 @@ export async function createBalanceInvoiceFlow(
       } catch {
         pdfBase64 = undefined; // send without the attachment rather than not at all
       }
+      const meta: BalanceInvoiceMeta = {
+        firstName: quote.customer_name,
+        quoteRef: quote.quote_ref,
+        amount,
+        moveDateLabel: moveDateLabel(quote.moving_date),
+        invoiceUrl: inv.invoiceUrl,
+        invoiceNumber: inv.invoiceNumber,
+      };
+      const templateId = process.env.RESEND_TEMPLATE_BALANCE_INVOICE;
       const res = await dispatchComm(sb, actorId, {
         channel: "email",
         to: quote.customer_email,
         subject: `Your final balance — ${quote.quote_ref} (£${amount.toFixed(2)})`,
         bodyText: `Final balance of £${amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
-        bodyHtml: buildBalanceInvoiceEmailHtml({
-          firstName: quote.customer_name,
-          quoteRef: quote.quote_ref,
-          amount,
-          moveDateLabel: moveDateLabel(quote.moving_date),
-          invoiceUrl: inv.invoiceUrl,
-          invoiceNumber: inv.invoiceNumber,
-        }),
+        ...(templateId
+          ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) } }
+          : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
         attachmentBase64: pdfBase64,
         attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
         replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
@@ -1165,17 +1179,21 @@ export async function markBalancePaid(
   });
 
   if (quote.customer_email && amount > 0) {
+    const meta = {
+      firstName: quote.customer_name,
+      quoteRef: quote.quote_ref,
+      amount,
+      moveDateLabel: moveDateLabel(quote.moving_date),
+    };
+    const templateId = process.env.RESEND_TEMPLATE_BALANCE_RECEIVED;
     await dispatchComm(sb, actorId, {
       channel: "email",
       to: quote.customer_email,
       subject: `Payment received — all settled (${quote.quote_ref})`,
       bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. Nothing more to pay.`,
-      bodyHtml: buildBalanceReceivedEmailHtml({
-        firstName: quote.customer_name,
-        quoteRef: quote.quote_ref,
-        amount,
-        moveDateLabel: moveDateLabel(quote.moving_date),
-      }),
+      ...(templateId
+        ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) } }
+        : { bodyHtml: buildBalanceReceivedEmailHtml(meta) }),
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id,
       quoteId: quote.id,

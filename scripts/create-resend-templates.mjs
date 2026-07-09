@@ -141,6 +141,230 @@ const reviewRequestHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/* ------------------------------------------------- branded shell + slots
+   Shared markup for the transactional emails below — mirrors the in-repo
+   fallback builders in lib/comms/payment-email.ts + quote-email.ts; keep in
+   sync. {{{VARS}}} are filled at send time (fragments like MOVE_DATE_CLAUSE /
+   INVOICE_BUTTON arrive as pre-composed HTML from the app). */
+
+const shellHtml = (preheader, inner) => `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title></head>
+<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${preheader}</div>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
+  <tr><td align="center" style="padding:34px 36px 8px;">
+    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+  </td></tr>
+${inner}
+  <tr><td style="background:#FAFAFA;border-top:1px solid #EAE7E2;padding:20px 36px;">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
+        <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
+      </td>
+      <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
+        <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
+        <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
+const pillRow = (label) => `  <tr><td align="center" style="padding:0 36px 24px;">
+    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">${label}</div>
+  </td></tr>`;
+const headlineRow = (text) => `  <tr><td align="center" style="padding:0 36px 6px;">
+    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">${text}</h1>
+  </td></tr>`;
+const sublineRow = (html, pad = "14px 36px 22px") => `  <tr><td align="center" style="padding:${pad};">
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">${html}</p>
+  </td></tr>`;
+const amountCard = (label, amount, note) => `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">${label}</div>
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${amount}</div>${
+          note ? `\n        <div style="font-size:11px;color:#6E6A65;margin-top:6px;">${note}</div>` : ""
+        }
+      </td></tr>
+    </table>
+  </td></tr>`;
+const bankCardRow = (reference) => {
+  const row = (l, v) => `<tr>
+    <td style="padding:8px 0;border-bottom:1px solid #F0EDE8;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;width:42%;">${l}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #F0EDE8;font-size:14px;color:#1A1A1A;font-weight:600;">${v}</td>
+  </tr>`;
+  return `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 24px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:10px;">Pay by bank transfer</div>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${row("Account name", "MARLEYMOVES LTD")}
+          ${row("Sort code", "04-00-03")}
+          ${row("Account number", "12787423")}
+          <tr>
+            <td style="padding:8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Reference</td>
+            <td style="padding:8px 0;font-size:14px;color:#C03838;font-weight:700;">${reference}</td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>`;
+};
+
+/* ------------------------------------------------- payment emails */
+
+const depositReceivedHtml = shellHtml(
+  "Your {{{AMOUNT}}} deposit is received. Your move date is secured.",
+  [
+    pillRow("Deposit received · {{{QUOTE_REF}}}"),
+    headlineRow("You're booked in, {{{CUSTOMER_FIRST_NAME}}}"),
+    sublineRow(
+      'We have received your {{{AMOUNT}}} deposit for your move on <strong style="color:#1A1A1A;">{{{MOVE_DATE_LABEL}}}</strong>. Your date and team are now secured.',
+    ),
+    amountCard("Deposit paid", "{{{AMOUNT}}}"),
+    sublineRow(
+      '{{{BALANCE_LINE}}} Any questions in the meantime, call Connor on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.',
+      "0 36px 26px",
+    ),
+  ].join("\n"),
+);
+
+const balanceInvoiceHtml = shellHtml(
+  "Your final balance of {{{AMOUNT}}} is due before move day.",
+  [
+    pillRow("Final balance · {{{QUOTE_REF}}}"),
+    headlineRow("Your final balance, {{{CUSTOMER_FIRST_NAME}}}"),
+    sublineRow(
+      "Ahead of your move{{{MOVE_DATE_CLAUSE}}}, here is the final balance. Payment in full is due before move day so everything is settled and the crew can focus on the job.",
+    ),
+    amountCard(
+      "Balance due{{{INVOICE_META}}}",
+      "{{{AMOUNT}}}",
+      "Your {{{QUOTE_REF}}} deposit is already accounted for.",
+    ),
+    "{{{INVOICE_BUTTON}}}",
+    bankCardRow("{{{QUOTE_REF}}}"),
+    sublineRow(
+      'Already paid or need a different arrangement? Call Connor on <strong style="color:#C03838;">01747 637070</strong> or reply to this email.',
+      "0 36px 26px",
+    ),
+  ].join("\n"),
+);
+
+const balanceReceivedHtml = shellHtml(
+  "Balance of {{{AMOUNT}}} received. You're all set for move day.",
+  [
+    pillRow("Payment received · {{{QUOTE_REF}}}"),
+    headlineRow("All settled, {{{CUSTOMER_FIRST_NAME}}}"),
+    sublineRow(
+      'We have received your balance of <strong style="color:#1A1A1A;">{{{AMOUNT}}}</strong>, so there is nothing more to pay. We will see you on <strong style="color:#1A1A1A;">{{{MOVE_DAY_LABEL}}}</strong>. Any last-minute questions, call Connor on <strong style="color:#C03838;">01747 637070</strong>.',
+      "14px 36px 26px",
+    ),
+  ].join("\n"),
+);
+
+/* ------------------------------------------------- quote email (accept variant)
+   Sent with the quote PDF attached. Mirrors lib/comms/quote-email.ts; the app
+   only uses this template when the quote has an accept link (it always does
+   since unified acceptance) — otherwise it falls back to the in-repo HTML. */
+
+const quoteEmailHtml = shellHtml(
+  "Your removal quote from Marley Moves: {{{GRAND_TOTAL}}}. PDF attached.",
+  [
+    pillRow("Ref {{{QUOTE_REF}}}"),
+    headlineRow("Your move is quoted, {{{CUSTOMER_FIRST_NAME}}}"),
+    sublineRow(
+      'Here is the full price for your move{{{MOVE_DATE_CLAUSE}}}. Accept online in 30 seconds to lock it in, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.',
+    ),
+    `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
+      <tr>
+        <td style="padding:22px 26px;border-left:4px solid #C03838;">
+          <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">Total Move Cost</div>
+          <div style="font-family:Georgia,'Times New Roman',serif;font-size:42px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">{{{GRAND_TOTAL}}}</div>
+          <div style="font-size:11px;color:#6E6A65;margin-top:6px;">{{{TOTAL_COST_NOTE}}}</div>
+        </td>
+        <td align="right" valign="middle" style="padding:22px 26px;border-left:1px solid #EAE7E2;width:150px;">
+          <div style="font-size:10px;color:#6E6A65;text-transform:uppercase;letter-spacing:0.18em;">Expires</div>
+          <div style="font-size:14px;color:#1A1A1A;font-weight:700;margin-top:4px;">{{{EXPIRY_DATE}}}</div>
+        </td>
+      </tr>
+    </table>
+  </td></tr>`,
+    `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 24px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:10px;">Job at a glance</div>
+        <table width="100%" cellpadding="0" cellspacing="0"><tr>
+          <td valign="top" style="width:46%;">
+            <div style="font-size:10px;color:#6E6A65;letter-spacing:0.1em;text-transform:uppercase;">Collection</div>
+            <div style="font-size:13px;color:#1A1A1A;font-weight:600;margin-top:4px;line-height:1.45;">{{{COLLECTION_HTML}}}</div>
+          </td>
+          <td align="center" valign="middle" style="width:8%;font-size:18px;color:#C03838;font-weight:600;">&rarr;</td>
+          <td valign="top" style="width:46%;">
+            <div style="font-size:10px;color:#6E6A65;letter-spacing:0.1em;text-transform:uppercase;">Destination</div>
+            <div style="font-size:13px;color:#1A1A1A;font-weight:600;margin-top:4px;line-height:1.45;">{{{DESTINATION_HTML}}}</div>
+          </td>
+        </tr></table>
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:18px;border-top:1px solid #EAE7E2;padding-top:14px;"><tr>
+          <td style="width:34%;font-size:11px;color:#6E6A65;vertical-align:top;">
+            <div style="letter-spacing:0.1em;text-transform:uppercase;font-size:9px;">Date</div>
+            <div style="color:#1A1A1A;font-weight:600;margin-top:2px;">{{{MOVE_DATE_GLANCE}}}</div>
+          </td>
+          <td style="width:33%;font-size:11px;color:#6E6A65;vertical-align:top;">
+            <div style="letter-spacing:0.1em;text-transform:uppercase;font-size:9px;">Vehicle</div>
+            <div style="color:#1A1A1A;font-weight:600;margin-top:2px;">{{{VEHICLE}}}</div>
+          </td>
+          <td style="width:33%;font-size:11px;color:#6E6A65;vertical-align:top;">
+            <div style="letter-spacing:0.1em;text-transform:uppercase;font-size:9px;">Packing</div>
+            <div style="color:#1A1A1A;font-weight:600;margin-top:2px;">{{{PACKING}}}</div>
+          </td>
+        </tr></table>
+      </td></tr>
+    </table>
+  </td></tr>`,
+    `  <tr><td align="center" style="padding:0 36px 10px;">
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
+      <a href="{{{ACCEPT_URL}}}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Accept your quote online &rarr;</a>
+    </td></tr></table>
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 22px;">
+    <p style="font-size:11px;color:#9CA3AF;margin:0;">Prefer email? <a href="{{{REPLY_HREF}}}" style="color:#6E6A65;">Reply to confirm</a> instead.</p>
+  </td></tr>`,
+    `  <tr><td style="padding:8px 36px 28px;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:14px;">What happens next</div>
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="width:33%;vertical-align:top;padding-right:10px;">
+        <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">1</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">Accept your quote</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">Tap the button above (takes about 30 seconds) and your date is reserved.</div>
+      </td>
+      <td style="width:34%;vertical-align:top;padding-right:10px;">
+        <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">2</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">{{{DEPOSIT_AMOUNT}}} deposit</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">Pay by card or bank transfer straight after accepting. This locks the booking in.</div>
+      </td>
+      <td style="width:33%;vertical-align:top;">
+        <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">3</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">Move day</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">We arrive on time. Balance due on completion.</div>
+      </td>
+    </tr></table>
+  </td></tr>`,
+    `  <tr><td style="padding:0 36px 20px;">
+    <div style="font-size:10px;color:#9CA3AF;line-height:1.5;">Issued {{{ISSUED_DATE}}} · valid 30 days · ref {{{QUOTE_REF}}}. Prices are subject to a site survey where applicable.</div>
+  </td></tr>`,
+  ].join("\n"),
+);
+
 /* ------------------------------------------------- chase emails (plain look)
    Personal plain-text voice from Connor — canonical copy lives in
    lib/quote/chase.ts (approved by Peter 2026-07-09); keep both in sync.
@@ -176,6 +400,77 @@ const TEMPLATES = [
       { key: "TIME_LABEL", type: "string", fallback_value: "the agreed time" },
       { key: "ESTIMATOR", type: "string", fallback_value: "One of our team" },
       { key: "ADDRESS", type: "string", fallback_value: "your address" },
+    ],
+  },
+  {
+    name: "quote-email",
+    envVar: "RESEND_TEMPLATE_QUOTE_EMAIL",
+    subject: "Your removal quote from Marley Moves — {{{QUOTE_REF}}}",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    html: quoteEmailHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
+      { key: "GRAND_TOTAL", type: "string", fallback_value: "the quoted total" },
+      { key: "TOTAL_COST_NOTE", type: "string", fallback_value: "Includes admin fee" },
+      { key: "EXPIRY_DATE", type: "string", fallback_value: "30 days from issue" },
+      { key: "MOVE_DATE_CLAUSE", type: "string", fallback_value: "" },
+      { key: "COLLECTION_HTML", type: "string", fallback_value: "—" },
+      { key: "DESTINATION_HTML", type: "string", fallback_value: "—" },
+      { key: "MOVE_DATE_GLANCE", type: "string", fallback_value: "TBC" },
+      { key: "VEHICLE", type: "string", fallback_value: "—" },
+      { key: "PACKING", type: "string", fallback_value: "—" },
+      { key: "ACCEPT_URL", type: "string", fallback_value: "https://marleymoves.co.uk/quote/" },
+      { key: "REPLY_HREF", type: "string", fallback_value: "mailto:hello@marleymoves.co.uk" },
+      { key: "DEPOSIT_AMOUNT", type: "string", fallback_value: "£100" },
+      { key: "ISSUED_DATE", type: "string", fallback_value: "today" },
+    ],
+  },
+  {
+    name: "deposit-received",
+    envVar: "RESEND_TEMPLATE_DEPOSIT_RECEIVED",
+    subject: "Deposit received — you're booked in ({{{QUOTE_REF}}})",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    html: depositReceivedHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
+      { key: "AMOUNT", type: "string", fallback_value: "your deposit" },
+      { key: "MOVE_DATE_LABEL", type: "string", fallback_value: "your booked date" },
+      {
+        key: "BALANCE_LINE",
+        type: "string",
+        fallback_value:
+          "We will send your final invoice nearer the time. The balance is due before move day.",
+      },
+    ],
+  },
+  {
+    name: "balance-invoice",
+    envVar: "RESEND_TEMPLATE_BALANCE_INVOICE",
+    subject: "Your final balance — {{{QUOTE_REF}}} ({{{AMOUNT}}})",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    html: balanceInvoiceHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
+      { key: "AMOUNT", type: "string", fallback_value: "the remaining balance" },
+      { key: "MOVE_DATE_CLAUSE", type: "string", fallback_value: "" },
+      { key: "INVOICE_META", type: "string", fallback_value: "" },
+      { key: "INVOICE_BUTTON", type: "string", fallback_value: "" },
+    ],
+  },
+  {
+    name: "balance-received",
+    envVar: "RESEND_TEMPLATE_BALANCE_RECEIVED",
+    subject: "Payment received — all settled ({{{QUOTE_REF}}})",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    html: balanceReceivedHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
+      { key: "AMOUNT", type: "string", fallback_value: "your balance" },
+      { key: "MOVE_DAY_LABEL", type: "string", fallback_value: "move day" },
     ],
   },
   {

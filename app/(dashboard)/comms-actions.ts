@@ -9,8 +9,18 @@ import {
   type DispatchCommResult,
 } from "@/lib/comms/dispatch";
 
-export type SendCommInput = DispatchCommInput;
+export type SendCommInput = DispatchCommInput & {
+  /** Resolve a published Resend template server-side (client components can't
+   *  read the env ids). When the env id is set, the template wins over bodyHtml
+   *  — which stays supplied as the fallback body. */
+  templateKey?: "quote-email";
+  templateVariables?: Record<string, string | number>;
+};
 export type SendCommResult = DispatchCommResult;
+
+const TEMPLATE_KEYS: Record<NonNullable<SendCommInput["templateKey"]>, string | undefined> = {
+  "quote-email": process.env.RESEND_TEMPLATE_QUOTE_EMAIL,
+};
 
 /** Dashboard send — the signed-in user's client + actor id over the shared
  *  dispatcher (duplicate guard, log, counters, activity live in dispatch.ts). */
@@ -19,6 +29,11 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
   const {
     data: { user },
   } = await sb.auth.getUser();
+
+  if (input.templateKey && input.templateVariables && !input.template) {
+    const id = TEMPLATE_KEYS[input.templateKey];
+    if (id) input = { ...input, template: { id, variables: input.templateVariables } };
+  }
 
   // Every quote/lead-linked email gets the per-lead reply address, so a
   // customer reply to ANY of our emails (quote, survey confirmation, manual
