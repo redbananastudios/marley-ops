@@ -91,6 +91,56 @@ const surveyConfirmationHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/* ------------------------------------------------- review request (branded)
+   Post-move "how did we do?" — mirrors lib/comms/payment-email.ts
+   buildReviewRequestEmailHtml (the in-repo fallback); keep both in sync. */
+
+const reviewRequestHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title></head>
+<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Thanks for moving with Marley Moves. A quick review helps us a lot.</div>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
+  <tr><td align="center" style="padding:34px 36px 8px;">
+    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 24px;">
+    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">Move complete</div>
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 6px;">
+    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">How did we do, {{{CUSTOMER_FIRST_NAME}}}?</h1>
+  </td></tr>
+  <tr><td align="center" style="padding:14px 36px 22px;">
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">That's your move done — thank you for choosing Marley Moves. If Connor and the crew looked after you, a quick Google review makes a real difference to a small local firm like ours. It takes about a minute.</p>
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 22px;">
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
+      <a href="{{{REVIEW_URL}}}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Leave a Google review &rarr;</a>
+    </td></tr></table>
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 26px;">
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">And if anything wasn't right, please reply to this email or call Connor on <strong style="color:#C03838;">01747 637070</strong> first — we would always rather fix it.</p>
+  </td></tr>
+  <tr><td style="background:#FAFAFA;border-top:1px solid #EAE7E2;padding:20px 36px;">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+      <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
+        <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
+      </td>
+      <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
+        <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
+        <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
+      </td>
+    </tr></table>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
 /* ------------------------------------------------- chase emails (plain look)
    Personal plain-text voice from Connor — canonical copy lives in
    lib/quote/chase.ts (approved by Peter 2026-07-09); keep both in sync.
@@ -126,6 +176,23 @@ const TEMPLATES = [
       { key: "TIME_LABEL", type: "string", fallback_value: "the agreed time" },
       { key: "ESTIMATOR", type: "string", fallback_value: "One of our team" },
       { key: "ADDRESS", type: "string", fallback_value: "your address" },
+    ],
+  },
+  {
+    name: "review-request",
+    envVar: "RESEND_TEMPLATE_REVIEW_REQUEST",
+    subject: "How did we do, {{{CUSTOMER_FIRST_NAME}}}?",
+    from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
+    // NO template-level reply_to: the sender sets the per-lead reply address.
+    html: reviewRequestHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      {
+        key: "REVIEW_URL",
+        type: "string",
+        fallback_value:
+          "https://search.google.com/local/writereview?placeid=ChIJq8R84fCs_EkRc_9iHhFQXW8",
+      },
     ],
   },
   {

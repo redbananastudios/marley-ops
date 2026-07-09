@@ -52,12 +52,17 @@ export async function sendReviewRequest(
   const token = (q?.accept_token as string | null) ?? null;
 
   const first = (lead.name ?? "").trim().split(/\s+/)[0] || "there";
+  // Prefer the published Resend template (copy editable in the dashboard, no
+  // deploy); the in-repo HTML is the fallback when the env id isn't set.
+  const templateId = process.env.RESEND_TEMPLATE_REVIEW_REQUEST;
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
     to: lead.email,
     subject: `How did we do, ${first}?`,
     bodyText: `Thanks for moving with Marley Moves. If we looked after you, a quick Google review makes a real difference to us: ${reviewUrl} — and if anything wasn't right, reply to this email or call Connor on 01747 637070 first.`,
-    bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl }),
+    ...(templateId
+      ? { template: { id: templateId, variables: { CUSTOMER_FIRST_NAME: first, REVIEW_URL: reviewUrl } } }
+      : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl }) }),
     replyTo: token ? replyAddressFor(token) : undefined,
     from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
     leadId,
