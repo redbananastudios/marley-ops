@@ -596,11 +596,14 @@ export async function createBalanceInvoiceFlow(
 /* ------------------------------------------------------------- balance paid */
 
 /** Balance landed (seen in Zoho, or one-tap in ops): stamp the lead, close the
- *  chase, confirm to the customer. Idempotent via the lead's balance_paid_at. */
+ *  chase, confirm to the customer. Idempotent via the lead's balance_paid_at.
+ *  `recordInZoho` records the BACS payment against the balance invoice (ops
+ *  one-tap); pass false when Zoho already knows (card / cron). */
 export async function markBalancePaid(
   sb: Sb,
   quoteId: string,
   actorId: string | null,
+  recordInZoho = false,
 ): Promise<{ ok: boolean; already?: boolean; error?: string }> {
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote?.lead_id) return { ok: false, error: "Quote or lead not found" };
@@ -613,6 +616,31 @@ export async function markBalancePaid(
     .is("balance_paid_at", null)
     .select("id");
   if (!won?.length) return { ok: true, already: true };
+
+  // BACS one-tap: keep Connor's Zoho books in step (card/cron already paid).
+  if (
+    recordInZoho &&
+    isRealZohoId(quote.zoho_balance_invoice_id) &&
+    isRealZohoId(quote.zoho_contact_id)
+  ) {
+    try {
+      const status = await getInvoiceStatus(quote.zoho_balance_invoice_id);
+      if (status.status !== "paid" && status.balance > 0) {
+        await recordInvoicePayment({
+          customerId: quote.zoho_contact_id,
+          invoiceId: quote.zoho_balance_invoice_id,
+          amount: status.balance,
+          mode: "banktransfer",
+          reference: quote.quote_ref,
+        });
+      }
+    } catch (err) {
+      await sendOpsAlert(`Zoho balance payment record FAILED — ${quote.quote_ref}`, [
+        `The balance for <strong>${quote.quote_ref}</strong> is marked paid in ops, but recording it against ${quote.zoho_balance_invoice_number ?? "the Zoho invoice"} failed: ${err instanceof Error ? err.message : "unknown"}.`,
+        `Record the payment manually in Zoho.`,
+      ]);
+    }
+  }
 
   const { data: open } = await sb
     .from("follow_ups")

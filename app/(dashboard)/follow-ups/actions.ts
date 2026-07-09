@@ -258,7 +258,7 @@ export async function markPaymentPaidAction(leadId: string, kind: "deposit" | "b
             actorId: userId,
             recordInZoho: true,
           })
-        : await markBalancePaid(sb, acceptedQuote.id, userId);
+        : await markBalancePaid(sb, acceptedQuote.id, userId, true);
     if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
     // markDepositPaid stamps the quote+lead; mirror the lead stamp for the
     // manual-deposit case where only the quote knew the amount.
