@@ -189,6 +189,87 @@ Marley design tokens, iPad-first).
 
 ---
 
+## Round 2 — in-depth workflows (screenshots in `docs/imve/*.jpeg`)
+
+### Job detail = the workflow hub (`/admin/viewjob/<id>`, `job-detail.jpeg`)
+Every workflow hangs off one job page, top to bottom: action bar (Edit Job / Edit
+Status / Add to Calendar / Appointments / **Move to Storage** / Mark Complete) ·
+Client info + Send Email/SMS · Job Details (job **title** + number, moving date
+vs **free-text approximate date** ("21st August"), package, cubic ft, source,
+**type of move**: Chain Free / Completion / Storage) · Other Details ·
+**Resources Required** (crew/vehicle requirement — validates our board plan) ·
+Moving From/To with property meta (type, bedrooms, floor, lift) · Tasks ·
+**Admin Notes vs Staff Notes as separate timelines** (visibility split) ·
+**"Previously Damaged" photo uploads** (liability cover) · Activity log ·
+Survey (date/time, **video-quote flag**, comments) · **Cubic Sheet (+ copy
+shareable URL)** · Job Sheet · Quote (pricing matrix) · Move Date · Deposit ·
+Invoice (**gated: "Pay the deposit first, then generate invoice"** — same rule
+we enforce) · Custom Invoices · **Staff Allocation per-day** ("Connor Wass —
+Thu, 09 Jul") · **Vehicle Allocation per-day** · Company Sign Offs.
+
+### Cubic sheet (`/admin/addcubicsheet/<jobId>`, `cubic-sheet*.jpeg`)
+Per-job volume survey. Room-category chips (Living space / Loft / Bedrooms /
+Garage-garden / Kitchen-utility / Office-commercial / Other) reveal an item
+catalogue where **every item carries a cubic-feet value** (Sofa 2 seater–35,
+Corner sofa 4 seater–140, Grand piano–150, Medium box–2 …) with −/qty/+
+steppers; picked items build an "Added items list" + Additional Details +
+multi-file Photos & Files. Catalogue is configurable in Settings → **Cubic
+Calculator Fields** (category → item → ft³/m³). The job stores total Cubic Ft.
+**Our improvement**: total ft³ → suggested van count (Luton ≈ 550–600 usable
+ft³) feeding the quote's vehicle spec — iMVE never closes that loop.
+
+### Job Board interactions (`jobboard-assign-modal.jpeg`)
+"Assign Resources to Appointment" modal = appointment status + date, multi-select
+Assign Staff + Assign Vehicles, Confirm. Assignments are **per appointment day**
+(a 4-day move gets a card per day, each independently staffed). Same model as
+our appointments + a join table.
+
+### Settings deep-dive
+- **Job Status Customisation** (`settings-job-status.jpeg`): admin-defined
+  statuses with colours (name + colour + preview). The giant default taxonomy is
+  grouped in Reports→Ops into stages: NEW ENQUIRIES / SURVEYS & QUOTING /
+  IN PROGRESS / COMPLETED & PAYMENT / ON HOLD / LOST & DECLINED.
+- **Job Sheet Customisation** (`settings-job-sheet.jpeg`): admin-defined
+  categories that appear on job sheets (Connor's: Move Details, Protectors,
+  Move Size, How many boxes). **Job Sheet Templates**: pre-built item sets "so
+  staff don't re-add the same fields on every job sheet".
+- **Customer Acceptance** (`settings-customer-acceptance.jpeg`): the accept-form
+  builder — T&C tick-box statements, optional **goods-value declaration box**
+  (insurance), optional move-date free text, custom Yes/No questions. Our /q
+  page covers T&C + signature; the **value declaration** is worth adding.
+- **Rota Settings** (`settings-rota.jpeg`): just a hosted file URL/upload — iMVE
+  doesn't build rotas. Nothing to copy.
+- Staff Management = name/email/password logins ("access assigned jobs");
+  Vehicle Staff = recipients of **vehicle defect inspection reports**.
+
+### Reports tabs (`reports-sales/ops/finances.jpeg`)
+- **Sales**: preset ranges (Today→Last 3 Months + custom) · Speed to Close +
+  Avg Time to Win · quote funnel + overall win rate · **Quote Loss Reasons**
+  (price / competitor / timing / no response / cancelled / other) · **Quote
+  Distribution by Staff** (per-estimator volume + win rate) · Win Rate this
+  year vs last (monthly).
+- **Ops**: Scheduled / In Progress / Completed / Declined + On-Time% · the
+  staged **Job Status Pipeline** with click-through counts · **Move Types
+  Breakdown** (jobs + £ per type) · **Vehicle Metrics: Fleet Size + Docs Due
+  (30d)** (validates compliance chips) · Jobs by lead generator · Jobs by
+  Source (Google/Vans/Estate Agent/Other) · Bookings by move type monthly.
+- **Finances**: Revenue (paid, period) · Total Outstanding (all time) · Revenue
+  by Move Type table · **Invoices Ageing** (current / 1-30 / 31-60 / 60+) ·
+  **Forecast next 30 days**.
+
+### Storage modals (`storage-add-site/container.jpeg`)
+- Add Site: name*, address*, Site Plan Type (**Upload Image** vs **Drag & Drop
+  Builder**) — switchable later via Plan Settings (keeps existing plans).
+- Add Container: number*, name, type* (from the configurable type list —
+  **size auto-fills from type**), code, description.
+
+### Live-usage note (important)
+Connor is running REAL clients in iMVE today (jobs 60-67 created 07-08 Jul,
+real names/emails, source=Google). marley-ops replaces iMVE only at cutover —
+until then iMVE is the live pipeline and any test in it emails real people.
+
+---
+
 ## Suggested build order
 
 1. **Vehicles** (small, self-contained; unblocks Job Board resources + compliance chips)

@@ -13,6 +13,7 @@ import {
   type ProgressSets,
 } from "@/lib/dashboard/compute";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
+import { vehicleNeedsAttention } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, boxesFromItems } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -176,6 +177,14 @@ export default async function DashboardPage() {
     balanceDue: leads.filter(
       (l) => l.status === "confirmed" && !(l as { balance_paid_at?: string | null }).balance_paid_at,
     ).length,
+    // Fleet compliance: active vehicles with tax/MOT/insurance due ≤30d or overdue.
+    ...(await (async () => {
+      const { data: vs } = await supabase
+        .from("vehicles")
+        .select("tax_due, mot_due, insurance_renewal")
+        .eq("is_active", true);
+      return { fleetDocsDue: (vs ?? []).filter((v) => vehicleNeedsAttention(v)).length };
+    })()),
     ...(await (async () => {
       // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
       const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");

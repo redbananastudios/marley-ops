@@ -54,6 +54,8 @@ export interface DashboardData {
     awaitingDeposit: number;
     /** Deposit paid, balance not settled — due in full before move day. */
     balanceDue: number;
+    /** Active vehicles with tax/MOT/insurance due within 30 days or overdue. */
+    fleetDocsDue: number;
   };
   recent: {
     id: string;
@@ -232,6 +234,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
           <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
           <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
+          <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
         </div>
       </section>
 

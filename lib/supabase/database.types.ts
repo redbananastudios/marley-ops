@@ -34,6 +34,102 @@ export type Database = {
   }
   public: {
     Tables: {
+      vehicles: {
+        Row: {
+          id: string
+          name: string
+          vehicle_type: string
+          registration: string
+          tax_due: string | null
+          mot_due: string | null
+          insurance_renewal: string | null
+          last_service: string | null
+          cost_per_month: number | null
+          payment_day: number | null
+          end_of_term: string | null
+          notes: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          vehicle_type?: string
+          registration?: string
+          tax_due?: string | null
+          mot_due?: string | null
+          insurance_renewal?: string | null
+          last_service?: string | null
+          cost_per_month?: number | null
+          payment_day?: number | null
+          end_of_term?: string | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          vehicle_type?: string
+          registration?: string
+          tax_due?: string | null
+          mot_due?: string | null
+          insurance_renewal?: string | null
+          last_service?: string | null
+          cost_per_month?: number | null
+          payment_day?: number | null
+          end_of_term?: string | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      staff: {
+        Row: {
+          id: string
+          profile_id: string | null
+          full_name: string
+          staff_role: string
+          phone: string | null
+          email: string | null
+          day_rate: number | null
+          notes: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          profile_id?: string | null
+          full_name: string
+          staff_role?: string
+          phone?: string | null
+          email?: string | null
+          day_rate?: number | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          profile_id?: string | null
+          full_name?: string
+          staff_role?: string
+          phone?: string | null
+          email?: string | null
+          day_rate?: number | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       activities: {
         Row: {
           actor_id: string | null

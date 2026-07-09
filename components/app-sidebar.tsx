@@ -17,6 +17,7 @@ import {
   PanelLeftOpen,
   Settings,
   Truck,
+  UserCog,
   Users,
   type LucideIcon,
 } from "lucide-react";
@@ -42,6 +43,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
+      { href: "/resources", label: "Staff & Fleet", icon: UserCog, live: true },
     ],
   },
   {

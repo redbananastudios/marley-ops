@@ -1,0 +1,59 @@
+/**
+ * Vehicle compliance helpers — the improvement over iMVE, which stores tax/MOT/
+ * insurance dates but never surfaces urgency. A document is "due" inside the
+ * 30-day warning window and "overdue" past its date; the fleet page shows the
+ * chips and the dashboard needs-action counts vehicles with any non-ok doc.
+ */
+
+export const VEHICLE_TYPES = [
+  { value: "luton", label: "Luton van" },
+  { value: "transit", label: "Transit van" },
+  { value: "7.5t", label: "7.5t lorry" },
+  { value: "other", label: "Other" },
+] as const;
+
+export type VehicleType = (typeof VEHICLE_TYPES)[number]["value"];
+
+export const VEHICLE_DOCS = [
+  { key: "tax_due", label: "Tax" },
+  { key: "mot_due", label: "MOT" },
+  { key: "insurance_renewal", label: "Insurance" },
+] as const;
+
+export type VehicleDocKey = (typeof VEHICLE_DOCS)[number]["key"];
+
+export interface DocStatus {
+  state: "none" | "ok" | "due" | "overdue";
+  /** Whole days until the date (negative = overdue by that many). Null when unset. */
+  days: number | null;
+}
+
+const DAY = 86_400_000;
+export const DOC_WARN_DAYS = 30;
+
+/** Status of one compliance date, evaluated against a UK calendar day. */
+export function docStatus(date: string | null | undefined, today = new Date()): DocStatus {
+  if (!date) return { state: "none", days: null };
+  const d = new Date(`${date.slice(0, 10)}T00:00:00Z`);
+  if (isNaN(d.getTime())) return { state: "none", days: null };
+  const todayStr = today.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  const t = new Date(`${todayStr}T00:00:00Z`);
+  const days = Math.round((d.getTime() - t.getTime()) / DAY);
+  if (days < 0) return { state: "overdue", days };
+  if (days <= DOC_WARN_DAYS) return { state: "due", days };
+  return { state: "ok", days };
+}
+
+export interface VehicleDocDates {
+  tax_due: string | null;
+  mot_due: string | null;
+  insurance_renewal: string | null;
+}
+
+/** True when any compliance doc is due within the window or overdue. */
+export function vehicleNeedsAttention(v: VehicleDocDates, today = new Date()): boolean {
+  return VEHICLE_DOCS.some((d) => {
+    const s = docStatus(v[d.key], today);
+    return s.state === "due" || s.state === "overdue";
+  });
+}
