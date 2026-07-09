@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { findExistingClient } from "@/lib/leads/resolver";
+import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
 
 async function actor() {
@@ -131,4 +132,21 @@ export async function createClientAction(input: CreateClientInput) {
   } catch (e) {
     return { ok: false as const, error: e instanceof Error ? e.message : "Could not add client." };
   }
+}
+
+/**
+ * "Book a survey" from a client record: phone customers are clients first, but
+ * every booking hangs off a lead — this returns the client's open enquiry or
+ * opens one (with the phone source they told us), ready to preselect in the
+ * survey diary.
+ */
+export async function createLeadForClientAction(clientId: string, entryChannel: string) {
+  const ALLOWED = ["phone_google", "phone_facebook", "phone_referral", "manual", "referral"];
+  const channel = ALLOWED.includes(entryChannel) ? entryChannel : "manual";
+  const { sb, userId } = await actor();
+  const res = await ensureLeadForClient(sb, clientId, userId, channel);
+  if (!res.ok) return res;
+  revalidatePath("/leads");
+  revalidatePath(`/clients/${clientId}`);
+  return res;
 }

@@ -167,6 +167,33 @@ export function buildBalanceReceivedEmailHtml(m: {
   return shell(`Balance of ${gbp(m.amount)} received. You're all set for move day.`, inner);
 }
 
+/* ------------------------------------------------- review request */
+
+/** Post-move "how did we do?" — the Google review ask. Sent once per lead,
+ *  after the move completes, only when a review URL is configured. */
+export function buildReviewRequestEmailHtml(m: {
+  firstName?: string | null;
+  reviewUrl: string;
+}): string {
+  const name = (m.firstName ?? "").trim().split(/\s+/)[0];
+  const inner = [
+    pill("Move complete"),
+    headline(`How did we do${name ? ", " + escapeHtml(name) : ""}?`),
+    subline(
+      `That's your move done — thank you for choosing Marley Moves. If Connor and the crew looked after you, a quick Google review makes a real difference to a small local firm like ours. It takes about a minute.`,
+    ),
+    `  <tr><td align="center" style="padding:0 36px 22px;">
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
+      <a href="${m.reviewUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Leave a Google review &rarr;</a>
+    </td></tr></table>
+  </td></tr>`,
+    subline(
+      `And if anything wasn't right, please reply to this email or call Connor on <strong style="color:#C03838;">01747 637070</strong> first — we would always rather fix it.`,
+    ),
+  ].join("\n");
+  return shell(`Thanks for moving with Marley Moves — a quick review helps us a lot.`, inner);
+}
+
 /* ------------------------------------------------- balance invoice */
 
 export interface BalanceInvoiceMeta {

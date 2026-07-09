@@ -61,6 +61,8 @@ export interface LeadOption {
   source?: SourceKey | null;
   /** Estimator from this lead's booked survey — a removal inherits it (read-only). */
   surveyEstimatorId?: string | null;
+  /** A bare client (no enquiry yet) — picking them opens the enquiry server-side. */
+  isClient?: boolean;
 }
 
 /** Surveys are a fixed 1-hour visit. */
@@ -341,7 +343,10 @@ export function AppointmentDialog({
     }
     setBusy(true);
     try {
-      const lead = leadId === NO_LEAD ? null : leadId;
+      const selected = leadId === NO_LEAD ? null : leads.find((l) => l.id === leadId) ?? null;
+      // A bare client has no enquiry yet — the server opens one when booking.
+      const lead = selected && !selected.isClient ? selected.id : null;
+      const clientId = selected?.isClient ? selected.id : null;
       const startsAt = localToIso(start);
       const endsAt = localToIso(endLocal);
 
@@ -369,6 +374,7 @@ export function AppointmentDialog({
         const res = await createAppointment({
           apptType,
           leadId: lead,
+          clientId,
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
           startsAt,
           endsAt,

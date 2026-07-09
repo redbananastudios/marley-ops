@@ -213,6 +213,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           vatNumber: "",
           baseLocation: "",
           defaultDeposit: 0,
+          googleReviewUrl: "",
         },
       ),
     [job, labourDay, vanDay, transitDay, cost75t, fuel, fuel75, boxCost, misc, estFee],

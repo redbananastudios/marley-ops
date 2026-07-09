@@ -47,11 +47,15 @@ export function AcceptQuoteButton({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [price, setPrice] = useState(String(grandTotal ?? 0));
+  const [deposit, setDeposit] = useState(String(depositAmount));
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (open) setPrice(String(grandTotal ?? 0));
-  }, [open, grandTotal]);
+    if (open) {
+      setPrice(String(grandTotal ?? 0));
+      setDeposit(String(depositAmount));
+    }
+  }, [open, grandTotal, depositAmount]);
 
   // Only live quotes convert; accepted ones link to Bookings from elsewhere.
   if (status !== "draft" && status !== "sent") return null;
@@ -62,8 +66,17 @@ export function AcceptQuoteButton({
       toast.error("Enter the agreed price.");
       return;
     }
+    const dep = Number(deposit);
+    if (!Number.isFinite(dep) || dep <= 0) {
+      toast.error("Enter the deposit to request.");
+      return;
+    }
+    if (dep >= value) {
+      toast.error("The deposit must be less than the agreed price.");
+      return;
+    }
     setBusy(true);
-    const res = await acceptQuote(quoteId, value);
+    const res = await acceptQuote(quoteId, value, dep);
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not accept the quote.");
@@ -99,10 +112,10 @@ export function AcceptQuoteButton({
           <DialogHeader>
             <DialogTitle className="font-display text-xl">Accept quote</DialogTitle>
             <DialogDescription>
-              This starts the booking: the customer gets an email with their{" "}
-              {gbp(depositAmount)} deposit payment link, the deposit invoice is raised in Zoho, and
-              the lead sits in <strong>Provisional</strong> — it confirms automatically the moment
-              the deposit lands. Track it in{" "}
+              This starts the booking: the customer gets an email with their deposit payment
+              link, the deposit invoice is raised in Zoho, and the lead sits in{" "}
+              <strong>Provisional</strong> — it confirms automatically the moment the deposit
+              lands. Track it in{" "}
               <Link href="/bookings" className="underline underline-offset-2">
                 Bookings
               </Link>
@@ -130,6 +143,26 @@ export function AcceptQuoteButton({
             <p className="mt-1.5 text-xs text-mist-400">
               Defaults to the quoted total ({gbp(Number(grandTotal ?? 0))}). Edit if the final
               figure differs — the balance invoice later uses this number less the deposit.
+            </p>
+
+            <Label htmlFor="accept-deposit" className="mt-4 mb-2 block">
+              Deposit to request
+            </Label>
+            <div className="flex h-12 items-center rounded-md border border-input bg-card px-3 focus-within:border-mm-red focus-within:ring-2 focus-within:ring-mm-red/30">
+              <span className="mr-1 text-base text-mist-400">£</span>
+              <input
+                id="accept-deposit"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step="0.01"
+                value={deposit}
+                onChange={(e) => setDeposit(e.target.value)}
+                className="tabular h-full w-full bg-transparent text-base text-foreground focus:outline-none"
+              />
+            </div>
+            <p className="mt-1.5 text-xs text-mist-400">
+              Standard is {gbp(depositAmount)} — raise it for bigger jobs if you want more down.
             </p>
           </div>
 

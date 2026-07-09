@@ -23,8 +23,20 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
-import { createClientAction, checkClientDuplicateAction } from "@/app/(dashboard)/clients/actions";
+import { MANUAL_ENTRY_CHANNELS } from "@/lib/leads/schema";
+import {
+  createClientAction,
+  checkClientDuplicateAction,
+  createLeadForClientAction,
+} from "@/app/(dashboard)/clients/actions";
 
 interface Values {
   isCompany: boolean;
@@ -61,6 +73,10 @@ export function AddClientDialog() {
   const [secondaryEmails, setSecondaryEmails] = useState<string[]>([]);
   const [emailDraft, setEmailDraft] = useState("");
   const [dupe, setDupe] = useState<{ clientName: string | null; previousLeadCount: number } | null>(null);
+  // Post-save step: offer the survey booking straight away (phone callers'
+  // usual next move) instead of dumping the user on the client page.
+  const [saved, setSaved] = useState<{ clientId: string; matched: boolean } | null>(null);
+  const [channel, setChannel] = useState("phone_google");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (k: keyof Values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -72,6 +88,8 @@ export function AddClientDialog() {
     setSecondaryEmails([]);
     setEmailDraft("");
     setDupe(null);
+    setSaved(null);
+    setChannel("phone_google");
   }
 
   function commitSecondaryEmail() {
@@ -137,12 +155,37 @@ export function AddClientDialog() {
         return;
       }
       toast.success(res.matched ? "Matched an existing client." : "Client added.");
-      setOpen(false);
-      reset();
-      router.push(`/clients/${res.clientId}`);
+      // Stay in the dialog: step 2 offers the survey booking immediately.
+      setSaved({ clientId: res.clientId, matched: res.matched });
+      router.refresh();
     } finally {
       setBusy(false);
     }
+  }
+
+  async function bookSurvey() {
+    if (!saved) return;
+    setBusy(true);
+    try {
+      const res = await createLeadForClientAction(saved.clientId, channel);
+      if (!res.ok) {
+        toast.error(res.error || "Could not open an enquiry.");
+        return;
+      }
+      setOpen(false);
+      reset();
+      router.push(`/schedule/surveys?leadId=${res.leadId}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function goToClient() {
+    if (!saved) return;
+    const id = saved.clientId;
+    setOpen(false);
+    reset();
+    router.push(`/clients/${id}`);
   }
 
   return (
@@ -160,6 +203,44 @@ export function AddClientDialog() {
         </Button>
       </DialogTrigger>
       <DialogContent className="max-h-[88vh] gap-0 overflow-y-auto sm:max-w-lg">
+        {saved ? (
+          <>
+            <DialogHeader>
+              <DialogTitle className="font-display">
+                {saved.matched ? "Matched an existing client" : "Client added"}
+              </DialogTitle>
+              <DialogDescription>
+                Book their survey now? Pick where the call came from and we&apos;ll open the
+                enquiry and take you straight to the diary.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-2 py-4">
+              <Label htmlFor="ac-channel">How did they get in touch?</Label>
+              <Select value={channel} onValueChange={setChannel}>
+                <SelectTrigger id="ac-channel">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MANUAL_ENTRY_CHANNELS.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={goToClient} disabled={busy} className="h-11">
+                Not now — open client
+              </Button>
+              <Button onClick={bookSurvey} disabled={busy} className="h-11">
+                {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
+                Book survey
+              </Button>
+            </DialogFooter>
+          </>
+        ) : (
+          <>
         <DialogHeader>
           <DialogTitle className="font-display">Add new client</DialogTitle>
           <DialogDescription>A person or household. We check for an existing match on phone or email.</DialogDescription>
@@ -304,6 +385,8 @@ export function AddClientDialog() {
             Save details
           </Button>
         </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );

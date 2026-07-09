@@ -52,7 +52,16 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
           className="h-14 w-full rounded-md border border-mist-200 bg-white px-4 text-base text-ink outline-none transition focus:border-mm-red focus:ring-2 focus:ring-mm-red/20"
         />
         <p className="mt-2 text-xs text-mist-400">
-          Typing your name acts as your signature accepting this quote and its terms.
+          Typing your name acts as your signature accepting this quote and our{" "}
+          <a
+            href="https://marleymoves.co.uk/terms-conditions/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="font-semibold text-mist-500 underline underline-offset-2"
+          >
+            terms &amp; conditions
+          </a>
+          .
         </p>
       </div>
 

@@ -188,6 +188,7 @@ export type Database = {
           cost_van_day: number
           default_deposit: number
           estimator_fee: number
+          google_review_url: string
           id: boolean
           pricing: Json | null
           updated_at: string
@@ -205,6 +206,7 @@ export type Database = {
           cost_van_day?: number
           default_deposit?: number
           estimator_fee?: number
+          google_review_url?: string
           id?: boolean
           pricing?: Json | null
           updated_at?: string
@@ -222,6 +224,7 @@ export type Database = {
           cost_van_day?: number
           default_deposit?: number
           estimator_fee?: number
+          google_review_url?: string
           id?: boolean
           pricing?: Json | null
           updated_at?: string
@@ -617,6 +620,7 @@ export type Database = {
           lost_at: string | null
           lost_note: string | null
           lost_reason: string | null
+          review_requested_at: string | null
           quote_chase_at: string | null
           quote_chase_step: number
           email: string | null
@@ -677,6 +681,7 @@ export type Database = {
           lost_at?: string | null
           lost_note?: string | null
           lost_reason?: string | null
+          review_requested_at?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
           email?: string | null
@@ -737,6 +742,7 @@ export type Database = {
           lost_at?: string | null
           lost_note?: string | null
           lost_reason?: string | null
+          review_requested_at?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
           email?: string | null
@@ -847,6 +853,9 @@ export type Database = {
           deposit_amount: number | null
           deposit_paid_at: string | null
           deposit_paid_method: string | null
+          deposit_selfreport_at: string | null
+          declined_at: string | null
+          declined_reason: string | null
           dest_addr: string | null
           discount: number
           email_error: string | null
@@ -899,6 +908,9 @@ export type Database = {
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_paid_method?: string | null
+          deposit_selfreport_at?: string | null
+          declined_at?: string | null
+          declined_reason?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null
@@ -951,6 +963,9 @@ export type Database = {
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_paid_method?: string | null
+          deposit_selfreport_at?: string | null
+          declined_at?: string | null
+          declined_reason?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null

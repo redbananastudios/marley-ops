@@ -66,11 +66,11 @@ export default async function DashboardPage() {
       supabase
         .from("leads")
         .select(
-          "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+          "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
         )
         .order("submitted_at", { ascending: false }),
       supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
-      supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob"),
+      supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at"),
       supabase.from("profiles").select("id, full_name"),
       getBusinessSettings(supabase),
     ]);
@@ -170,6 +170,12 @@ export default async function DashboardPage() {
         new Date(a.starts_at).getTime() < startToday + DAY,
     ).length,
     quotesAwaiting: quotes.filter((q) => q.status === "sent").length,
+    // Money pipeline (mirrors /bookings): provisional = accepted awaiting the
+    // deposit; confirmed with balance unpaid = balance due before move day.
+    awaitingDeposit: statusCounts.get("provisional") ?? 0,
+    balanceDue: leads.filter(
+      (l) => l.status === "confirmed" && !(l as { balance_paid_at?: string | null }).balance_paid_at,
+    ).length,
     ...(await (async () => {
       // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
       const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");

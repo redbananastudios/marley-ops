@@ -77,6 +77,11 @@ const settingsSchema = z.object({
   vatNumber: z.string().trim().max(20),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
   defaultDeposit: num,
+  googleReviewUrl: z
+    .string()
+    .trim()
+    .max(500)
+    .refine((s) => !s || /^https:\/\//.test(s), "Must be an https:// link (or empty to disable)"),
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
@@ -113,6 +118,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       vat_number: (v.vatNumber || null) as never,
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
+      google_review_url: v.googleReviewUrl,
     })
     .eq("id", true);
   if (error) return { ok: false as const, error: error.message };

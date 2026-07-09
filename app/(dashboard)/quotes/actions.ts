@@ -197,11 +197,11 @@ const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "co
  * lands in Bookings → Awaiting deposit and confirms itself when the money
  * arrives. The full pipeline lives in lib/quote/accept-flow.ts.
  */
-export async function acceptQuote(id: string, agreedPrice?: number) {
+export async function acceptQuote(id: string, agreedPrice?: number, depositAmount?: number) {
   const { sb, userId } = await ctx();
   if (!userId) return { ok: false as const, error: "Not signed in" };
 
-  const res = await acceptQuoteByStaff(sb, id, userId, agreedPrice);
+  const res = await acceptQuoteByStaff(sb, id, userId, agreedPrice, depositAmount);
   if (!res.ok) return { ok: false as const, error: res.error };
 
   const { data: q } = await sb.from("quotes").select("lead_id").eq("id", id).single();

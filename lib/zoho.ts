@@ -280,6 +280,21 @@ export async function getInvoicePdfBase64(invoiceId: string): Promise<string> {
   return Buffer.from(await res.arrayBuffer()).toString("base64");
 }
 
+/**
+ * Void an UNPAID invoice — the app-flow reversal used when a quote is superseded
+ * (re-quote after acceptance) or a lead cancels before paying. Void only, never
+ * delete: the voided document stays on Connor's books for the audit trail. Paid
+ * invoices are never voided from code — refunds/credit notes are a human call.
+ */
+export async function voidInvoice(invoiceId: string): Promise<void> {
+  const status = await getInvoiceStatus(invoiceId);
+  if (status.status === "void") return; // already done
+  if (status.status === "paid" || status.balance < status.total) {
+    throw new ZohoError(`Refusing to void ${status.invoiceNumber}: payment already applied`);
+  }
+  await zoho("POST", `/invoices/${invoiceId}/status/void`);
+}
+
 /* ------------------------------------------------------------- cleanup (test hygiene) */
 
 /** Void + delete an invoice — used only by test-data cleanup, never in the app flow. */

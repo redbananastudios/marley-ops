@@ -56,6 +56,7 @@ interface Row {
   agreed: number;
   deposit: number;
   depositPaidAt: string | null;
+  depositSelfreportAt: string | null;
   acceptedAt: string | null;
   acceptToken: string | null;
   movingDate: string | null;
@@ -113,7 +114,7 @@ export default async function BookingsPage() {
   const { data: quotes } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+      "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
     )
     .eq("status", "accepted")
     .not("lead_id", "is", null);
@@ -162,6 +163,7 @@ export default async function BookingsPage() {
       agreed,
       deposit,
       depositPaidAt: q.deposit_paid_at,
+      depositSelfreportAt: q.deposit_selfreport_at,
       acceptedAt: q.accepted_at,
       acceptToken: q.accept_token,
       movingDate: (q.moving_date || lead.preferred_date) as string | null,
@@ -238,6 +240,11 @@ export default async function BookingsPage() {
                 ) : null}
               </p>
             </div>
+            {r.depositSelfreportAt ? (
+              <span className="inline-flex items-center gap-1 rounded-pill bg-warn-bg px-2.5 py-1 text-xs font-semibold text-warn">
+                <AlertTriangle className="size-3.5" strokeWidth={2} /> Customer says sent — check the bank
+              </span>
+            ) : null}
             <span className="tabular text-sm font-semibold text-foreground">{gbp(r.deposit)}</span>
             {r.acceptToken ? <CopyLinkButton url={acceptUrlFor(r.acceptToken)} /> : null}
             <MarkPaidButton quoteId={r.quoteId} kind="deposit" amount={r.deposit} customerName={r.customer} />
@@ -285,9 +292,18 @@ export default async function BookingsPage() {
                 </Link>
                 <p className="text-xs text-mist-400">
                   {r.quoteRef} · {gbp(r.agreed)} · moving {dateLabel(r.apptStartsAt)}{" "}
-                  {days >= 0 ? `(${days === 0 ? "today" : `in ${days}d`})` : "(past — mark completed on the lead)"}
+                  {days >= 0
+                    ? `(${days === 0 ? "today" : `in ${days}d`})`
+                    : r.balancePaidAt
+                      ? "(done — completes automatically)"
+                      : "(moved — balance outstanding)"}
                 </p>
               </div>
+              {days < 0 && !r.balancePaidAt ? (
+                <span className="inline-flex items-center gap-1 rounded-pill bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
+                  <AlertTriangle className="size-3.5" strokeWidth={2} /> OVERDUE
+                </span>
+              ) : null}
               {r.balancePaidAt ? (
                 <span className="inline-flex items-center gap-1 rounded-pill bg-success-bg px-2.5 py-1 text-xs font-semibold text-success">
                   <CheckCircle2 className="size-3.5" strokeWidth={2} /> Paid in full

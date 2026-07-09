@@ -48,6 +48,7 @@ import {
   getInvoicePdfBase64,
   getInvoiceStatus,
   recordInvoicePayment,
+  voidInvoice,
 } from "@/lib/zoho";
 
 type Sb = SupabaseClient<Database>;
@@ -55,7 +56,7 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at";
+  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -81,6 +82,8 @@ export type AcceptQuoteRow = {
   deposit_amount: number | null;
   deposit_paid_at: string | null;
   deposit_paid_method: string | null;
+  deposit_selfreport_at: string | null;
+  declined_at: string | null;
   zoho_contact_id: string | null;
   zoho_deposit_invoice_id: string | null;
   zoho_deposit_invoice_number: string | null;
@@ -137,6 +140,153 @@ export function acceptUrlFor(token: string): string {
   return `${base.replace(/\/$/, "")}/q/${token}`;
 }
 
+/* ------------------------------------------------------------- supersede */
+
+interface SupersedeResult {
+  /** The old accepted quote's deposit was already PAID — its payment record was
+   *  carried onto the new quote, so no new deposit is requested or invoiced. */
+  carriedDeposit: boolean;
+}
+
+/**
+ * Accepting a quote retires its siblings — this is the price-revision path
+ * (survey found more, re-quote, accept the new number) made safe:
+ *
+ *  - Other SENT quotes on the lead → superseded (their accept links die).
+ *  - A previously ACCEPTED quote → superseded, and its money moves with it:
+ *      deposit PAID   → the payment (and its Zoho invoice link) is carried onto
+ *                       the new quote — never a second deposit invoice.
+ *      deposit UNPAID → its Zoho deposit invoice is VOIDED (stays on the books
+ *                       as void); the new quote raises its own.
+ *      balance UNPAID invoice → voided; the new quote re-raises at the new price.
+ *      balance PAID → hands off to a human (ops alert) — money already settled
+ *                     against the old number is never touched from code.
+ */
+async function supersedeSiblingQuotes(
+  sb: Sb,
+  quote: AcceptQuoteRow,
+  actorId: string | null,
+): Promise<SupersedeResult> {
+  const result: SupersedeResult = { carriedDeposit: false };
+  if (!quote.lead_id) return result;
+
+  const { data: siblings } = await sb
+    .from("quotes")
+    .select(QUOTE_COLS)
+    .eq("lead_id", quote.lead_id)
+    .neq("id", quote.id)
+    .in("status", ["sent", "accepted"]);
+  if (!siblings?.length) return result;
+
+  const { data: lead } = await sb
+    .from("leads")
+    .select("balance_paid_at, client_id")
+    .eq("id", quote.lead_id)
+    .maybeSingle();
+
+  for (const raw of siblings as AcceptQuoteRow[]) {
+    const old = raw;
+    await sb.from("quotes").update({ status: "superseded" } as never).eq("id", old.id);
+
+    if (old.status !== "accepted") {
+      await sb.from("activities").insert({
+        lead_id: quote.lead_id,
+        client_id: lead?.client_id ?? quote.client_id,
+        actor_id: actorId,
+        type: "note",
+        summary: `Quote ${old.quote_ref} superseded by ${quote.quote_ref}`,
+        meta: { superseded_quote_id: old.id, by_quote_id: quote.id },
+      });
+      continue;
+    }
+
+    // --- previously accepted: move the money to the new quote ---
+    if (old.deposit_paid_at) {
+      // Deposit already paid: carry the payment + invoice link across so the
+      // balance math (agreed − deposit) and Zoho stay consistent. VAT rule:
+      // never a second deposit invoice.
+      await sb
+        .from("quotes")
+        .update({
+          deposit_amount: old.deposit_amount,
+          deposit_paid_at: old.deposit_paid_at,
+          deposit_paid_method: old.deposit_paid_method,
+          zoho_contact_id: old.zoho_contact_id,
+          zoho_deposit_invoice_id: old.zoho_deposit_invoice_id,
+          zoho_deposit_invoice_number: old.zoho_deposit_invoice_number,
+          zoho_deposit_invoice_url: old.zoho_deposit_invoice_url,
+        } as never)
+        .eq("id", quote.id);
+      result.carriedDeposit = true;
+    } else if (isRealZohoId(old.zoho_deposit_invoice_id)) {
+      // Unpaid deposit invoice on the old number: void it (audit stays in Zoho).
+      try {
+        await voidInvoice(old.zoho_deposit_invoice_id);
+        await sb.from("activities").insert({
+          lead_id: quote.lead_id,
+          client_id: lead?.client_id ?? quote.client_id,
+          actor_id: actorId,
+          type: "note",
+          summary: `Deposit invoice ${old.zoho_deposit_invoice_number ?? ""} voided — quote ${old.quote_ref} superseded`.trim(),
+          meta: { superseded_quote_id: old.id, invoice_id: old.zoho_deposit_invoice_id },
+        });
+      } catch (err) {
+        await sendOpsAlert(`Void deposit invoice FAILED — ${old.quote_ref}`, [
+          `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its unpaid deposit invoice ${old.zoho_deposit_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}.`,
+          `Void it manually in Zoho — the new quote raises its own deposit invoice.`,
+        ]);
+      }
+    }
+
+    // Old balance invoice: re-raised at the new price, so retire the old one.
+    if (isRealZohoId(old.zoho_balance_invoice_id)) {
+      if (lead?.balance_paid_at) {
+        await sendOpsAlert(`Superseded quote has a PAID balance — ${old.quote_ref}`, [
+          `${old.quote_ref} was superseded by ${quote.quote_ref}, but its balance invoice ${old.zoho_balance_invoice_number ?? ""} is already paid.`,
+          `Nothing was changed in Zoho — settle the price difference manually (credit note or extra invoice).`,
+        ]);
+      } else {
+        try {
+          await voidInvoice(old.zoho_balance_invoice_id);
+          await sb
+            .from("leads")
+            .update({ balance_amount: null, balance_due_date: null } as never)
+            .eq("id", quote.lead_id);
+          await sb
+            .from("follow_ups")
+            .update({ status: "cancelled", outcome: "cancelled" })
+            .eq("lead_id", quote.lead_id)
+            .eq("reason", "balance")
+            .eq("status", "open");
+          await sb.from("activities").insert({
+            lead_id: quote.lead_id,
+            client_id: lead?.client_id ?? quote.client_id,
+            actor_id: actorId,
+            type: "note",
+            summary: `Balance invoice ${old.zoho_balance_invoice_number ?? ""} voided — re-raise it from ${quote.quote_ref} at the new price`.trim(),
+            meta: { superseded_quote_id: old.id, invoice_id: old.zoho_balance_invoice_id },
+          });
+        } catch (err) {
+          await sendOpsAlert(`Void balance invoice FAILED — ${old.quote_ref}`, [
+            `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its balance invoice failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
+          ]);
+        }
+      }
+    }
+
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: lead?.client_id ?? quote.client_id,
+      actor_id: actorId,
+      type: "status_change",
+      summary: `Price revised: quote ${old.quote_ref} (£${(old.agreed_price ?? 0).toFixed(0)}) superseded by ${quote.quote_ref}${result.carriedDeposit ? " — paid deposit carried over" : ""}`,
+      meta: { superseded_quote_id: old.id, by_quote_id: quote.id, carried_deposit: result.carriedDeposit },
+    });
+  }
+
+  return result;
+}
+
 /* ------------------------------------------------------------- accept */
 
 export type AcceptOutcome =
@@ -186,46 +336,54 @@ export async function acceptQuoteOnline(
     .eq("status", "sent"); // double-submit race: only one accept wins
   if (error) return { ok: false, error: "Something went wrong — please call 01747 637070." };
 
+  // Retire sibling quotes (re-quote path): carries a paid deposit across,
+  // voids an unpaid one — never two live deposit invoices on one lead.
+  const { carriedDeposit } = await supersedeSiblingQuotes(sb, { ...quote, status: "accepted" }, null);
+
   if (quote.lead_id) {
     const { data: lead } = await sb
       .from("leads")
       .select("status, first_contacted_at, client_id")
       .eq("id", quote.lead_id)
       .single();
-    const patch: Record<string, unknown> = {
-      deposit_amount: deposit,
-      deposit_requested_at: new Date().toISOString(),
-      // Fresh chase context: acceptance ends the quote chase and arms the
-      // deposit cadence, even if a reply had paused chasing earlier.
-      chase_paused: false,
-      deposit_chase_step: 0,
-    };
+    const patch: Record<string, unknown> = carriedDeposit
+      ? {} // deposit already paid on the superseded quote — no new request, no chase
+      : {
+          deposit_amount: deposit,
+          deposit_requested_at: new Date().toISOString(),
+          // Fresh chase context: acceptance ends the quote chase and arms the
+          // deposit cadence, even if a reply had paused chasing earlier.
+          chase_paused: false,
+          deposit_chase_step: 0,
+        };
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
-    await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+    if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
 
     // One open deposit CALL task max — due day 5 (the chase engine emails
     // automatically on days 1 and 3, so the human only steps in after those).
-    const { data: open } = await sb
-      .from("follow_ups")
-      .select("id")
-      .eq("lead_id", quote.lead_id)
-      .eq("reason", "deposit")
-      .eq("status", "open")
-      .limit(1)
-      .maybeSingle();
-    if (!open) {
-      await sb.from("follow_ups").insert({
-        lead_id: quote.lead_id,
-        client_id: lead?.client_id ?? quote.client_id,
-        quote_id: quote.id,
-        reason: "deposit",
-        due_at: ukTimeAt(9, 0, 5).toISOString(),
-        assigned_to: quote.estimator_id,
-        source: "online_accept",
-        notes: "Deposit still unpaid after two automatic reminders — give them a call.",
-        metadata: { amount: deposit },
-      } as never);
+    if (!carriedDeposit) {
+      const { data: open } = await sb
+        .from("follow_ups")
+        .select("id")
+        .eq("lead_id", quote.lead_id)
+        .eq("reason", "deposit")
+        .eq("status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (!open) {
+        await sb.from("follow_ups").insert({
+          lead_id: quote.lead_id,
+          client_id: lead?.client_id ?? quote.client_id,
+          quote_id: quote.id,
+          reason: "deposit",
+          due_at: ukTimeAt(9, 0, 5).toISOString(),
+          assigned_to: quote.estimator_id,
+          source: "online_accept",
+          notes: "Deposit still unpaid after two automatic reminders — give them a call.",
+          metadata: { amount: deposit },
+        } as never);
+      }
     }
 
     await sb.from("activities").insert({
@@ -233,17 +391,21 @@ export async function acceptQuoteOnline(
       client_id: lead?.client_id ?? quote.client_id,
       actor_id: null,
       type: "status_change",
-      summary: `Quote ${quote.quote_ref} accepted ONLINE by "${name}" — agreed £${agreed.toFixed(0)}, £${deposit.toFixed(0)} deposit requested`,
+      summary: `Quote ${quote.quote_ref} accepted ONLINE by "${name}" — agreed £${agreed.toFixed(0)}, ${carriedDeposit ? "deposit already paid (carried over)" : `£${deposit.toFixed(0)} deposit requested`}`,
       meta: { quote_id: quote.id, agreed_price: agreed, accepted_name: name, via: "accept_page" },
     });
   }
 
-  await ensureDepositInvoice(sb, quote.id);
+  if (!carriedDeposit) await ensureDepositInvoice(sb, quote.id);
 
   await sendOpsAlert(`Quote ${quote.quote_ref} accepted online`, [
     `<strong>${quote.customer_name ?? "Customer"}</strong> accepted quote <strong>${quote.quote_ref}</strong> (signed "${name}").`,
-    `Agreed £${agreed.toFixed(2)} — £${deposit.toFixed(2)} deposit now requested.`,
-    `Lead moved to Provisional. It confirms automatically when the deposit lands.`,
+    carriedDeposit
+      ? `Agreed £${agreed.toFixed(2)} — their paid deposit was carried over from the superseded quote.`
+      : `Agreed £${agreed.toFixed(2)} — £${deposit.toFixed(2)} deposit now requested.`,
+    carriedDeposit
+      ? `Lead stays Confirmed.`
+      : `Lead moved to Provisional. It confirms automatically when the deposit lands.`,
   ]);
 
   return { ok: true, alreadyAccepted: false };
@@ -269,11 +431,15 @@ export async function acceptQuoteByStaff(
   quoteId: string,
   actorId: string | null,
   agreedPrice?: number,
+  depositOverride?: number,
 ): Promise<StaffAcceptOutcome> {
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote) return { ok: false, error: "Quote not found" };
   const settings = await getBusinessSettings(sb);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  const deposit =
+    typeof depositOverride === "number" && Number.isFinite(depositOverride) && depositOverride > 0
+      ? round2(depositOverride)
+      : (quote.deposit_amount ?? settings.defaultDeposit);
 
   if (quote.status === "accepted") {
     await ensureDepositInvoice(sb, quote.id); // self-heal, then no-op
@@ -314,44 +480,52 @@ export async function acceptQuoteByStaff(
     return { ok: true, alreadyAccepted: true, agreed, deposit, emailed: false };
   }
 
+  // Retire sibling quotes (re-quote path): carries a paid deposit across,
+  // voids an unpaid one — never two live deposit invoices on one lead.
+  const { carriedDeposit } = await supersedeSiblingQuotes(sb, { ...quote, status: "accepted" }, actorId);
+
   if (quote.lead_id) {
     const { data: lead } = await sb
       .from("leads")
       .select("status, first_contacted_at, client_id")
       .eq("id", quote.lead_id)
       .single();
-    const patch: Record<string, unknown> = {
-      deposit_amount: deposit,
-      deposit_requested_at: new Date().toISOString(),
-      chase_paused: false,
-      deposit_chase_step: 0,
-    };
+    const patch: Record<string, unknown> = carriedDeposit
+      ? {} // deposit already paid on the superseded quote — no new request, no chase
+      : {
+          deposit_amount: deposit,
+          deposit_requested_at: new Date().toISOString(),
+          chase_paused: false,
+          deposit_chase_step: 0,
+        };
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
-    await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+    if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
 
     // One open deposit CALL task max — day 5, after the day-1/3 auto reminders.
-    const { data: open } = await sb
-      .from("follow_ups")
-      .select("id")
-      .eq("lead_id", quote.lead_id)
-      .eq("reason", "deposit")
-      .eq("status", "open")
-      .limit(1)
-      .maybeSingle();
-    if (!open) {
-      await sb.from("follow_ups").insert({
-        lead_id: quote.lead_id,
-        client_id: lead?.client_id ?? quote.client_id,
-        quote_id: quote.id,
-        reason: "deposit",
-        due_at: ukTimeAt(9, 0, 5).toISOString(),
-        assigned_to: quote.estimator_id ?? actorId,
-        created_by: actorId,
-        source: "staff_accept",
-        notes: "Deposit still unpaid after two automatic reminders — give them a call.",
-        metadata: { amount: deposit },
-      } as never);
+    if (!carriedDeposit) {
+      const { data: open } = await sb
+        .from("follow_ups")
+        .select("id")
+        .eq("lead_id", quote.lead_id)
+        .eq("reason", "deposit")
+        .eq("status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (!open) {
+        await sb.from("follow_ups").insert({
+          lead_id: quote.lead_id,
+          client_id: lead?.client_id ?? quote.client_id,
+          quote_id: quote.id,
+          reason: "deposit",
+          due_at: ukTimeAt(9, 0, 5).toISOString(),
+          assigned_to: quote.estimator_id ?? actorId,
+          created_by: actorId,
+          source: "staff_accept",
+          notes: "Deposit still unpaid after two automatic reminders — give them a call.",
+          metadata: { amount: deposit },
+        } as never);
+      }
     }
 
     await sb.from("activities").insert({
@@ -359,9 +533,15 @@ export async function acceptQuoteByStaff(
       client_id: lead?.client_id ?? quote.client_id,
       actor_id: actorId,
       type: "status_change",
-      summary: `Quote ${quote.quote_ref} accepted — agreed £${agreed.toFixed(0)}, £${deposit.toFixed(0)} deposit requested`,
+      summary: `Quote ${quote.quote_ref} accepted — agreed £${agreed.toFixed(0)}, ${carriedDeposit ? "deposit already paid (carried over)" : `£${deposit.toFixed(0)} deposit requested`}`,
       meta: { quote_id: quote.id, agreed_price: agreed, via: "staff_accept" },
     });
+  }
+
+  if (carriedDeposit) {
+    // Fully paid deposit came across with the supersede — nothing to invoice or
+    // chase; the caller reports "price revised" rather than "deposit requested".
+    return { ok: true, alreadyAccepted: false, agreed, deposit, emailed: false };
   }
 
   await ensureDepositInvoice(sb, quote.id);
@@ -402,6 +582,156 @@ export async function acceptQuoteByStaff(
   }
 
   return { ok: true, alreadyAccepted: false, agreed, deposit, emailed };
+}
+
+/* ------------------------------------------------------------- decline (customer) */
+
+const DECLINE_REASONS = new Set([
+  "too_expensive",
+  "chose_competitor",
+  "move_fell_through",
+  "dates_didnt_work",
+  "other",
+]);
+
+/**
+ * Customer declines from the /q page — the quote is rejected, the lead is lost
+ * with THEIR stated reason (feeds the Performance "why we lose" breakdown
+ * without waiting for staff), and all chasing stops immediately.
+ */
+export async function declineQuoteOnline(
+  sb: Sb,
+  token: string,
+  reason: string,
+  note?: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const quote = await fetchQuoteByToken(sb, token);
+  if (!quote) return { ok: false, error: "This quote link is no longer valid." };
+  if (quote.status === "rejected") return { ok: true };
+  if (quote.status !== "sent") {
+    return { ok: false, error: "This quote can't be declined online any more — call us on 01747 637070." };
+  }
+  const lostReason = DECLINE_REASONS.has(reason) ? reason : "other";
+
+  const { data: won } = await sb
+    .from("quotes")
+    .update({
+      status: "rejected",
+      declined_at: new Date().toISOString(),
+      declined_reason: lostReason,
+    } as never)
+    .eq("id", quote.id)
+    .eq("status", "sent")
+    .select("id");
+  if (!won?.length) return { ok: true }; // raced an accept/decline — the other action stands
+
+  if (quote.lead_id) {
+    await sb
+      .from("leads")
+      .update({
+        status: "declined",
+        lost_reason: lostReason,
+        lost_note: note?.trim() || null,
+        lost_at: new Date().toISOString(),
+        chase_paused: true,
+      } as never)
+      .eq("id", quote.lead_id);
+    await sb
+      .from("follow_ups")
+      .update({ status: "cancelled", outcome: "declined" })
+      .eq("lead_id", quote.lead_id)
+      .eq("status", "open");
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: null,
+      type: "status_change",
+      summary: `Quote ${quote.quote_ref} declined ONLINE — ${lostReason.replace(/_/g, " ")}${note?.trim() ? ` ("${note.trim()}")` : ""}`,
+      meta: { quote_id: quote.id, via: "accept_page", lost_reason: lostReason },
+    });
+  }
+
+  await sendOpsAlert(`Quote ${quote.quote_ref} declined online`, [
+    `<strong>${quote.customer_name ?? "Customer"}</strong> declined quote <strong>${quote.quote_ref}</strong>.`,
+    `Reason: ${lostReason.replace(/_/g, " ")}${note?.trim() ? ` — "${note.trim()}"` : ""}.`,
+    `Chasing stopped; the lead is marked lost with their reason.`,
+  ]);
+
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------- deposit self-report */
+
+/**
+ * Customer taps "I've sent the bank transfer" on the payment page. Staff still
+ * confirm against the bank — this just pauses the reminder emails and puts a
+ * "check the bank" task at the top of the queue so the confirmation isn't
+ * waiting on someone happening to notice the credit.
+ */
+export async function reportDepositSent(
+  sb: Sb,
+  token: string,
+): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+  const quote = await fetchQuoteByToken(sb, token);
+  if (!quote) return { ok: false, error: "This quote link is no longer valid." };
+  if (quote.status !== "accepted" || quote.deposit_paid_at) return { ok: true, already: true };
+
+  const { data: won } = await sb
+    .from("quotes")
+    .update({ deposit_selfreport_at: new Date().toISOString() } as never)
+    .eq("id", quote.id)
+    .is("deposit_selfreport_at", null)
+    .select("id");
+  if (!won?.length) return { ok: true, already: true };
+
+  const settings = await getBusinessSettings(sb);
+  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+
+  if (quote.lead_id) {
+    // Stop the reminder emails while the transfer is checked.
+    await sb.from("leads").update({ chase_paused: true } as never).eq("id", quote.lead_id);
+
+    const notes = `Customer says the £${deposit.toFixed(2)} deposit was sent by bank transfer (ref ${quote.quote_ref}) — check the bank and tap "Deposit received" in Bookings.`;
+    const { data: open } = await sb
+      .from("follow_ups")
+      .select("id")
+      .eq("lead_id", quote.lead_id)
+      .eq("reason", "deposit")
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+    if (open) {
+      await sb.from("follow_ups").update({ due_at: new Date().toISOString(), notes }).eq("id", open.id);
+    } else {
+      await sb.from("follow_ups").insert({
+        lead_id: quote.lead_id,
+        client_id: quote.client_id,
+        quote_id: quote.id,
+        reason: "deposit",
+        due_at: new Date().toISOString(),
+        assigned_to: quote.estimator_id,
+        source: "customer_selfreport",
+        notes,
+        metadata: { amount: deposit },
+      } as never);
+    }
+
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: null,
+      type: "note",
+      summary: `Customer reports the deposit transfer is sent (${quote.quote_ref}) — check the bank`,
+      meta: { quote_id: quote.id, via: "accept_page" },
+    });
+  }
+
+  await sendOpsAlert(`Customer says deposit sent — ${quote.quote_ref}`, [
+    `<strong>${quote.customer_name ?? "Customer"}</strong> reports the £${deposit.toFixed(2)} deposit for <strong>${quote.quote_ref}</strong> was sent by bank transfer.`,
+    `Check the bank, then confirm it in Bookings — reminders are paused meanwhile.`,
+  ]);
+
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------- deposit invoice */
@@ -583,6 +913,8 @@ export async function markDepositPaid(
         moveDateLabel: moveDateLabel(quote.moving_date),
         balanceAmount: balanceDue(agreed, deposit),
       }),
+      // Replies route back into the panel (pause chase, log, follow-up).
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
@@ -739,6 +1071,7 @@ export async function createBalanceInvoiceFlow(
         }),
         attachmentBase64: pdfBase64,
         attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
+        replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
         leadId: quote.lead_id ?? undefined,
         quoteId: quote.id,
         clientId: quote.client_id ?? undefined,
@@ -843,6 +1176,7 @@ export async function markBalancePaid(
         amount,
         moveDateLabel: moveDateLabel(quote.moving_date),
       }),
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,

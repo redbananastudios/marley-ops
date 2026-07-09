@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { ensureLeadForClient } from "@/lib/leads/for-client";
+import { balanceDueDate } from "@/lib/quote/payments";
+import { ukInstant } from "@/lib/uk-time";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import {
   surveyConfirmEmailHtml,
@@ -27,6 +30,8 @@ function revalidateSchedule() {
 export interface CreateAppointmentInput {
   apptType: "survey" | "removal";
   leadId?: string | null;
+  /** A bare client picked in the diary (no enquiry yet) — we open one first. */
+  clientId?: string | null;
   estimatorId?: string | null;
   startsAt: string; // ISO
   endsAt: string; // ISO
@@ -43,6 +48,14 @@ export async function createAppointment(input: CreateAppointmentInput) {
   // Who actually does this visit — chosen in the dialog, defaults to the creator.
   // This is what attributes visits to Connor vs Luke for pay + win stats.
   const estimatorId = input.estimatorId ?? userId;
+
+  // Booked against a bare client: open (or reuse) their enquiry first — every
+  // booking hangs off a lead so the funnel/chase/quote layers all work.
+  if (!input.leadId && input.clientId) {
+    const ensured = await ensureLeadForClient(sb, input.clientId, userId, "manual");
+    if (!ensured.ok) return { ok: false as const, error: ensured.error };
+    input = { ...input, leadId: ensured.leadId };
+  }
 
   // Pull the lead (for client_id + status + a default title + the confirmation send).
   let lead: {
@@ -181,9 +194,55 @@ export async function createAppointment(input: CreateAppointmentInput) {
 }
 
 export async function rescheduleAppointment(id: string, startsAt: string, endsAt: string) {
-  const { sb } = await ctx();
+  const { sb, userId } = await ctx();
   const { error } = await sb.from("appointments").update({ starts_at: startsAt, ends_at: endsAt }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  // Moving a REMOVAL moves the money dates with it: the accepted quote's move
+  // date, the lead's balance-due date, and the open balance chase — otherwise
+  // the "day before move" reminder stays pinned to the old date.
+  const { data: appt } = await sb
+    .from("appointments")
+    .select("appt_type, lead_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (appt?.appt_type === "removal" && appt.lead_id) {
+    // yyyy-mm-dd of the new slot as a UK wall-clock day (en-CA = ISO format).
+    const newMoveDate = new Date(startsAt).toLocaleDateString("en-CA", { timeZone: UK_TZ });
+    const { data: accepted } = await sb
+      .from("quotes")
+      .select("id, moving_date")
+      .eq("lead_id", appt.lead_id)
+      .eq("status", "accepted")
+      .order("accepted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (accepted && accepted.moving_date !== newMoveDate) {
+      await sb.from("quotes").update({ moving_date: newMoveDate } as never).eq("id", accepted.id);
+      const dueDate = balanceDueDate(newMoveDate);
+      await sb.from("leads").update({ balance_due_date: dueDate } as never).eq("id", appt.lead_id);
+      const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
+      if (dm) {
+        const dueAt = ukInstant(Number(dm[1]), Number(dm[2]), Number(dm[3]), 9, 0).toISOString();
+        await sb
+          .from("follow_ups")
+          .update({ due_at: dueAt })
+          .eq("lead_id", appt.lead_id)
+          .eq("reason", "balance")
+          .eq("status", "open");
+      }
+      await sb.from("activities").insert({
+        lead_id: appt.lead_id,
+        actor_id: userId,
+        type: "note",
+        summary: `Removal rescheduled — move date now ${newMoveDate}; balance chase follows it`,
+        meta: { appointment_id: id, moving_date: newMoveDate },
+      });
+      revalidatePath("/bookings");
+      revalidatePath(`/leads/${appt.lead_id}`);
+    }
+  }
+
   revalidateSchedule();
   return { ok: true as const };
 }
@@ -204,6 +263,44 @@ export async function updateAppointment(
     })
     .eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  // Survey done → the next step is the quote. If the lead has no quote yet,
+  // queue a "build the quote" follow-up so completed surveys can't go cold.
+  if (patch.status === "completed") {
+    const { data: appt } = await sb
+      .from("appointments")
+      .select("appt_type, lead_id, client_id, estimator_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (appt?.appt_type === "survey" && appt.lead_id) {
+      const [{ data: existingQuote }, { data: openFu }] = await Promise.all([
+        sb.from("quotes").select("id").eq("lead_id", appt.lead_id).limit(1).maybeSingle(),
+        sb
+          .from("follow_ups")
+          .select("id")
+          .eq("lead_id", appt.lead_id)
+          .eq("reason", "quote_followup")
+          .eq("status", "open")
+          .limit(1)
+          .maybeSingle(),
+      ]);
+      if (!existingQuote && !openFu) {
+        const { data: { user } } = await sb.auth.getUser();
+        await sb.from("follow_ups").insert({
+          lead_id: appt.lead_id,
+          client_id: appt.client_id,
+          reason: "quote_followup",
+          due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          assigned_to: appt.estimator_id,
+          created_by: user?.id ?? null,
+          source: "survey_completed",
+          notes: "Survey completed — build and send the quote.",
+        } as never);
+        revalidatePath("/follow-ups");
+      }
+    }
+  }
+
   revalidateSchedule();
   return { ok: true as const };
 }

@@ -97,7 +97,14 @@ export function LeadCombobox({
               </button>
             </li>
             {filtered.map((l) => {
-              const sub = [l.from_postcode, l.phone, l.email].filter(Boolean).join(" · ");
+              const sub = [
+                l.isClient ? "client — opens a new enquiry" : null,
+                l.from_postcode,
+                l.phone,
+                l.email,
+              ]
+                .filter(Boolean)
+                .join(" · ");
               return (
                 <li key={l.id}>
                   <button

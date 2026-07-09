@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { sendReviewRequest } from "@/lib/comms/review-request";
+import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
 import {
@@ -308,6 +311,12 @@ export async function updateLeadStatusAction(leadId: string, status: string) {
     meta: { from, to: status },
   });
 
+  // Move done → ask for the Google review (once per lead, settings-gated;
+  // fail-soft so a comms hiccup never blocks the status change).
+  if (status === "completed") {
+    await sendReviewRequest(sb, leadId, userId).catch(() => null);
+  }
+
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
   revalidatePath("/");
@@ -326,7 +335,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   const { sb, userId } = await actor();
   const { data: current } = await sb
     .from("leads")
-    .select("status, client_id")
+    .select("status, client_id, balance_paid_at, name")
     .eq("id", leadId)
     .single();
 
@@ -351,19 +360,111 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     await sb.from("follow_ups").update({ status: "cancelled", outcome: "declined" }).eq("id", fu.id);
   }
 
+  // --- unwind the booking, not just the status -------------------------------
+  // A cancelled job must leave nothing live behind it: diary slots are freed,
+  // unpaid Zoho invoices are voided (they stay on the books as void), and paid
+  // money becomes an explicit refund decision for a human — never touched by code.
+  let voidedInvoices = 0;
+  let refundTask = false;
+
+  // Free upcoming diary slots (surveys and removals both).
+  const { data: cancelledAppts } = await sb
+    .from("appointments")
+    .update({ status: "cancelled" as never })
+    .eq("lead_id", leadId)
+    .eq("status", "scheduled")
+    .gte("starts_at", new Date().toISOString())
+    .select("id");
+  const apptsCancelled = cancelledAppts?.length ?? 0;
+
+  // The money on the lead's accepted quote(s).
+  const { data: moneyQuotes } = await sb
+    .from("quotes")
+    .select(
+      "id, quote_ref, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, estimator_id, client_id",
+    )
+    .eq("lead_id", leadId)
+    .eq("status", "accepted");
+
+  const isReal = (v: string | null) => !!v && v !== "pending";
+  for (const q of moneyQuotes ?? []) {
+    // Unpaid deposit invoice → void.
+    if (!q.deposit_paid_at && isReal(q.zoho_deposit_invoice_id)) {
+      try {
+        await voidInvoice(q.zoho_deposit_invoice_id!);
+        voidedInvoices++;
+        await sb.from("activities").insert({
+          lead_id: leadId,
+          client_id: current?.client_id ?? null,
+          actor_id: userId,
+          type: "note",
+          summary: `Deposit invoice ${q.zoho_deposit_invoice_number ?? ""} voided — booking cancelled`.trim(),
+          meta: { quote_id: q.id, invoice_id: q.zoho_deposit_invoice_id },
+        });
+      } catch (err) {
+        await sendOpsAlert(`Void on cancel FAILED — ${q.quote_ref}`, [
+          `Lead cancelled but voiding deposit invoice ${q.zoho_deposit_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
+        ]);
+      }
+    }
+    // Unpaid balance invoice → void.
+    if (!current?.balance_paid_at && isReal(q.zoho_balance_invoice_id)) {
+      try {
+        await voidInvoice(q.zoho_balance_invoice_id!);
+        voidedInvoices++;
+        await sb.from("activities").insert({
+          lead_id: leadId,
+          client_id: current?.client_id ?? null,
+          actor_id: userId,
+          type: "note",
+          summary: `Balance invoice ${q.zoho_balance_invoice_number ?? ""} voided — booking cancelled`.trim(),
+          meta: { quote_id: q.id, invoice_id: q.zoho_balance_invoice_id },
+        });
+      } catch (err) {
+        await sendOpsAlert(`Void on cancel FAILED — ${q.quote_ref}`, [
+          `Lead cancelled but voiding balance invoice ${q.zoho_balance_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
+        ]);
+      }
+    }
+    // Money already taken → a human decides the refund (deposit terms may keep it).
+    const paidBits = [
+      q.deposit_paid_at ? `£${Number(q.deposit_amount ?? 0).toFixed(2)} deposit` : null,
+      current?.balance_paid_at ? `£${Number(q.balance_invoice_amount ?? 0).toFixed(2)} balance` : null,
+    ].filter(Boolean);
+    if (paidBits.length) {
+      refundTask = true;
+      await sb.from("follow_ups").insert({
+        lead_id: leadId,
+        client_id: q.client_id ?? current?.client_id ?? null,
+        quote_id: q.id,
+        reason: "custom",
+        due_at: new Date().toISOString(),
+        assigned_to: q.estimator_id ?? userId,
+        created_by: userId,
+        source: "cancellation",
+        notes: `Booking cancelled with ${paidBits.join(" + ")} already paid (${q.quote_ref}). Decide refund vs retained deposit per the terms, and record the outcome in Zoho.`,
+      } as never);
+      await sendOpsAlert(`Cancellation with money taken — ${q.quote_ref}`, [
+        `<strong>${current?.name ?? "Customer"}</strong> cancelled with ${paidBits.join(" + ")} already paid.`,
+        `A refund-decision task is in Follow-ups. Nothing was changed in Zoho for the paid amounts.`,
+      ]);
+    }
+  }
+
   const label = reason.replace(/_/g, " ");
   await sb.from("activities").insert({
     client_id: current?.client_id ?? null,
     lead_id: leadId,
     actor_id: userId,
     type: "status_change",
-    summary: `Marked lost — ${label}${note?.trim() ? ` ("${note.trim()}")` : ""}`,
+    summary: `Marked lost — ${label}${note?.trim() ? ` ("${note.trim()}")` : ""}${apptsCancelled ? ` · ${apptsCancelled} appointment${apptsCancelled === 1 ? "" : "s"} cancelled` : ""}${voidedInvoices ? ` · ${voidedInvoices} invoice${voidedInvoices === 1 ? "" : "s"} voided` : ""}`,
     meta: { from: current?.status ?? null, to: "declined", lost_reason: reason },
   });
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
   revalidatePath("/bookings");
+  revalidatePath("/follow-ups");
   revalidatePath("/");
-  return { ok: true as const };
+  return { ok: true as const, apptsCancelled, voidedInvoices, refundTask };
 }

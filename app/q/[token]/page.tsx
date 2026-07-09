@@ -11,6 +11,9 @@ import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
 import { isPaymentGatewayActive } from "@/lib/zoho";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { AcceptForm } from "./accept-form";
+import { DeclineOption, DepositSentButton } from "./customer-actions";
+
+const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
 
 /**
  * PUBLIC customer page — linked from the quote email CTA, the PDF QR codes and
@@ -144,6 +147,24 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
   const sb = createAdminClient();
   let quote = await fetchQuoteByToken(sb, token);
 
+  // Customer declined from this page — acknowledge, don't 404 them.
+  if (quote?.status === "rejected" && quote.declined_at) {
+    return (
+      <Shell>
+        <Card>
+          <div className="p-6 text-center sm:p-8">
+            <h1 className="font-display text-2xl font-semibold text-ink">Thanks for letting us know</h1>
+            <p className="mt-3 text-sm leading-relaxed text-mist-500">
+              We&apos;ve closed the quote and you won&apos;t get any more reminders from us. If
+              anything changes, call <strong className="text-ink">01747 637070</strong> and
+              we&apos;ll pick it straight back up. All the best with the move.
+            </p>
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
+
   // Only quotes the customer was actually sent (or has accepted) resolve here.
   if (!quote || (quote.status !== "sent" && quote.status !== "accepted")) return <NotFoundCard />;
 
@@ -193,10 +214,20 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
                 Accepting reserves your date. A{" "}
                 <strong className="text-ink">{gbp(deposit)} deposit</strong> secures the booking —
                 pay by card or bank transfer on the next screen. The balance is due before move
-                day. Full terms are in your quote PDF.
+                day. Read our{" "}
+                <a
+                  href={TERMS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-ink underline underline-offset-2"
+                >
+                  terms &amp; conditions
+                </a>
+                .
               </p>
             </div>
             <AcceptForm token={token} depositLabel={gbp(deposit)} />
+            <DeclineOption token={token} />
           </div>
         </Card>
       </Shell>
@@ -269,6 +300,18 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
           ) : null}
 
           <BankPanel reference={quote.quote_ref} />
+
+          {quote.deposit_selfreport_at ? (
+            <div className="flex items-start gap-2.5 rounded-md border border-mist-200 bg-mist-50 p-4">
+              <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" strokeWidth={1.75} />
+              <p className="text-sm leading-relaxed text-mist-500">
+                Thanks — you&apos;ve told us the transfer is on its way. We&apos;re checking the
+                bank and will email your confirmation as soon as it lands.
+              </p>
+            </div>
+          ) : (
+            <DepositSentButton token={token} />
+          )}
 
           {quote.zoho_deposit_invoice_number && quote.zoho_deposit_invoice_url ? (
             <p className="text-center text-xs text-mist-400">

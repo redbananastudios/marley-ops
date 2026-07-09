@@ -41,7 +41,14 @@ export function MarkLostButton({ leadId, className }: { leadId: string; classNam
         toast.error(res.error || "Could not mark lost.");
         return;
       }
-      toast.success("Marked lost.");
+      const bits = [
+        res.apptsCancelled ? `${res.apptsCancelled} appointment${res.apptsCancelled === 1 ? "" : "s"} cancelled` : null,
+        res.voidedInvoices ? `${res.voidedInvoices} unpaid invoice${res.voidedInvoices === 1 ? "" : "s"} voided in Zoho` : null,
+      ].filter(Boolean);
+      toast.success(`Marked lost.${bits.length ? ` ${bits.join(" · ")}.` : ""}`);
+      if (res.refundTask) {
+        toast.warning("Money was already paid on this job — a refund-decision task is in Follow-ups.");
+      }
       setOpen(false);
       router.refresh();
     });

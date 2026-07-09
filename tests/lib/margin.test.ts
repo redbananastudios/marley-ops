@@ -15,6 +15,7 @@ const RATES: BusinessSettings = {
   vatDefault: true,
   vatNumber: "",
   baseLocation: "",
+  googleReviewUrl: "",
   defaultDeposit: 0,
 };
 

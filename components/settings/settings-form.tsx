@@ -17,7 +17,7 @@ import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/sett
 import type { BusinessSettings } from "@/lib/settings";
 
 interface FieldDef {
-  key: Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation">;
+  key: Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation" | "googleReviewUrl">;
   label: string;
   hint: string;
   unit: "£" | "£/mile" | "£/hour" | "£/day";
@@ -80,7 +80,8 @@ export function SettingsForm({
   const [vatDefault, setVatDefault] = useState(initial.vatDefault);
   const [vatNumber, setVatNumber] = useState(initial.vatNumber);
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
-  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation">, string>>({
+  const [googleReviewUrl, setGoogleReviewUrl] = useState(initial.googleReviewUrl);
+  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation" | "googleReviewUrl">, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costFuel75PerMile: String(initial.costFuel75PerMile),
@@ -109,6 +110,7 @@ export function SettingsForm({
       vatDefault,
       vatNumber: vatNumber.trim(),
       baseLocation: baseLocation.trim(),
+      googleReviewUrl: googleReviewUrl.trim(),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
     setBusy(false);
@@ -171,6 +173,23 @@ export function SettingsForm({
           className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         <p className="mt-1.5 text-xs text-mist-400">Printed in the quote PDF footer. Required on customer paperwork once VAT registered.</p>
+      </div>
+
+      {/* Google review link — the post-move review email sends only when set */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-review-url">Google review link</Label>
+        <input
+          id="set-review-url"
+          type="url"
+          value={googleReviewUrl}
+          disabled={!canEdit || busy}
+          onChange={(e) => setGoogleReviewUrl(e.target.value)}
+          placeholder="https://search.google.com/local/writereview?placeid=…"
+          className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+        />
+        <p className="mt-1.5 text-xs text-mist-400">
+          The &quot;leave a review&quot; button in the post-move email. Clear it to switch the review ask off.
+        </p>
       </div>
 
       {/* VAT default for new quotes */}

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, Phone, MessageCircle, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Card } from "@/components/ui/card";
+import { BookSurveyButton } from "@/components/clients/book-survey-button";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -63,6 +64,10 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const leadRows = leads ?? [];
   const quoteRows = quotes ?? [];
 
+  // Their live enquiry (if any) — "Book survey" reuses it rather than duplicating.
+  const OPEN = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed"];
+  const openLead = leadRows.find((l) => OPEN.includes(l.status));
+
   const fullAddress =
     [client.address_line1, client.town, client.county, client.postcode_home, client.country]
       .filter(Boolean)
@@ -99,6 +104,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         </div>
 
         <div className="flex flex-wrap gap-2 border-t px-5 py-4">
+          <BookSurveyButton clientId={client.id} openLeadId={openLead?.id ?? null} />
           {phone ? (
             <a href={`tel:${phone}`} className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted" aria-label="Call">
               <Phone className="size-4 text-[#2563eb]" strokeWidth={1.75} />

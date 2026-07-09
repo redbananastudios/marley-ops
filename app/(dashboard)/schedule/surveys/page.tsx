@@ -31,7 +31,7 @@ export default async function SurveysSchedulePage({
     sb
       .from("leads")
       .select(
-        "id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
+        "id,client_id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
       )
       .order("created_at", { ascending: false }),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
@@ -52,6 +52,32 @@ export default async function SurveysSchedulePage({
     surveyEstimatorId: surveyEst.get(l.id) ?? null,
   }));
 
+  // Bare clients (no enquiry yet — usually phone callers added via Clients) are
+  // bookable too: picking one opens the enquiry server-side at booking time.
+  const clientIdsWithLeads = new Set((leads ?? []).map((l) => (l as { client_id?: string | null }).client_id).filter(Boolean));
+  const { data: bareClients } = await sb
+    .from("clients")
+    .select("id, display_name, email, phone_raw, phone_e164, postcode_home, address_line1, town")
+    .is("merged_into_id", null)
+    .eq("is_active", true);
+  const clientOptions = (bareClients ?? [])
+    .filter((c) => !clientIdsWithLeads.has(c.id))
+    .map((c) => ({
+      id: c.id,
+      name: c.display_name,
+      phone: c.phone_raw ?? c.phone_e164,
+      email: c.email,
+      from_postcode: c.postcode_home,
+      from_address: [c.address_line1, c.town].filter(Boolean).join(", ") || null,
+      to_postcode: null,
+      to_address: null,
+      property_size: null,
+      lead_notes: null,
+      source: "manual" as const,
+      surveyEstimatorId: null,
+      isClient: true,
+    }));
+
   // Booked from a lead ("Book survey") — auto-open the dialog prefilled with that
   // lead + its pickup address as the location.
   let presetLocation: string | null = null;
@@ -70,7 +96,7 @@ export default async function SurveysSchedulePage({
       <SchedulerView
         view="survey"
         events={(appts ?? []) as SchedulerEvent[]}
-        leads={leadOptions}
+        leads={[...leadOptions, ...clientOptions]}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}
         presetLeadId={leadId ?? null}

@@ -50,6 +50,10 @@ export interface DashboardData {
     quotesAwaiting: number;
     followUpsDueToday: number;
     followUpsOverdue: number;
+    /** Accepted, £deposit outstanding — the money half of the pipeline. */
+    awaitingDeposit: number;
+    /** Deposit paid, balance not settled — due in full before move day. */
+    balanceDue: number;
   };
   recent: {
     id: string;
@@ -220,12 +224,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {/* needs action (now) */}
       <section>
         <p className="eyebrow mb-2">Needs action now</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <ActionCard label="Follow-ups overdue" count={data.needsAction.followUpsOverdue} href="/follow-ups" accent empty="Nothing overdue" />
           <ActionCard label="Follow-ups due today" count={data.needsAction.followUpsDueToday} href="/follow-ups" empty="None due today" />
           <ActionCard label="New enquiries to action" count={data.needsAction.newToAction} href="/leads?status=website_enquiry" accent empty="All enquiries triaged" />
           <ActionCard label="Surveys today" count={data.needsAction.surveysToday} href="/schedule/surveys" empty="No surveys today" />
           <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
+          <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
+          <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
         </div>
       </section>
 

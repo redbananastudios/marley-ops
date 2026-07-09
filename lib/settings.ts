@@ -26,6 +26,8 @@ export interface BusinessSettings {
   baseLocation: string;
   /** Standard deposit £ — prefills "Request deposit" on a job (editable per job). */
   defaultDeposit: number;
+  /** Google "write a review" link — the post-move review email sends only when set. */
+  googleReviewUrl: string;
 }
 
 /** The Marley yard the live quote tool hardcoded — default base until changed in Settings. */
@@ -45,6 +47,8 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   vatNumber: "",
   baseLocation: DEFAULT_BASE_LOCATION,
   defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
+  // Same place id the marleymoves.co.uk site links to.
+  googleReviewUrl: "https://search.google.com/local/writereview?placeid=ChIJq8R84fCs_EkRc_9iHhFQXW8",
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -53,7 +57,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, base_location, default_deposit")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, base_location, default_deposit, google_review_url")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -71,5 +75,6 @@ export async function getBusinessSettings(
     vatNumber: (data.vat_number as string | null)?.trim() || "",
     baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
     defaultDeposit: Number(data.default_deposit ?? DEFAULT_SETTINGS.defaultDeposit) || DEFAULT_SETTINGS.defaultDeposit,
+    googleReviewUrl: (data.google_review_url as string | null)?.trim() ?? DEFAULT_SETTINGS.googleReviewUrl,
   };
 }
