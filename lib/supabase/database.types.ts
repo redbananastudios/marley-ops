@@ -277,6 +277,42 @@ export type Database = {
         }
         Relationships: []
       }
+      job_notes: {
+        Row: {
+          id: string
+          appointment_id: string | null
+          lead_id: string | null
+          client_id: string | null
+          author_id: string | null
+          author_name: string
+          body: string
+          photo_paths: string[]
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          appointment_id?: string | null
+          lead_id?: string | null
+          client_id?: string | null
+          author_id?: string | null
+          author_name: string
+          body?: string
+          photo_paths?: string[]
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          appointment_id?: string | null
+          lead_id?: string | null
+          client_id?: string | null
+          author_id?: string | null
+          author_name?: string
+          body?: string
+          photo_paths?: string[]
+          created_at?: string
+        }
+        Relationships: []
+      }
       storage_invoices: {
         Row: {
           id: string

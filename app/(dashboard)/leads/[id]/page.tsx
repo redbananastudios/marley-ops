@@ -20,6 +20,8 @@ import {
   type ContractSignatureView,
 } from "@/components/quote/signature-cards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadJobNotesForLead } from "@/lib/job-notes";
+import { CrewNotesCard } from "@/components/crew-notes-card";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -141,7 +143,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Signed paperwork on this enquiry (final-pass audit: the lead page is where
   // the office lands from Leads/Board/Follow-ups — evidence must show here,
   // not just on the quote page).
-  const [{ data: sigRow }, { data: completionRow }] = await Promise.all([
+  const [{ data: sigRow }, { data: completionRow }, crewNotes] = await Promise.all([
     supabase
       .from("signatures")
       .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
@@ -159,6 +161,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .order("signed_at", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    loadJobNotesForLead(createAdminClient(), id),
   ]);
   let leadCompletion: CompletionView | null = null;
   if (completionRow) {
@@ -358,6 +361,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           ) : acceptedQuote ? (
             <div className="mt-5">
               <ContractSignatureCard signature={null} quoteStatus="accepted" />
+            </div>
+          ) : null}
+
+          {crewNotes.length ? (
+            <div className="mt-5">
+              <CrewNotesCard notes={crewNotes} canDelete />
             </div>
           ) : null}
 

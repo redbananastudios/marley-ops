@@ -18,6 +18,8 @@ import {
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
+import { loadJobNotesForAppointment } from "@/lib/job-notes";
+import { JobNotes } from "@/components/crew/job-notes";
 import type { JobSheetAddress } from "@/lib/job-sheet-docdef";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
@@ -60,8 +62,9 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
   const loaded = await loadJobSheet(admin, id);
   if (!loaded) notFound();
   const { data: d, apptType, surveyId } = loaded;
-  const [photos, { data: completion }, { data: myStaff }] = await Promise.all([
+  const [photos, crewNotes, { data: completion }, { data: myStaff }] = await Promise.all([
     surveyId ? loadPhotoSignedUrls(admin, surveyId) : Promise.resolve([]),
+    loadJobNotesForAppointment(admin, id),
     admin
       .from("job_completions")
       .select("customer_name, customer_absent, crew_name, exceptions, signed_at, certificate_emailed_at")
@@ -295,6 +298,9 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
             </div>
           </div>
         ) : null}
+
+        {/* crew notes + photos — damage, access issues, internal records */}
+        <JobNotes appointmentId={id} notes={crewNotes} currentProfileId={profile.id} />
 
         <div className="mt-4 flex items-center gap-1.5 text-xs text-mist-400">
           <CalendarDays className="size-3.5" strokeWidth={1.75} />

@@ -17,6 +17,8 @@ import {
   type ContractSignatureView,
 } from "@/components/quote/signature-cards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
+import { CrewNotesCard } from "@/components/crew-notes-card";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -92,7 +94,9 @@ export default async function QuoteDetailPage({
   const contractSignature = sigRow ? ({ ...sigRow, collectedByName } as ContractSignatureView) : null;
 
   let completion: CompletionView | null = null;
+  let crewNotes: JobNoteView[] = [];
   if (quote.lead_id) {
+    crewNotes = await loadJobNotesForLead(createAdminClient(), quote.lead_id);
     const { data: comp } = await sb
       .from("job_completions")
       .select(
@@ -219,6 +223,7 @@ export default async function QuoteDetailPage({
           <div className="mt-4 space-y-4">
             <ContractSignatureCard signature={contractSignature} quoteStatus={quote.status ?? "draft"} />
             <CompletionCard completion={completion} />
+            <CrewNotesCard notes={crewNotes} canDelete />
           </div>
         </>
       )}
