@@ -1,5 +1,6 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
-import { MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
@@ -219,48 +220,54 @@ export default async function MyJobsPage() {
               <div className="space-y-3">
                 {groups.get(day)!.map((j) => (
                   <div key={j.id} className="rounded-lg border border-border bg-card p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-base font-semibold text-foreground">{j.lead_name ?? j.title ?? "Job"}</p>
-                        <p className="mt-0.5 text-sm text-mist-500">
-                          {apptWindow(j)} · <span className="capitalize">{j.appt_type === "removal" ? "Move" : j.appt_type}</span>
-                        </p>
+                    {/* Card body opens the full job page; buttons below stay their own targets. */}
+                    <Link href={`/my-jobs/${j.id}`} className="focus-ring -m-2 block rounded-md p-2 active:bg-muted">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-base font-semibold text-foreground">{j.lead_name ?? j.title ?? "Job"}</p>
+                          <p className="mt-0.5 text-sm text-mist-500">
+                            {apptWindow(j)} · <span className="capitalize">{j.appt_type === "removal" ? "Move" : j.appt_type}</span>
+                          </p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <span
+                            className={
+                              "rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
+                              (j.appt_type === "removal" ? "bg-mm-red-tint text-mm-red-deep" : "bg-muted text-mist-500")
+                            }
+                          >
+                            {j.appt_type === "removal" ? "Move" : "Survey"}
+                          </span>
+                          <ChevronRight className="size-4 text-mist-400" strokeWidth={1.75} />
+                        </span>
                       </div>
-                      <span
-                        className={
-                          "shrink-0 rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
-                          (j.appt_type === "removal" ? "bg-mm-red-tint text-mm-red-deep" : "bg-muted text-mist-500")
-                        }
-                      >
-                        {j.appt_type === "removal" ? "Move" : "Survey"}
-                      </span>
-                    </div>
 
-                    <div className="mt-2 space-y-1 text-sm text-mist-500">
-                      {j.from_postcode || j.to_postcode ? (
-                        <p className="tabular flex items-center gap-2">
-                          <MapPin className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
-                          {j.from_postcode ?? "?"} → {j.to_postcode ?? "?"}
-                        </p>
-                      ) : j.location ? (
-                        <p className="flex items-center gap-2">
-                          <MapPin className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
-                          {j.location}
-                        </p>
-                      ) : null}
-                      {j.crewMates.length ? (
-                        <p className="flex items-center gap-2">
-                          <UserRound className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
-                          With {j.crewMates.join(", ")}
-                        </p>
-                      ) : null}
-                      {j.vans.length ? (
-                        <p className="flex items-center gap-2">
-                          <Truck className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
-                          {j.vans.join(", ")}
-                        </p>
-                      ) : null}
-                    </div>
+                      <div className="mt-2 space-y-1 text-sm text-mist-500">
+                        {j.from_postcode || j.to_postcode ? (
+                          <p className="tabular flex items-center gap-2">
+                            <MapPin className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+                            {j.from_postcode ?? "?"} → {j.to_postcode ?? "?"}
+                          </p>
+                        ) : j.location ? (
+                          <p className="flex items-center gap-2">
+                            <MapPin className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+                            {j.location}
+                          </p>
+                        ) : null}
+                        {j.crewMates.length ? (
+                          <p className="flex items-center gap-2">
+                            <UserRound className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+                            With {j.crewMates.join(", ")}
+                          </p>
+                        ) : null}
+                        {j.vans.length ? (
+                          <p className="flex items-center gap-2">
+                            <Truck className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+                            {j.vans.join(", ")}
+                          </p>
+                        ) : null}
+                      </div>
+                    </Link>
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {j.appt_type === "removal" ? (

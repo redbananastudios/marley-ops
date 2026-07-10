@@ -11,6 +11,7 @@ import {
 } from "@/lib/quote/form-types";
 import { addressFromString } from "@/lib/places/parse";
 import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
+import { markLeadLostAction } from "@/app/(dashboard)/leads/actions";
 import { getBusinessSettings } from "@/lib/settings";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { ukParts } from "@/lib/uk-time";
@@ -188,6 +189,77 @@ export async function setQuoteStatus(id: string, status: string) {
 }
 
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
+
+/**
+ * Reject a sent quote with a required reason (Peter, 2026-07-10: the quote
+ * page had no "too expensive"-style reject like the lead's Mark-lost). Mirrors
+ * the customer's online decline: quote → rejected + reason recorded (feeds the
+ * Performance "why we lose" breakdown). The lead is only marked lost when this
+ * was its LAST live quote — rejecting a superseded-but-still-sent revision
+ * never kills a lead that has a newer quote in play. Accepted quotes don't
+ * take this path: cancelling a booked job is the lead's Mark-lost (which
+ * unwinds appointments + Zoho invoices).
+ */
+export async function rejectQuote(id: string, reason: string, note?: string) {
+  const VALID = ["too_expensive", "chose_competitor", "move_fell_through", "dates_didnt_work", "no_response", "other"];
+  if (!VALID.includes(reason)) return { ok: false as const, error: "Pick a reason" };
+  const { sb, userId } = await ctx();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+
+  const { data: q } = await sb
+    .from("quotes")
+    .select("id, quote_ref, status, lead_id, client_id")
+    .eq("id", id)
+    .maybeSingle();
+  if (!q) return { ok: false as const, error: "Quote not found" };
+  if (q.status === "rejected") return { ok: true as const, leadLost: false };
+  if (q.status === "accepted") {
+    return { ok: false as const, error: "This quote is accepted — cancel the booking with Mark lost on the lead instead." };
+  }
+  if (q.status !== "sent") {
+    return { ok: false as const, error: "Only a sent quote can be rejected. Drafts can just be deleted." };
+  }
+
+  const { data: won } = await sb
+    .from("quotes")
+    .update({ status: "rejected", declined_at: new Date().toISOString(), declined_reason: reason } as never)
+    .eq("id", id)
+    .eq("status", "sent")
+    .select("id");
+  if (!won?.length) return { ok: false as const, error: "The quote just changed — refresh and check its status." };
+
+  let leadLost = false;
+  if (q.lead_id) {
+    const { data: others } = await sb
+      .from("quotes")
+      .select("id")
+      .eq("lead_id", q.lead_id)
+      .in("status", ["sent", "accepted"])
+      .neq("id", id)
+      .limit(1);
+
+    if (!others?.length) {
+      const res = await markLeadLostAction(q.lead_id, reason, note);
+      leadLost = res.ok === true;
+    } else {
+      await sb.from("activities").insert({
+        lead_id: q.lead_id,
+        client_id: q.client_id,
+        actor_id: userId,
+        type: "status_change",
+        summary: `Quote ${q.quote_ref} rejected — ${reason.replace(/_/g, " ")}${note?.trim() ? ` ("${note.trim()}")` : ""} (lead stays live — another quote is still in play)`,
+        meta: { quote_id: id, lost_reason: reason },
+      });
+    }
+    revalidatePath(`/leads/${q.lead_id}`);
+    revalidatePath("/leads");
+  }
+
+  revalidatePath(`/quotes/${id}`);
+  revalidatePath("/quotes");
+  revalidatePath("/");
+  return { ok: true as const, leadLost };
+}
 
 /**
  * Accept a quote (staff-side: "Mark accepted" on the quote, "Mark won" on the

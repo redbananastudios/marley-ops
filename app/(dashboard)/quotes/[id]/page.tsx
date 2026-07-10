@@ -11,6 +11,7 @@ import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { QuoteView } from "@/components/quote/quote-view";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
+import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 import { ViewLeadDialog } from "@/components/quote/view-lead-dialog";
 
@@ -127,6 +128,7 @@ export default async function QuoteDetailPage({
             status={quote.status ?? "draft"}
             depositAmount={settings.defaultDeposit}
           />
+          <RejectQuoteButton quoteId={quote.id} status={quote.status ?? "draft"} />
           <DeleteQuoteButton
             quoteId={quote.id}
             status={quote.status ?? "draft"}
