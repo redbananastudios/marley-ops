@@ -145,7 +145,9 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
   return {
     pageSize: "A4",
     pageMargins: [38, 38, 38, 46],
-    defaultStyle: { fontSize: 9.5, color: C.ink, lineHeight: 1.25 },
+    // The site vfs ships ONLY Cormorant + Montserrat (no Roboto, pdfmake's
+    // default) — an unset font makes createPdf hang forever. Always name one.
+    defaultStyle: { font: "Montserrat", fontSize: 9.5, color: C.ink, lineHeight: 1.25 },
     footer: (page: number, pages: number) => ({
       columns: [
         { text: "Marley Moves · 01747 637070 · hello@marleymoves.co.uk", style: "footerText" },
@@ -154,7 +156,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
       margin: [38, 12, 38, 0],
     }),
     styles: {
-      brand: { fontSize: 20, bold: true, color: C.ink },
+      brand: { font: "Cormorant", fontSize: 22, bold: true, color: C.ink },
       brandRed: { color: C.red },
       docTitle: { fontSize: 11, bold: true, color: C.muted, characterSpacing: 1 },
       hero: { fontSize: 13, bold: true, color: C.white },

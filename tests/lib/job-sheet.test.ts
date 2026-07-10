@@ -113,6 +113,11 @@ describe("buildJobSheetDocDef", () => {
     }
   });
 
+  it("names a vfs font — an unset font (pdfmake's Roboto default) hangs createPdf", () => {
+    const def = buildJobSheetDocDef(data);
+    expect(def.defaultStyle.font).toBe("Montserrat");
+  });
+
   it("NEVER leaks money — the crew sheet is price-free", () => {
     const s = JSON.stringify(buildJobSheetDocDef(data));
     expect(s).not.toContain("£");
