@@ -1,5 +1,16 @@
 @import "tailwindcss";
 
+/* Handwriting face for typed e-signatures (DocuSign-style: type your name,
+   see it written). Used on /q, the crew signing dialogs, and the office
+   signature cards. OFL-licensed Great Vibes, self-hosted (CSP-safe). */
+@font-face {
+  font-family: "Signature Script";
+  src: url("/fonts/great-vibes.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ============================================================
    Marley Ops design system — Vercel (Geist) / ElevenLabs minimal
    Mono base + ONE rare accent (Marley red #C03838).

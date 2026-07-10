@@ -21,7 +21,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
-import { allAcksConfirmed, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
 import {
   buildDepositReceivedEmailHtml,
   buildBalanceInvoiceEmailHtml,
@@ -310,7 +310,7 @@ export async function acceptQuoteOnline(
   token: string,
   fullName: string,
   ip: string | null,
-  opts?: { acks?: Record<string, unknown>; userAgent?: string | null },
+  opts?: { acks?: Record<string, unknown>; userAgent?: string | null; signatureImage?: string | null },
 ): Promise<AcceptOutcome> {
   const quote = await fetchQuoteByToken(sb, token);
   if (!quote) return { ok: false, error: "This quote link is no longer valid." };
@@ -348,11 +348,14 @@ export async function acceptQuoteOnline(
 
   // The contract signature record — typed name + the acknowledgment set +
   // T&C version + IP/UA. One per quote (unique index); a replay just skips.
+  // signatureImage = the client's script rendering of the typed name (nice
+  // for certificates/office view); the typed name itself is the signature.
   await sb.from("signatures").insert({
     kind: "contract",
     quote_id: quote.id,
     lead_id: quote.lead_id,
     signer_name: name,
+    signature_data: isValidSignatureDataUri(opts?.signatureImage) ? opts?.signatureImage : null,
     method: "typed",
     channel: "remote",
     acknowledgments: normalizeAcks(opts?.acks),

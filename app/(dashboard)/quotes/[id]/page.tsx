@@ -10,6 +10,13 @@ import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import { QuoteView } from "@/components/quote/quote-view";
+import {
+  CompletionCard,
+  ContractSignatureCard,
+  type CompletionView,
+  type ContractSignatureView,
+} from "@/components/quote/signature-cards";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -67,6 +74,41 @@ export default async function QuoteDetailPage({
   // codes and the email CTA always point at the live /q/<token> page.
   const acceptToken = await ensureAcceptToken(sb, quote.id);
   const acceptUrl = acceptToken ? acceptUrlFor(acceptToken) : undefined;
+
+  // Signed evidence for the office view: the contract signature (one per
+  // quote) + the latest job-completion sign-off on the lead, with a
+  // short-lived link to the stored certificate PDF.
+  const { data: sigRow } = await sb
+    .from("signatures")
+    .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
+    .eq("quote_id", quote.id)
+    .eq("kind", "contract")
+    .maybeSingle();
+  const contractSignature = (sigRow ?? null) as ContractSignatureView | null;
+
+  let completion: CompletionView | null = null;
+  if (quote.lead_id) {
+    const { data: comp } = await sb
+      .from("job_completions")
+      .select(
+        "customer_name, customer_absent, absent_reason, exceptions, crew_name, signed_at, certificate_emailed_at, certificate_path",
+      )
+      .eq("lead_id", quote.lead_id)
+      .order("signed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (comp) {
+      let certificateUrl: string | null = null;
+      if (comp.certificate_path) {
+        const { data: signed } = await createAdminClient()
+          .storage.from("job-docs")
+          .createSignedUrl(comp.certificate_path, 3600);
+        certificateUrl = signed?.signedUrl ?? null;
+      }
+      const { certificate_path: _path, ...rest } = comp;
+      completion = { ...rest, certificateUrl };
+    }
+  }
 
   // The linked lead's context for the View-lead modal (no navigation away from the form).
   let leadOption = null;
@@ -152,22 +194,28 @@ export default async function QuoteDetailPage({
           acceptUrl={acceptUrl}
         />
       ) : (
-        <QuoteView
-          values={initialValues}
-          money={{
-            subtotal: quote.subtotal,
-            discount: quote.discount,
-            vat_enabled: quote.vat_enabled,
-            vat_amount: quote.vat_amount,
-            grand_total: quote.grand_total,
-            agreed_price: quote.agreed_price,
-            status: quote.status ?? "draft",
-            deposit_amount: quote.deposit_amount ?? settings.defaultDeposit,
-            deposit_paid_at: quote.deposit_paid_at,
-            moving_date: quote.moving_date,
-          }}
-          editHref={`/quotes/${quote.id}?edit=1`}
-        />
+        <>
+          <QuoteView
+            values={initialValues}
+            money={{
+              subtotal: quote.subtotal,
+              discount: quote.discount,
+              vat_enabled: quote.vat_enabled,
+              vat_amount: quote.vat_amount,
+              grand_total: quote.grand_total,
+              agreed_price: quote.agreed_price,
+              status: quote.status ?? "draft",
+              deposit_amount: quote.deposit_amount ?? settings.defaultDeposit,
+              deposit_paid_at: quote.deposit_paid_at,
+              moving_date: quote.moving_date,
+            }}
+            editHref={`/quotes/${quote.id}?edit=1`}
+          />
+          <div className="mt-4 space-y-4">
+            <ContractSignatureCard signature={contractSignature} quoteStatus={quote.status ?? "draft"} />
+            <CompletionCard completion={completion} />
+          </div>
+        </>
       )}
     </main>
   );

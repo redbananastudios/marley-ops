@@ -19,13 +19,14 @@ export async function acceptQuoteAction(
   token: string,
   fullName: string,
   acks?: Record<string, boolean>,
+  signatureImage?: string | null,
 ): Promise<AcceptOutcome> {
   const sb = createAdminClient();
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
   const userAgent = h.get("user-agent");
 
-  const result = await acceptQuoteOnline(sb, token, fullName, ip, { acks, userAgent });
+  const result = await acceptQuoteOnline(sb, token, fullName, ip, { acks, userAgent, signatureImage });
   if (result.ok) revalidatePath(`/q/${token}`);
   return result;
 }

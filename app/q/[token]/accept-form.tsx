@@ -11,6 +11,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { CONTRACT_ACKS, type ContractAckKey } from "@/lib/signatures";
+import { ScriptSignature, renderNameToPng } from "@/lib/signature-script";
 import { acceptQuoteAction } from "./actions";
 
 export function AcceptForm({ token, depositLabel }: { token: string; depositLabel: string }) {
@@ -38,7 +39,10 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
       return;
     }
     startTransition(async () => {
-      const res = await acceptQuoteAction(token, name.trim(), acks);
+      // Rasterise the script rendering so the record carries a signature
+      // image; the typed name stays the legal signature if this fails.
+      const sigImage = await renderNameToPng(name);
+      const res = await acceptQuoteAction(token, name.trim(), acks, sigImage);
       if (!res.ok) setError(res.error);
       else router.refresh(); // server re-renders into the payment view
     });
@@ -85,6 +89,9 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
           placeholder="e.g. Jane Smith"
           className="h-14 w-full rounded-md border border-mist-200 bg-white px-4 text-base text-ink outline-none transition focus:border-mm-red focus:ring-2 focus:ring-mm-red/20"
         />
+        <div className="mt-3">
+          <ScriptSignature name={name} />
+        </div>
         <p className="mt-2 text-xs text-mist-400">
           Typing your name acts as your signature accepting this quote and our{" "}
           <a
