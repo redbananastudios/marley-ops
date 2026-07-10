@@ -10,7 +10,9 @@ import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { MarkPaidButton } from "@/components/performance/mark-paid-button";
 import { SalesTab } from "@/components/performance/sales-tab";
+import { StorageTab, type CurrentLetRow } from "@/components/performance/storage-tab";
 import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
+import { buildStorageReport, letWeeks } from "@/lib/storage-report";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
@@ -60,8 +62,8 @@ function resolveRange(preset: string, fromQ?: string, toQ?: string): { from: str
 
 type SearchParams = { month?: string; tab?: string; range?: string; from?: string; to?: string };
 
-function TabBar({ active }: { active: "overview" | "sales" }) {
-  const tab = (key: "overview" | "sales", label: string, href: string) => (
+function TabBar({ active }: { active: "overview" | "sales" | "storage" }) {
+  const tab = (key: "overview" | "sales" | "storage", label: string, href: string) => (
     <Link
       href={href}
       aria-current={active === key ? "page" : undefined}
@@ -78,7 +80,66 @@ function TabBar({ active }: { active: "overview" | "sales" }) {
       {tab("overview", "Overview", "/performance")}
       <span className="w-px bg-border" />
       {tab("sales", "Sales", "/performance?tab=sales")}
+      <span className="w-px bg-border" />
+      {tab("storage", "Storage", "/performance?tab=storage")}
     </div>
+  );
+}
+
+async function StorageTabPage() {
+  const sb = await createClient();
+  const [{ data: sites }, { data: units }, lets, { data: clients }] = await Promise.all([
+    sb.from("storage_sites").select("id, name, is_active"),
+    sb.from("storage_units").select("id, site_id, code, name, unit_type, is_active"),
+    fetchAllRows((f, t) =>
+      sb
+        .from("storage_lets")
+        .select("id, unit_id, client_id, start_date, end_date, rate, rate_period")
+        .order("id")
+        .range(f, t),
+    ),
+    sb.from("clients").select("id, display_name"),
+  ]);
+
+  const today = (() => {
+    const p = ukParts();
+    return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+  })();
+
+  const report = buildStorageReport(
+    (sites ?? []).map((s) => ({ id: s.id, is_active: s.is_active })),
+    units ?? [],
+    lets.map((l) => ({ ...l, rate: l.rate == null ? null : Number(l.rate) })),
+    today,
+  );
+
+  const clientName = new Map((clients ?? []).map((c) => [c.id, c.display_name as string]));
+  const unitById = new Map((units ?? []).map((u) => [u.id, u]));
+  const siteName = new Map((sites ?? []).map((s) => [s.id, s.name as string]));
+  const currentLets: CurrentLetRow[] = lets
+    .filter((l) => l.end_date == null)
+    .map((l) => {
+      const u = unitById.get(l.unit_id);
+      return {
+        id: l.id,
+        client_id: l.client_id,
+        client_name: clientName.get(l.client_id) ?? "Unknown client",
+        unit_label: u ? u.code || u.name || "Unit" : "Unit",
+        site_name: u ? siteName.get(u.site_id) ?? "—" : "—",
+        start_date: l.start_date,
+        rate: l.rate == null ? null : Number(l.rate),
+        rate_period: l.rate_period,
+        weeks: letWeeks(l.start_date, today),
+      };
+    })
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+
+  return (
+    <main className="flex-1 p-6 md:p-8">
+      <PageHeader eyebrow="Reports" title="Performance" />
+      <TabBar active="storage" />
+      <StorageTab report={report} currentLets={currentLets} />
+    </main>
   );
 }
 
@@ -131,6 +192,7 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
 export default async function PerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   if (sp.tab === "sales") return <SalesTabPage sp={sp} />;
+  if (sp.tab === "storage") return <StorageTabPage />;
   const nowUk = ukParts();
   const m = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month!.split("-") : null;
   const year = m ? Number(m[0]) : nowUk.year;
