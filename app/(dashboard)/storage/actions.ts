@@ -1,8 +1,15 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import {
+  allStorageAcksConfirmed,
+  isValidSignatureDataUri,
+  normalizeStorageAcks,
+  TERMS_VERSION,
+} from "@/lib/signatures";
 
 async function actor() {
   const sb = await createClient();
@@ -195,4 +202,145 @@ export async function endLetAction(letId: string, endDate: string) {
 
   revalidatePath("/storage");
   return { ok: true as const };
+}
+
+/** Edit a let. Rate/notes change freely (future periods bill at the new rate);
+ *  start_date/rate_period are locked once invoices exist — the billed periods
+ *  are anchored to them and re-anchoring would corrupt the invoice history. */
+const editLetSchema = z.object({
+  rate: optNum,
+  rate_period: z.enum(["week", "month"]),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  notes: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+export type EditLetInput = z.infer<typeof editLetSchema>;
+
+export async function editLetAction(letId: string, input: EditLetInput) {
+  const parsed = editLetSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const v = parsed.data;
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+
+  const { data: row } = await sb.from("storage_lets").select("start_date, rate_period, end_date").eq("id", letId).single();
+  if (!row) return { ok: false as const, error: "Let not found." };
+
+  const anchorsChanged = v.start_date !== row.start_date || v.rate_period !== row.rate_period;
+  if (anchorsChanged) {
+    const { count } = await sb
+      .from("storage_invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("let_id", letId);
+    if ((count ?? 0) > 0) {
+      return {
+        ok: false as const,
+        error: "Invoices exist on this let — the start date and billing period are locked. Rate and notes can still change.",
+      };
+    }
+  }
+  if (row.end_date && v.start_date > row.end_date) {
+    return { ok: false as const, error: "Start date can't be after the end date." };
+  }
+
+  const { error } = await sb
+    .from("storage_lets")
+    .update({
+      rate: v.rate === "" || v.rate == null ? null : v.rate,
+      rate_period: v.rate_period,
+      start_date: v.start_date,
+      notes: v.notes || null,
+    })
+    .eq("id", letId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/storage");
+  return { ok: true as const };
+}
+
+/** Reopen an accidentally-ended let (audit gap: ending was one-way). */
+export async function reopenLetAction(letId: string) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const { data: row } = await sb.from("storage_lets").select("unit_id, end_date").eq("id", letId).single();
+  if (!row) return { ok: false as const, error: "Let not found." };
+  if (!row.end_date) return { ok: false as const, error: "This let is already open." };
+
+  const { error } = await sb.from("storage_lets").update({ end_date: null }).eq("id", letId);
+  if (error) {
+    return {
+      ok: false as const,
+      error: error.message.includes("storage_lets_open_uq")
+        ? "The unit now has a different open let — end that one first."
+        : error.message,
+    };
+  }
+  revalidatePath("/storage");
+  return { ok: true as const };
+}
+
+export async function setBillingPausedAction(letId: string, paused: boolean) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const { error } = await sb.from("storage_lets").update({ billing_paused: paused } as never).eq("id", letId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/storage");
+  return { ok: true as const };
+}
+
+/* ------------------------------------------------------- storage agreement */
+
+/** In-person agreement signing on the office/crew device — the default
+ *  (Peter, 2026-07-10). Identical record to remote except channel. */
+export async function signStorageAgreementAction(
+  letId: string,
+  input: { signerName: string; signatureDataUri: string; acks: Record<string, boolean> },
+) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const name = input.signerName.trim();
+  if (name.length < 2) return { ok: false as const, error: "Type the customer's full name." };
+  if (!allStorageAcksConfirmed(input.acks)) {
+    return { ok: false as const, error: "Tick each confirmation with the customer first." };
+  }
+  if (!isValidSignatureDataUri(input.signatureDataUri)) {
+    return { ok: false as const, error: "The signature didn't come through — ask them to sign again." };
+  }
+
+  const { data: let_ } = await sb.from("storage_lets").select("id, client_id, lead_id").eq("id", letId).single();
+  if (!let_) return { ok: false as const, error: "Let not found." };
+
+  const { error } = await sb.from("signatures").insert({
+    kind: "storage",
+    storage_let_id: let_.id,
+    client_id: let_.client_id,
+    lead_id: let_.lead_id,
+    signer_name: name,
+    signature_data: input.signatureDataUri,
+    method: "drawn",
+    channel: "in_person",
+    acknowledgments: normalizeStorageAcks(input.acks),
+    terms_version: TERMS_VERSION,
+    collected_by: userId,
+  } as never);
+  if (error) {
+    if (error.code === "23505") return { ok: true as const }; // already signed — success state
+    return { ok: false as const, error: "Could not save the signature — try again." };
+  }
+  revalidatePath("/storage");
+  return { ok: true as const };
+}
+
+/** Remote signing link (no-one-on-site collections): mints the let's token
+ *  lazily and returns the /s/<token> URL for copy/send. */
+export async function getStorageSignLinkAction(letId: string) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const { data: row } = await sb.from("storage_lets").select("sign_token").eq("id", letId).single();
+  if (!row) return { ok: false as const, error: "Let not found." };
+  let token = row.sign_token as string | null;
+  if (!token) {
+    token = randomBytes(18).toString("base64url");
+    const { error } = await sb.from("storage_lets").update({ sign_token: token } as never).eq("id", letId);
+    if (error) return { ok: false as const, error: error.message };
+  }
+  return { ok: true as const, url: `https://ops.marleymoves.co.uk/s/${token}` };
 }

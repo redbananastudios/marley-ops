@@ -38,6 +38,8 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/auth") ||
     // Customer accept/pay page — the unguessable token IS the credential.
     path.startsWith("/q/") ||
+    // Storage-agreement signing page — same token-as-credential model.
+    path.startsWith("/s/") ||
     // Scheduled callers (Vercel cron / i9 tasks) authenticate with a bearer
     // secret INSIDE the route (requireUserOrCronSecret); a redirect-to-login
     // here would silently break them.

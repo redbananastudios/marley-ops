@@ -12,7 +12,7 @@ import { MarkPaidButton } from "@/components/performance/mark-paid-button";
 import { SalesTab } from "@/components/performance/sales-tab";
 import { StorageTab, type CurrentLetRow } from "@/components/performance/storage-tab";
 import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
-import { buildStorageReport, letWeeks } from "@/lib/storage-report";
+import { buildStorageBillingStats, buildStorageReport, letWeeks } from "@/lib/storage-report";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
@@ -100,11 +100,22 @@ async function StorageTabPage() {
     ),
     sb.from("clients").select("id, display_name"),
   ]);
+  const { data: storageInvoices } = await sb
+    .from("storage_invoices")
+    .select("amount, status, period_start");
 
   const today = (() => {
     const p = ukParts();
     return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
   })();
+
+  const billing = buildStorageBillingStats(
+    (storageInvoices ?? []).map((i) => ({ ...i, amount: Number(i.amount) })),
+    (() => {
+      const p = ukParts();
+      return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+    })(),
+  );
 
   const report = buildStorageReport(
     (sites ?? []).map((s) => ({ id: s.id, is_active: s.is_active })),
@@ -138,7 +149,7 @@ async function StorageTabPage() {
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Reports" title="Performance" />
       <TabBar active="storage" />
-      <StorageTab report={report} currentLets={currentLets} />
+      <StorageTab report={report} currentLets={currentLets} billing={billing} />
     </main>
   );
 }

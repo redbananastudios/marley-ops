@@ -164,6 +164,7 @@ export type Database = {
           quote_id: string | null
           lead_id: string | null
           client_id: string | null
+          storage_let_id: string | null
           signer_name: string
           signature_data: string | null
           method: string
@@ -182,6 +183,7 @@ export type Database = {
           quote_id?: string | null
           lead_id?: string | null
           client_id?: string | null
+          storage_let_id?: string | null
           signer_name: string
           signature_data?: string | null
           method: string
@@ -200,6 +202,7 @@ export type Database = {
           quote_id?: string | null
           lead_id?: string | null
           client_id?: string | null
+          storage_let_id?: string | null
           signer_name?: string
           signature_data?: string | null
           method?: string
@@ -271,6 +274,57 @@ export type Database = {
           certificate_emailed_at?: string | null
           signed_at?: string
           created_at?: string
+        }
+        Relationships: []
+      }
+      storage_invoices: {
+        Row: {
+          id: string
+          let_id: string
+          client_id: string | null
+          period_start: string
+          period_end: string
+          amount: number
+          zoho_invoice_id: string | null
+          zoho_invoice_number: string | null
+          zoho_invoice_url: string | null
+          status: string
+          emailed_at: string | null
+          error: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          let_id: string
+          client_id?: string | null
+          period_start: string
+          period_end: string
+          amount: number
+          zoho_invoice_id?: string | null
+          zoho_invoice_number?: string | null
+          zoho_invoice_url?: string | null
+          status?: string
+          emailed_at?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          let_id?: string
+          client_id?: string | null
+          period_start?: string
+          period_end?: string
+          amount?: number
+          zoho_invoice_id?: string | null
+          zoho_invoice_number?: string | null
+          zoho_invoice_url?: string | null
+          status?: string
+          emailed_at?: string | null
+          error?: string | null
+          created_at?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -354,6 +408,8 @@ export type Database = {
           rate: number | null
           rate_period: string
           notes: string | null
+          billing_paused: boolean
+          sign_token: string | null
           created_at: string
           updated_at: string
         }
@@ -367,6 +423,8 @@ export type Database = {
           rate?: number | null
           rate_period?: string
           notes?: string | null
+          billing_paused?: boolean
+          sign_token?: string | null
           created_at?: string
           updated_at?: string
         }
@@ -380,6 +438,8 @@ export type Database = {
           rate?: number | null
           rate_period?: string
           notes?: string | null
+          billing_paused?: boolean
+          sign_token?: string | null
           created_at?: string
           updated_at?: string
         }

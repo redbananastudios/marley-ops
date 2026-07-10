@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import {
   endLetAction,
+  reopenLetAction,
   saveSiteAction,
   saveUnitAction,
   setSiteActiveAction,
@@ -52,6 +53,7 @@ import {
   type UnitInput,
 } from "@/app/(dashboard)/storage/actions";
 import { defaultCuft, occupiedUnitIds, siteOccupancy, UNIT_TYPES, type UnitType } from "@/lib/storage-units";
+import { ManageLetDialog } from "@/components/storage/manage-let-dialog";
 
 export interface SiteRow {
   id: string;
@@ -72,6 +74,15 @@ export interface UnitRow {
   is_active: boolean;
 }
 
+export interface LetInvoice {
+  id: string;
+  period_start: string;
+  amount: number;
+  status: string;
+  zoho_invoice_number: string | null;
+  zoho_invoice_url: string | null;
+}
+
 export interface LetRow {
   id: string;
   unit_id: string;
@@ -82,6 +93,13 @@ export interface LetRow {
   rate: number | null;
   rate_period: string;
   notes: string | null;
+  billing_paused: boolean;
+  /** kind='storage' signature on this let, if collected. */
+  agreement: { signer: string; channel: string } | null;
+  /** Next date the billing cron will raise an invoice (open lets only). */
+  next_invoice: string | null;
+  /** Most recent invoices, newest first. */
+  invoices: LetInvoice[];
 }
 
 export interface PickerClient {
@@ -125,11 +143,22 @@ export function StorageView({
   const [unitEdit, setUnitEdit] = useState<UnitRow | "new" | null>(null);
   const [letFor, setLetFor] = useState<UnitRow | null>(null);
   const [endFor, setEndFor] = useState<{ unit: UnitRow; let: LetRow } | null>(null);
+  const [manageFor, setManageFor] = useState<{ unit: UnitRow; let: LetRow } | null>(null);
 
   const occupied = useMemo(() => occupiedUnitIds(lets), [lets]);
   const openLetByUnit = useMemo(() => {
     const m = new Map<string, LetRow>();
     for (const l of lets) if (l.end_date == null) m.set(l.unit_id, l);
+    return m;
+  }, [lets]);
+  // Latest ENDED let per unit — the "reopen" recovery for an accidental end.
+  const lastEndedByUnit = useMemo(() => {
+    const m = new Map<string, LetRow>();
+    for (const l of lets) {
+      if (!l.end_date) continue;
+      const cur = m.get(l.unit_id);
+      if (!cur || l.end_date > (cur.end_date ?? "")) m.set(l.unit_id, l);
+    }
     return m;
   }, [lets]);
 
@@ -247,6 +276,8 @@ export function StorageView({
                   onEdit={() => setUnitEdit(u)}
                   onAssign={() => setLetFor(u)}
                   onEnd={(l) => setEndFor({ unit: u, let: l })}
+                  onManage={(l) => setManageFor({ unit: u, let: l })}
+                  lastEndedLet={lastEndedByUnit.get(u.id) ?? null}
                 />
               ))}
             </div>
@@ -267,6 +298,7 @@ export function StorageView({
       ) : null}
       {letFor ? <LetDialog unit={letFor} clients={clients} onClose={() => setLetFor(null)} /> : null}
       {endFor ? <EndLetDialog unit={endFor.unit} let_={endFor.let} onClose={() => setEndFor(null)} /> : null}
+      {manageFor ? <ManageLetDialog unit={manageFor.unit} let_={manageFor.let} onClose={() => setManageFor(null)} /> : null}
     </div>
   );
 }
@@ -454,12 +486,16 @@ function UnitCard({
   onEdit,
   onAssign,
   onEnd,
+  onManage,
+  lastEndedLet,
 }: {
   u: UnitRow;
   openLet: LetRow | null;
   onEdit: () => void;
   onAssign: () => void;
   onEnd: (l: LetRow) => void;
+  onManage: (l: LetRow) => void;
+  lastEndedLet: LetRow | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -516,19 +552,47 @@ function UnitCard({
             since {fmtDate(openLet.start_date)}
             {openLet.rate != null ? ` · ${gbp(openLet.rate)}/${openLet.rate_period === "month" ? "mo" : "wk"}` : ""}
           </p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            {openLet.agreement ? (
+              <span className="rounded-pill bg-success-bg px-2 py-0.5 text-[10px] font-semibold text-success">
+                Agreement signed
+              </span>
+            ) : (
+              <span className="rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
+                Agreement unsigned
+              </span>
+            )}
+            {openLet.billing_paused ? (
+              <span className="rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
+                Billing paused
+              </span>
+            ) : openLet.next_invoice ? (
+              <span className="rounded-pill bg-muted px-2 py-0.5 text-[10px] font-medium text-mist-500">
+                Next invoice {fmtDate(openLet.next_invoice)}
+              </span>
+            ) : null}
+          </p>
         </div>
       ) : null}
 
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
         {u.is_active ? (
           occupied && openLet ? (
-            <Button variant="outline" size="sm" onClick={() => onEnd(openLet)}>
-              End let
-            </Button>
+            <span className="flex gap-2">
+              <Button size="sm" onClick={() => onManage(openLet)} className="bg-mm-red text-white hover:bg-mm-red-deep">
+                Manage
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => onEnd(openLet)}>
+                End let
+              </Button>
+            </span>
           ) : (
-            <Button size="sm" onClick={onAssign} className="bg-mm-red text-white hover:bg-mm-red-deep">
-              Assign client
-            </Button>
+            <span className="flex items-center gap-2">
+              <Button size="sm" onClick={onAssign} className="bg-mm-red text-white hover:bg-mm-red-deep">
+                Assign client
+              </Button>
+              {lastEndedLet ? <ReopenLetLink let_={lastEndedLet} /> : null}
+            </span>
           )
         ) : (
           <span />
@@ -561,6 +625,33 @@ function UnitCard({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Undo an accidental End-let: reopens the unit's most recent ended let. */
+function ReopenLetLink({ let_ }: { let_: LetRow }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  function reopen() {
+    start(async () => {
+      const res = await reopenLetAction(let_.id);
+      if (!res.ok) toast.error(res.error);
+      else {
+        toast.success(`${let_.client_name}'s let reopened — billing resumes from where it left off.`);
+        router.refresh();
+      }
+    });
+  }
+  return (
+    <button
+      type="button"
+      onClick={reopen}
+      disabled={pending}
+      title={`Reopen ${let_.client_name}'s let (ended ${fmtDate(let_.end_date)})`}
+      className="focus-ring text-xs font-medium text-mist-400 underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+    >
+      {pending ? "Reopening…" : "Reopen last let"}
+    </button>
   );
 }
 
@@ -865,7 +956,8 @@ function EndLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: LetRow; on
           <DialogTitle className="font-display text-xl">End let</DialogTitle>
           <DialogDescription>
             {let_.client_name} moves out of {unit.code || unit.name || "this unit"} — it becomes available again.
-            Check any outstanding storage invoices in Zoho.
+            Billing stops automatically; periods already invoiced are not pro-rated, and any unpaid invoices stay
+            collectable.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-1.5 py-2">

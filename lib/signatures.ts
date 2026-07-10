@@ -33,6 +33,40 @@ export const CONTRACT_ACKS = [
 
 export type ContractAckKey = (typeof CONTRACT_ACKS)[number]["key"];
 
+/** The storage-agreement acknowledgments (kind='storage'). GENERIC wording at
+ *  launch — legal review before full go-live (ClickUp 869e35z42); the lien
+ *  clause is the one with real teeth. */
+export const STORAGE_ACKS = [
+  {
+    key: "rate_advance",
+    label: "I agree to the storage rate shown, billed in advance each period until I end the storage.",
+  },
+  {
+    key: "lien",
+    label:
+      "I understand that if invoices stay unpaid for 60+ days, Marley Moves may, after written notice, dispose of or sell stored items to recover the charges.",
+  },
+  {
+    key: "no_prohibited",
+    label: "Nothing stored is hazardous, perishable, illegal, or irreplaceable without my own insurance.",
+  },
+] as const;
+
+export type StorageAckKey = (typeof STORAGE_ACKS)[number]["key"];
+
+export function allStorageAcksConfirmed(acks: Record<string, unknown> | null | undefined): boolean {
+  if (!acks) return false;
+  return STORAGE_ACKS.every((a) => acks[a.key] === true);
+}
+
+export function normalizeStorageAcks(
+  acks: Record<string, unknown> | null | undefined,
+): Record<StorageAckKey, boolean> {
+  const out = {} as Record<StorageAckKey, boolean>;
+  for (const a of STORAGE_ACKS) out[a.key] = acks?.[a.key] === true;
+  return out;
+}
+
 /** All acknowledgments ticked? (Object shape: { inventory: true, ... }) */
 export function allAcksConfirmed(acks: Record<string, unknown> | null | undefined): boolean {
   if (!acks) return false;

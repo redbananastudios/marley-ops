@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import type { StorageReport } from "@/lib/storage-report";
+import type { StorageBillingStats, StorageReport } from "@/lib/storage-report";
 
 /**
  * Performance → Storage tab (iMVE Storage Analysis clone-and-improve; numbers
@@ -47,7 +47,15 @@ function fmtDate(d: string): string {
     : t.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
-export function StorageTab({ report, currentLets }: { report: StorageReport; currentLets: CurrentLetRow[] }) {
+export function StorageTab({
+  report,
+  currentLets,
+  billing,
+}: {
+  report: StorageReport;
+  currentLets: CurrentLetRow[];
+  billing: StorageBillingStats;
+}) {
   const r = report;
   const hasStorage = r.sites > 0 || r.units.total > 0;
 
@@ -122,7 +130,35 @@ export function StorageTab({ report, currentLets }: { report: StorageReport; cur
         <KpiCard
           label="Earned to date"
           value={gbp(r.earnedToDate)}
-          definition="Estimate of all-time storage revenue from the let history — check Zoho for what was actually invoiced."
+          definition="Estimate from the let history — the invoicing row below is what was actually billed."
+        />
+      </div>
+
+      {/* invoicing — real numbers from the billing cron (phase 2) */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          label="Billed to date"
+          value={gbp(billing.billed)}
+          sub={`${billing.invoiceCount} invoice${billing.invoiceCount === 1 ? "" : "s"}`}
+          definition="Every storage invoice raised in Zoho by the nightly billing run (void/errors excluded)."
+        />
+        <KpiCard
+          label="Paid"
+          value={gbp(billing.paid)}
+          sub={`${billing.paidCount} invoice${billing.paidCount === 1 ? "" : "s"}`}
+          definition="Invoices Zoho shows as settled."
+        />
+        <KpiCard
+          label="Outstanding"
+          value={gbp(billing.outstanding)}
+          sub={`${billing.outstandingCount} invoice${billing.outstandingCount === 1 ? "" : "s"}`}
+          definition="Raised but not yet paid."
+        />
+        <KpiCard
+          label="Overdue"
+          value={String(billing.overdueCount)}
+          sub={billing.overdueCount ? "chase these" : "all current"}
+          definition="Unpaid invoices whose billing period started 14+ days ago."
         />
       </div>
 
@@ -225,8 +261,8 @@ export function StorageTab({ report, currentLets }: { report: StorageReport; cur
       </Card>
 
       <p className="text-xs text-mist-400">
-        Revenue figures are calculated from agreed let rates — storage invoicing is manual in Zoho until recurring
-        billing is wired in. Invoice analytics (paid vs outstanding) arrive with it.
+        Run-rate figures come from agreed let rates; the invoicing row is what the nightly billing run actually
+        raised in Zoho, with paid status refreshed daily.
       </p>
     </div>
   );

@@ -1,0 +1,116 @@
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { UNIT_TYPES } from "@/lib/storage-units";
+import { TERMS_URL } from "@/lib/signatures";
+import { StorageAgreementForm } from "./agreement-form";
+
+/**
+ * /s/<token> — remote storage-agreement signing (Peter, 2026-07-10: in person
+ * is the default; this is the option for no-one-on-site collections). Same
+ * model as /q: the unguessable token IS the credential; noindex; the typed
+ * name + acknowledgments are the signature, stored with IP/UA + a script
+ * rendering of the name.
+ */
+
+export const dynamic = "force-dynamic";
+export const metadata: Metadata = { robots: { index: false, follow: false } };
+
+const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\.00$/, "");
+
+const prettyDay = (iso: string): string =>
+  new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+export default async function StorageSignPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = await params;
+  if (!/^[\w-]{10,64}$/.test(token)) notFound();
+
+  const admin = createAdminClient();
+  const { data: let_ } = await admin
+    .from("storage_lets")
+    .select("id, client_id, unit_id, start_date, end_date, rate, rate_period")
+    .eq("sign_token", token)
+    .maybeSingle();
+  if (!let_) notFound();
+
+  const [{ data: client }, { data: unit }, { data: existing }] = await Promise.all([
+    admin.from("clients").select("display_name").eq("id", let_.client_id).maybeSingle(),
+    admin.from("storage_units").select("code, unit_type, site_id").eq("id", let_.unit_id).maybeSingle(),
+    admin
+      .from("signatures")
+      .select("signer_name, signed_at")
+      .eq("storage_let_id", let_.id)
+      .eq("kind", "storage")
+      .maybeSingle(),
+  ]);
+  const { data: site } = unit?.site_id
+    ? await admin.from("storage_sites").select("name").eq("id", unit.site_id).maybeSingle()
+    : { data: null };
+
+  const typeLabel = UNIT_TYPES.find((t) => t.value === unit?.unit_type)?.label ?? "Storage unit";
+  const unitLabel = `${typeLabel}${unit?.code ? ` ${unit.code}` : ""}${site?.name ? ` at ${site.name}` : ""}`;
+  const firstName = (client?.display_name ?? "").trim().split(/\s+/)[0] || "there";
+  const rateLabel = let_.rate ? `${gbp(Number(let_.rate))} per ${let_.rate_period}` : "as agreed";
+
+  return (
+    <main className="mx-auto min-h-screen max-w-xl bg-[#F6F5F3] px-5 py-10">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="https://quotes.marleymoves.co.uk/logo.png" alt="Marley Moves" width={170} className="mx-auto mb-6" />
+
+      <div className="rounded-lg border border-[#E8E4DD] bg-white p-6 sm:p-8">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-mm-red">Storage agreement</p>
+        <h1 className="mt-2 font-display text-3xl font-semibold text-ink">
+          {existing ? "All signed — thank you." : `Your storage with us, ${firstName}`}
+        </h1>
+
+        {existing ? (
+          <p className="mt-4 text-sm leading-relaxed text-mist-500">
+            This agreement was signed by <strong>{existing.signer_name}</strong> on{" "}
+            {prettyDay(existing.signed_at)}. Nothing more to do — any questions, call{" "}
+            <a href="tel:01747637070" className="font-semibold text-mm-red">
+              01747 637070
+            </a>
+            .
+          </p>
+        ) : (
+          <>
+            <div className="mt-5 space-y-2 rounded-md border-l-4 border-mm-red bg-[#FBF8F4] p-4 text-sm text-ink">
+              <p>
+                <strong>{unitLabel}</strong>
+              </p>
+              <p>
+                From <strong>{prettyDay(let_.start_date)}</strong> · Rate <strong>{rateLabel}</strong>, billed in
+                advance each period until you end the storage. The final period is not part-refunded.
+              </p>
+            </div>
+            <p className="mt-4 text-xs leading-relaxed text-mist-400">
+              This agreement is with Marley Moves Ltd (Company No. 15914266) under our{" "}
+              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+                terms &amp; conditions
+              </a>
+              . Invoices are payable by bank transfer on receipt.
+            </p>
+
+            <div className="mt-6">
+              <StorageAgreementForm token={token} />
+            </div>
+          </>
+        )}
+      </div>
+
+      <p className="mt-6 text-center text-xs text-mist-400">
+        Marley Moves Ltd · Company No. 15914266 · Shaftesbury, SP7
+        <br />
+        Questions? Call{" "}
+        <a href="tel:01747637070" className="font-semibold">
+          01747 637070
+        </a>
+      </p>
+    </main>
+  );
+}

@@ -45,6 +45,64 @@ export interface StorageReport {
   longestOpenWeeks: number | null;
 }
 
+export interface ReportInvoice {
+  amount: number;
+  status: string; // pending | sent | paid | void | error
+  period_start: string;
+}
+
+export interface StorageBillingStats {
+  /** Live invoicing totals (void/error excluded from billed). */
+  billed: number;
+  paid: number;
+  outstanding: number;
+  invoiceCount: number;
+  paidCount: number;
+  outstandingCount: number;
+  /** Sent invoices whose PERIOD already started 14+ days ago — chase these. */
+  overdueCount: number;
+}
+
+/** Real invoicing analytics (phase 2) — replaces the earned-to-date estimate
+ *  as the number to trust once billing runs. */
+export function buildStorageBillingStats(invoices: ReportInvoice[], todayIso: string): StorageBillingStats {
+  let billed = 0,
+    paid = 0,
+    outstanding = 0,
+    paidCount = 0,
+    outstandingCount = 0,
+    overdueCount = 0;
+  const overdueBefore = new Date(`${todayIso.slice(0, 10)}T00:00:00Z`);
+  overdueBefore.setUTCDate(overdueBefore.getUTCDate() - 14);
+  const overdueCut = overdueBefore.toISOString().slice(0, 10);
+
+  let counted = 0;
+  for (const inv of invoices) {
+    if (inv.status === "void" || inv.status === "error") continue;
+    counted++;
+    const amt = Number(inv.amount) || 0;
+    billed += amt;
+    if (inv.status === "paid") {
+      paid += amt;
+      paidCount++;
+    } else {
+      outstanding += amt;
+      outstandingCount++;
+      if (inv.period_start.slice(0, 10) <= overdueCut) overdueCount++;
+    }
+  }
+  const r = (n: number) => Math.round(n * 100) / 100;
+  return {
+    billed: r(billed),
+    paid: r(paid),
+    outstanding: r(outstanding),
+    invoiceCount: counted,
+    paidCount,
+    outstandingCount,
+    overdueCount,
+  };
+}
+
 const WEEK_MS = 7 * 86_400_000;
 const dayMs = (d: string): number => new Date(`${d}T00:00:00Z`).getTime();
 
