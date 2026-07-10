@@ -19,6 +19,7 @@ import {
   Truck,
   UserCog,
   Users,
+  Warehouse,
   type LucideIcon,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
@@ -44,6 +45,7 @@ export const NAV: NavGroup[] = [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
       { href: "/resources", label: "Staff & Fleet", icon: UserCog, live: true },
+      { href: "/storage", label: "Storage", icon: Warehouse, live: true },
     ],
   },
   {

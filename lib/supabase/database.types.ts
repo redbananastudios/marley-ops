@@ -130,6 +130,117 @@ export type Database = {
         }
         Relationships: []
       }
+      storage_sites: {
+        Row: {
+          id: string
+          name: string
+          address: string
+          notes: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          name: string
+          address?: string
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          name?: string
+          address?: string
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      storage_units: {
+        Row: {
+          id: string
+          site_id: string
+          code: string
+          name: string
+          unit_type: string
+          size_cuft: number | null
+          notes: string | null
+          is_active: boolean
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          site_id: string
+          code?: string
+          name?: string
+          unit_type?: string
+          size_cuft?: number | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          site_id?: string
+          code?: string
+          name?: string
+          unit_type?: string
+          size_cuft?: number | null
+          notes?: string | null
+          is_active?: boolean
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      storage_lets: {
+        Row: {
+          id: string
+          unit_id: string
+          client_id: string
+          lead_id: string | null
+          start_date: string
+          end_date: string | null
+          rate: number | null
+          rate_period: string
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          unit_id: string
+          client_id: string
+          lead_id?: string | null
+          start_date: string
+          end_date?: string | null
+          rate?: number | null
+          rate_period?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          unit_id?: string
+          client_id?: string
+          lead_id?: string | null
+          start_date?: string
+          end_date?: string | null
+          rate?: number | null
+          rate_period?: string
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       activities: {
         Row: {
           actor_id: string | null
