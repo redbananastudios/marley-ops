@@ -131,4 +131,16 @@ describe("buildJobSheetDocDef", () => {
     expect(s).toContain("No crew assigned yet");
     expect(s).toContain("No vehicles assigned yet");
   });
+
+  it("no-quote inventory keeps the colSpan filler a BARE {} — any property loops pdfmake's layout", () => {
+    const bare = assembleJobSheetData(appt, lead, null, [], []);
+    const def = buildJobSheetDocDef(bare);
+    const tables = def.content.filter((b: { table?: { body: unknown[][] } }) => b.table);
+    const inventory = tables.find((b: { table: { body: { text?: string }[][] } }) =>
+      JSON.stringify(b).includes("No packing materials"),
+    );
+    const emptyRow = inventory.table.body[1];
+    expect(emptyRow[0].colSpan).toBe(2);
+    expect(Object.keys(emptyRow[1])).toEqual([]);
+  });
 });

@@ -128,13 +128,16 @@ function listCard(title: string, lines: string[], empty: string): any {
 }
 
 export function buildJobSheetDocDef(d: JobSheetData): any {
+  const cellM = [10, 4, 10, 4];
+  // NOTE: the colSpan filler MUST stay a bare {} — giving it any property
+  // (even just a margin) sends pdfmake's layout into an infinite loop.
   const inventoryRows =
     d.items.length > 0
       ? d.items.map((i, idx) => [
-          { text: i.label, style: "body", fillColor: idx % 2 ? C.rowAlt : C.white },
-          { text: String(i.qty), style: "bodyQty", fillColor: idx % 2 ? C.rowAlt : C.white },
+          { text: i.label, style: "body", fillColor: idx % 2 ? C.rowAlt : C.white, margin: cellM },
+          { text: String(i.qty), style: "bodyQty", fillColor: idx % 2 ? C.rowAlt : C.white, margin: cellM },
         ])
-      : [[{ text: "No packing materials recorded on the quote.", style: "meta", colSpan: 2 }, {}]];
+      : [[{ text: "No packing materials recorded on the quote.", style: "meta", colSpan: 2, margin: cellM }, {}]];
 
   const notes = [
     d.accessNotes ? `Access: ${d.accessNotes}` : null,
@@ -283,9 +286,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
               { text: "PACKING MATERIALS & INVENTORY", style: "colHead", fillColor: C.charcoal, margin: [10, 5, 10, 5] },
               { text: "QTY", style: "colHead", fillColor: C.charcoal, alignment: "right", margin: [10, 5, 10, 5] },
             ],
-            ...inventoryRows.map((r: any[]) =>
-              r.map((c: any) => ({ ...c, margin: [10, 4, 10, 4] })),
-            ),
+            ...inventoryRows,
           ],
         },
         layout: {
