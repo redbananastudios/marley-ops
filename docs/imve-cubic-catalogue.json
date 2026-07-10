@@ -1,0 +1,1358 @@
+[
+  {
+    "category": "Living space",
+    "key": "livingroom",
+    "order": 0,
+    "items": [
+      {
+        "title": "Sofa 2 seater",
+        "ft3": 35,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sofa 3 seater",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sofa 4 seater",
+        "ft3": 65,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Corner sofa 3 seater",
+        "ft3": 103,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Corner sofa 4 seater",
+        "ft3": 140,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sofa bed",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Footstool",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Armchair small",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Armchair medium",
+        "ft3": 15,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Armchair large",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Armchair recliner",
+        "ft3": 17,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Rocking chair",
+        "ft3": 7,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sideboard small",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sideboard medium",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sideboard large",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cabinet small",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cabinet medium",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cabinet large",
+        "ft3": 30,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Welsh dresser",
+        "ft3": 80,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bookcase small",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bookcase medium",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bookcase large",
+        "ft3": 26,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Ikea kallax 4 cube",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Ikea kallax 6 cube",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "kallax 8 cube",
+        "ft3": 16,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "kallax 12 cube",
+        "ft3": 24,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "kallax 16 cube",
+        "ft3": 32,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bureau",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Writing desk",
+        "ft3": 14,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dining table small",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dining table medium",
+        "ft3": 30,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dining table large",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dining chairs",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Coffee table",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Small side table",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Nest of tables",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Hall table",
+        "ft3": 14,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV 32in",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV 43in",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV 52in",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV 60in +",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV stand medium",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV stand large",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "TV box (DVD, Sky etc)",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Hifi set",
+        "ft3": 16,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Hifi speaker",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "CD tower",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Floor standing lamp medium",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Floor standing lamp large",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Table lamp",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror small",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror medium",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror large",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Rug medium",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Rug large",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Coat stand",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Shoe rack",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Grandfather clock",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Piano upright",
+        "ft3": 70,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Baby grand piano",
+        "ft3": 80,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Grand piano",
+        "ft3": 150,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Piano stool",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Indoor plant small",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Indoor plant large",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Vacuum",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "6ft pool table",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "2ft Fish tank",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "3ft Fish tank",
+        "ft3": 30,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "4ft Fish tank",
+        "ft3": 45,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Storage box",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bags",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Boxed already",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Loft",
+    "key": "loft",
+    "order": 0,
+    "items": [
+      {
+        "title": "Suitcases",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry cuft",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Boxed already",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Bedrooms",
+    "key": "bedroom",
+    "order": 0,
+    "items": [
+      {
+        "title": "Divan bed single and mattress",
+        "ft3": 40,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Divan bed double and mattress",
+        "ft3": 55,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Divan bed king and mattress",
+        "ft3": 60,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Divan bed super-king and mattress",
+        "ft3": 72,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Frame single and mattress",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Frame double and mattress",
+        "ft3": 40,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Frame king and mattress",
+        "ft3": 45,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Frame super king and mattress",
+        "ft3": 52,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Single mattress",
+        "ft3": 21,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Double mattress",
+        "ft3": 55,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "King size mattress",
+        "ft3": 75,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Small child's bed",
+        "ft3": 30,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bunk bed",
+        "ft3": 70,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cot",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Futon",
+        "ft3": 30,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bedside table",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Chest of drawers small",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Chest of drawers medium",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Chest of drawers large",
+        "ft3": 40,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Tall boy",
+        "ft3": 23,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dressing table",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Wardrobe single",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Wardrobe double",
+        "ft3": 40,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Wardrobe triple",
+        "ft3": 60,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Occasional chair",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Chaise longue",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Trunk/blanket box",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Clothes basket",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror small",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror medium",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror large",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Indoor plant",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Toy Kitchen",
+        "ft3": 9,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dolls house",
+        "ft3": 13,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry cuft",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Wardrobe box",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Boxed Already",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Garage / garden area",
+    "key": "garden",
+    "order": 0,
+    "items": [
+      {
+        "title": "Single garage (half)",
+        "ft3": 400,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Single garage (full)",
+        "ft3": 800,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "6x4 shed (full)",
+        "ft3": 140,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "12x8 shed (full)",
+        "ft3": 280,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden table",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden chairs",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden lounger",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden bench",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picnic table",
+        "ft3": 60,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "BBQ small",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "BBQ medium",
+        "ft3": 32,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "BBQ large",
+        "ft3": 45,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Parasol",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Gas heater",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Stacking chairs",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Folding chairs",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Trampoline",
+        "ft3": 70,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Netball Post",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Climbing frame large",
+        "ft3": 175,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Swing single",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Slide",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Plastic Wendy house",
+        "ft3": 40,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden Storage Unit",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Garden hose",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Outdoor bin",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Wheelbarrow",
+        "ft3": 14,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Storage Racking",
+        "ft3": 26,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Electric mower",
+        "ft3": 14,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Petrol mower",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Ride on mower",
+        "ft3": 125,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Strimmer",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry cuft",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bike",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Child's bike",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Step ladder",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Ladder",
+        "ft3": 18,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Workbench",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Tool cabinet wheeled",
+        "ft3": 16,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Car roof box",
+        "ft3": 16,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Golf clubs",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Multi gym Weights machine",
+        "ft3": 120,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Running machine folded",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Exercise bike",
+        "ft3": 38,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Table tennis table",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Canoe",
+        "ft3": 28,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Pushchair",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bag of Chopped woods",
+        "ft3": 15,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Outdoor plant small",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Outdoor plant medium",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Outdoor plant large",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Already boxed",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Kitchen and utility",
+    "key": "kitchen",
+    "order": 0,
+    "items": [
+      {
+        "title": "Fridge freezer",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium fridge",
+        "ft3": 13,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Fridge freezer American",
+        "ft3": 80,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Chest freezer",
+        "ft3": 70,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Washing machine",
+        "ft3": 13,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Tumble dryer",
+        "ft3": 13,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Dishwasher",
+        "ft3": 22,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Microwave",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cooker single",
+        "ft3": 16,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cooker large",
+        "ft3": 22,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Cooker range",
+        "ft3": 32,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Table and 2 breakfast chairs",
+        "ft3": 15,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Breakfast chair",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Kitchen cabinet",
+        "ft3": 25,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Baby high chair",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Air con unit",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Bin",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Ironing board",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Indoor plant",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror small",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror medium",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Picture/mirror large",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry cuft",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Already boxed",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Office and commercial",
+    "key": "office",
+    "order": 0,
+    "items": [
+      {
+        "title": "Office desk",
+        "ft3": 45,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Pedestal desk",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Meeting table",
+        "ft3": 160,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Desk chairs",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Office chair",
+        "ft3": 7,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Filing cabinet 2 drawers",
+        "ft3": 10,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Filing cabinet 4 drawer",
+        "ft3": 20,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Monitor",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Laptop",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Desktop computer",
+        "ft3": 8,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Printer",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Printer large",
+        "ft3": 6,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Photocopier",
+        "ft3": 60,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Server cabinet medium",
+        "ft3": 12,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Storage unit",
+        "ft3": 50,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Fan",
+        "ft3": 5,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Sundry cuft",
+        "ft3": 1,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Boxed already",
+        "ft3": 3,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Medium box",
+        "ft3": 2,
+        "editable": false,
+        "order": 0
+      },
+      {
+        "title": "Large box",
+        "ft3": 4,
+        "editable": false,
+        "order": 0
+      }
+    ]
+  },
+  {
+    "category": "Other",
+    "key": "other",
+    "order": 0,
+    "items": []
+  }
+]
