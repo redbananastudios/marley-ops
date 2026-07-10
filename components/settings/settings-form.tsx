@@ -92,6 +92,10 @@ export function SettingsForm({
     cost75t: String(initial.cost75t),
     costMisc: String(initial.costMisc),
     defaultDeposit: String(initial.defaultDeposit),
+    cubicFillPct: String(initial.cubicFillPct),
+    cubicTransitFt3: String(initial.cubicTransitFt3),
+    cubicLutonFt3: String(initial.cubicLutonFt3),
+    cubic75tFt3: String(initial.cubic75tFt3),
   });
 
   async function onSave() {
@@ -111,6 +115,10 @@ export function SettingsForm({
       vatNumber: vatNumber.trim(),
       baseLocation: baseLocation.trim(),
       googleReviewUrl: googleReviewUrl.trim(),
+      cubicFillPct: Number(v.cubicFillPct),
+      cubicTransitFt3: Number(v.cubicTransitFt3),
+      cubicLutonFt3: Number(v.cubicLutonFt3),
+      cubic75tFt3: Number(v.cubic75tFt3),
     } satisfies SettingsInput;
     const res = await updateSettingsAction(payload);
     setBusy(false);
@@ -141,6 +149,40 @@ export function SettingsForm({
             <p className="text-xs text-mist-400">{f.hint}</p>
           </div>
         ))}
+      </div>
+
+      {/* Cubic survey van planning — feeds the volume→van recommendation */}
+      <div className="border-t px-5 py-4">
+        <p className="text-sm font-medium text-foreground">Cubic survey — van planning</p>
+        <p className="mt-0.5 text-xs text-mist-400">
+          Usable load volume per vehicle and the fill level crews realistically pack to. Drives the van
+          recommendation on surveys and new quotes.
+        </p>
+        <div className="mt-3 grid gap-4 sm:grid-cols-4">
+          {(
+            [
+              ["cubicLutonFt3", "Luton (ft³)"],
+              ["cubicTransitFt3", "Transit (ft³)"],
+              ["cubic75tFt3", "7.5t (ft³)"],
+              ["cubicFillPct", "Planning fill %"],
+            ] as const
+          ).map(([key, label]) => (
+            <div key={key} className="grid gap-1.5">
+              <Label htmlFor={`set-${key}`}>{label}</Label>
+              <input
+                id={`set-${key}`}
+                type="number"
+                inputMode="decimal"
+                min={key === "cubicFillPct" ? 50 : 1}
+                max={key === "cubicFillPct" ? 100 : 10000}
+                value={v[key]}
+                disabled={!canEdit || busy}
+                onChange={(e) => setV((s) => ({ ...s, [key]: e.target.value }))}
+                className="tabular flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+              />
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Base / yard location */}

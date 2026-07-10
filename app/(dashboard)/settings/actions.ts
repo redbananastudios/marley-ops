@@ -82,6 +82,10 @@ const settingsSchema = z.object({
     .trim()
     .max(500)
     .refine((s) => !s || /^https:\/\//.test(s), "Must be an https:// link (or empty to disable)"),
+  cubicFillPct: z.coerce.number().min(50, "Fill % must be 50–100").max(100, "Fill % must be 50–100"),
+  cubicTransitFt3: z.coerce.number().positive("Must be above 0").max(5000),
+  cubicLutonFt3: z.coerce.number().positive("Must be above 0").max(5000),
+  cubic75tFt3: z.coerce.number().positive("Must be above 0").max(10000),
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
@@ -119,6 +123,10 @@ export async function updateSettingsAction(input: SettingsInput) {
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
       google_review_url: v.googleReviewUrl,
+      cubic_fill_pct: v.cubicFillPct,
+      cubic_transit_ft3: v.cubicTransitFt3,
+      cubic_luton_ft3: v.cubicLutonFt3,
+      cubic_75t_ft3: v.cubic75tFt3,
     })
     .eq("id", true);
   if (error) return { ok: false as const, error: error.message };

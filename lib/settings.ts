@@ -28,6 +28,12 @@ export interface BusinessSettings {
   defaultDeposit: number;
   /** Google "write a review" link — the post-move review email sends only when set. */
   googleReviewUrl: string;
+  /** Cubic-survey van planning: crews pack to ~this % of a van's usable volume. */
+  cubicFillPct: number;
+  /** Usable load volumes (ft³) per vehicle class — feeds the van recommendation. */
+  cubicTransitFt3: number;
+  cubicLutonFt3: number;
+  cubic75tFt3: number;
 }
 
 /** The Marley yard the live quote tool hardcoded — default base until changed in Settings. */
@@ -49,6 +55,10 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
   // Same place id the marleymoves.co.uk site links to.
   googleReviewUrl: "https://search.google.com/local/writereview?placeid=ChIJq8R84fCs_EkRc_9iHhFQXW8",
+  cubicFillPct: 90,
+  cubicTransitFt3: 280,
+  cubicLutonFt3: 550,
+  cubic75tFt3: 1400,
 };
 
 /** Read the singleton settings row, falling back to defaults if absent. */
@@ -57,7 +67,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, base_location, default_deposit, google_review_url")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3")
     .eq("id", true)
     .maybeSingle();
   if (!data) return { ...DEFAULT_SETTINGS };
@@ -76,5 +86,9 @@ export async function getBusinessSettings(
     baseLocation: (data.base_location as string | null)?.trim() || DEFAULT_BASE_LOCATION,
     defaultDeposit: Number(data.default_deposit ?? DEFAULT_SETTINGS.defaultDeposit) || DEFAULT_SETTINGS.defaultDeposit,
     googleReviewUrl: (data.google_review_url as string | null)?.trim() ?? DEFAULT_SETTINGS.googleReviewUrl,
+    cubicFillPct: Number(data.cubic_fill_pct ?? DEFAULT_SETTINGS.cubicFillPct) || DEFAULT_SETTINGS.cubicFillPct,
+    cubicTransitFt3: Number(data.cubic_transit_ft3 ?? DEFAULT_SETTINGS.cubicTransitFt3) || DEFAULT_SETTINGS.cubicTransitFt3,
+    cubicLutonFt3: Number(data.cubic_luton_ft3 ?? DEFAULT_SETTINGS.cubicLutonFt3) || DEFAULT_SETTINGS.cubicLutonFt3,
+    cubic75tFt3: Number(data.cubic_75t_ft3 ?? DEFAULT_SETTINGS.cubic75tFt3) || DEFAULT_SETTINGS.cubic75tFt3,
   };
 }

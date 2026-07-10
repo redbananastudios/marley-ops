@@ -22,7 +22,7 @@ import {
   loadSurveyPhotos,
 } from "@/app/(dashboard)/leads/[id]/survey-actions";
 
-type PhotoCategory = "access" | "large_items";
+type PhotoCategory = "access" | "large_items" | "cubic";
 
 interface PhotoState {
   id: string;

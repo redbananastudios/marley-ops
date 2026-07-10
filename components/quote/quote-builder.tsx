@@ -25,6 +25,7 @@ import {
   Step5Extras,
   Step6Items,
   Step7Review,
+  type CubicQuoteHint,
 } from "@/components/quote/wizard-steps";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
 
@@ -86,6 +87,7 @@ export function QuoteBuilder({
   pricing = DEFAULT_PRICING,
   settings,
   acceptUrl,
+  cubicHint,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -100,6 +102,8 @@ export function QuoteBuilder({
   settings?: BusinessSettings | null;
   /** Customer accept page (/q/<token>) — renders the PDF QR codes + email CTA. */
   acceptUrl?: string;
+  /** Cubic-survey van suggestion, shown on the Vehicle step. */
+  cubicHint?: CubicQuoteHint | null;
 }) {
   const [values, setValues] = useState<QuoteFormValues>(() => ({
     ...defaultQuoteValues(),
@@ -259,7 +263,7 @@ export function QuoteBuilder({
       <div className="rounded-lg border border-border bg-card p-6 md:p-7">
         {step === 1 && <Step1Customer values={values} set={set} showErrors={showStep1Errors} />}
         {step === 2 && <Step2Job values={values} set={set} pricing={pricing} />}
-        {step === 3 && <Step3Vehicle values={values} set={set} pricing={pricing} />}
+        {step === 3 && <Step3Vehicle values={values} set={set} pricing={pricing} cubicHint={cubicHint} />}
         {step === 4 && <Step4Access values={values} set={set} leadId={leadId} />}
         {step === 5 && <Step5Extras values={values} set={set} />}
         {step === 6 && <Step6Items values={values} set={set} leadId={leadId} />}

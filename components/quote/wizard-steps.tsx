@@ -518,7 +518,21 @@ export function Step2Job({ values, set, pricing }: StepProps) {
 
 /* ---------- STEP 3 — VEHICLE & PACKING ---------- */
 
-export function Step3Vehicle({ values, set, pricing }: StepProps) {
+export interface CubicQuoteHint {
+  totalFt3: number;
+  vehicleKey: VehicleKey;
+  /** "2 Lutons" / "Transit van" */
+  shortLabel: string;
+  /** Full sentence for the chip's small print. */
+  detail: string;
+}
+
+export function Step3Vehicle({
+  values,
+  set,
+  pricing,
+  cubicHint,
+}: StepProps & { cubicHint?: CubicQuoteHint | null }) {
   const base = pricing?.base ?? BASE_PRICES;
   const pack = pricing?.pack ?? PACK_PRICES;
   const addon75Base = pricing?.addon75Base ?? ADDON_75T_BASE;
@@ -532,6 +546,29 @@ export function Step3Vehicle({ values, set, pricing }: StepProps) {
   return (
     <div>
       <StepHeader title="Vehicle &amp; Packing" sub="What is the move size?" />
+
+      {/* Cubic-survey recommendation — suggest-only on an existing quote;
+          new drafts are already pre-selected at creation. */}
+      {cubicHint ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-md border border-mm-red/25 bg-mm-red-tint/40 px-3.5 py-2.5">
+          <span className="text-sm text-foreground">
+            Cubic survey: <strong className="tabular">{cubicHint.totalFt3.toLocaleString("en-GB")} ft³</strong> →{" "}
+            <strong>{cubicHint.shortLabel}</strong>
+            <span className="ml-1.5 text-xs text-mist-500">{cubicHint.detail}</span>
+          </span>
+          {values.vehicle !== cubicHint.vehicleKey ? (
+            <button
+              type="button"
+              onClick={() => set("vehicle", cubicHint.vehicleKey)}
+              className="focus-ring ml-auto inline-flex min-h-9 items-center rounded-md bg-mm-red px-3 text-xs font-semibold text-white hover:bg-mm-red-deep"
+            >
+              Use {cubicHint.shortLabel}
+            </button>
+          ) : (
+            <span className="ml-auto text-xs font-semibold text-success">Matches selection</span>
+          )}
+        </div>
+      ) : null}
 
       <div className="mb-5">
         <FieldLabel>Vehicle</FieldLabel>

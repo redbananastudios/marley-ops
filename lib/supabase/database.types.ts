@@ -622,6 +622,57 @@ export type Database = {
           },
         ]
       }
+      cubic_surveys: {
+        Row: {
+          id: string
+          lead_id: string | null
+          client_id: string | null
+          appointment_id: string | null
+          items: Json
+          total_ft3: number
+          notes: string
+          customer_notes: string
+          status: string
+          share_token: string | null
+          created_by: string | null
+          updated_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          lead_id?: string | null
+          client_id?: string | null
+          appointment_id?: string | null
+          items?: Json
+          total_ft3?: number
+          notes?: string
+          customer_notes?: string
+          status?: string
+          share_token?: string | null
+          created_by?: string | null
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          lead_id?: string | null
+          client_id?: string | null
+          appointment_id?: string | null
+          items?: Json
+          total_ft3?: number
+          notes?: string
+          customer_notes?: string
+          status?: string
+          share_token?: string | null
+          created_by?: string | null
+          updated_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       business_settings: {
         Row: {
           base_location: string
@@ -636,6 +687,10 @@ export type Database = {
           default_deposit: number
           estimator_fee: number
           google_review_url: string
+          cubic_fill_pct: number
+          cubic_transit_ft3: number
+          cubic_luton_ft3: number
+          cubic_75t_ft3: number
           id: boolean
           pricing: Json | null
           updated_at: string
@@ -654,6 +709,10 @@ export type Database = {
           default_deposit?: number
           estimator_fee?: number
           google_review_url?: string
+          cubic_fill_pct?: number
+          cubic_transit_ft3?: number
+          cubic_luton_ft3?: number
+          cubic_75t_ft3?: number
           id?: boolean
           pricing?: Json | null
           updated_at?: string
@@ -672,6 +731,10 @@ export type Database = {
           default_deposit?: number
           estimator_fee?: number
           google_review_url?: string
+          cubic_fill_pct?: number
+          cubic_transit_ft3?: number
+          cubic_luton_ft3?: number
+          cubic_75t_ft3?: number
           id?: boolean
           pricing?: Json | null
           updated_at?: string
@@ -1623,7 +1686,7 @@ export type Database = {
         | "confirmed"
         | "completed"
         | "declined"
-      photo_category: "access" | "large_items"
+      photo_category: "access" | "large_items" | "cubic"
       quote_status: "draft" | "sent" | "accepted" | "rejected" | "superseded"
       survey_status: "scheduled" | "completed" | "cancelled"
       user_role: "admin" | "estimator" | "crew"

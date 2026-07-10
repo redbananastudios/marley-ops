@@ -9,6 +9,8 @@ import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
+import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
+import { recommendVans, vehicleShortLabel } from "@/lib/cubic-survey";
 import { QuoteView } from "@/components/quote/quote-view";
 import {
   CompletionCard,
@@ -92,6 +94,33 @@ export default async function QuoteDetailPage({
     collectedByName = collector?.full_name ?? null;
   }
   const contractSignature = sigRow ? ({ ...sigRow, collectedByName } as ContractSignatureView) : null;
+
+  // Cubic-survey van suggestion for the Vehicle step (suggest-only here; new
+  // drafts were pre-selected at creation).
+  let cubicHint: CubicQuoteHint | null = null;
+  if (quote.lead_id) {
+    const { data: cubic } = await sb
+      .from("cubic_surveys")
+      .select("total_ft3")
+      .eq("lead_id", quote.lead_id)
+      .maybeSingle();
+    if (cubic && Number(cubic.total_ft3) > 0) {
+      const rec = recommendVans(Number(cubic.total_ft3), {
+        fillPct: settings.cubicFillPct,
+        transitFt3: settings.cubicTransitFt3,
+        lutonFt3: settings.cubicLutonFt3,
+        sevenFiveTFt3: settings.cubic75tFt3,
+      });
+      if (rec) {
+        cubicHint = {
+          totalFt3: Number(cubic.total_ft3),
+          vehicleKey: rec.vehicleKey,
+          shortLabel: vehicleShortLabel(rec),
+          detail: rec.label + (rec.consider75t ? " · consider the 7.5t" : ""),
+        };
+      }
+    }
+  }
 
   let completion: CompletionView | null = null;
   let crewNotes: JobNoteView[] = [];
@@ -201,6 +230,7 @@ export default async function QuoteDetailPage({
           pricing={pricing}
           settings={settings}
           acceptUrl={acceptUrl}
+          cubicHint={cubicHint}
         />
       ) : (
         <>

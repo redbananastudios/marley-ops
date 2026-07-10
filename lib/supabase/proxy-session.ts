@@ -40,6 +40,8 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/q/") ||
     // Storage-agreement signing page — same token-as-credential model.
     path.startsWith("/s/") ||
+    // Customer cubic-survey self-fill — same token-as-credential model.
+    path.startsWith("/cv/") ||
     // Scheduled callers (Vercel cron / i9 tasks) authenticate with a bearer
     // secret INSIDE the route (requireUserOrCronSecret); a redirect-to-login
     // here would silently break them.

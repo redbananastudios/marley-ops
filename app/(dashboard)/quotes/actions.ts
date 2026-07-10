@@ -13,6 +13,7 @@ import { addressFromString } from "@/lib/places/parse";
 import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
 import { markLeadLostAction } from "@/app/(dashboard)/leads/actions";
 import { getBusinessSettings } from "@/lib/settings";
+import { recommendVans } from "@/lib/cubic-survey";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { ukParts } from "@/lib/uk-time";
 
@@ -61,6 +62,23 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     seed.job.destAddress = addressFromString([lead.to_address, lead.to_postcode].filter(Boolean).join(", "));
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
+
+    // Cubic survey → pre-select the recommended vehicle on NEW quotes only
+    // (Peter, 2026-07-10). Existing quotes only ever get the suggestion chip.
+    const { data: cubic } = await sb
+      .from("cubic_surveys")
+      .select("total_ft3")
+      .eq("lead_id", lead.id)
+      .maybeSingle();
+    if (cubic && Number(cubic.total_ft3) > 0) {
+      const rec = recommendVans(Number(cubic.total_ft3), {
+        fillPct: settings.cubicFillPct,
+        transitFt3: settings.cubicTransitFt3,
+        lutonFt3: settings.cubicLutonFt3,
+        sevenFiveTFt3: settings.cubic75tFt3,
+      });
+      if (rec) seed.vehicle = rec.vehicleKey;
+    }
   }
   const pricing = await getPricingConfig(sb);
   const breakdown = computeQuote(deriveInputs(seed), pricing);

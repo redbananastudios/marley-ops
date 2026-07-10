@@ -45,7 +45,7 @@ export async function loadSurveyPhotos(leadId: string) {
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (!survey) return { ok: true as const, photos: [] as { id: string; category: "access" | "large_items"; storage_path: string }[] };
+  if (!survey) return { ok: true as const, photos: [] as { id: string; category: "access" | "large_items" | "cubic"; storage_path: string }[] };
   const { data } = await sb
     .from("survey_photos")
     .select("id, category, storage_path")
@@ -53,7 +53,7 @@ export async function loadSurveyPhotos(leadId: string) {
     .order("created_at", { ascending: true });
   return {
     ok: true as const,
-    photos: (data ?? []) as { id: string; category: "access" | "large_items"; storage_path: string }[],
+    photos: (data ?? []) as { id: string; category: "access" | "large_items" | "cubic"; storage_path: string }[],
   };
 }
 
@@ -77,7 +77,7 @@ export async function saveSurveyData(
 export async function recordSurveyPhoto(
   surveyId: string,
   leadId: string,
-  category: "access" | "large_items",
+  category: "access" | "large_items" | "cubic",
   storagePath: string,
   caption?: string,
 ) {
@@ -96,7 +96,9 @@ export async function recordSurveyPhoto(
 
 /** Remove a photo (DB row + storage object). Uses the service role so any staff can tidy up. */
 export async function deleteSurveyPhoto(photoId: string, storagePath: string, leadId: string) {
-  await ctx();
+  // Service-role path — must not be callable anonymously (review, 2026-07-10).
+  const { userId } = await ctx();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
   const admin = createAdminClient();
   await admin.storage.from("survey-photos").remove([storagePath]);
   const { error } = await admin.from("survey_photos").delete().eq("id", photoId);

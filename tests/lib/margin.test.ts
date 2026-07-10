@@ -17,6 +17,10 @@ const RATES: BusinessSettings = {
   baseLocation: "",
   googleReviewUrl: "",
   defaultDeposit: 0,
+  cubicFillPct: 90,
+  cubicTransitFt3: 280,
+  cubicLutonFt3: 550,
+  cubic75tFt3: 1400,
 };
 
 describe("crewSize", () => {

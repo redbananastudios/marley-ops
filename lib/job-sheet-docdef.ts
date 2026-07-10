@@ -54,6 +54,8 @@ export interface JobSheetData {
   accessNotes: string;
   largeItemsNotes: string;
   jobNotes: string; // internal quote notes
+  /** Cubic-survey summary — "Volume: 812 ft³ (≈2 Lutons) · 3 to dismantle". Price-free. */
+  volumeLine?: string | null;
   /** Survey photos (data URIs) — rendered on their own page when present. */
   photos?: JobSheetPhoto[];
   /** Contract signature state: false = accepted quote with NO signature yet
@@ -151,6 +153,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
       : [[{ text: "No packing materials recorded on the quote.", style: "meta", colSpan: 2, margin: cellM }, {}]];
 
   const notes = [
+    d.volumeLine ? d.volumeLine : null,
     d.accessNotes ? `Access: ${d.accessNotes}` : null,
     d.largeItemsNotes ? `Large items: ${d.largeItemsNotes}` : null,
     d.jobNotes ? d.jobNotes : null,

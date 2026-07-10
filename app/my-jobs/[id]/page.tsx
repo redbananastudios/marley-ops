@@ -257,10 +257,11 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         </div>
 
         {/* notes */}
-        {d.accessNotes || d.largeItemsNotes || d.jobNotes ? (
+        {d.volumeLine || d.accessNotes || d.largeItemsNotes || d.jobNotes ? (
           <div className="mt-3 rounded-lg border border-border bg-card p-4">
             {eyebrow(<StickyNote className="size-3.5" strokeWidth={1.75} />, "Notes")}
             <div className="mt-1.5 space-y-1.5 text-sm text-foreground">
+              {d.volumeLine ? <p className="font-medium">{d.volumeLine}</p> : null}
               {d.accessNotes ? (
                 <p>
                   <span className="text-mist-400">Access:</span> {d.accessNotes}

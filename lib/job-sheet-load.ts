@@ -9,12 +9,18 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
+import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
+import { getBusinessSettings } from "@/lib/settings";
 import type { JobSheetData, JobSheetPhoto } from "@/lib/job-sheet-docdef";
 
 const MAX_PHOTOS = 6;
 const MAX_PHOTO_BYTES = 1_500_000;
 
-const CATEGORY_LABEL: Record<string, string> = { access: "Access", large_items: "Large items / extra packing" };
+const CATEGORY_LABEL: Record<string, string> = {
+  access: "Access",
+  large_items: "Large items / extra packing",
+  cubic: "Volume survey",
+};
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -89,6 +95,32 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     crew,
     vehicles,
   );
+
+  // Cubic-survey summary — total + the flags a crew cares about. Price-free.
+  if (appt.lead_id) {
+    const { data: cubic } = await admin
+      .from("cubic_surveys")
+      .select("items, total_ft3")
+      .eq("lead_id", appt.lead_id)
+      .maybeSingle();
+    if (cubic && Number(cubic.total_ft3) > 0) {
+      const lines = sanitizeCubicLines(cubic.items) ?? [];
+      const totals = computeCubicTotals(lines);
+      const settings = await getBusinessSettings(admin);
+      const rec = recommendVans(Number(cubic.total_ft3), {
+        fillPct: settings.cubicFillPct,
+        transitFt3: settings.cubicTransitFt3,
+        lutonFt3: settings.cubicLutonFt3,
+        sevenFiveTFt3: settings.cubic75tFt3,
+      });
+      const bits = [
+        `Volume survey: ${Number(cubic.total_ft3).toLocaleString("en-GB")} ft³${rec ? ` (≈ ${vehicleShortLabel(rec)})` : ""}`,
+        totals.dismantleCount ? `${totals.dismantleCount} to dismantle` : null,
+        totals.fragileCount ? `${totals.fragileCount} fragile/high-value` : null,
+      ].filter(Boolean);
+      data.volumeLine = bits.join(" · ");
+    }
+  }
 
   // Contract flag: accepted quote with no signature row = collect on arrival.
   const quoteId = (quote as { id?: string } | null)?.id ?? null;

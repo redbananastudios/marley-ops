@@ -1,0 +1,203 @@
+/**
+ * Cubic survey engine — totals + van recommendation (the loop iMVE never
+ * closes: their sheet stores a number and nothing else happens). Pure and
+ * tested; the builder, lead card, quote wizard and job sheet all call these so
+ * the maths can never drift between surfaces.
+ *
+ * Planning happens at a FILL FACTOR (default 90%): a Luton is ~550 usable ft³
+ * but a real crew packs to ~90% of that before the load gets slow and risky.
+ * Capacities + fill live in business_settings (migration 0029).
+ */
+
+import type { VehicleKey } from "@/lib/quote/constants";
+
+export interface CubicLineFlags {
+  dismantle?: boolean;
+  fragile?: boolean;
+  /** Recorded but excluded from the volume total (customer keeps/skips it). */
+  notMoving?: boolean;
+}
+
+export interface CubicLine {
+  /** Catalogue key ("bedrooms:wardrobe-double") or "custom:<uuid>". */
+  key: string;
+  title: string;
+  /** Category key; custom lines carry the category they were added under. */
+  category: string;
+  qty: number;
+  /** Per-unit cubic feet — starts at the catalogue value, editable per line. */
+  unitFt3: number;
+  flags?: CubicLineFlags;
+  note?: string;
+}
+
+export const MAX_LINES = 300;
+export const MAX_QTY = 999;
+export const MAX_UNIT_FT3 = 2000;
+
+export interface CubicTotals {
+  /** Volume that moves (notMoving lines excluded). */
+  totalFt3: number;
+  totalM3: number;
+  itemCount: number;
+  lineCount: number;
+  byCategory: { category: string; ft3: number; items: number }[];
+  dismantleCount: number;
+  fragileCount: number;
+  notMovingCount: number;
+}
+
+const round1 = (n: number): number => Math.round(n * 10) / 10;
+
+/** 1 ft³ = 0.0283168 m³ */
+export const ft3ToM3 = (ft3: number): number => Math.round(ft3 * 0.0283168 * 10) / 10;
+
+export function computeCubicTotals(lines: CubicLine[]): CubicTotals {
+  const byCat = new Map<string, { ft3: number; items: number }>();
+  let totalFt3 = 0;
+  let itemCount = 0;
+  let dismantleCount = 0;
+  let fragileCount = 0;
+  let notMovingCount = 0;
+
+  for (const l of lines) {
+    const qty = Number(l.qty) || 0;
+    const unit = Number(l.unitFt3) || 0;
+    if (qty <= 0) continue;
+    if (l.flags?.notMoving) {
+      notMovingCount += qty;
+      continue; // recorded, never counted — and its other flags create no crew work
+    }
+    if (l.flags?.dismantle) dismantleCount += qty;
+    if (l.flags?.fragile) fragileCount += qty;
+    const ft3 = qty * unit;
+    totalFt3 += ft3;
+    itemCount += qty;
+    const cur = byCat.get(l.category) ?? { ft3: 0, items: 0 };
+    cur.ft3 += ft3;
+    cur.items += qty;
+    byCat.set(l.category, cur);
+  }
+
+  return {
+    totalFt3: round1(totalFt3),
+    totalM3: ft3ToM3(totalFt3),
+    itemCount,
+    lineCount: lines.length,
+    byCategory: [...byCat.entries()]
+      .map(([category, v]) => ({ category, ft3: round1(v.ft3), items: v.items }))
+      .sort((a, b) => b.ft3 - a.ft3),
+    dismantleCount,
+    fragileCount,
+    notMovingCount,
+  };
+}
+
+export interface VanCapacities {
+  fillPct: number; // e.g. 90
+  transitFt3: number;
+  lutonFt3: number;
+  sevenFiveTFt3: number;
+}
+
+export const DEFAULT_CAPACITIES: VanCapacities = {
+  fillPct: 90,
+  transitFt3: 280,
+  lutonFt3: 550,
+  sevenFiveTFt3: 1400,
+};
+
+export interface VanRecommendation {
+  /** Maps straight onto the quote wizard's vehicle select. */
+  vehicleKey: VehicleKey;
+  lutonCount: number; // 0 when transit
+  /** Fractional Luton loads at the planned fill (e.g. 1.5). */
+  lutonLoads: number;
+  /** "812 ft³ ≈ 1.7 Luton loads" style summary. */
+  label: string;
+  /** Fleet-reality hint once the move needs 3+ Lutons. */
+  consider75t: boolean;
+  /** How many 7.5t loads the volume represents at the planned fill. */
+  sevenFiveTLoads: number;
+  /** 0–100 fill of the recommended combination. */
+  fillOfRecommendationPct: number;
+}
+
+export function recommendVans(totalFt3: number, caps: VanCapacities = DEFAULT_CAPACITIES): VanRecommendation | null {
+  const total = Number(totalFt3) || 0;
+  if (total <= 0) return null;
+  const fill = Math.min(Math.max(caps.fillPct, 50), 100) / 100;
+  const usableTransit = caps.transitFt3 * fill;
+  const usableLuton = caps.lutonFt3 * fill;
+  const usable75 = caps.sevenFiveTFt3 * fill;
+
+  const lutonLoads = Math.round((total / usableLuton) * 10) / 10;
+  const sevenFiveTLoads = usable75 > 0 ? Math.max(1, Math.ceil(total / usable75)) : 0;
+
+  if (total <= usableTransit) {
+    return {
+      vehicleKey: "transit",
+      lutonCount: 0,
+      lutonLoads,
+      label: `${total.toFixed(0)} ft³ fits a Transit at ${caps.fillPct}% fill`,
+      consider75t: false,
+      sevenFiveTLoads,
+      fillOfRecommendationPct: Math.round((total / usableTransit) * 100),
+    };
+  }
+
+  const n = Math.min(5, Math.max(1, Math.ceil(total / usableLuton)));
+  const capped = total > usableLuton * 5;
+  const consider75t = n >= 3;
+  return {
+    vehicleKey: `${n}luton` as VehicleKey,
+    lutonCount: n,
+    lutonLoads,
+    label:
+      `${total.toFixed(0)} ft³ ≈ ${lutonLoads} Luton load${lutonLoads === 1 ? "" : "s"} at ${caps.fillPct}% fill` +
+      (consider75t ? ` · fits ${sevenFiveTLoads} × 7.5t` : "") +
+      (capped ? " — exceeds 5 Lutons" : ""),
+    consider75t,
+    sevenFiveTLoads,
+    fillOfRecommendationPct: Math.min(999, Math.round((total / (usableLuton * n)) * 100)),
+  };
+}
+
+/** Human line for chips/PDF: "2 Lutons" / "Transit van". */
+export function vehicleShortLabel(rec: VanRecommendation): string {
+  return rec.vehicleKey === "transit" ? "Transit van" : `${rec.lutonCount} Luton${rec.lutonCount === 1 ? "" : "s"}`;
+}
+
+/* ------------------------------------------------- validation (server) */
+
+export function sanitizeCubicLines(raw: unknown): CubicLine[] | null {
+  if (!Array.isArray(raw) || raw.length > MAX_LINES) return null;
+  const out: CubicLine[] = [];
+  for (const l of raw) {
+    if (typeof l !== "object" || l === null) return null;
+    const o = l as Record<string, unknown>;
+    const key = String(o.key ?? "").slice(0, 120);
+    const title = String(o.title ?? "").trim().slice(0, 120);
+    const category = String(o.category ?? "").slice(0, 60);
+    const qty = Math.floor(Number(o.qty));
+    const unitFt3 = Number(o.unitFt3);
+    if (!key || !title || !category) return null;
+    if (!Number.isFinite(qty) || qty < 1 || qty > MAX_QTY) return null;
+    if (!Number.isFinite(unitFt3) || unitFt3 < 0 || unitFt3 > MAX_UNIT_FT3) return null;
+    const f = (o.flags ?? {}) as Record<string, unknown>;
+    out.push({
+      key,
+      title,
+      category,
+      qty,
+      unitFt3: Math.round(unitFt3 * 10) / 10,
+      flags: {
+        dismantle: f.dismantle === true,
+        fragile: f.fragile === true,
+        notMoving: f.notMoving === true,
+      },
+      note: typeof o.note === "string" ? o.note.trim().slice(0, 300) : undefined,
+    });
+  }
+  return out;
+}
