@@ -7,6 +7,7 @@ import {
   BarChart3,
   BellRing,
   CalendarCheck,
+  CalendarRange,
   ClipboardCheck,
   Contact,
   FileText,
@@ -44,6 +45,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
+      { href: "/schedule/board", label: "Job Board", icon: CalendarRange, live: true },
       { href: "/resources", label: "Staff & Fleet", icon: UserCog, live: true },
       { href: "/storage", label: "Storage", icon: Warehouse, live: true },
     ],

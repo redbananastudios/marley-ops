@@ -130,6 +130,30 @@ export type Database = {
         }
         Relationships: []
       }
+      appointment_assignments: {
+        Row: {
+          id: string
+          appointment_id: string
+          staff_id: string | null
+          vehicle_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          appointment_id: string
+          staff_id?: string | null
+          vehicle_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          appointment_id?: string
+          staff_id?: string | null
+          vehicle_id?: string | null
+          created_at?: string
+        }
+        Relationships: []
+      }
       storage_sites: {
         Row: {
           id: string
