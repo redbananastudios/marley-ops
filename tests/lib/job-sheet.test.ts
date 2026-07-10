@@ -1,0 +1,129 @@
+import { describe, expect, it } from "vitest";
+import { assembleJobSheetData, vehicleLabelOf } from "@/lib/job-sheet-data";
+import { buildJobSheetDocDef } from "@/lib/job-sheet-docdef";
+import { defaultQuoteValues } from "@/lib/quote/form-types";
+
+const appt = {
+  id: "a1",
+  title: "Removal — Jane Doe",
+  starts_at: "2026-07-15T08:00:00+01:00",
+  ends_at: "2026-07-15T17:00:00+01:00",
+  all_day: true,
+};
+
+const lead = {
+  name: "Jane Doe",
+  phone: "07572 000000",
+  from_address: "1 High Street, Gillingham",
+  from_postcode: "sp8 4gh",
+  to_address: "2 Low Road, Poole",
+  to_postcode: "BH1 4DQ",
+  notes: "Gate code 4321",
+};
+
+function blob() {
+  const v = defaultQuoteValues();
+  v.customer = { name: "Jane Doe", phone: "07572 000000", email: "" };
+  v.job.collectAddr = "1 High Street, Gillingham, SP8 4GH";
+  v.job.days = 2;
+  v.vehicle = "2luton";
+  v.sevenFiveT = 1;
+  v.packing = "full";
+  v.collect = { type: "flat", lift: "no", floor: "2nd", accessM: 25 };
+  v.items.wardrobeBoxes = 6;
+  v.items.mattressDouble = 2;
+  v.survey.accessNotes = "Narrow lane, park on the corner";
+  v.review.quoteNotes = "Piano in the lounge";
+  return v;
+}
+
+describe("vehicleLabelOf", () => {
+  it("describes the vehicle mix in crew language", () => {
+    const v = defaultQuoteValues();
+    expect(vehicleLabelOf(v)).toBe("1 Luton Van");
+    v.vehicle = "3luton";
+    v.sevenFiveT = 1;
+    v.transitVans = 2;
+    expect(vehicleLabelOf(v)).toBe("3 Luton Vans + 1 × 7.5t Lorry + 2 Transit Vans");
+    v.vehicle = "transit";
+    v.sevenFiveT = 0;
+    v.transitVans = 0;
+    expect(vehicleLabelOf(v)).toBe("1 Transit Van");
+  });
+});
+
+describe("assembleJobSheetData", () => {
+  it("merges lead, quote and assignments into the crew brief", () => {
+    const quote = { quote_ref: "MM-260710-001", moving_date: "2026-07-15", state_blob: blob() };
+    const d = assembleJobSheetData(appt, lead, quote, ["Jack", "Oscar"], ["Luton 1 (AB12 CDE)"]);
+    expect(d.customerName).toBe("Jane Doe");
+    expect(d.quoteRef).toBe("MM-260710-001");
+    expect(d.timeWindow).toBe("All day");
+    expect(d.days).toBe(2);
+    expect(d.from.address).toContain("1 High Street");
+    expect(d.from.postcode).toBe("SP8 4GH"); // lead's lowercase postcode upper-cased
+    expect(d.from.propertyType).toBe("flat");
+    expect(d.from.accessM).toBe(25);
+    expect(d.vehicleLabel).toBe("2 Luton Vans + 1 × 7.5t Lorry");
+    expect(d.packingLabel).toBe("Full pack service");
+    expect(d.items).toEqual([
+      { label: "Wardrobe Boxes", qty: 6 },
+      { label: "Mattress Covers (Double)", qty: 2 },
+    ]);
+    expect(d.accessNotes).toBe("Narrow lane, park on the corner");
+    expect(d.jobNotes).toBe("Piano in the lounge");
+    expect(d.crew).toEqual(["Jack", "Oscar"]);
+  });
+
+  it("survives a job with no quote — falls back to the lead", () => {
+    const d = assembleJobSheetData(appt, lead, null, [], []);
+    expect(d.customerName).toBe("Jane Doe");
+    expect(d.moveDate).toBe("2026-07-15"); // from the appointment
+    expect(d.items).toEqual([]);
+    expect(d.jobNotes).toBe("Gate code 4321"); // lead notes fill in
+    expect(d.to.postcode).toBe("BH1 4DQ");
+  });
+});
+
+describe("buildJobSheetDocDef", () => {
+  const data = assembleJobSheetData(
+    appt,
+    lead,
+    { quote_ref: "MM-260710-001", moving_date: "2026-07-15", state_blob: blob() },
+    ["Jack"],
+    ["Luton 1 (AB12 CDE)"],
+  );
+
+  it("carries the crew-critical strings", () => {
+    const s = JSON.stringify(buildJobSheetDocDef(data));
+    for (const expected of [
+      "JOB SHEET",
+      "Jane Doe",
+      "Wednesday, 15 July 2026",
+      "SP8 4GH",
+      "BH1 4DQ",
+      "Wardrobe Boxes",
+      "Narrow lane, park on the corner",
+      "Piano in the lounge",
+      "Jack",
+      "Luton 1 (AB12 CDE)",
+      "CUSTOMER SIGN-OFF",
+    ]) {
+      expect(s).toContain(expected);
+    }
+  });
+
+  it("NEVER leaks money — the crew sheet is price-free", () => {
+    const s = JSON.stringify(buildJobSheetDocDef(data));
+    expect(s).not.toContain("£");
+    expect(s.toLowerCase()).not.toContain("deposit");
+    expect(s.toLowerCase()).not.toContain("total");
+  });
+
+  it("empty assignment lists render the check-the-board hint", () => {
+    const bare = assembleJobSheetData(appt, lead, null, [], []);
+    const s = JSON.stringify(buildJobSheetDocDef(bare));
+    expect(s).toContain("No crew assigned yet");
+    expect(s).toContain("No vehicles assigned yet");
+  });
+});

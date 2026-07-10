@@ -67,7 +67,7 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
         <div>
           <h2 className="font-display text-lg font-semibold text-foreground">Team &amp; roles</h2>
           <p className="mt-0.5 text-xs text-mist-400">
-            Admins manage settings + team; estimators run leads, quotes and the diary.
+            Admins manage settings + team; estimators run leads, quotes and the diary; crew see only their assigned jobs.
           </p>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)} className="h-9">
@@ -103,7 +103,7 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
               <Select
                 value={u.role}
                 onValueChange={(role) =>
-                  run(u.id, () => updateTeamUserAction(u.id, { role: role as "admin" | "estimator" }), "Role updated.")
+                  run(u.id, () => updateTeamUserAction(u.id, { role: role as "admin" | "estimator" | "crew" }), "Role updated.")
                 }
                 disabled={busy || isMe}
               >
@@ -113,6 +113,7 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
                   <SelectItem value="estimator">Estimator</SelectItem>
+                  <SelectItem value="crew">Crew</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -157,7 +158,7 @@ function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
   const [busy, setBusy] = useState(false);
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
-  const [role, setRole] = useState<"admin" | "estimator">("estimator");
+  const [role, setRole] = useState<"admin" | "estimator" | "crew">("estimator");
   const [password, setPassword] = useState("");
 
   async function submit() {
@@ -196,13 +197,14 @@ function AddUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (v
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-2">
               <Label htmlFor="team-role">Role</Label>
-              <Select value={role} onValueChange={(v) => setRole(v as "admin" | "estimator")}>
+              <Select value={role} onValueChange={(v) => setRole(v as "admin" | "estimator" | "crew")}>
                 <SelectTrigger id="team-role">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="estimator">Estimator</SelectItem>
                   <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="crew">Crew</SelectItem>
                 </SelectContent>
               </Select>
             </div>

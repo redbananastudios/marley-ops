@@ -42,6 +42,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { JobSheetButton } from "@/components/job-sheet-button";
 import { LEAD_STATUS_META } from "@/components/lead-status-badge";
 import {
   apptDays,
@@ -654,13 +655,18 @@ function JobCard({
         </div>
       ) : null}
 
-      <button
-        type="button"
-        onClick={onAssign}
-        className="focus-ring mt-2 w-full rounded-md border border-input bg-card py-1 text-[11px] font-medium text-mist-500 transition-colors hover:bg-muted hover:text-foreground"
-      >
-        Assign staff / vehicle
-      </button>
+      <div className="mt-2 flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onAssign}
+          className="focus-ring w-full flex-1 rounded-md border border-input bg-card py-1 text-[11px] font-medium text-mist-500 transition-colors hover:bg-muted hover:text-foreground"
+        >
+          Assign staff / vehicle
+        </button>
+        {isRemoval ? (
+          <JobSheetButton appointmentId={appt.id} fileHint={appt.lead_name ?? appt.title ?? "job"} variant="icon" />
+        ) : null}
+      </div>
     </div>
   );
 }

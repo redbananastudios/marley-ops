@@ -10,6 +10,8 @@ export default async function DashboardLayout({
 }) {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
+  // Crew logins get their own surface — never the office dashboard.
+  if (profile.role === "crew") redirect("/my-jobs");
 
   const navProfile = {
     full_name: profile.full_name || profile.email || "User",

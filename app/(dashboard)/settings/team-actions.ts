@@ -20,7 +20,7 @@ async function requireAdmin() {
 const createSchema = z.object({
   email: z.string().trim().email("Enter a valid email"),
   fullName: z.string().trim().min(1, "Name is required"),
-  role: z.enum(["admin", "estimator"]),
+  role: z.enum(["admin", "estimator", "crew"]),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
@@ -47,12 +47,18 @@ export async function createTeamUserAction(input: z.infer<typeof createSchema>) 
     .upsert({ id: data.user.id, email: v.email, full_name: v.fullName, role: v.role, active: true });
   if (pErr) return { ok: false as const, error: pErr.message };
 
+  // Crew login ↔ crew record: link the Staff & Fleet row that carries this
+  // email so /my-jobs resolves their assignments immediately.
+  if (v.role === "crew") {
+    await admin.from("staff").update({ profile_id: data.user.id }).ilike("email", v.email).is("profile_id", null);
+  }
+
   revalidatePath("/settings");
   return { ok: true as const };
 }
 
 const updateSchema = z.object({
-  role: z.enum(["admin", "estimator"]).optional(),
+  role: z.enum(["admin", "estimator", "crew"]).optional(),
   active: z.boolean().optional(),
   fullName: z.string().trim().min(1).optional(),
 });
@@ -66,7 +72,7 @@ export async function updateTeamUserAction(id: string, input: z.infer<typeof upd
   if (error) return { ok: false as const, error };
 
   const v = parsed.data;
-  if (id === userId && (v.role === "estimator" || v.active === false)) {
+  if (id === userId && ((v.role && v.role !== "admin") || v.active === false)) {
     return { ok: false as const, error: "You can't demote or deactivate your own account." };
   }
 

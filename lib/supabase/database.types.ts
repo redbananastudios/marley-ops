@@ -1410,7 +1410,7 @@ export type Database = {
       photo_category: "access" | "large_items"
       quote_status: "draft" | "sent" | "accepted" | "rejected" | "superseded"
       survey_status: "scheduled" | "completed" | "cancelled"
-      user_role: "admin" | "estimator"
+      user_role: "admin" | "estimator" | "crew"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1592,7 +1592,7 @@ export const Constants = {
       photo_category: ["access", "large_items"],
       quote_status: ["draft", "sent", "accepted", "rejected", "superseded"],
       survey_status: ["scheduled", "completed", "cancelled"],
-      user_role: ["admin", "estimator"],
+      user_role: ["admin", "estimator", "crew"],
     },
   },
 } as const
