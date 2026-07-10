@@ -133,13 +133,16 @@ export function StorageView({
     return m;
   }, [lets]);
 
-  const site = sites.find((s) => s.id === siteId) ?? null;
+  // Fall back to the first active site so the units section appears as soon as
+  // the FIRST site is created (the initial useState ran while there were none).
+  const site = sites.find((s) => s.id === siteId) ?? firstActive;
+  const selectedId = site?.id ?? null;
 
   const siteUnits = useMemo(() => {
-    if (!siteId) return [];
+    if (!selectedId) return [];
     const needle = q.trim().toLowerCase();
     return units
-      .filter((u) => u.site_id === siteId)
+      .filter((u) => u.site_id === selectedId)
       .filter((u) => {
         if (filter === "occupied" && !occupied.has(u.id)) return false;
         if (filter === "available" && (occupied.has(u.id) || !u.is_active)) return false;
@@ -150,7 +153,7 @@ export function StorageView({
           .toLowerCase()
           .includes(needle);
       });
-  }, [units, siteId, filter, q, occupied, openLetByUnit]);
+  }, [units, selectedId, filter, q, occupied, openLetByUnit]);
 
   return (
     <div className="space-y-6">
@@ -174,7 +177,7 @@ export function StorageView({
                 key={s.id}
                 s={s}
                 occ={siteOccupancy(units, lets, s.id)}
-                selected={s.id === siteId}
+                selected={s.id === selectedId}
                 onSelect={() => setSiteId(s.id)}
                 onEdit={() => setSiteEdit(s)}
               />
