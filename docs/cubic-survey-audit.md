@@ -1,5 +1,13 @@
 # Cubic survey — iMVE audit + marley-ops implementation plan
 
+> **SHIPPED 2026-07-10** (commit `e65c69c`, migrations 0029+0030) — M1 + M2 in
+> one pass, hardened by a 33-agent adversarial review (notes split office vs
+> customer, atomic finalised-guard, optimistic concurrency, guarded token
+> minting, 44px tablet targets). Peter's decisions: vans pre-select on NEW
+> quotes; customer /cv link shipped but estimator-tablet is primary;
+> categories only, no room grouping. M3 (Settings catalogue editor) stays
+> deferred until asked.
+
 Audited 2026-07-10 (authenticated browser walk of app.i-mve.com as Connor W. admin,
 plus their API). Companion to `imve-discovery.md`. Full item catalogue extracted to
 **`imve-cubic-catalogue.json`** (7 categories, 218 items, every cu ft value).
