@@ -91,6 +91,51 @@ const surveyConfirmationHtml = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/* ------------------------------------------- completion certificate (branded)
+   Doorstep sign-off email — the certificate PDF rides as an attachment.
+   Mirrors lib/comms/completion-email.ts buildCompletionEmailHtml (the in-repo
+   fallback); keep both in sync. */
+
+const completionCertificateHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Move complete — Marley Moves</title></head>
+<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your move with Marley Moves is complete — your certificate is attached.</div>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
+<tr><td align="center">
+<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
+  <tr><td align="center" style="padding:34px 36px 8px;">
+    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 24px;">
+    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">Move complete</div>
+  </td></tr>
+  <tr><td align="center" style="padding:0 36px 6px;">
+    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">That's you moved, {{{CUSTOMER_FIRST_NAME}}}</h1>
+  </td></tr>
+  <tr><td align="center" style="padding:14px 36px 18px;">
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">Your move on {{{MOVE_DATE_LABEL}}} is complete — thank you for choosing Marley Moves. Your <strong>completion certificate is attached</strong> for your records.</p>
+  </td></tr>
+  <tr><td style="padding:0 36px 24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FBF8F4;border-radius:8px;">
+      <tr><td style="padding:16px 22px;border-left:4px solid #C03838;">
+        <p style="margin:0;font-size:13px;color:#5A554F;line-height:1.6;">{{{STATUS_LINE}}}</p>
+      </td></tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:0 36px 28px;">
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0;">If anything comes up, just reply to this email or call Connor on <strong style="color:#C03838;">01747 637070</strong>.</p>
+  </td></tr>
+  <tr><td style="padding:20px 36px;background:#1A1A1A;">
+    <p style="margin:0;font-size:12px;color:#B8B3AC;line-height:1.7;">Marley Moves · Company No. 15914266 · 01747 637070<br>
+    <a href="mailto:hello@marleymoves.co.uk" style="color:#E85959;text-decoration:none;">hello@marleymoves.co.uk</a> · <a href="https://marleymoves.co.uk" style="color:#E85959;text-decoration:none;">marleymoves.co.uk</a></p>
+  </td></tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>`;
+
 /* ------------------------------------------------- review request (branded)
    Post-move "how did we do?" — mirrors lib/comms/payment-email.ts
    buildReviewRequestEmailHtml (the in-repo fallback); keep both in sync. */
@@ -471,6 +516,23 @@ const TEMPLATES = [
       { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
       { key: "AMOUNT", type: "string", fallback_value: "your balance" },
       { key: "MOVE_DAY_LABEL", type: "string", fallback_value: "move day" },
+    ],
+  },
+  {
+    name: "completion-certificate",
+    envVar: "RESEND_TEMPLATE_COMPLETION_CERT",
+    subject: "Your move is complete — certificate attached",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    reply_to: "hello@marleymoves.co.uk",
+    html: completionCertificateHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "MOVE_DATE_LABEL", type: "string", fallback_value: "your move date" },
+      {
+        key: "STATUS_LINE",
+        type: "string",
+        fallback_value: "Everything was signed off on the day with nothing to report.",
+      },
     ],
   },
   {

@@ -150,6 +150,17 @@ describe("buildJobSheetDocDef", () => {
     expect(JSON.stringify(buildJobSheetDocDef(data))).not.toContain("SURVEY PHOTOS");
   });
 
+  it("unsigned contract prints the collect-on-arrival banner; signed/no-quote stays clean", () => {
+    const flagged = JSON.stringify(buildJobSheetDocDef({ ...data, contractSigned: false }));
+    expect(flagged).toContain("CONTRACT NOT YET SIGNED");
+    expect(JSON.stringify(buildJobSheetDocDef({ ...data, contractSigned: true }))).not.toContain(
+      "CONTRACT NOT YET SIGNED",
+    );
+    expect(JSON.stringify(buildJobSheetDocDef({ ...data, contractSigned: null }))).not.toContain(
+      "CONTRACT NOT YET SIGNED",
+    );
+  });
+
   it("no-quote inventory keeps the colSpan filler a BARE {} — any property loops pdfmake's layout", () => {
     const bare = assembleJobSheetData(appt, lead, null, [], []);
     const def = buildJobSheetDocDef(bare);

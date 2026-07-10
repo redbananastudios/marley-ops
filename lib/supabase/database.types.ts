@@ -157,6 +157,117 @@ export type Database = {
         }
         Relationships: []
       }
+      signatures: {
+        Row: {
+          id: string
+          kind: string
+          quote_id: string | null
+          lead_id: string | null
+          signer_name: string
+          signature_data: string | null
+          method: string
+          channel: string
+          acknowledgments: Json
+          terms_version: string | null
+          ip: string | null
+          user_agent: string | null
+          collected_by: string | null
+          signed_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          kind: string
+          quote_id?: string | null
+          lead_id?: string | null
+          signer_name: string
+          signature_data?: string | null
+          method: string
+          channel: string
+          acknowledgments?: Json
+          terms_version?: string | null
+          ip?: string | null
+          user_agent?: string | null
+          collected_by?: string | null
+          signed_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          kind?: string
+          quote_id?: string | null
+          lead_id?: string | null
+          signer_name?: string
+          signature_data?: string | null
+          method?: string
+          channel?: string
+          acknowledgments?: Json
+          terms_version?: string | null
+          ip?: string | null
+          user_agent?: string | null
+          collected_by?: string | null
+          signed_at?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
+      job_completions: {
+        Row: {
+          id: string
+          appointment_id: string
+          lead_id: string | null
+          customer_name: string | null
+          customer_signature: string | null
+          customer_absent: boolean
+          absent_reason: string | null
+          exceptions: string
+          crew_staff_id: string | null
+          crew_name: string
+          crew_signature: string
+          completed_by: string | null
+          certificate_path: string | null
+          certificate_emailed_at: string | null
+          signed_at: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          appointment_id: string
+          lead_id?: string | null
+          customer_name?: string | null
+          customer_signature?: string | null
+          customer_absent?: boolean
+          absent_reason?: string | null
+          exceptions?: string
+          crew_staff_id?: string | null
+          crew_name?: string
+          crew_signature?: string
+          completed_by?: string | null
+          certificate_path?: string | null
+          certificate_emailed_at?: string | null
+          signed_at?: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          appointment_id?: string
+          lead_id?: string | null
+          customer_name?: string | null
+          customer_signature?: string | null
+          customer_absent?: boolean
+          absent_reason?: string | null
+          exceptions?: string
+          crew_staff_id?: string | null
+          crew_name?: string
+          crew_signature?: string
+          completed_by?: string | null
+          certificate_path?: string | null
+          certificate_emailed_at?: string | null
+          signed_at?: string
+          created_at?: string
+        }
+        Relationships: []
+      }
       storage_sites: {
         Row: {
           id: string

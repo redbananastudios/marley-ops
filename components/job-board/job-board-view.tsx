@@ -68,6 +68,8 @@ export interface BoardAppt extends ApptLite {
   from_postcode: string | null;
   to_postcode: string | null;
   required: { vans: number; men: number } | null;
+  /** Accepted quote with no contract signature — crew collect on arrival. */
+  sigNeeded: boolean;
 }
 
 export interface BoardStaff {
@@ -622,6 +624,12 @@ function JobCard({
       {req ? (
         <p className={cn("mt-1 text-[11px] font-medium", under ? "text-mm-red-deep" : "text-mist-500")}>
           Vans {assignedVehicles.length}/{req.vans} · Crew {assignedStaff.length}/{req.men}
+        </p>
+      ) : null}
+
+      {appt.sigNeeded ? (
+        <p className="mt-1 inline-flex items-center gap-1 rounded-pill border border-warn-border bg-warn-bg px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+          Signature needed on arrival
         </p>
       ) : null}
 

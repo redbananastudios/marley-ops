@@ -2,13 +2,27 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
-import { ArrowLeft, CalendarDays, Camera, MapPin, Package, Phone, StickyNote, Truck, UserRound } from "lucide-react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  Camera,
+  CheckCircle2,
+  MapPin,
+  Package,
+  PenLine,
+  Phone,
+  StickyNote,
+  Truck,
+  UserRound,
+} from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
 import type { JobSheetAddress } from "@/lib/job-sheet-docdef";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
+import { CollectContractButton } from "@/components/crew/collect-contract-button";
+import { CompleteJobButton } from "@/components/crew/complete-job-button";
 
 /**
  * /my-jobs/[id] — the job sheet AS A WEB PAGE (Peter, 2026-07-10: "we should
@@ -46,8 +60,18 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
   const loaded = await loadJobSheet(admin, id);
   if (!loaded) notFound();
   const { data: d, apptType, surveyId } = loaded;
-  const photos = surveyId ? await loadPhotoSignedUrls(admin, surveyId) : [];
+  const [photos, { data: completion }, { data: myStaff }] = await Promise.all([
+    surveyId ? loadPhotoSignedUrls(admin, surveyId) : Promise.resolve([]),
+    admin
+      .from("job_completions")
+      .select("customer_name, customer_absent, crew_name, exceptions, signed_at, certificate_emailed_at")
+      .eq("appointment_id", id)
+      .maybeSingle(),
+    admin.from("staff").select("full_name").eq("profile_id", profile.id).eq("is_active", true).maybeSingle(),
+  ]);
   const isRemoval = apptType === "removal";
+  const fromLine = [d.from.address, d.from.postcode].filter(Boolean).join(", ");
+  const toLine = [d.to.address, d.to.postcode].filter(Boolean).join(", ");
 
   const eyebrow = (icon: React.ReactNode, text: string) => (
     <p className="eyebrow flex items-center gap-1.5">
@@ -94,8 +118,53 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           </span>
         </div>
 
+        {/* contract flag — never gates the move, but the crew can't miss it */}
+        {isRemoval && !completion && d.contractSigned === false ? (
+          <div className="mt-4 rounded-md border border-warn-border bg-warn-bg p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-warn">
+              <PenLine className="size-4 shrink-0" strokeWidth={2} />
+              Contract not signed yet — collect the customer&apos;s signature on arrival.
+            </p>
+            <div className="mt-3">
+              <CollectContractButton appointmentId={id} customerName={d.customerName} />
+            </div>
+          </div>
+        ) : null}
+
+        {/* completed state */}
+        {completion ? (
+          <div className="mt-4 rounded-md border border-success-border bg-success-bg p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-success">
+              <CheckCircle2 className="size-4 shrink-0" strokeWidth={2} />
+              Job completed —{" "}
+              {completion.customer_absent
+                ? `signed by crew lead ${completion.crew_name} (customer not present)`
+                : `signed by ${completion.customer_name} and ${completion.crew_name}`}
+            </p>
+            <p className="mt-1 text-xs text-success/80">
+              {completion.exceptions?.trim()
+                ? `Exceptions noted: ${completion.exceptions.trim()}`
+                : "Nothing to report."}
+              {completion.certificate_emailed_at ? " Certificate emailed to the customer." : ""}
+            </p>
+          </div>
+        ) : null}
+
         {/* actions */}
         <div className="mt-4 flex flex-wrap gap-2">
+          {isRemoval && !completion ? (
+            <CompleteJobButton
+              job={{
+                appointmentId: id,
+                customerName: d.customerName,
+                quoteRef: d.quoteRef,
+                moveDate: d.moveDate,
+                fromLine,
+                toLine,
+                crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
+              }}
+            />
+          ) : null}
           {isRemoval ? <JobSheetButton appointmentId={id} fileHint={d.customerName} /> : null}
           {d.customerPhone ? (
             <a

@@ -21,6 +21,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
+import { allAcksConfirmed, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
 import {
   buildDepositReceivedEmailHtml,
   buildBalanceInvoiceEmailHtml,
@@ -309,6 +310,7 @@ export async function acceptQuoteOnline(
   token: string,
   fullName: string,
   ip: string | null,
+  opts?: { acks?: Record<string, unknown>; userAgent?: string | null },
 ): Promise<AcceptOutcome> {
   const quote = await fetchQuoteByToken(sb, token);
   if (!quote) return { ok: false, error: "This quote link is no longer valid." };
@@ -322,6 +324,9 @@ export async function acceptQuoteOnline(
   }
   const name = fullName.trim();
   if (name.length < 2) return { ok: false, error: "Type your full name to accept the quote." };
+  if (!allAcksConfirmed(opts?.acks)) {
+    return { ok: false, error: "Please tick each confirmation box to accept the quote." };
+  }
 
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
@@ -340,6 +345,21 @@ export async function acceptQuoteOnline(
     .eq("id", quote.id)
     .eq("status", "sent"); // double-submit race: only one accept wins
   if (error) return { ok: false, error: "Something went wrong — please call 01747 637070." };
+
+  // The contract signature record — typed name + the acknowledgment set +
+  // T&C version + IP/UA. One per quote (unique index); a replay just skips.
+  await sb.from("signatures").insert({
+    kind: "contract",
+    quote_id: quote.id,
+    lead_id: quote.lead_id,
+    signer_name: name,
+    method: "typed",
+    channel: "remote",
+    acknowledgments: normalizeAcks(opts?.acks),
+    terms_version: TERMS_VERSION,
+    ip,
+    user_agent: opts?.userAgent ?? null,
+  } as never);
 
   // Retire sibling quotes (re-quote path): carries a paid deposit across,
   // voids an unpaid one — never two live deposit invoices on one lead.

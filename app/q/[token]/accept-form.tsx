@@ -1,20 +1,30 @@
 "use client";
 
 /**
- * The customer-facing accept form: typed full name = the acceptance signature.
- * Mobile-first (the link arrives by email/SMS/QR), 56px touch targets.
+ * The customer-facing accept form: typed full name = the acceptance signature,
+ * plus the three contract acknowledgments (one signature, several protections
+ * — Peter, 2026-07-10). Mobile-first (the link arrives by email/SMS/QR),
+ * 56px touch targets, no account, no app.
  */
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { CONTRACT_ACKS, type ContractAckKey } from "@/lib/signatures";
 import { acceptQuoteAction } from "./actions";
 
 export function AcceptForm({ token, depositLabel }: { token: string; depositLabel: string }) {
   const router = useRouter();
   const [name, setName] = useState("");
+  const [acks, setAcks] = useState<Record<ContractAckKey, boolean>>({
+    inventory: false,
+    owner_packed: false,
+    no_hazardous: false,
+  });
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const allTicked = CONTRACT_ACKS.every((a) => acks[a.key]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -23,8 +33,12 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
       setError("Type your full name to accept the quote.");
       return;
     }
+    if (!allTicked) {
+      setError("Please tick each confirmation box — it protects your belongings and your move.");
+      return;
+    }
     startTransition(async () => {
-      const res = await acceptQuoteAction(token, name.trim());
+      const res = await acceptQuoteAction(token, name.trim(), acks);
       if (!res.ok) setError(res.error);
       else router.refresh(); // server re-renders into the payment view
     });
@@ -32,6 +46,26 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <div className="space-y-2.5">
+        {CONTRACT_ACKS.map((a) => (
+          <label
+            key={a.key}
+            className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border border-mist-200 bg-white px-4 py-3 transition has-[:checked]:border-mm-red/50 has-[:checked]:bg-mm-red/[0.03]"
+          >
+            <input
+              type="checkbox"
+              checked={acks[a.key]}
+              onChange={(e) => {
+                setAcks((s) => ({ ...s, [a.key]: e.target.checked }));
+                setError(null);
+              }}
+              className="size-5 shrink-0 accent-mm-red"
+            />
+            <span className="text-sm leading-snug text-ink">{a.label}</span>
+          </label>
+        ))}
+      </div>
+
       <div>
         <label
           htmlFor="accept-name"

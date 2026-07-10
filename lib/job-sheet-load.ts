@@ -22,6 +22,8 @@ export interface JobSheetLoad {
   data: JobSheetData;
   apptType: string;
   surveyId: string | null;
+  quoteId: string | null;
+  leadId: string | null;
 }
 
 /** Assemble the price-free sheet for one appointment (photos NOT included —
@@ -45,7 +47,7 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     appt.lead_id
       ? admin
           .from("quotes")
-          .select("quote_ref, moving_date, state_blob, accepted_at")
+          .select("id, quote_ref, moving_date, state_blob, accepted_at")
           .eq("lead_id", appt.lead_id)
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
@@ -87,7 +89,23 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     crew,
     vehicles,
   );
-  return { data, apptType: appt.appt_type, surveyId: survey?.id ?? null };
+
+  // Contract flag: accepted quote with no signature row = collect on arrival.
+  const quoteId = (quote as { id?: string } | null)?.id ?? null;
+  if (quoteId) {
+    const { data: sig } = await admin
+      .from("signatures")
+      .select("id")
+      .eq("quote_id", quoteId)
+      .eq("kind", "contract")
+      .limit(1)
+      .maybeSingle();
+    data.contractSigned = !!sig;
+  } else {
+    data.contractSigned = null;
+  }
+
+  return { data, apptType: appt.appt_type, surveyId: survey?.id ?? null, quoteId, leadId: appt.lead_id ?? null };
 }
 
 /** Survey photos as data URIs for pdfmake — capped, oversized files skipped. */

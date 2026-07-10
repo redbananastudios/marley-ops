@@ -29,7 +29,7 @@ export default async function JobBoardPage() {
       supabase.from("leads").select("id, name, status, from_postcode, to_postcode").order("id").range(f, t),
     ),
     fetchAllRows((f, t) =>
-      supabase.from("quotes").select("lead_id, status, breakdown").eq("status", "accepted").order("id").range(f, t),
+      supabase.from("quotes").select("id, lead_id, status, breakdown").eq("status", "accepted").order("id").range(f, t),
     ),
     supabase.from("staff").select("id, full_name, staff_role").eq("is_active", true).order("full_name"),
     supabase
@@ -50,6 +50,22 @@ export default async function JobBoardPage() {
     if (req) reqByLead.set(q.lead_id, req);
   }
 
+  // Contract-signature state per lead: accepted quote with no signature row →
+  // the crew must collect on arrival (amber flag on the removal card).
+  const quoteIds = quotes.map((q) => q.id).filter(Boolean) as string[];
+  const signedQuoteIds = new Set<string>();
+  if (quoteIds.length) {
+    const sigs = await fetchAllRows((f, t) =>
+      supabase.from("signatures").select("quote_id").eq("kind", "contract").order("id").range(f, t),
+    );
+    for (const s of sigs) if (s.quote_id) signedQuoteIds.add(s.quote_id);
+  }
+  const sigNeededByLead = new Map<string, boolean>();
+  for (const q of quotes) {
+    if (!q.lead_id || sigNeededByLead.has(q.lead_id)) continue;
+    sigNeededByLead.set(q.lead_id, !signedQuoteIds.has(q.id));
+  }
+
   const cards: BoardAppt[] = appts.map((a) => {
     const lead = a.lead_id ? leadById.get(a.lead_id) : null;
     return {
@@ -65,6 +81,7 @@ export default async function JobBoardPage() {
       from_postcode: lead?.from_postcode ?? null,
       to_postcode: lead?.to_postcode ?? null,
       required: a.appt_type === "removal" && a.lead_id ? (reqByLead.get(a.lead_id) ?? null) : null,
+      sigNeeded: a.appt_type === "removal" && a.lead_id ? (sigNeededByLead.get(a.lead_id) ?? false) : false,
     };
   });
 

@@ -15,12 +15,17 @@ import {
  * token (24 url-safe random chars) is the credential, and the flow core is
  * idempotent, so replays/double-taps can't create anything twice.
  */
-export async function acceptQuoteAction(token: string, fullName: string): Promise<AcceptOutcome> {
+export async function acceptQuoteAction(
+  token: string,
+  fullName: string,
+  acks?: Record<string, boolean>,
+): Promise<AcceptOutcome> {
   const sb = createAdminClient();
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
+  const userAgent = h.get("user-agent");
 
-  const result = await acceptQuoteOnline(sb, token, fullName, ip);
+  const result = await acceptQuoteOnline(sb, token, fullName, ip, { acks, userAgent });
   if (result.ok) revalidatePath(`/q/${token}`);
   return result;
 }

@@ -56,6 +56,9 @@ export interface JobSheetData {
   jobNotes: string; // internal quote notes
   /** Survey photos (data URIs) — rendered on their own page when present. */
   photos?: JobSheetPhoto[];
+  /** Contract signature state: false = accepted quote with NO signature yet
+   *  (crew must collect on arrival); null/undefined = no accepted quote. */
+  contractSigned?: boolean | null;
 }
 
 const fmtDate = (d: string | null): string => {
@@ -213,6 +216,31 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
         ],
       },
       { canvas: [{ type: "line", x1: 0, y1: 0, x2: 519, y2: 0, lineWidth: 1, lineColor: C.border }], margin: [0, 8, 0, 12] },
+
+      /* contract flag — never gates the move, but the crew must see it */
+      ...(d.contractSigned === false
+        ? [
+            {
+              table: {
+                widths: ["*"],
+                body: [
+                  [
+                    {
+                      text: "CONTRACT NOT YET SIGNED — collect the customer's signature on arrival (My jobs → this job → Collect signature now).",
+                      fontSize: 9,
+                      bold: true,
+                      color: C.red,
+                      fillColor: C.redSoft,
+                      margin: [10, 7, 10, 7],
+                    },
+                  ],
+                ],
+              },
+              layout: "noBorders",
+              margin: [0, 0, 0, 12],
+            },
+          ]
+        : []),
 
       /* hero strip — who + when */
       {
