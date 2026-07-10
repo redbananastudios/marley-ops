@@ -143,6 +143,20 @@ export default async function MyJobsPage() {
   }
   const orderedDays = [...groups.keys()].sort();
 
+  // Week-at-a-glance: the next 7 days with how many jobs sit on each.
+  const weekStrip = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + i);
+    const iso = d.toISOString().slice(0, 10);
+    return {
+      iso,
+      dow: d.toLocaleDateString("en-GB", { weekday: "short", timeZone: "UTC" }),
+      date: d.getUTCDate(),
+      count: groups.get(iso)?.length ?? 0,
+      isToday: iso === today,
+    };
+  });
+
   return (
     <div className="min-h-screen bg-background">
       <header className="flex h-16 items-center justify-between border-b bg-card px-5">
@@ -158,6 +172,34 @@ export default async function MyJobsPage() {
       <main className="mx-auto max-w-2xl p-5 md:p-8">
         <p className="eyebrow">Your jobs</p>
         <h1 className="mt-1 font-display text-3xl font-bold text-foreground">My jobs</h1>
+
+        {staffRow ? (
+          <div className="mt-4 grid grid-cols-7 gap-1.5" aria-label="Your week at a glance">
+            {weekStrip.map((d) => (
+              <div
+                key={d.iso}
+                className={
+                  "flex flex-col items-center rounded-lg border py-2 " +
+                  (d.isToday ? "border-mm-red bg-mm-red-tint/50" : "border-border bg-card")
+                }
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-mist-400">{d.dow}</span>
+                <span className={"text-sm font-semibold " + (d.isToday ? "text-mm-red-deep" : "text-foreground")}>
+                  {d.date}
+                </span>
+                <span
+                  className={
+                    "mt-1 flex size-5 items-center justify-center rounded-full text-[11px] font-bold " +
+                    (d.count > 0 ? "bg-mm-red text-white" : "bg-muted text-mist-300")
+                  }
+                  aria-label={`${d.count} job${d.count === 1 ? "" : "s"}`}
+                >
+                  {d.count > 0 ? d.count : "·"}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
 
         {!staffRow ? (
           <div className="mt-6 rounded-lg border border-border bg-card px-5 py-10 text-center text-sm text-mist-500">

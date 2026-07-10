@@ -132,6 +132,24 @@ describe("buildJobSheetDocDef", () => {
     expect(s).toContain("No vehicles assigned yet");
   });
 
+  it("survey photos render on their own page with category captions", () => {
+    const withPhotos = {
+      ...data,
+      photos: [
+        { dataUri: "data:image/jpeg;base64,AAA", label: "Access", caption: "Narrow gate" },
+        { dataUri: "data:image/jpeg;base64,BBB", label: "Large items / extra packing", caption: "" },
+        { dataUri: "data:image/jpeg;base64,CCC", label: "Access", caption: "" },
+      ],
+    };
+    const s = JSON.stringify(buildJobSheetDocDef(withPhotos));
+    expect(s).toContain("SURVEY PHOTOS");
+    expect(s).toContain("data:image/jpeg;base64,AAA");
+    expect(s).toContain("Access — Narrow gate");
+    expect(s).toContain('"pageBreak":"before"');
+    // and without photos the section vanishes entirely
+    expect(JSON.stringify(buildJobSheetDocDef(data))).not.toContain("SURVEY PHOTOS");
+  });
+
   it("no-quote inventory keeps the colSpan filler a BARE {} — any property loops pdfmake's layout", () => {
     const bare = assembleJobSheetData(appt, lead, null, [], []);
     const def = buildJobSheetDocDef(bare);

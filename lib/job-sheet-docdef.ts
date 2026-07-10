@@ -31,6 +31,12 @@ export interface JobSheetAddress {
   accessM: number;
 }
 
+export interface JobSheetPhoto {
+  dataUri: string;
+  label: string; // category ("Access" / "Large items / extra packing")
+  caption: string;
+}
+
 export interface JobSheetData {
   quoteRef: string | null;
   customerName: string;
@@ -48,6 +54,8 @@ export interface JobSheetData {
   accessNotes: string;
   largeItemsNotes: string;
   jobNotes: string; // internal quote notes
+  /** Survey photos (data URIs) — rendered on their own page when present. */
+  photos?: JobSheetPhoto[];
 }
 
 const fmtDate = (d: string | null): string => {
@@ -144,6 +152,29 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
     d.largeItemsNotes ? `Large items: ${d.largeItemsNotes}` : null,
     d.jobNotes ? d.jobNotes : null,
   ].filter(Boolean) as string[];
+
+  /* survey photos — their own page, two per row */
+  const photos = d.photos ?? [];
+  const photoCell = (p: JobSheetPhoto): any => ({
+    stack: [
+      { image: p.dataUri, fit: [246, 185] },
+      { text: p.caption ? `${p.label} — ${p.caption}` : p.label, style: "meta", margin: [0, 3, 0, 0] },
+    ],
+    width: "*",
+  });
+  const photoRows: any[] = [];
+  for (let i = 0; i < photos.length; i += 2) {
+    photoRows.push({
+      columns: [photoCell(photos[i]), { width: 12, text: "" }, photos[i + 1] ? photoCell(photos[i + 1]) : { width: "*", text: "" }],
+      margin: [0, 0, 0, 12],
+    });
+  }
+  const photoSection: any[] = photos.length
+    ? [
+        { text: "SURVEY PHOTOS", style: "colHead", color: C.red, pageBreak: "before" as const, margin: [0, 0, 0, 10] },
+        ...photoRows,
+      ]
+    : [];
 
   return {
     pageSize: "A4",
@@ -334,6 +365,8 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
         },
         layout: "noBorders",
       },
+
+      ...photoSection,
     ],
   };
 }

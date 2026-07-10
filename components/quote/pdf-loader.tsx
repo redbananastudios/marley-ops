@@ -24,14 +24,16 @@ export function PdfLoader() {
 
   return (
     <>
+      {/* afterInteractive (not lazyOnload): a crew member tapping "Job sheet"
+          seconds after page-load shouldn't race a lazily-scheduled script. */}
       <Script
         id="pdfmake-core"
         src={PDFMAKE_SRC}
-        strategy="lazyOnload"
+        strategy="afterInteractive"
         onLoad={() => setCoreReady(true)}
       />
       {coreReady && (
-        <Script id="pdfmake-vfs" src={VFS_SRC} strategy="lazyOnload" />
+        <Script id="pdfmake-vfs" src={VFS_SRC} strategy="afterInteractive" />
       )}
     </>
   );

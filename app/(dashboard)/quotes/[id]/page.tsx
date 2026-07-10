@@ -9,6 +9,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
+import { QuoteView } from "@/components/quote/quote-view";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 import { ViewLeadDialog } from "@/components/quote/view-lead-dialog";
@@ -29,14 +30,21 @@ const gbp = (n: number | null | undefined): string =>
  *
  * Next 16: params is async.
  */
-export default async function QuoteDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function QuoteDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ edit?: string }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
   const sb = await createClient();
 
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at",
+      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date",
     )
     .eq("id", id)
     .maybeSingle();
@@ -127,17 +135,38 @@ export default async function QuoteDetailPage({ params }: { params: Promise<{ id
         </div>
       </PageHeader>
 
-      <QuoteBuilder
-        quoteId={quote.id}
-        quoteRef={quote.quote_ref}
-        initialValues={initialValues}
-        leadId={quote.lead_id}
-        clientId={quote.client_id}
-        estimatorName={estimatorName}
-        pricing={pricing}
-        settings={settings}
-        acceptUrl={acceptUrl}
-      />
+      {/* Drafts open straight into the wizard (nothing to view yet); everything
+          else opens as a read-only job card — Edit is a deliberate action. */}
+      {quote.status === "draft" || sp.edit === "1" ? (
+        <QuoteBuilder
+          quoteId={quote.id}
+          quoteRef={quote.quote_ref}
+          initialValues={initialValues}
+          leadId={quote.lead_id}
+          clientId={quote.client_id}
+          estimatorName={estimatorName}
+          pricing={pricing}
+          settings={settings}
+          acceptUrl={acceptUrl}
+        />
+      ) : (
+        <QuoteView
+          values={initialValues}
+          money={{
+            subtotal: quote.subtotal,
+            discount: quote.discount,
+            vat_enabled: quote.vat_enabled,
+            vat_amount: quote.vat_amount,
+            grand_total: quote.grand_total,
+            agreed_price: quote.agreed_price,
+            status: quote.status ?? "draft",
+            deposit_amount: quote.deposit_amount ?? settings.defaultDeposit,
+            deposit_paid_at: quote.deposit_paid_at,
+            moving_date: quote.moving_date,
+          }}
+          editHref={`/quotes/${quote.id}?edit=1`}
+        />
+      )}
     </main>
   );
 }

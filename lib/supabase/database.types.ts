@@ -136,6 +136,7 @@ export type Database = {
           appointment_id: string
           staff_id: string | null
           vehicle_id: string | null
+          reminded_at: string | null
           created_at: string
         }
         Insert: {
@@ -143,6 +144,7 @@ export type Database = {
           appointment_id: string
           staff_id?: string | null
           vehicle_id?: string | null
+          reminded_at?: string | null
           created_at?: string
         }
         Update: {
@@ -150,6 +152,7 @@ export type Database = {
           appointment_id?: string
           staff_id?: string | null
           vehicle_id?: string | null
+          reminded_at?: string | null
           created_at?: string
         }
         Relationships: []
