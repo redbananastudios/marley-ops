@@ -9,6 +9,9 @@ import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
 import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { MarkPaidButton } from "@/components/performance/mark-paid-button";
+import { SalesTab } from "@/components/performance/sales-tab";
+import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
@@ -16,8 +19,118 @@ export const dynamic = "force-dynamic";
 const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export default async function PerformancePage({ searchParams }: { searchParams: Promise<{ month?: string }> }) {
+const isDay = (s: string | undefined): s is string => !!s && /^\d{4}-\d{2}-\d{2}$/.test(s);
+
+/** yyyy-mm-dd ± n days (pure date strings). */
+function addDaysStr(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Resolve a range preset to inclusive UK day bounds + a human label. */
+function resolveRange(preset: string, fromQ?: string, toQ?: string): { from: string; to: string; label: string } {
+  const now = ukParts();
+  const day = (y: number, m: number, d: number) => `${y}-${pad(m)}-${pad(d)}`;
+  const today = day(now.year, now.month, now.day);
+  const lastOfMonth = (y: number, m: number) => new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const fmt = (d: string) =>
+    new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+  switch (preset) {
+    case "last-month": {
+      const y = now.month === 1 ? now.year - 1 : now.year;
+      const m = now.month === 1 ? 12 : now.month - 1;
+      return { from: day(y, m, 1), to: day(y, m, lastOfMonth(y, m)), label: "the previous calendar month" };
+    }
+    case "last-30":
+      return { from: addDaysStr(today, -29), to: today, label: "the last 30 days" };
+    case "last-90":
+      return { from: addDaysStr(today, -89), to: today, label: "the last 90 days" };
+    case "this-year":
+      return { from: day(now.year, 1, 1), to: day(now.year, 12, 31), label: `${now.year} to date and booked ahead` };
+    case "all":
+      return { from: "2000-01-01", to: "2099-12-31", label: "all time" };
+    case "custom":
+      if (isDay(fromQ) && isDay(toQ) && fromQ <= toQ)
+        return { from: fromQ, to: toQ, label: `${fmt(fromQ)} – ${fmt(toQ)}` };
+      break;
+  }
+  return { from: day(now.year, now.month, 1), to: day(now.year, now.month, lastOfMonth(now.year, now.month)), label: "this calendar month" };
+}
+
+type SearchParams = { month?: string; tab?: string; range?: string; from?: string; to?: string };
+
+function TabBar({ active }: { active: "overview" | "sales" }) {
+  const tab = (key: "overview" | "sales", label: string, href: string) => (
+    <Link
+      href={href}
+      aria-current={active === key ? "page" : undefined}
+      className={
+        "focus-ring flex min-h-9 items-center px-3.5 text-sm font-medium transition-colors " +
+        (active === key ? "bg-mm-red-tint text-mm-red-deep" : "text-mist-500 hover:bg-muted")
+      }
+    >
+      {label}
+    </Link>
+  );
+  return (
+    <div className="mb-5 inline-flex overflow-hidden rounded-md border border-input bg-card">
+      {tab("overview", "Overview", "/performance")}
+      <span className="w-px bg-border" />
+      {tab("sales", "Sales", "/performance?tab=sales")}
+    </div>
+  );
+}
+
+async function SalesTabPage({ sp }: { sp: SearchParams }) {
+  const preset = sp.range ?? "this-month";
+  const { from, to, label } = resolveRange(preset, sp.from, sp.to);
+  const sb = await createClient();
+
+  const [quotes, leads, surveys] = await Promise.all([
+    fetchAllRows((f, t) =>
+      sb
+        .from("quotes")
+        .select(
+          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at",
+        )
+        .order("id")
+        .range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      sb
+        .from("leads")
+        .select(
+          "id, status, submitted_at, created_at, preferred_date, balance_amount, balance_paid_at, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
+        )
+        .order("id")
+        .range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      sb
+        .from("appointments")
+        .select("lead_id, starts_at")
+        .eq("appt_type", "survey")
+        .eq("status", "completed")
+        .order("id")
+        .range(f, t),
+    ),
+  ]);
+
+  const report = buildSalesReport(quotes as SalesQuote[], leads as SalesLead[], surveys, from, to);
+
+  return (
+    <main className="flex-1 p-6 md:p-8">
+      <PageHeader eyebrow="Reports" title="Performance" />
+      <TabBar active="sales" />
+      <SalesTab report={report} rangeLabel={`Showing ${label}.`} preset={preset} from={from} to={to} />
+    </main>
+  );
+}
+
+export default async function PerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
+  if (sp.tab === "sales") return <SalesTabPage sp={sp} />;
   const nowUk = ukParts();
   const m = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month!.split("-") : null;
   const year = m ? Number(m[0]) : nowUk.year;
@@ -148,6 +261,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
           </Link>
         </div>
       </PageHeader>
+
+      <TabBar active="overview" />
 
       <p className="mb-4 text-sm text-mist-400">
         Attended survey visits this month, by estimator. Fee = visits × {gbp(settings.estimatorFee)} per visit.
