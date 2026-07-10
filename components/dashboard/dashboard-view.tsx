@@ -56,6 +56,8 @@ export interface DashboardData {
     balanceDue: number;
     /** Active vehicles with tax/MOT/insurance due within 30 days or overdue. */
     fleetDocsDue: number;
+    /** Accepted quotes with no contract signature — crew collect on arrival. */
+    unsignedContracts: number;
   };
   recent: {
     id: string;
@@ -235,6 +237,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
           <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
           <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
+          <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
         </div>
       </section>
 

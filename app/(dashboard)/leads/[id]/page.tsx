@@ -13,6 +13,13 @@ import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
 import { PaymentsCard } from "@/components/leads/payments-card";
+import {
+  CompletionCard,
+  ContractSignatureCard,
+  type CompletionView,
+  type ContractSignatureView,
+} from "@/components/quote/signature-cards";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -130,6 +137,42 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
+
+  // Signed paperwork on this enquiry (final-pass audit: the lead page is where
+  // the office lands from Leads/Board/Follow-ups — evidence must show here,
+  // not just on the quote page).
+  const [{ data: sigRow }, { data: completionRow }] = await Promise.all([
+    supabase
+      .from("signatures")
+      .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
+      .eq("lead_id", id)
+      .eq("kind", "contract")
+      .order("signed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("job_completions")
+      .select(
+        "id, customer_name, customer_absent, absent_reason, exceptions, crew_name, signed_at, certificate_emailed_at, certificate_path",
+      )
+      .eq("lead_id", id)
+      .order("signed_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  let leadCompletion: CompletionView | null = null;
+  if (completionRow) {
+    let certificateUrl: string | null = null;
+    if (completionRow.certificate_path) {
+      const { data: signedCert } = await createAdminClient()
+        .storage.from("job-docs")
+        .createSignedUrl(completionRow.certificate_path, 3600);
+      certificateUrl = signedCert?.signedUrl ?? null;
+    }
+    const { certificate_path, ...rest } = completionRow;
+    leadCompletion = { ...rest, certificateUrl, hasStoredCertificate: !!certificate_path };
+  }
+  const leadContract = (sigRow ?? null) as ContractSignatureView | null;
 
   // Payments context: standard deposit from Settings + the accepted quote's value.
   const { defaultDeposit } = await getBusinessSettings(supabase);
@@ -301,6 +344,20 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   balancePaidAt: lead.balance_paid_at,
                 }}
               />
+            </div>
+          ) : null}
+
+          {leadContract || leadCompletion ? (
+            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+              <ContractSignatureCard
+                signature={leadContract}
+                quoteStatus={acceptedQuote ? "accepted" : "none"}
+              />
+              <CompletionCard completion={leadCompletion} />
+            </div>
+          ) : acceptedQuote ? (
+            <div className="mt-5">
+              <ContractSignatureCard signature={null} quoteStatus="accepted" />
             </div>
           ) : null}
 

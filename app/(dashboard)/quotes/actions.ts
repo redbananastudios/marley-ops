@@ -139,9 +139,23 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
 }
 
 /** Delete a quote. Drafts/rejected go freely; the UI gates sent/accepted behind an
- *  extra confirm (deleting an accepted quote removes a recorded win). */
+ *  extra confirm (deleting an accepted quote removes a recorded win). A quote
+ *  carrying a SIGNED CONTRACT is never deletable — the signature row would be
+ *  orphaned (quote_id nulls out) and the evidence unreachable. */
 export async function deleteQuote(id: string) {
   const { sb } = await ctx();
+  const { data: signed } = await sb
+    .from("signatures")
+    .select("id")
+    .eq("quote_id", id)
+    .limit(1)
+    .maybeSingle();
+  if (signed) {
+    return {
+      ok: false as const,
+      error: "This quote carries a signed contract — it can't be deleted. Reject it instead if it's no longer live.",
+    };
+  }
   const { error } = await sb.from("quotes").delete().eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/quotes");

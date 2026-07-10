@@ -72,6 +72,7 @@ export async function signContractInPersonAction(
     kind: "contract",
     quote_id: quote.id,
     lead_id: appt.lead_id,
+    client_id: quote.client_id,
     signer_name: name,
     signature_data: input.signatureDataUri,
     method: "drawn",
@@ -169,6 +170,7 @@ export async function completeJobAction(
     .insert({
       appointment_id: appointmentId,
       lead_id: appt.lead_id,
+      client_id: lead?.client_id ?? null,
       customer_name: v.customerAbsent ? null : v.customerName.trim(),
       customer_signature: v.customerAbsent ? null : v.customerSignature,
       customer_absent: v.customerAbsent,
@@ -283,4 +285,85 @@ export async function completeJobAction(
   }
 
   return { ok: true, emailed, emailNote };
+}
+
+/* ------------------------------------------------- certificate resend (office) */
+
+/** Resend the stored completion certificate — the recovery path when the
+ *  original email failed/bounced or the customer lost it. Sends the SAME
+ *  stored PDF (evidence never regenerates) with the duplicate-guard
+ *  deliberately overridden (a resend is identical content by design). */
+export async function resendCertificateAction(
+  completionId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!z.string().uuid().safeParse(completionId).success) return { ok: false, error: "Invalid completion" };
+  const prof = await requireActiveProfile();
+  if (!prof) return { ok: false, error: "Not signed in." };
+
+  const admin = createAdminClient();
+  const { data: comp } = await admin
+    .from("job_completions")
+    .select("id, lead_id, customer_absent, exceptions, certificate_path, appointment_id")
+    .eq("id", completionId)
+    .single();
+  if (!comp) return { ok: false, error: "Completion record not found." };
+  if (!comp.certificate_path) return { ok: false, error: "No stored certificate PDF for this completion." };
+
+  const { data: lead } = comp.lead_id
+    ? await admin.from("leads").select("id, name, email, client_id").eq("id", comp.lead_id).single()
+    : { data: null };
+  if (!lead?.email) return { ok: false, error: "No email address on the customer's record." };
+
+  const { data: file, error: dlErr } = await admin.storage.from("job-docs").download(comp.certificate_path);
+  if (dlErr || !file) return { ok: false, error: "Could not read the stored certificate." };
+  const pdfB64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+
+  const { data: appt } = await admin
+    .from("appointments")
+    .select("starts_at")
+    .eq("id", comp.appointment_id)
+    .maybeSingle();
+  const moveDay = appt?.starts_at ? appt.starts_at.slice(0, 10) : null;
+  const exceptionsNote = (comp.exceptions ?? "").trim();
+  const emailInput: CompletionEmailInput = {
+    firstName: (lead.name ?? "").trim().split(/\s+/)[0] || "there",
+    moveDateLabel: moveDay
+      ? new Date(`${moveDay}T00:00:00Z`).toLocaleDateString("en-GB", {
+          weekday: "long",
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+          timeZone: "UTC",
+        })
+      : "your move date",
+    hasExceptions: exceptionsNote.length > 0,
+    exceptions: exceptionsNote,
+    customerAbsent: comp.customer_absent,
+  };
+  const templateId = process.env.RESEND_TEMPLATE_COMPLETION_CERT;
+  const res = await dispatchComm(admin, prof.id, {
+    channel: "email",
+    to: lead.email,
+    subject: completionEmailSubject(emailInput),
+    bodyText: completionEmailText(emailInput),
+    ...(templateId
+      ? { template: { id: templateId, variables: completionEmailVariables(emailInput) } }
+      : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
+    attachmentBase64: pdfB64,
+    attachmentName: "marley-moves-completion-certificate.pdf",
+    from: "Marley Moves <quotes@marleymoves.co.uk>",
+    replyTo: "hello@marleymoves.co.uk",
+    leadId: lead.id,
+    clientId: lead.client_id ?? undefined,
+    override: true,
+    overrideReason: "Certificate resend from the office",
+  });
+  if (!("ok" in res && res.ok)) {
+    return { ok: false, error: "duplicate" in res ? "Send blocked as duplicate — try again." : res.error };
+  }
+  await admin
+    .from("job_completions")
+    .update({ certificate_emailed_at: new Date().toISOString() } as never)
+    .eq("id", comp.id);
+  return { ok: true };
 }

@@ -354,6 +354,7 @@ export async function acceptQuoteOnline(
     kind: "contract",
     quote_id: quote.id,
     lead_id: quote.lead_id,
+    client_id: quote.client_id,
     signer_name: name,
     signature_data: isValidSignatureDataUri(opts?.signatureImage) ? opts?.signatureImage : null,
     method: "typed",

@@ -342,11 +342,14 @@ export async function GET(req: Request) {
    * settled → lead completed + review ask) or raises the alarm (balance still
    * unpaid after the move = money at risk → urgent task + ops alert). */
   const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+  // 'completed' included: crew sign-off marks the appointment completed on move
+  // day, and those jobs must still auto-complete the lead / chase the balance
+  // (audit 2026-07-10 — scheduled-only silently skipped every signed-off job).
   const { data: pastAppts } = await sb
     .from("appointments")
     .select("id, lead_id, ends_at")
     .eq("appt_type", "removal")
-    .eq("status", "scheduled")
+    .in("status", ["scheduled", "completed"])
     .lt("ends_at", cutoff)
     .not("lead_id", "is", null)
     .limit(50);

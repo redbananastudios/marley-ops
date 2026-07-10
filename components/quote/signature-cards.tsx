@@ -2,6 +2,7 @@
 import { CheckCircle2, FileDown, PenLine, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { CONTRACT_ACKS } from "@/lib/signatures";
+import { ResendCertificateButton } from "@/components/quote/resend-certificate-button";
 
 /**
  * Office view of the signed evidence (Peter, 2026-07-10: "we don't have
@@ -18,9 +19,12 @@ export interface ContractSignatureView {
   acknowledgments: Record<string, unknown> | null;
   terms_version: string | null;
   signed_at: string;
+  /** Staff member who collected an in-person signature (evidence pack). */
+  collectedByName?: string | null;
 }
 
 export interface CompletionView {
+  id: string;
   customer_name: string | null;
   customer_absent: boolean;
   absent_reason: string | null;
@@ -29,6 +33,7 @@ export interface CompletionView {
   signed_at: string;
   certificate_emailed_at: string | null;
   certificateUrl: string | null; // short-lived signed URL
+  hasStoredCertificate: boolean;
 }
 
 const fmtAt = (iso: string): string =>
@@ -85,8 +90,11 @@ export function ContractSignatureCard({
           <div className="min-w-0 text-sm">
             <p className="font-semibold text-foreground">{signature.signer_name}</p>
             <p className="text-mist-500">
-              Signed {signature.channel === "in_person" ? "in person on the crew device" : "online"} ·{" "}
-              {fmtAt(signature.signed_at)}
+              Signed {signature.channel === "in_person" ? "in person on the crew device" : "online"}
+              {signature.channel === "in_person" && signature.collectedByName
+                ? ` (collected by ${signature.collectedByName})`
+                : ""}{" "}
+              · {fmtAt(signature.signed_at)}
             </p>
             <p className="text-xs text-mist-400">Terms: {signature.terms_version ?? "—"}</p>
             <ul className="mt-1.5 space-y-0.5">
@@ -142,6 +150,7 @@ export function CompletionCard({ completion }: { completion: CompletionView | nu
               Completion certificate (PDF)
             </a>
           ) : null}
+          {completion.hasStoredCertificate ? <ResendCertificateButton completionId={completion.id} /> : null}
           <span className="text-xs text-mist-400">
             {completion.certificate_emailed_at
               ? `Emailed to the customer ${fmtAt(completion.certificate_emailed_at)}`

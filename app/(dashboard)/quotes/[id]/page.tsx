@@ -80,18 +80,23 @@ export default async function QuoteDetailPage({
   // short-lived link to the stored certificate PDF.
   const { data: sigRow } = await sb
     .from("signatures")
-    .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
+    .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at, collected_by")
     .eq("quote_id", quote.id)
     .eq("kind", "contract")
     .maybeSingle();
-  const contractSignature = (sigRow ?? null) as ContractSignatureView | null;
+  let collectedByName: string | null = null;
+  if (sigRow?.collected_by) {
+    const { data: collector } = await sb.from("profiles").select("full_name").eq("id", sigRow.collected_by).maybeSingle();
+    collectedByName = collector?.full_name ?? null;
+  }
+  const contractSignature = sigRow ? ({ ...sigRow, collectedByName } as ContractSignatureView) : null;
 
   let completion: CompletionView | null = null;
   if (quote.lead_id) {
     const { data: comp } = await sb
       .from("job_completions")
       .select(
-        "customer_name, customer_absent, absent_reason, exceptions, crew_name, signed_at, certificate_emailed_at, certificate_path",
+        "id, customer_name, customer_absent, absent_reason, exceptions, crew_name, signed_at, certificate_emailed_at, certificate_path",
       )
       .eq("lead_id", quote.lead_id)
       .order("signed_at", { ascending: false })
@@ -105,8 +110,8 @@ export default async function QuoteDetailPage({
           .createSignedUrl(comp.certificate_path, 3600);
         certificateUrl = signed?.signedUrl ?? null;
       }
-      const { certificate_path: _path, ...rest } = comp;
-      completion = { ...rest, certificateUrl };
+      const { certificate_path, ...rest } = comp;
+      completion = { ...rest, certificateUrl, hasStoredCertificate: !!certificate_path };
     }
   }
 

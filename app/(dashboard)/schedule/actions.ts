@@ -195,8 +195,21 @@ export async function createAppointment(input: CreateAppointmentInput) {
 
 export async function rescheduleAppointment(id: string, startsAt: string, endsAt: string) {
   const { sb, userId } = await ctx();
+  // Capture the old slot BEFORE the update so a day-change can re-arm reminders.
+  const { data: before } = await sb.from("appointments").select("starts_at").eq("id", id).maybeSingle();
   const { error } = await sb.from("appointments").update({ starts_at: startsAt, ends_at: endsAt }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  // Day changed → the night-before crew reminder must fire again for the new
+  // date (audit 2026-07-10: reminded_at stayed set, so rescheduled jobs never
+  // re-notified the crew).
+  const oldDay = before?.starts_at
+    ? new Date(before.starts_at).toLocaleDateString("en-CA", { timeZone: UK_TZ })
+    : null;
+  const newDay = new Date(startsAt).toLocaleDateString("en-CA", { timeZone: UK_TZ });
+  if (oldDay && oldDay !== newDay) {
+    await sb.from("appointment_assignments").update({ reminded_at: null } as never).eq("appointment_id", id);
+  }
 
   // Moving a REMOVAL moves the money dates with it: the accepted quote's move
   // date, the lead's balance-due date, and the open balance chase — otherwise
@@ -308,7 +321,17 @@ export async function updateAppointment(
 export async function deleteAppointment(id: string) {
   const { sb } = await ctx();
   const { error } = await sb.from("appointments").delete().eq("id", id);
-  if (error) return { ok: false as const, error: error.message };
+  if (error) {
+    // FK RESTRICT (migration 0026): a signed-off job's completion record must
+    // outlive the diary row — deleting the appointment would destroy evidence.
+    if (error.code === "23503") {
+      return {
+        ok: false as const,
+        error: "This job has a signed completion record — it can't be deleted. Cancel it instead.",
+      };
+    }
+    return { ok: false as const, error: error.message };
+  }
   revalidateSchedule();
   return { ok: true as const };
 }

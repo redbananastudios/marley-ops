@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Phone, MessageCircle, Mail } from "lucide-react";
+import { ChevronLeft, FileDown, Phone, MessageCircle, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { Card } from "@/components/ui/card";
 import { BookSurveyButton } from "@/components/clients/book-survey-button";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
@@ -60,6 +61,36 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   const leadRows = leads ?? [];
   const quoteRows = quotes ?? [];
+
+  // Signed paperwork for this customer — the client record is the anchor for
+  // "recall everything about this customer" (final-pass audit, 2026-07-10).
+  // Match by client_id (canonical) OR by the client's leads (older rows).
+  const leadIdList = leadRows.map((l) => l.id);
+  const orFilter = leadIdList.length
+    ? `client_id.eq.${id},lead_id.in.(${leadIdList.join(",")})`
+    : `client_id.eq.${id}`;
+  const [{ data: sigDocs }, { data: compDocs }] = await Promise.all([
+    sb
+      .from("signatures")
+      .select("id, kind, quote_id, signer_name, channel, signed_at")
+      .or(orFilter)
+      .order("signed_at", { ascending: false }),
+    sb
+      .from("job_completions")
+      .select("id, customer_name, customer_absent, exceptions, crew_name, signed_at, certificate_path")
+      .or(orFilter)
+      .order("signed_at", { ascending: false }),
+  ]);
+  const certUrl = new Map<string, string>();
+  const certPaths = (compDocs ?? []).map((c) => c.certificate_path).filter(Boolean) as string[];
+  if (certPaths.length) {
+    const { data: signedUrls } = await createAdminClient()
+      .storage.from("job-docs")
+      .createSignedUrls(certPaths, 3600);
+    for (const s of signedUrls ?? []) if (s.signedUrl && s.path) certUrl.set(s.path, s.signedUrl);
+  }
+  const quoteRefById = new Map(quoteRows.map((q) => [q.id, q.quote_ref]));
+  const docCount = (sigDocs?.length ?? 0) + (compDocs?.length ?? 0);
 
   // Contact fallback: the one-live-client-per-phone/email dedupe means a client
   // record can carry no contact while its leads do — show the latest lead's.
@@ -184,6 +215,75 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           )}
         </Card>
       </div>
+
+      {/* documents — the customer's signed paperwork file */}
+      <Card className="mt-5 p-0">
+        <div className="flex items-center justify-between border-b px-5 py-3.5">
+          <h2 className="font-display text-lg font-semibold text-foreground">Documents</h2>
+          <Link href="/documents" className="focus-ring text-xs font-medium text-mist-400 hover:text-foreground">
+            All documents →
+          </Link>
+        </div>
+        {docCount === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-mist-400">
+            No signed documents yet — the contract lands here when a quote is accepted.
+          </p>
+        ) : (
+          <ul className="divide-y">
+            {(sigDocs ?? []).map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
+                <span className="shrink-0 rounded-pill bg-mm-red-tint px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
+                  {s.kind === "storage" ? "Storage agreement" : "Contract"}
+                </span>
+                <div className="min-w-0 flex-1 text-sm">
+                  <span className="font-medium text-foreground">
+                    Signed {s.channel === "in_person" ? "in person" : "online"} by {s.signer_name}
+                  </span>
+                  <span className="text-mist-400">
+                    {" "}
+                    · {fmtDate(s.signed_at)}
+                    {s.quote_id && quoteRefById.get(s.quote_id) ? ` · ${quoteRefById.get(s.quote_id)}` : ""}
+                  </span>
+                </div>
+                {s.quote_id ? (
+                  <Link href={`/quotes/${s.quote_id}`} className="focus-ring shrink-0 text-xs font-medium text-mist-400 hover:text-foreground">
+                    View →
+                  </Link>
+                ) : null}
+              </li>
+            ))}
+            {(compDocs ?? []).map((c) => (
+              <li key={c.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
+                <span className="shrink-0 rounded-pill bg-success-bg px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-success">
+                  Completion
+                </span>
+                <div className="min-w-0 flex-1 text-sm">
+                  <span className="font-medium text-foreground">
+                    {c.customer_absent ? `Crew lead ${c.crew_name} (customer not present)` : `Signed by ${c.customer_name} + ${c.crew_name}`}
+                  </span>
+                  <span className="text-mist-400"> · {fmtDate(c.signed_at)}</span>
+                  {c.exceptions?.trim() ? (
+                    <span className="ml-2 rounded-pill bg-warn-bg px-2 py-0.5 text-[11px] font-semibold text-warn">
+                      Exceptions noted
+                    </span>
+                  ) : null}
+                </div>
+                {c.certificate_path && certUrl.get(c.certificate_path) ? (
+                  <a
+                    href={certUrl.get(c.certificate_path)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="focus-ring inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted"
+                  >
+                    <FileDown className="size-3.5" strokeWidth={1.75} />
+                    Certificate
+                  </a>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
     </main>
   );
 }

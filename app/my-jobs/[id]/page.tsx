@@ -177,21 +177,35 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           ) : null}
         </div>
 
-        {/* route */}
+        {/* route — each address is tap-to-navigate for the van cab */}
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {(
             [
               ["Moving from", d.from],
               ["Moving to", d.to],
             ] as const
-          ).map(([title, side]) => (
-            <div key={title} className="rounded-lg border border-border bg-card p-4">
-              {eyebrow(<MapPin className="size-3.5" strokeWidth={1.75} />, title)}
-              <p className="mt-1.5 text-sm font-medium text-foreground">{side.address || "—"}</p>
-              {side.postcode ? <p className="tabular text-sm font-semibold text-foreground">{side.postcode}</p> : null}
-              {accessLine(side) ? <p className="mt-1 text-xs capitalize text-mist-400">{accessLine(side)}</p> : null}
-            </div>
-          ))}
+          ).map(([title, side]) => {
+            const dest = [side.address, side.postcode].filter(Boolean).join(", ");
+            return (
+              <div key={title} className="rounded-lg border border-border bg-card p-4">
+                {eyebrow(<MapPin className="size-3.5" strokeWidth={1.75} />, title)}
+                <p className="mt-1.5 text-sm font-medium text-foreground">{side.address || "—"}</p>
+                {side.postcode ? <p className="tabular text-sm font-semibold text-foreground">{side.postcode}</p> : null}
+                {accessLine(side) ? <p className="mt-1 text-xs capitalize text-mist-400">{accessLine(side)}</p> : null}
+                {dest ? (
+                  <a
+                    href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="focus-ring mt-2.5 inline-flex min-h-10 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted"
+                  >
+                    <MapPin className="size-4" strokeWidth={1.75} />
+                    Directions
+                  </a>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
 
         {/* vehicles + crew */}

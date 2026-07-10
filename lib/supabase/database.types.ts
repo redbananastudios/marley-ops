@@ -163,6 +163,7 @@ export type Database = {
           kind: string
           quote_id: string | null
           lead_id: string | null
+          client_id: string | null
           signer_name: string
           signature_data: string | null
           method: string
@@ -180,6 +181,7 @@ export type Database = {
           kind: string
           quote_id?: string | null
           lead_id?: string | null
+          client_id?: string | null
           signer_name: string
           signature_data?: string | null
           method: string
@@ -197,6 +199,7 @@ export type Database = {
           kind?: string
           quote_id?: string | null
           lead_id?: string | null
+          client_id?: string | null
           signer_name?: string
           signature_data?: string | null
           method?: string
@@ -216,6 +219,7 @@ export type Database = {
           id: string
           appointment_id: string
           lead_id: string | null
+          client_id: string | null
           customer_name: string | null
           customer_signature: string | null
           customer_absent: boolean
@@ -234,6 +238,7 @@ export type Database = {
           id?: string
           appointment_id: string
           lead_id?: string | null
+          client_id?: string | null
           customer_name?: string | null
           customer_signature?: string | null
           customer_absent?: boolean
@@ -252,6 +257,7 @@ export type Database = {
           id?: string
           appointment_id?: string
           lead_id?: string | null
+          client_id?: string | null
           customer_name?: string | null
           customer_signature?: string | null
           customer_absent?: boolean

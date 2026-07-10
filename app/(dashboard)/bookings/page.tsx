@@ -132,7 +132,9 @@ export default async function BookingsPage() {
           .from("appointments")
           .select("lead_id, starts_at, status")
           .eq("appt_type", "removal")
-          .eq("status", "scheduled")
+          // Crew sign-off flips the appointment to 'completed' on move day —
+          // the booking row must keep its move date (only cancelled drops out).
+          .in("status", ["scheduled", "completed"])
           .in("lead_id", leadIds)
       : Promise.resolve({ data: [] as never[] }),
   ]);

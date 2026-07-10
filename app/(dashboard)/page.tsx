@@ -186,6 +186,15 @@ export default async function DashboardPage() {
       return { fleetDocsDue: (vs ?? []).filter((v) => vehicleNeedsAttention(v)).length };
     })()),
     ...(await (async () => {
+      // Accepted quotes with no contract signature — crew must collect on arrival.
+      const [{ data: accepted }, { data: signed }] = await Promise.all([
+        supabase.from("quotes").select("id").eq("status", "accepted"),
+        supabase.from("signatures").select("quote_id").eq("kind", "contract"),
+      ]);
+      const signedIds = new Set((signed ?? []).map((s) => s.quote_id));
+      return { unsignedContracts: (accepted ?? []).filter((qq) => !signedIds.has(qq.id)).length };
+    })()),
+    ...(await (async () => {
       // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
       const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");
       let followUpsOverdue = 0;

@@ -10,6 +10,7 @@ import {
   CalendarRange,
   ClipboardCheck,
   Contact,
+  FileCheck2,
   FileText,
   KanbanSquare,
   LayoutDashboard,
@@ -29,6 +30,12 @@ import { cn } from "@/lib/utils";
 type NavItem = { href: string; label: string; icon: LucideIcon; live: boolean };
 type NavGroup = { group: string; items: NavItem[] };
 
+/* IA per the 2026-07-10 final-pass audit (Option A — low churn): every route
+   keeps its position; "Board" gains a qualifier to stop colliding with "Job
+   Board" in the collapsed icon rail; Staff & Fleet + Storage move under an
+   honest OPERATIONS eyebrow (their pages already self-describe as Operations);
+   Documents joins SALES as the paperwork tail of the sale (quote → booking →
+   signed contract → completion certificate). */
 export const NAV: NavGroup[] = [
   {
     group: "Pipeline",
@@ -37,7 +44,7 @@ export const NAV: NavGroup[] = [
       { href: "/leads", label: "Leads", icon: Users, live: true },
       { href: "/follow-ups", label: "Follow-ups", icon: BellRing, live: true },
       { href: "/clients", label: "Clients", icon: Contact, live: true },
-      { href: "/board", label: "Board", icon: KanbanSquare, live: true },
+      { href: "/board", label: "Pipeline Board", icon: KanbanSquare, live: true },
     ],
   },
   {
@@ -46,6 +53,11 @@ export const NAV: NavGroup[] = [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
       { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
       { href: "/schedule/board", label: "Job Board", icon: CalendarRange, live: true },
+    ],
+  },
+  {
+    group: "Operations",
+    items: [
       { href: "/resources", label: "Staff & Fleet", icon: UserCog, live: true },
       { href: "/storage", label: "Storage", icon: Warehouse, live: true },
     ],
@@ -55,6 +67,7 @@ export const NAV: NavGroup[] = [
     items: [
       { href: "/quotes", label: "Quotes", icon: FileText, live: true },
       { href: "/bookings", label: "Bookings", icon: ClipboardCheck, live: true },
+      { href: "/documents", label: "Documents", icon: FileCheck2, live: true },
     ],
   },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3, live: true }] },
