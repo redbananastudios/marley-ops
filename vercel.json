@@ -19,6 +19,10 @@
     {
       "path": "/api/cron/storage-billing",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/ai-jobs",
+      "schedule": "*/2 * * * *"
     }
   ]
 }

@@ -593,7 +593,7 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 
 **`lib/storage/`**: `media-store.ts` is the only public AI-media API and defines the driver contract for upload initialisation, object put/read/metadata, signed GET and delete. `supabase-media-store.ts` is the V1 implementation and the only new AI module allowed to call `supabase.storage.from()`. A future `s3-media-store.ts` implements the same contract for Cloudflare R2 or another S3-compatible service.
 
-**Env:** `GEMINI_API_KEY` (server-only), `AI_MEDIA_STORAGE_DRIVER=supabase|s3`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `NEXT_PUBLIC_APP_URL`. Future S3/R2 endpoints and credentials are environment-only. No storage, app, deployment-platform or provider host is embedded in application code.
+**Env:** `GEMINI_API_KEY` (server-only), `GEMINI_API_BASE_URL` (the AI SDK provider endpoint), `AI_MEDIA_STORAGE_DRIVER=supabase|s3`, `AI_MEDIA_STORAGE_ENDPOINT` (optional Supabase storage override), `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `NEXT_PUBLIC_APP_URL`, and optional `AI_JOBS_KICK_URL` for the post-upload immediate drainer kick. Future S3/R2 endpoints and credentials are environment-only. No storage, app, deployment-platform or provider host is embedded in application code.
 
 ---
 

@@ -110,6 +110,24 @@ describe("validateVideoOutput", () => {
     expect(result.data.items[1]).toMatchObject({ roomId: null, reviewReason: "unmatched-room" });
   });
 
+  it("preserves an unassigned persisted segment as blocking evidence", () => {
+    const result = validateVideoOutput({
+      roomAssessment: assessment,
+      items: [item({ segmentRef: "kitchen", timestampsS: [12] })],
+    }, {
+      kind: "import_video",
+      durationS: 20,
+      segments: [{ id: "seg-2", modelRef: "kitchen", roomId: null, startS: 10, endS: 20 }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.items[0]).toMatchObject({
+      roomId: null,
+      evidence: { kind: "video", segmentId: "seg-2", timestampsS: [12] },
+      reviewReason: "unmatched-room",
+    });
+  });
+
   it("fails malformed/overlapping proposed segments before detections can persist", () => {
     const result = validateVideoOutput({
       roomAssessment: {

@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 
 import { revalidatePath } from "next/cache";
+import { after } from "next/server";
 import { z } from "zod";
 
 import { requireOfficeProfile } from "@/lib/ai/auth";
@@ -276,6 +277,16 @@ export async function finalizeMediaUploadAction(
     if (error) throw error;
   } catch {
     return { ok: false, error: "Upload verification failed. Retry from this screen." };
+  }
+  const kickUrl = process.env.AI_JOBS_KICK_URL;
+  const kickSecret = process.env.SYNC_CRON_SECRET;
+  if (kickUrl && kickSecret) {
+    after(async () => {
+      await fetch(kickUrl, {
+        headers: { Authorization: `Bearer ${kickSecret}` },
+        signal: AbortSignal.timeout(5_000),
+      }).catch(() => undefined);
+    });
   }
   return { ok: true };
 }

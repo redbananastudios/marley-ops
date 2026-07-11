@@ -207,7 +207,7 @@ function segmentForItem(
   const matches = segments.filter((segment) =>
     segment.modelRef === segmentRef &&
     timestampsS.every((timestamp) => timestamp >= segment.startS && timestamp <= segment.endS));
-  return matches.length === 1 && matches[0].roomId ? matches[0] : null;
+  return matches.length === 1 ? matches[0] : null;
 }
 
 export function validateVideoOutput(raw: unknown, context: VideoValidationContext): SurveyValidationResult<ValidatedVideoEvidence> {
@@ -228,7 +228,7 @@ export function validateVideoOutput(raw: unknown, context: VideoValidationContex
     const segment = context.kind === "import_video"
       ? segmentForItem(context.segments, item.segmentRef, timestampsS)
       : null;
-    const unmatchedRoom = context.kind === "import_video" && !segment;
+    const unmatchedRoom = context.kind === "import_video" && !segment?.roomId;
     const roomId = context.kind === "room_video" ? context.roomId : segment?.roomId ?? null;
     return {
       label: item.label.trim(),
