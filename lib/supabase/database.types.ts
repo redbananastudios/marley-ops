@@ -783,6 +783,8 @@ export type Database = {
           model: string
           output_tokens: number | null
           prompt_version: string
+          provider_deleted_at: string | null
+          provider_file_name: string | null
           purpose: string
           reserved_cost_usd: number
           started_at: string
@@ -800,6 +802,8 @@ export type Database = {
           model: string
           output_tokens?: number | null
           prompt_version: string
+          provider_deleted_at?: string | null
+          provider_file_name?: string | null
           purpose: string
           reserved_cost_usd?: number
           started_at?: string
@@ -817,6 +821,8 @@ export type Database = {
           model?: string
           output_tokens?: number | null
           prompt_version?: string
+          provider_deleted_at?: string | null
+          provider_file_name?: string | null
           purpose?: string
           reserved_cost_usd?: number
           started_at?: string
@@ -2626,6 +2632,10 @@ export type Database = {
         Returns: undefined
       }
       release_ai_call: { Args: { p_attempt_key: string }; Returns: boolean }
+      release_stale_ai_reservations: {
+        Args: { p_age_minutes?: number }
+        Returns: number
+      }
       reserve_ai_call: {
         Args: {
           p_attempt_key: string

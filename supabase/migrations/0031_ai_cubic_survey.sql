@@ -180,6 +180,8 @@ create table public.cubic_analysis_runs (
   reserved_cost_usd numeric(10,4) not null default 0 check (reserved_cost_usd >= 0),
   cost_usd numeric(10,4) check (cost_usd is null or cost_usd >= 0),
   error text,
+  provider_file_name text,
+  provider_deleted_at timestamptz,
   started_at timestamptz not null default now(),
   finished_at timestamptz,
   unique (survey_id, id),
@@ -620,7 +622,7 @@ begin
   return query
   update public.ai_jobs as job
   set status = 'running',
-      attempts = job.attempts + 1,
+      attempts = case when job.status = 'blocked' then job.attempts else job.attempts + 1 end,
       locked_at = pg_catalog.now(),
       locked_by = p_worker,
       lease_expires_at = pg_catalog.now() + pg_catalog.make_interval(secs => least(greatest(p_lease_seconds, 30), 900)),
@@ -630,7 +632,7 @@ begin
     select candidate.id
     from public.ai_jobs as candidate
     where (
-        (candidate.status = 'queued' and candidate.next_run_at <= pg_catalog.now())
+        (candidate.status in ('queued', 'blocked') and candidate.next_run_at <= pg_catalog.now())
         or (candidate.status = 'running' and candidate.lease_expires_at < pg_catalog.now())
       )
       and candidate.attempts < candidate.max_attempts
@@ -813,7 +815,11 @@ begin
   from public.ai_spend_reservations
   where attempt_key = p_attempt_key;
   if found then
-    return query select true, 'existing', existing.id;
+    if existing.status = 'released' then
+      return query select false, 'attempt_released', null::uuid;
+    else
+      return query select true, 'existing', existing.id;
+    end if;
     return;
   end if;
 
@@ -932,6 +938,38 @@ begin
 end
 $function$;
 
+create or replace function public.release_stale_ai_reservations(p_age_minutes int default 30)
+returns int
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  released_count int := 0;
+  stale record;
+begin
+  for stale in
+    select reservation.id, reservation.month, reservation.estimated_usd
+    from public.ai_spend_reservations as reservation
+    join public.ai_jobs as job on job.id = reservation.job_id
+    where reservation.status = 'reserved'
+      and reservation.created_at < pg_catalog.now() - pg_catalog.make_interval(mins => least(greatest(p_age_minutes, 5), 1440))
+      and (job.status <> 'running' or job.lease_expires_at < pg_catalog.now())
+    for update of reservation skip locked
+  loop
+    perform 1 from public.ai_spend_months where month = stale.month for update;
+    update public.ai_spend_months
+    set reserved_usd = greatest(0, reserved_usd - stale.estimated_usd)
+    where month = stale.month;
+    update public.ai_spend_reservations
+    set status = 'released', finalised_at = pg_catalog.now()
+    where id = stale.id;
+    released_count := released_count + 1;
+  end loop;
+  return released_count;
+end
+$function$;
+
 -- ---------------------------------------------------------------------------
 -- Transactional worker completion
 
@@ -997,6 +1035,7 @@ begin
         output_tokens = greatest(coalesce(p_output_tokens, 0), 0),
         cost_usd = p_actual_usd,
         error = 'discarded-after-consent-withdrawal',
+        provider_deleted_at = case when p_provider_deleted then pg_catalog.now() else provider_deleted_at end,
         finished_at = pg_catalog.now()
     where id = run.id;
     update public.cubic_survey_media
@@ -1039,6 +1078,7 @@ begin
       input_tokens = greatest(coalesce(p_input_tokens, 0), 0),
       output_tokens = greatest(coalesce(p_output_tokens, 0), 0),
       cost_usd = p_actual_usd,
+      provider_deleted_at = case when p_provider_deleted then pg_catalog.now() else provider_deleted_at end,
       finished_at = pg_catalog.now()
   where id = run.id;
   update public.cubic_survey_media
@@ -1189,6 +1229,8 @@ revoke all on function public.finalise_ai_call(text, numeric)
   from public, anon, authenticated;
 revoke all on function public.release_ai_call(text)
   from public, anon, authenticated;
+revoke all on function public.release_stale_ai_reservations(int)
+  from public, anon, authenticated;
 revoke all on function public.complete_ai_media_job(
   uuid, text, uuid, jsonb, text, jsonb, jsonb, int, int, numeric, boolean
 ) from public, anon, authenticated;
@@ -1211,6 +1253,8 @@ grant execute on function public.reserve_ai_call(uuid, uuid, text, numeric)
 grant execute on function public.finalise_ai_call(text, numeric)
   to service_role;
 grant execute on function public.release_ai_call(text)
+  to service_role;
+grant execute on function public.release_stale_ai_reservations(int)
   to service_role;
 grant execute on function public.complete_ai_media_job(
   uuid, text, uuid, jsonb, text, jsonb, jsonb, int, int, numeric, boolean

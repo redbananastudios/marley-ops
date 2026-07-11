@@ -6,11 +6,14 @@ const catalogue = CUBIC_CATEGORIES.flatMap((category) =>
   category.items.map((item) => `${item.key} | ${item.title}`),
 ).join("\n");
 
-export function roomVideoPrompt(roomName: string): string {
+export function roomVideoPrompt(roomName: string, context: { roomType?: string | null; floor?: string | null; hiddenStorageChecked?: boolean | null } = {}): string {
   return `You are preparing a UK removals inventory for Marley Moves.
 Analyse the complete room video and its narration. Identify every movable item, including repeated chairs, boxes and hidden-storage contents that are actually shown or clearly narrated.
 
 Room: ${roomName}
+Room type: ${context.roomType ?? "not specified"}
+Floor: ${context.floor ?? "not specified"}
+Estimator checked cupboards/hidden storage: ${context.hiddenStorageChecked ? "yes" : "no"}
 
 Rules:
 - Use only catalogue keys from the allow-list below. Never invent a key or cubic volume.

@@ -203,6 +203,9 @@ export async function registerMediaAction(
   if (input.data.kind === "photo" && input.data.bytes > 15_728_640) {
     return { ok: false, error: "Photos must be under 15 MB." };
   }
+  if (input.data.kind === "photo" && !input.data.roomId) {
+    return { ok: false, error: "Choose the room for this photo." };
+  }
 
   const { data: survey } = await surveyContext(id.data);
   if (!survey?.ai_consent || survey.ai_consent_withdrawn_at || survey.ai_status === "abandoned") {

@@ -101,6 +101,8 @@ export function AiSurveyCapture({
   const [method, setMethod] = useState<"verbal" | "digital">("verbal");
   const [rooms, setRooms] = useState(initialRooms);
   const [roomName, setRoomName] = useState("");
+  const [hiddenStorageChecked, setHiddenStorageChecked] = useState(false);
+  const [wholePropertyImport, setWholePropertyImport] = useState(false);
   const [selectedRoom, setSelectedRoom] = useState(initialRooms[0]?.id ?? "");
   const [recording, setRecording] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -171,7 +173,7 @@ export function AiSurveyCapture({
       const name = roomName.trim();
       const result = await createRoomAction(surveyId, {
         name,
-        hiddenStorageChecked: false,
+        hiddenStorageChecked,
       });
       if (!result.ok) {
         toast.error(result.error);
@@ -180,6 +182,7 @@ export function AiSurveyCapture({
       setRooms((current) => [...current, { id: result.roomId, name, status: "pending" }]);
       setSelectedRoom(result.roomId);
       setRoomName("");
+      setHiddenStorageChecked(false);
     });
   }
 
@@ -265,7 +268,7 @@ export function AiSurveyCapture({
         kind: isVideo ? "import_video" : "photo",
         durationS: isVideo ? await videoDuration(file) : undefined,
         previewUrl: URL.createObjectURL(file),
-        roomId: selectedRoom || undefined,
+        roomId: isVideo && wholePropertyImport ? undefined : selectedRoom || undefined,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not read that file.");
@@ -362,6 +365,7 @@ export function AiSurveyCapture({
           <input value={roomName} onChange={(event) => setRoomName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addRoom(); }} placeholder="Add a room" className="focus-ring h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-base" />
           <button type="button" aria-label="Add room" disabled={busy} onClick={addRoom} className="focus-ring flex size-11 shrink-0 items-center justify-center rounded-lg bg-foreground text-background"><Plus className="size-5" /></button>
         </div>
+        <label className="mt-2 flex min-h-11 items-center gap-2 text-xs text-mist-500"><input type="checkbox" checked={hiddenStorageChecked} onChange={(event) => setHiddenStorageChecked(event.target.checked)} className="size-5 accent-mm-red" /> Cupboards and hidden storage checked</label>
       </aside>
 
       <section className="overflow-hidden rounded-2xl border border-border bg-[#101416] text-white shadow-xl">
@@ -381,6 +385,7 @@ export function AiSurveyCapture({
           <label className="focus-ring flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 font-semibold hover:bg-white/10"><FileVideo className="size-5" /> Import media<input type="file" accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png" className="sr-only" disabled={recording || uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseFile(file); event.target.value = ""; }} /></label>
           <button type="button" disabled={!pending || uploading} onClick={uploadPending} className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl bg-cyan-300 font-semibold text-slate-950 disabled:opacity-35">{uploading ? <Loader2 className="size-5 animate-spin" /> : <UploadCloud className="size-5" />} Upload & analyse</button>
         </div>
+        <label className="mx-4 mb-3 flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm text-white/70"><input type="checkbox" checked={wholePropertyImport} onChange={(event) => setWholePropertyImport(event.target.checked)} disabled={recording || uploading} className="size-5 accent-mm-red" /> Imported video covers multiple rooms</label>
         <label className="mx-4 mb-3 flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm text-white/70"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} disabled={recording} className="size-5 accent-mm-red" /> Record narration</label>
         <p className="px-4 pb-4 text-xs leading-5 text-white/45">Keep this page open until upload reaches 100%. AI suggestions never replace your review.</p>
       </section>

@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(30);
+select plan(39);
 
 select has_table('public', 'cubic_survey_rooms', 'rooms table exists');
 select has_table('public', 'cubic_survey_media', 'media table exists');
@@ -101,10 +101,10 @@ select is(
     from pg_policies
     where schemaname = 'storage'
       and tablename = 'objects'
-      and policyname in ('survey_media_read', 'survey_media_insert', 'survey_media_delete')
+      and policyname in ('survey_media_read', 'survey_media_insert', 'survey_media_update', 'survey_media_delete')
   ),
-  3,
-  'provider migration installs the three path-bound storage policies'
+  4,
+  'provider migration installs the four path-bound storage policies'
 );
 
 insert into auth.users (id, email, raw_app_meta_data, raw_user_meta_data)
@@ -199,6 +199,12 @@ select lives_ok(
     )$$,
   'estimator can insert a valid evidence-frame path'
 );
+select lives_ok(
+  $$update storage.objects set metadata = '{"mimetype":"video/mp4","size":42}'::jsonb
+    where bucket_id = 'survey-media'
+      and name = '20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000001/source.mp4'$$,
+  'estimator can retry/upsert the exact preregistered source path'
+);
 reset role;
 update public.cubic_survey_media set status = 'uploaded'
 where id = '40000000-0000-4000-8000-000000000001';
@@ -279,6 +285,38 @@ select is(
   'failed',
   'expired final attempt recomputes the room to failed'
 );
+
+select is(
+  (select allowed from public.reserve_ai_call(
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    'released-attempt', 0.10
+  )), true, 'spend reservation is initially allowed'
+);
+select is(public.release_ai_call('released-attempt'), true, 'reservation can be released');
+select is(
+  (select allowed::text || ':' || reason from public.reserve_ai_call(
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    'released-attempt', 0.10
+  )), 'false:attempt_released', 'released attempt cannot silently bypass reservation'
+);
+
+select is(
+  (select allowed from public.reserve_ai_call(
+    '20000000-0000-4000-8000-000000000001',
+    '50000000-0000-4000-8000-000000000001',
+    'stale-attempt', 0.10
+  )), true, 'stale-sweep fixture is reserved'
+);
+update public.ai_spend_reservations set created_at = now() - interval '2 hours' where attempt_key = 'stale-attempt';
+select is(public.release_stale_ai_reservations(30), 1, 'stale reservation sweeper releases abandoned ledger rows');
+select is((select status from public.ai_spend_reservations where attempt_key = 'stale-attempt'), 'released', 'stale reservation is marked released');
+
+update public.ai_jobs set status = 'blocked', attempts = 2, next_run_at = now() - interval '1 minute', locked_by = null, lease_expires_at = null
+where id = '50000000-0000-4000-8000-000000000001';
+select is((select count(*)::int from public.claim_ai_jobs('unblocked-worker', 1, 300)), 1, 'due budget-blocked job is reconsidered');
+select is((select status || ':' || attempts::text from public.ai_jobs where id = '50000000-0000-4000-8000-000000000001'), 'running:2', 'budget reconsideration does not consume a retry attempt');
 
 select * from finish();
 rollback;

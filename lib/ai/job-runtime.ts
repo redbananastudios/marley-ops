@@ -1,7 +1,5 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
-
 import { calculateAiCallCostUsd, estimateAiCallCost, isApprovedAiModelId } from "@/lib/ai/budget";
 import { analyseGeminiMedia } from "@/lib/ai/gemini";
 import type { AiJobProcessResult, AiJobRuntime } from "@/lib/ai/jobs";
@@ -18,18 +16,31 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "AI processing failed";
 }
 
-async function storedBytes(storagePath: string): Promise<Uint8Array> {
-  const url = await createMediaStore().createSignedGetUrl(storagePath, 900);
-  const response = await fetch(url, { signal: AbortSignal.timeout(600_000) });
-  if (!response.ok) throw new Error(`Media download failed (${response.status})`);
-  return new Uint8Array(await response.arrayBuffer());
+async function withLeaseHeartbeat<T>(heartbeat: () => Promise<void>, task: () => Promise<T>): Promise<T> {
+  let leaseError: unknown = null;
+  const timer = setInterval(() => {
+    void heartbeat().catch((error) => { leaseError = error; });
+  }, 60_000);
+  try {
+    const result = await task();
+    if (leaseError) throw leaseError;
+    await heartbeat();
+    return result;
+  } finally {
+    clearInterval(timer);
+  }
 }
 
 export function createAiJobRuntime(): AiJobRuntime<Job> {
   const admin = createAdminClient();
+  let staleReservationsSwept = false;
 
   return {
     async claimNext(workerId) {
+      if (!staleReservationsSwept) {
+        await admin.rpc("release_stale_ai_reservations", { p_age_minutes: 30 });
+        staleReservationsSwept = true;
+      }
       const { data, error } = await admin.rpc("claim_ai_jobs", {
         p_worker: workerId,
         p_batch: 1,
@@ -54,7 +65,7 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
       }
       const { data: media } = await admin
         .from("cubic_survey_media")
-        .select("id, survey_id, room_id, kind, storage_path, mime, duration_s")
+        .select("id, survey_id, room_id, kind, storage_path, mime, duration_s, bytes")
         .eq("id", job.media_id)
         .maybeSingle();
       if (!media) throw new Error("Job media was not found");
@@ -67,7 +78,8 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
         ? settings.ai_model_default
         : "gemini-3.5-flash";
       const estimate = estimateAiCallCost({ durationS: Math.max(media.duration_s ?? 1, 1), model });
-      const attemptKey = `${job.id}:${job.attempts}:${randomUUID()}`;
+      if (media.kind === "photo" && !media.room_id) throw new Error("Photo media must belong to a room");
+      const attemptKey = `${job.id}:${job.attempts}`;
       const { data: reservation, error: reservationError } = await admin.rpc("reserve_ai_call", {
         p_survey_id: job.survey_id,
         p_job_id: job.id,
@@ -97,21 +109,25 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
         throw runError ?? new Error("Could not create analysis run");
       }
 
+      let providerFileUploaded = false;
       try {
-        await context.heartbeat();
-        const bytes = await storedBytes(media.storage_path);
+        const analysisResult = await withLeaseHeartbeat(context.heartbeat, async () => {
+        const store = createMediaStore();
+        const metadata = await store.getObjectMetadata(media.storage_path);
+        const sourceUrl = await store.createSignedGetUrl(media.storage_path, 900);
         let analysis;
         let validated;
         if (media.kind === "photo") {
           const { data: room } = await admin.from("cubic_survey_rooms").select("name").eq("id", media.room_id!).single();
-          analysis = await analyseGeminiMedia({ bytes, mime: media.mime, model, prompt: photoPrompt(room?.name ?? "Room"), schema: photoDetectionSchema, displayName: `marley-${media.id}` });
+          analysis = await analyseGeminiMedia({ sourceUrl, bytes: metadata.bytes, mime: media.mime, model, prompt: photoPrompt(room?.name ?? "Room"), schema: photoDetectionSchema, displayName: `marley-${media.id}`, onFileUploaded: async (name) => { providerFileUploaded = true; await admin.from("cubic_analysis_runs").update({ provider_file_name: name }).eq("id", run.id); } });
           validated = validatePhotoOutput(analysis.output, { kind: "photo", roomId: media.room_id!, photoCount: 1 });
         } else {
           const { data: room } = media.room_id
-            ? await admin.from("cubic_survey_rooms").select("name").eq("id", media.room_id).single()
+            ? await admin.from("cubic_survey_rooms").select("name, room_type, floor, hidden_storage_checked").eq("id", media.room_id).single()
             : { data: null };
-          analysis = await analyseGeminiMedia({ bytes, mime: media.mime, model, prompt: media.kind === "room_video" ? roomVideoPrompt(room?.name ?? "Room") : importedVideoPrompt(), schema: videoDetectionSchema, displayName: `marley-${media.id}` });
-          if (media.kind === "room_video") {
+          const roomScoped = media.kind === "room_video" || !!media.room_id;
+          analysis = await analyseGeminiMedia({ sourceUrl, bytes: metadata.bytes, mime: media.mime, model, prompt: roomScoped ? roomVideoPrompt(room?.name ?? "Room", { roomType: room?.room_type, floor: room?.floor, hiddenStorageChecked: room?.hidden_storage_checked }) : importedVideoPrompt(), schema: videoDetectionSchema, displayName: `marley-${media.id}`, onFileUploaded: async (name) => { providerFileUploaded = true; await admin.from("cubic_analysis_runs").update({ provider_file_name: name }).eq("id", run.id); } });
+          if (roomScoped) {
             validated = validateVideoOutput(analysis.output, { kind: "room_video", roomId: media.room_id!, durationS: media.duration_s ?? 1 });
           } else {
             const proposed = analysis.output.roomAssessment.proposedRooms ?? [];
@@ -136,7 +152,9 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
           }
         }
         if (!validated.ok) throw new Error(validated.error);
-        await context.heartbeat();
+        return { analysis, validated };
+        });
+        const { analysis, validated } = analysisResult;
         const actualCost = calculateAiCallCostUsd(model, analysis.inputTokens, analysis.outputTokens);
         const detections = validated.data.items.map((item) => ({
           roomId: item.roomId,
@@ -165,10 +183,32 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
           p_provider_deleted: analysis.providerFileDeleted,
         });
         if (completeError) throw completeError;
+        const { data: surveyDetections } = await admin
+          .from("cubic_ai_detections")
+          .select("id, room_id, catalogue_key, run:cubic_analysis_runs(media_id)")
+          .eq("survey_id", job.survey_id)
+          .eq("state", "proposed")
+          .not("room_id", "is", null)
+          .not("catalogue_key", "is", null);
+        const groups = new Map<string, { ids: string[]; media: Set<string> }>();
+        for (const detection of surveyDetections ?? []) {
+          const key = `${detection.room_id}:${detection.catalogue_key}`;
+          const group = groups.get(key) ?? { ids: [], media: new Set<string>() };
+          group.ids.push(detection.id);
+          if (detection.run?.media_id) group.media.add(detection.run.media_id);
+          groups.set(key, group);
+        }
+        for (const group of groups.values()) {
+          if (group.media.size > 1) await admin.from("cubic_ai_detections").update({ review_reason: "seen-in-multiple-clips" }).in("id", group.ids);
+        }
         return { status: "done" };
       } catch (error) {
-        await admin.rpc("release_ai_call", { p_attempt_key: attemptKey });
-        await admin.from("cubic_analysis_runs").update({ status: "failed", error: errorMessage(error), finished_at: new Date().toISOString() }).eq("id", run.id).eq("status", "running");
+        if (providerFileUploaded) {
+          await admin.rpc("finalise_ai_call", { p_attempt_key: attemptKey, p_actual_usd: estimate.estimatedCostUsd });
+        } else {
+          await admin.rpc("release_ai_call", { p_attempt_key: attemptKey });
+        }
+        await admin.from("cubic_analysis_runs").update({ status: "failed", cost_usd: providerFileUploaded ? estimate.estimatedCostUsd : null, error: errorMessage(error), finished_at: new Date().toISOString() }).eq("id", run.id).eq("status", "running");
         throw error;
       }
     },
@@ -178,7 +218,7 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
     },
 
     async block(jobId, workerId, reason) {
-      const { error } = await admin.from("ai_jobs").update({ status: "blocked", error: reason, locked_by: null, locked_at: null, lease_expires_at: null, heartbeat_at: null }).eq("id", jobId).eq("status", "running").eq("locked_by", workerId);
+      const { error } = await admin.from("ai_jobs").update({ status: "blocked", error: reason, next_run_at: new Date(Date.now() + 300_000).toISOString(), locked_by: null, locked_at: null, lease_expires_at: null, heartbeat_at: null }).eq("id", jobId).eq("status", "running").eq("locked_by", workerId);
       if (error) throw error;
     },
 
