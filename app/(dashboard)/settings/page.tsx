@@ -20,9 +20,10 @@ export default async function SettingsPage() {
   const admin = createAdminClient();
   const month = new Date();
   month.setUTCDate(1); month.setUTCHours(0, 0, 0, 0);
-  const [{ data: spend }, { data: mediaRows }] = await Promise.all([
+  const [{ data: spend }, { data: mediaRows }, { data: problemJobs }] = await Promise.all([
     admin.from("ai_spend_months").select("spent_usd").eq("month", month.toISOString().slice(0, 10)).maybeSingle(),
     admin.from("cubic_survey_media").select("bytes").neq("status", "deleted"),
+    admin.from("ai_jobs").select("id, status, attempts, max_attempts, error, created_at").in("status", ["failed", "dead", "blocked"]).order("created_at", { ascending: false }).limit(20),
   ]);
   const aiConfigured = !!process.env.GEMINI_API_KEY && !!process.env.GEMINI_API_BASE_URL && !!(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
 
@@ -42,7 +43,7 @@ export default async function SettingsPage() {
 
       <div className="grid gap-6">
         {canEdit ? <TeamForm users={team} meId={profile?.id ?? null} /> : null}
-        <AiSettingsCard settings={settings} spentUsd={Number(spend?.spent_usd ?? 0)} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} configured={aiConfigured} canEdit={canEdit} />
+        <AiSettingsCard settings={settings} spentUsd={Number(spend?.spent_usd ?? 0)} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
         <PricingForm initial={pricing} canEdit={canEdit} />
         <SettingsForm initial={settings} canEdit={canEdit} />
         <MarginCalculator settings={settings} />

@@ -1211,6 +1211,190 @@ begin
 end
 $function$;
 
+create or replace function public.assign_ai_segment(
+  p_segment_id uuid,
+  p_action text,
+  p_room_id uuid,
+  p_new_room text,
+  p_actor_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  segment public.cubic_survey_segments%rowtype;
+  target_room public.cubic_survey_rooms%rowtype;
+  next_sort int;
+  survey_updated_at timestamptz;
+begin
+  if p_action not in ('assign', 'merge', 'reject') then
+    raise exception 'invalid segment action' using errcode = '22023';
+  end if;
+
+  select * into segment
+  from public.cubic_survey_segments
+  where id = p_segment_id
+  for update;
+  if segment.id is null or segment.status not in ('proposed', 'assigned', 'merged') then
+    raise exception 'segment is not assignable' using errcode = '22023';
+  end if;
+
+  if p_action = 'reject' then
+    update public.cubic_survey_segments
+    set status = 'rejected', room_id = null
+    where id = segment.id;
+    update public.cubic_ai_detections
+    set state = 'rejected', room_id = null
+    where segment_id = segment.id and state <> 'merged';
+  else
+    if p_room_id is not null then
+      select * into target_room
+      from public.cubic_survey_rooms
+      where id = p_room_id and survey_id = segment.survey_id;
+      if target_room.id is null then
+        raise exception 'room is outside this survey' using errcode = '23503';
+      end if;
+    elsif nullif(btrim(p_new_room), '') is not null then
+      if char_length(btrim(p_new_room)) > 60 then
+        raise exception 'room name is too long' using errcode = '22023';
+      end if;
+      select coalesce(max(sort), -1) + 1 into next_sort
+      from public.cubic_survey_rooms
+      where survey_id = segment.survey_id;
+      insert into public.cubic_survey_rooms(survey_id, name, sort, created_by)
+      values (segment.survey_id, btrim(p_new_room), next_sort, p_actor_id)
+      returning * into target_room;
+    else
+      raise exception 'room assignment is required' using errcode = '22023';
+    end if;
+
+    update public.cubic_survey_segments
+    set room_id = target_room.id,
+        status = case when p_action = 'merge' then 'merged' else 'assigned' end
+    where id = segment.id;
+    update public.cubic_ai_detections
+    set room_id = target_room.id
+    where segment_id = segment.id and state <> 'merged';
+    update public.cubic_survey_rooms as assigned_room
+    set status = case when source_media.status = 'processed' then 'ready' else 'processing' end,
+        coverage = source_media.coverage,
+        completion_method = null
+    from public.cubic_survey_media as source_media
+    where assigned_room.id = target_room.id
+      and source_media.id = segment.media_id;
+  end if;
+
+  update public.cubic_surveys
+  set room_manifest_complete = false,
+      planning_ready = false,
+      last_ai_user_activity_at = pg_catalog.now(),
+      updated_by = p_actor_id
+  where id = segment.survey_id
+  returning updated_at into survey_updated_at;
+
+  return jsonb_build_object(
+    'roomId', target_room.id,
+    'updatedAt', survey_updated_at,
+    'status', case when p_action = 'reject' then 'rejected' when p_action = 'merge' then 'merged' else 'assigned' end
+  );
+end
+$function$;
+
+create or replace function public.retry_ai_job(p_job_id uuid, p_actor_id uuid)
+returns public.ai_jobs
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  job public.ai_jobs%rowtype;
+  media public.cubic_survey_media%rowtype;
+begin
+  select * into job from public.ai_jobs where id = p_job_id for update;
+  if job.id is null or job.status not in ('failed', 'dead') then
+    raise exception 'job is not retryable' using errcode = '22023';
+  end if;
+  if not exists (select 1 from public.business_settings where id = true and ai_survey_enabled) then
+    raise exception 'AI surveys are paused' using errcode = '55000';
+  end if;
+  update public.ai_jobs
+  set status = 'queued', attempts = 0, next_run_at = pg_catalog.now(), error = null,
+      locked_at = null, locked_by = null, lease_expires_at = null, heartbeat_at = null
+  where id = job.id returning * into job;
+  if job.media_id is not null then
+    update public.cubic_survey_media set status = 'uploaded', error = null
+    where id = job.media_id returning * into media;
+    if media.room_id is not null then perform public.recompute_ai_room_state(media.room_id); end if;
+  end if;
+  update public.cubic_surveys
+  set ai_status = 'active', planning_ready = false,
+      last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
+  where id = job.survey_id;
+  return job;
+end
+$function$;
+
+create or replace function public.ignore_failed_ai_media(p_media_id uuid, p_actor_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  media public.cubic_survey_media%rowtype;
+begin
+  select * into media from public.cubic_survey_media where id = p_media_id for update;
+  if media.id is null or media.status <> 'failed' then
+    raise exception 'media is not failed' using errcode = '22023';
+  end if;
+  if exists (select 1 from public.ai_jobs where media_id = media.id and status in ('queued', 'running', 'blocked')) then
+    raise exception 'media still has live work' using errcode = '55000';
+  end if;
+  update public.cubic_survey_media set status = 'ignored', error = null where id = media.id;
+  if media.room_id is not null then perform public.recompute_ai_room_state(media.room_id); end if;
+  update public.cubic_surveys
+  set room_manifest_complete = false, planning_ready = false,
+      last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
+  where id = media.survey_id;
+  return true;
+end
+$function$;
+
+create or replace function public.finish_ai_room_manually(p_room_id uuid, p_actor_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  room public.cubic_survey_rooms%rowtype;
+begin
+  select * into room from public.cubic_survey_rooms where id = p_room_id for update;
+  if room.id is null or room.status not in ('failed', 'needs_attention', 'pending') then
+    raise exception 'room is not eligible for manual completion' using errcode = '22023';
+  end if;
+  if exists (
+    select 1 from public.ai_jobs as job
+    join public.cubic_survey_media as media on media.id = job.media_id
+    where media.room_id = room.id and job.status in ('queued', 'running', 'blocked')
+  ) then raise exception 'room still has live work' using errcode = '55000'; end if;
+  if exists (select 1 from public.cubic_survey_media where room_id = room.id and status = 'failed') then
+    raise exception 'discard or retry failed clips first' using errcode = '55000';
+  end if;
+  update public.cubic_survey_rooms
+  set status = 'confirmed', completion_method = 'manual'
+  where id = room.id;
+  update public.cubic_surveys
+  set room_manifest_complete = false, planning_ready = false, ai_status = 'active',
+      contingency_pct = greatest(contingency_pct, 20),
+      last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
+  where id = room.survey_id;
+  return true;
+end
+$function$;
+
 -- New routines inherit broad grants from migration 0001 and PostgreSQL grants
 -- EXECUTE to PUBLIC by default. Remove both, then expose only to service_role.
 revoke all on function public.finalize_ai_media(uuid, uuid, bigint, numeric, jsonb, text)
@@ -1237,6 +1421,11 @@ revoke all on function public.complete_ai_media_job(
 revoke all on function public.confirm_ai_room(
   uuid, uuid, timestamptz, jsonb, uuid[], numeric, int, boolean, uuid
 ) from public, anon, authenticated;
+revoke all on function public.assign_ai_segment(uuid, text, uuid, text, uuid)
+  from public, anon, authenticated;
+revoke all on function public.retry_ai_job(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.ignore_failed_ai_media(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.finish_ai_room_manually(uuid, uuid) from public, anon, authenticated;
 
 grant execute on function public.finalize_ai_media(uuid, uuid, bigint, numeric, jsonb, text)
   to service_role;
@@ -1262,3 +1451,8 @@ grant execute on function public.complete_ai_media_job(
 grant execute on function public.confirm_ai_room(
   uuid, uuid, timestamptz, jsonb, uuid[], numeric, int, boolean, uuid
 ) to service_role;
+grant execute on function public.assign_ai_segment(uuid, text, uuid, text, uuid)
+  to service_role;
+grant execute on function public.retry_ai_job(uuid, uuid) to service_role;
+grant execute on function public.ignore_failed_ai_media(uuid, uuid) to service_role;
+grant execute on function public.finish_ai_room_manually(uuid, uuid) to service_role;

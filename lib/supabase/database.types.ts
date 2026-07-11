@@ -2463,6 +2463,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      assign_ai_segment: {
+        Args: {
+          p_action: string
+          p_actor_id: string
+          p_new_room: string | null
+          p_room_id: string | null
+          p_segment_id: string
+        }
+        Returns: Json
+      }
       claim_ai_jobs: {
         Args: { p_batch?: number; p_lease_seconds?: number; p_worker: string }
         Returns: {
@@ -2624,6 +2634,14 @@ export type Database = {
         Args: { p_job_id: string; p_lease_seconds?: number; p_worker: string }
         Returns: boolean
       }
+      finish_ai_room_manually: {
+        Args: { p_actor_id: string; p_room_id: string }
+        Returns: boolean
+      }
+      ignore_failed_ai_media: {
+        Args: { p_actor_id: string; p_media_id: string }
+        Returns: boolean
+      }
       is_admin: { Args: never; Returns: boolean }
       is_office: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
@@ -2635,6 +2653,16 @@ export type Database = {
       release_stale_ai_reservations: {
         Args: { p_age_minutes?: number }
         Returns: number
+      }
+      retry_ai_job: {
+        Args: { p_actor_id: string; p_job_id: string }
+        Returns: Database["public"]["Tables"]["ai_jobs"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       reserve_ai_call: {
         Args: {

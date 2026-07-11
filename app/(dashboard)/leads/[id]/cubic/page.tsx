@@ -9,6 +9,8 @@ import { sanitizeCubicLines, type CubicLine } from "@/lib/cubic-survey";
 import { saveCubicSurveyAction } from "@/app/actions/cubic-survey";
 import { CubicBuilder } from "@/components/cubic/cubic-builder";
 import { CopyCubicLinkButton } from "@/components/cubic/copy-cubic-link-button";
+import { SurveyRoomsStrip, type SurveyRoomState } from "@/components/ai-survey/survey-rooms-strip";
+import { SurveyStatePoller } from "@/components/ai-survey/survey-state-poller";
 
 /**
  * /leads/[id]/cubic — the estimator's tablet surface for the volume survey.
@@ -28,7 +30,7 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
 
   // Get-or-create the survey row (unique per lead; loser of a race refetches).
   const admin = createAdminClient();
-  const COLS = "id, items, notes, customer_notes, status, updated_at";
+  const COLS = "id, items, notes, customer_notes, status, updated_at, ai_status";
   let { data: survey } = await admin.from("cubic_surveys").select(COLS).eq("lead_id", id).maybeSingle();
   if (!survey) {
     const {
@@ -49,9 +51,23 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
 
   const settings = await getBusinessSettings(sb);
   const lines: CubicLine[] = sanitizeCubicLines(survey.items) ?? [];
+  const [{ data: aiRooms }, { data: aiMedia }, { data: aiJobs }, { data: aiDetections }] = settings.aiSurveyEnabled ? await Promise.all([
+    admin.from("cubic_survey_rooms").select("id, name, status").eq("survey_id", survey.id).order("sort"),
+    admin.from("cubic_survey_media").select("id, room_id, status").eq("survey_id", survey.id),
+    admin.from("ai_jobs").select("id, media_id, status").eq("survey_id", survey.id),
+    admin.from("cubic_ai_detections").select("room_id, state").eq("survey_id", survey.id).neq("state", "rejected"),
+  ]) : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }];
+  const roomStates: SurveyRoomState[] = (aiRooms ?? []).map((room) => {
+    const roomMedia = (aiMedia ?? []).filter((media) => media.room_id === room.id);
+    const failedMedia = roomMedia.find((media) => media.status === "failed");
+    const retryJob = (aiJobs ?? []).find((job) => job.media_id === failedMedia?.id && ["failed", "dead"].includes(job.status));
+    const roomLines = lines.filter((line) => line.room === room.name && line.source === "ai");
+    return { id: room.id, name: room.name, status: room.status, itemCount: (aiDetections ?? []).filter((item) => item.room_id === room.id).length, totalFt3: roomLines.reduce((sum, line) => sum + (line.flags?.notMoving ? 0 : line.unitFt3 * line.qty), 0), failedMediaId: failedMedia?.id ?? null, retryJobId: retryJob?.id ?? null, manualFinishAvailable: room.status === "pending" && roomMedia.some((media) => media.status === "ignored") };
+  });
 
   return (
     <main className="mx-auto w-full max-w-6xl px-5 pb-10 md:px-8">
+      <SurveyStatePoller surveyId={survey.id} enabled={roomStates.some((room) => room.status === "processing")} />
       <div className="flex items-center justify-between gap-3 py-4">
         <div className="min-w-0">
           <Link
@@ -70,6 +86,8 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
           <CopyCubicLinkButton surveyId={survey.id} />
         </div>
       </div>
+
+      <SurveyRoomsStrip leadId={id} rooms={roomStates} />
 
       <CubicBuilder
         mode="office"

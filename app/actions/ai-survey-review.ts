@@ -27,17 +27,56 @@ const customResolution = z.object({
   type: z.literal("custom"),
   title: z.string().trim().min(1).max(120),
   category: z.string().trim().min(1).max(60),
-  unitFt3: z.number().finite().min(0).max(2000),
+  unitFt3: z.number().finite().min(0.1).max(2000),
   qty: z.number().int().min(1).max(999),
   moving: z.enum(["moving", "staying"]),
   flags,
 });
 const resolution = z.discriminatedUnion("type", [catalogueResolution, customResolution]);
+const segmentAssignment = z.object({
+  action: z.enum(["assign", "merge", "reject"]),
+  roomId: z.string().uuid().optional(),
+  newRoom: z.string().trim().min(1).max(60).optional(),
+}).refine((value) => value.action === "reject" || !!value.roomId || !!value.newRoom, "Choose a room.");
+
+export async function assignSegmentAction(
+  segmentId: string,
+  raw: z.input<typeof segmentAssignment>,
+): Promise<ReviewResult<{ roomId: string | null; status: string; updatedAt: string }>> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(segmentId);
+  const input = segmentAssignment.safeParse(raw);
+  if (!id.success || !input.success) return { ok: false, error: "Choose where this proposed room belongs." };
+  if (input.data.roomId && input.data.newRoom) return { ok: false, error: "Choose an existing room or create a new one, not both." };
+
+  const admin = createAdminClient();
+  const { data, error } = await admin.rpc("assign_ai_segment", {
+    p_segment_id: id.data,
+    p_action: input.data.action,
+    p_room_id: input.data.roomId ?? null,
+    p_new_room: input.data.newRoom ?? null,
+    p_actor_id: actor.id,
+  });
+  if (error || !data || typeof data !== "object" || Array.isArray(data)) {
+    return { ok: false, error: "Could not assign the proposed room." };
+  }
+  const result = data as { roomId?: unknown; status?: unknown; updatedAt?: unknown };
+  if (typeof result.status !== "string" || typeof result.updatedAt !== "string") {
+    return { ok: false, error: "The room assignment returned an invalid result." };
+  }
+  return {
+    ok: true,
+    roomId: typeof result.roomId === "string" ? result.roomId : null,
+    status: result.status,
+    updatedAt: result.updatedAt,
+  };
+}
 
 export async function resolveDetectionAction(
   detectionId: string,
   raw: { state: "accepted" | "edited" | "rejected"; resolution?: z.input<typeof resolution> },
-): Promise<ReviewResult> {
+): Promise<ReviewResult<{ updatedAt: string }>> {
   const actor = await requireOfficeProfile();
   if (!actor) return { ok: false, error: "Office access required." };
   const id = uuid.safeParse(detectionId);
@@ -71,16 +110,17 @@ export async function resolveDetectionAction(
     .eq("id", id.data)
     .neq("state", "merged");
   if (error) return { ok: false, error: "Could not save the item review." };
-  await admin.from("cubic_surveys").update({
+  const { data: updated } = await admin.from("cubic_surveys").update({
     last_ai_user_activity_at: new Date().toISOString(),
     updated_by: actor.id,
-  }).eq("id", detection.survey_id);
-  return { ok: true };
+  }).eq("id", detection.survey_id).select("updated_at").single();
+  if (!updated) return { ok: false, error: "Could not refresh the survey review token." };
+  return { ok: true, updatedAt: updated.updated_at };
 }
 
 export async function acceptRoomDetectionsAction(
   roomId: string,
-): Promise<ReviewResult<{ accepted: number }>> {
+): Promise<ReviewResult<{ accepted: number; updatedAt: string }>> {
   const actor = await requireOfficeProfile();
   if (!actor) return { ok: false, error: "Office access required." };
   const id = uuid.safeParse(roomId);
@@ -96,14 +136,15 @@ export async function acceptRoomDetectionsAction(
     .is("review_reason", null)
     .select("id");
   if (error) return { ok: false, error: "Could not accept the room items." };
-  await admin.from("cubic_surveys").update({ last_ai_user_activity_at: new Date().toISOString(), updated_by: actor.id }).eq("id", room.survey_id);
-  return { ok: true, accepted: data?.length ?? 0 };
+  const { data: updated } = await admin.from("cubic_surveys").update({ last_ai_user_activity_at: new Date().toISOString(), updated_by: actor.id }).eq("id", room.survey_id).select("updated_at").single();
+  if (!updated) return { ok: false, error: "Could not refresh the survey review token." };
+  return { ok: true, accepted: data?.length ?? 0, updatedAt: updated.updated_at };
 }
 
 export async function setRoomManifestCompleteAction(
   surveyId: string,
   complete: boolean,
-): Promise<ReviewResult> {
+): Promise<ReviewResult<{ updatedAt: string }>> {
   const actor = await requireOfficeProfile();
   if (!actor) return { ok: false, error: "Office access required." };
   const id = uuid.safeParse(surveyId);
@@ -111,13 +152,13 @@ export async function setRoomManifestCompleteAction(
   const admin = createAdminClient();
   const { count } = await admin.from("cubic_survey_rooms").select("id", { count: "exact", head: true }).eq("survey_id", id.data);
   if (complete && !count) return { ok: false, error: "Add at least one room first." };
-  const { error } = await admin.from("cubic_surveys").update({
+  const { data: updated, error } = await admin.from("cubic_surveys").update({
     room_manifest_complete: complete,
     planning_ready: false,
     last_ai_user_activity_at: new Date().toISOString(),
     updated_by: actor.id,
-  }).eq("id", id.data);
-  return error ? { ok: false, error: "Could not update the room checklist." } : { ok: true };
+  }).eq("id", id.data).select("updated_at").single();
+  return error || !updated ? { ok: false, error: "Could not update the room checklist." } : { ok: true, updatedAt: updated.updated_at };
 }
 
 function resolvedDetection(row: {
@@ -143,6 +184,12 @@ function resolvedDetection(row: {
   };
 }
 
+function resolvedCatalogueKey(row: { catalogue_key: string | null; resolution: unknown }): string | null {
+  const saved = resolution.safeParse(row.resolution);
+  if (saved.success) return saved.data.type === "catalogue" ? saved.data.catalogueKey : null;
+  return row.catalogue_key;
+}
+
 export async function confirmAiItemsAction(
   surveyId: string,
   roomId: string,
@@ -166,11 +213,12 @@ export async function confirmAiItemsAction(
   const duplicateKeys = new Set<string>();
   const seen = new Map<string, string>();
   for (const item of chosen) {
-    if (!item.catalogue_key) continue;
+    const effectiveKey = resolvedCatalogueKey(item);
+    if (!effectiveKey) continue;
     const mediaId = item.run?.media_id ?? "";
-    const prior = seen.get(item.catalogue_key);
-    if (prior && prior !== mediaId) duplicateKeys.add(item.catalogue_key);
-    seen.set(item.catalogue_key, mediaId);
+    const prior = seen.get(effectiveKey);
+    if (prior && prior !== mediaId) duplicateKeys.add(effectiveKey);
+    seen.set(effectiveKey, mediaId);
   }
   if (duplicateKeys.size) return { ok: false, error: "Possible duplicate items remain across clips. Reject or correct them before confirming." };
 

@@ -4,6 +4,7 @@ import { ChevronLeft } from "lucide-react";
 import { z } from "zod";
 
 import { AiSurveyCapture } from "@/components/ai-survey/ai-survey-capture";
+import { SurveyStatePoller } from "@/components/ai-survey/survey-state-poller";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -29,6 +30,7 @@ export default async function AiSurveyScanPage({ params }: { params: Promise<{ i
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-10 md:px-7">
+      <SurveyStatePoller surveyId={survey.id} enabled={(rooms ?? []).some((room) => room.status === "processing")} />
       <header className="flex items-center justify-between gap-4 py-4">
         <div>
           <Link href={`/leads/${leadId}/cubic`} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded text-sm font-medium text-mist-500 hover:text-foreground"><ChevronLeft className="size-4" /> Cubic survey</Link>

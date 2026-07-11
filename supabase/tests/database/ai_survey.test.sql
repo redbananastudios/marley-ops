@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(39);
+select plan(62);
 
 select has_table('public', 'cubic_survey_rooms', 'rooms table exists');
 select has_table('public', 'cubic_survey_media', 'media table exists');
@@ -89,6 +89,40 @@ select ok(
   ),
   'anonymous users cannot execute the job claim RPC'
 );
+select ok(
+  has_function_privilege(
+    'service_role',
+    'public.assign_ai_segment(uuid,text,uuid,text,uuid)',
+    'EXECUTE'
+  ),
+  'service role can execute the segment assignment RPC'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.assign_ai_segment(uuid,text,uuid,text,uuid)',
+    'EXECUTE'
+  ),
+  'authenticated users cannot execute the segment assignment RPC'
+);
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.assign_ai_segment(uuid,text,uuid,text,uuid)',
+    'EXECUTE'
+  ),
+  'anonymous users cannot execute the segment assignment RPC'
+);
+
+select ok(has_function_privilege('service_role', 'public.retry_ai_job(uuid,uuid)', 'EXECUTE'), 'service role can retry AI jobs');
+select ok(not has_function_privilege('authenticated', 'public.retry_ai_job(uuid,uuid)', 'EXECUTE'), 'authenticated users cannot retry AI jobs directly');
+select ok(not has_function_privilege('anon', 'public.retry_ai_job(uuid,uuid)', 'EXECUTE'), 'anonymous users cannot retry AI jobs');
+select ok(has_function_privilege('service_role', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'service role can ignore failed media');
+select ok(not has_function_privilege('authenticated', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'authenticated users cannot ignore failed media directly');
+select ok(not has_function_privilege('anon', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'anonymous users cannot ignore failed media');
+select ok(has_function_privilege('service_role', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'service role can finish AI rooms manually');
+select ok(not has_function_privilege('authenticated', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'authenticated users cannot finish AI rooms directly');
+select ok(not has_function_privilege('anon', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'anonymous users cannot finish AI rooms');
 
 select is(
   (select count(*)::int from storage.buckets where id = 'survey-media' and not public),
@@ -285,6 +319,34 @@ select is(
   'failed',
   'expired final attempt recomputes the room to failed'
 );
+
+select is(
+  (select status || ':' || attempts::text from public.retry_ai_job('50000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002')),
+  'queued:0',
+  'authorised recovery resets a dead job for a clean retry'
+);
+select is((select status from public.cubic_survey_media where id = '40000000-0000-4000-8000-000000000001'), 'uploaded', 'retry restores failed media to uploaded');
+select is((select status from public.cubic_survey_rooms where id = '30000000-0000-4000-8000-000000000001'), 'processing', 'retry recomputes the room to processing');
+
+update public.ai_jobs set status = 'dead', attempts = max_attempts where id = '50000000-0000-4000-8000-000000000001';
+update public.cubic_survey_media set status = 'failed' where id = '40000000-0000-4000-8000-000000000001';
+select is(public.ignore_failed_ai_media('40000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'), true, 'failed media can be explicitly discarded');
+select is((select status from public.cubic_survey_media where id = '40000000-0000-4000-8000-000000000001'), 'ignored', 'discard marks the failed media ignored');
+select is((select status from public.cubic_survey_rooms where id = '30000000-0000-4000-8000-000000000001'), 'pending', 'discarding the only failed clip leaves the room pending');
+select is(public.finish_ai_room_manually('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'), true, 'acknowledged failed room can be finished manually');
+select is((select status || ':' || completion_method from public.cubic_survey_rooms where id = '30000000-0000-4000-8000-000000000001'), 'confirmed:manual', 'manual finish records confirmed provenance');
+
+insert into public.cubic_survey_media(id, survey_id, kind, storage_path, mime, status, created_by)
+values ('40000000-0000-4000-8000-000000000002', '20000000-0000-4000-8000-000000000001', 'import_video', '20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000002/source.mp4', 'video/mp4', 'processed', '10000000-0000-4000-8000-000000000002');
+insert into public.cubic_survey_segments(id, survey_id, media_id, model_ref, proposed_name, start_s, end_s)
+values ('60000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000001', '40000000-0000-4000-8000-000000000002', 'office', 'Office', 0, 20);
+select is(
+  (public.assign_ai_segment('60000000-0000-4000-8000-000000000001', 'assign', null, 'Home office', '10000000-0000-4000-8000-000000000002') ->> 'status'),
+  'assigned',
+  'whole-property segment can atomically create and assign a room'
+);
+select is((select name from public.cubic_survey_rooms where id = (select room_id from public.cubic_survey_segments where id = '60000000-0000-4000-8000-000000000001')), 'Home office', 'segment assignment creates the proposed room');
+select is((select room.status from public.cubic_survey_rooms as room join public.cubic_survey_segments as segment on segment.room_id = room.id where segment.id = '60000000-0000-4000-8000-000000000001'), 'ready', 'processed whole-property segment opens ready for review');
 
 select is(
   (select allowed from public.reserve_ai_call(
