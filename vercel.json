@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/ai-jobs",
       "schedule": "*/2 * * * *"
+    },
+    {
+      "path": "/api/cron/ai-retention",
+      "schedule": "30 2 * * *"
     }
   ]
 }

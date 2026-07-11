@@ -1,0 +1,215 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+
+import { computeContingency, type AiSurveyStatus, type ContingencyRoom } from "@/lib/ai/contingency";
+import { mergeResolvedDetections, type ResolvedDetection } from "@/lib/ai/merge";
+import { requireOfficeProfile } from "@/lib/ai/auth";
+import { catalogueItem } from "@/lib/cubic-catalogue";
+import { computeCubicTotals, sanitizeCubicLines } from "@/lib/cubic-survey";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+type ReviewResult<T extends object = object> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string; conflict?: boolean };
+
+const uuid = z.string().uuid();
+const flags = z.object({ dismantle: z.boolean(), fragile: z.boolean() });
+const catalogueResolution = z.object({
+  type: z.literal("catalogue"),
+  catalogueKey: z.string().min(1).max(120),
+  qty: z.number().int().min(1).max(999),
+  moving: z.enum(["moving", "staying"]),
+  flags,
+});
+const customResolution = z.object({
+  type: z.literal("custom"),
+  title: z.string().trim().min(1).max(120),
+  category: z.string().trim().min(1).max(60),
+  unitFt3: z.number().finite().min(0).max(2000),
+  qty: z.number().int().min(1).max(999),
+  moving: z.enum(["moving", "staying"]),
+  flags,
+});
+const resolution = z.discriminatedUnion("type", [catalogueResolution, customResolution]);
+
+export async function resolveDetectionAction(
+  detectionId: string,
+  raw: { state: "accepted" | "edited" | "rejected"; resolution?: z.input<typeof resolution> },
+): Promise<ReviewResult> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(detectionId);
+  const state = z.enum(["accepted", "edited", "rejected"]).safeParse(raw.state);
+  if (!id.success || !state.success) return { ok: false, error: "Invalid item resolution." };
+  const admin = createAdminClient();
+  const { data: detection } = await admin
+    .from("cubic_ai_detections")
+    .select("id, survey_id, room_id, catalogue_key, qty, moving, flags, state")
+    .eq("id", id.data)
+    .maybeSingle();
+  if (!detection || detection.state === "merged") return { ok: false, error: "Item is no longer editable." };
+
+  let storedResolution: z.infer<typeof resolution> | null = null;
+  if (state.data === "accepted") {
+    if (!detection.catalogue_key || !catalogueItem(detection.catalogue_key) || detection.moving === "uncertain") {
+      return { ok: false, error: "Choose the correct item and moving status first." };
+    }
+  } else if (state.data === "edited") {
+    const parsed = resolution.safeParse(raw.resolution);
+    if (!parsed.success) return { ok: false, error: "Check the corrected item details." };
+    if (parsed.data.type === "catalogue" && !catalogueItem(parsed.data.catalogueKey)) {
+      return { ok: false, error: "Choose an item from the Marley catalogue." };
+    }
+    storedResolution = parsed.data;
+  }
+
+  const { error } = await admin
+    .from("cubic_ai_detections")
+    .update({ state: state.data, resolution: storedResolution as never })
+    .eq("id", id.data)
+    .neq("state", "merged");
+  if (error) return { ok: false, error: "Could not save the item review." };
+  await admin.from("cubic_surveys").update({
+    last_ai_user_activity_at: new Date().toISOString(),
+    updated_by: actor.id,
+  }).eq("id", detection.survey_id);
+  return { ok: true };
+}
+
+export async function acceptRoomDetectionsAction(
+  roomId: string,
+): Promise<ReviewResult<{ accepted: number }>> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(roomId);
+  if (!id.success) return { ok: false, error: "Invalid room." };
+  const admin = createAdminClient();
+  const { data: room } = await admin.from("cubic_survey_rooms").select("survey_id").eq("id", id.data).maybeSingle();
+  if (!room) return { ok: false, error: "Room not found." };
+  const { data, error } = await admin
+    .from("cubic_ai_detections")
+    .update({ state: "accepted" })
+    .eq("room_id", id.data)
+    .eq("state", "proposed")
+    .is("review_reason", null)
+    .select("id");
+  if (error) return { ok: false, error: "Could not accept the room items." };
+  await admin.from("cubic_surveys").update({ last_ai_user_activity_at: new Date().toISOString(), updated_by: actor.id }).eq("id", room.survey_id);
+  return { ok: true, accepted: data?.length ?? 0 };
+}
+
+export async function setRoomManifestCompleteAction(
+  surveyId: string,
+  complete: boolean,
+): Promise<ReviewResult> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(surveyId);
+  if (!id.success || typeof complete !== "boolean") return { ok: false, error: "Invalid survey." };
+  const admin = createAdminClient();
+  const { count } = await admin.from("cubic_survey_rooms").select("id", { count: "exact", head: true }).eq("survey_id", id.data);
+  if (complete && !count) return { ok: false, error: "Add at least one room first." };
+  const { error } = await admin.from("cubic_surveys").update({
+    room_manifest_complete: complete,
+    planning_ready: false,
+    last_ai_user_activity_at: new Date().toISOString(),
+    updated_by: actor.id,
+  }).eq("id", id.data);
+  return error ? { ok: false, error: "Could not update the room checklist." } : { ok: true };
+}
+
+function resolvedDetection(row: {
+  id: string; catalogue_key: string | null; qty: number; moving: string;
+  flags: unknown; resolution: unknown; label: string;
+}, roomName: string): ResolvedDetection {
+  const saved = resolution.safeParse(row.resolution);
+  if (saved.success) {
+    const value = saved.data;
+    return {
+      id: row.id, roomName,
+      catalogueKey: value.type === "catalogue" ? value.catalogueKey : null,
+      ...(value.type === "custom" ? { customItem: { title: value.title, category: value.category, unitFt3: value.unitFt3 } } : {}),
+      qty: value.qty, moving: value.moving, flags: value.flags,
+    };
+  }
+  const parsedFlags = flags.safeParse(row.flags);
+  if (!row.catalogue_key || !catalogueItem(row.catalogue_key) || row.moving === "uncertain") throw new Error("Unresolved item");
+  return {
+    id: row.id, roomName, catalogueKey: row.catalogue_key, qty: row.qty,
+    moving: row.moving as "moving" | "staying",
+    flags: parsedFlags.success ? parsedFlags.data : { dismantle: false, fragile: false },
+  };
+}
+
+export async function confirmAiItemsAction(
+  surveyId: string,
+  roomId: string,
+  baseUpdatedAt: string,
+): Promise<ReviewResult<{ totalFt3: number; contingencyPct: number; updatedAt: string }>> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  if (!uuid.safeParse(surveyId).success || !uuid.safeParse(roomId).success || !baseUpdatedAt) return { ok: false, error: "Invalid confirmation." };
+  const admin = createAdminClient();
+  const [{ data: survey }, { data: room }, { data: detections }] = await Promise.all([
+    admin.from("cubic_surveys").select("id, lead_id, items, updated_at, ai_status, room_manifest_complete").eq("id", surveyId).maybeSingle(),
+    admin.from("cubic_survey_rooms").select("id, name, status").eq("id", roomId).eq("survey_id", surveyId).maybeSingle(),
+    admin.from("cubic_ai_detections").select("id, catalogue_key, qty, moving, flags, resolution, label, state, run:cubic_analysis_runs(media_id)").eq("survey_id", surveyId).eq("room_id", roomId),
+  ]);
+  if (!survey || !room) return { ok: false, error: "Survey room not found." };
+  if (survey.updated_at !== baseUpdatedAt) return { ok: false, conflict: true, error: "The survey changed elsewhere. Reload and review again." };
+  if (!survey.room_manifest_complete) return { ok: false, error: "Confirm that the room list is complete first." };
+  const unresolved = (detections ?? []).filter((item) => item.state === "proposed");
+  if (unresolved.length) return { ok: false, error: `Review all ${unresolved.length} remaining item${unresolved.length === 1 ? "" : "s"} first.` };
+  const chosen = (detections ?? []).filter((item) => item.state === "accepted" || item.state === "edited");
+  const duplicateKeys = new Set<string>();
+  const seen = new Map<string, string>();
+  for (const item of chosen) {
+    if (!item.catalogue_key) continue;
+    const mediaId = item.run?.media_id ?? "";
+    const prior = seen.get(item.catalogue_key);
+    if (prior && prior !== mediaId) duplicateKeys.add(item.catalogue_key);
+    seen.set(item.catalogue_key, mediaId);
+  }
+  if (duplicateKeys.size) return { ok: false, error: "Possible duplicate items remain across clips. Reject or correct them before confirming." };
+
+  try {
+    const existing = sanitizeCubicLines(survey.items);
+    if (!existing) throw new Error("Saved inventory is invalid");
+    const merged = mergeResolvedDetections(existing, chosen.map((item) => resolvedDetection(item, room.name)));
+    const totals = computeCubicTotals(merged.lines);
+    const { data: allRooms } = await admin.from("cubic_survey_rooms").select("id, status, coverage, quality_flags, hidden_storage_checked, completion_method").eq("survey_id", surveyId);
+    const { count: unresolvedCount } = await admin.from("cubic_ai_detections").select("id", { count: "exact", head: true }).eq("survey_id", surveyId).eq("state", "proposed").neq("room_id", roomId);
+    const decision = computeContingency({
+      aiStatus: survey.ai_status as AiSurveyStatus,
+      rawFt3: totals.totalFt3,
+      roomManifestComplete: true,
+      rooms: (allRooms ?? []).map((item) => ({
+        status: item.id === roomId ? "confirmed" : item.status,
+        coverage: item.coverage,
+        qualityFlags: item.quality_flags as never,
+        hiddenStorageChecked: item.hidden_storage_checked,
+        completionMethod: item.id === roomId ? "ai" : item.completion_method,
+      })) as ContingencyRoom[],
+      unresolved: { unmatched: unresolvedCount ?? 0, bigItem: 0, duplicate: 0 },
+      wholePropertyImportUsed: false,
+      correctedDetectionCount: chosen.filter((item) => item.state === "edited").length,
+      detectionCount: chosen.length,
+    });
+    const { data: result, error } = await admin.rpc("confirm_ai_room", {
+      p_survey_id: surveyId, p_room_id: roomId, p_base_updated_at: baseUpdatedAt,
+      p_new_lines: merged.added as never, p_detection_ids: chosen.map((item) => item.id),
+      p_total_ft3: totals.totalFt3, p_contingency_pct: decision.contingencyPct,
+      p_planning_ready: decision.planningReady, p_actor_id: actor.id,
+    });
+    if (error || !result) {
+      if (error?.code === "40001") return { ok: false, conflict: true, error: "The survey changed elsewhere. Reload and review again." };
+      throw error ?? new Error("Confirmation failed");
+    }
+    if (survey.lead_id) revalidatePath(`/leads/${survey.lead_id}/cubic`);
+    return { ok: true, totalFt3: Number(result.total_ft3), contingencyPct: result.contingency_pct, updatedAt: result.updated_at };
+  } catch {
+    return { ok: false, error: "One or more items still need correcting before this room can be confirmed." };
+  }
+}

@@ -1,0 +1,52 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ChevronLeft, RefreshCw } from "lucide-react";
+import { z } from "zod";
+
+import { ReviewWorkspace, type ReviewDetection, type ReviewMedia } from "@/components/ai-survey/review-workspace";
+import { requireOfficeProfile } from "@/lib/ai/auth";
+import { CUBIC_CATEGORIES } from "@/lib/cubic-catalogue";
+import { createMediaStore } from "@/lib/storage/media-store";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export const dynamic = "force-dynamic";
+
+export default async function AiSurveyReviewPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id: leadId } = await params;
+  if (!z.string().uuid().safeParse(leadId).success || !(await requireOfficeProfile())) notFound();
+  const admin = createAdminClient();
+  const { data: survey } = await admin
+    .from("cubic_surveys")
+    .select("id, updated_at, room_manifest_complete, ai_consent_withdrawn_at, ai_status, lead:leads(name)")
+    .eq("lead_id", leadId)
+    .maybeSingle();
+  if (!survey || survey.ai_consent_withdrawn_at || survey.ai_status === "abandoned") notFound();
+  const [{ data: rooms }, { data: detections }, { data: mediaRows }] = await Promise.all([
+    admin.from("cubic_survey_rooms").select("id, name, status, coverage").eq("survey_id", survey.id).order("sort"),
+    admin.from("cubic_ai_detections").select("id, room_id, label, catalogue_key, candidates, qty, confidence, moving, flags, evidence, review_reason, state").eq("survey_id", survey.id).order("created_at"),
+    admin.from("cubic_survey_media").select("id, room_id, kind, storage_path, status").eq("survey_id", survey.id).in("status", ["processed", "processing", "uploaded"]),
+  ]);
+  const store = createMediaStore();
+  const media: ReviewMedia[] = [];
+  for (const row of mediaRows ?? []) {
+    try {
+      media.push({ id: row.id, roomId: row.room_id, kind: row.kind, url: await store.createSignedGetUrl(row.storage_path, 3600) });
+    } catch {
+      // Evidence remains reviewable as an item list if a signed preview fails.
+    }
+  }
+  const reviewDetections: ReviewDetection[] = (detections ?? []).map((row) => ({
+    id: row.id, roomId: row.room_id, label: row.label, catalogueKey: row.catalogue_key,
+    candidates: Array.isArray(row.candidates) ? row.candidates as never : [], qty: row.qty,
+    confidence: Number(row.confidence), moving: row.moving,
+    flags: row.flags && typeof row.flags === "object" && !Array.isArray(row.flags) ? row.flags as never : {},
+    evidence: row.evidence && typeof row.evidence === "object" && !Array.isArray(row.evidence) ? row.evidence as never : {},
+    reviewReason: row.review_reason, state: row.state,
+  }));
+  const catalogue = CUBIC_CATEGORIES.flatMap((category) => category.items.map((item) => ({ key: item.key, title: item.title, ft3: item.ft3, category: category.key })));
+
+  return <main className="w-full px-4 pb-10 md:px-7">
+    <header className="flex items-center justify-between gap-4 py-4"><div><Link href={`/leads/${leadId}/cubic`} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded text-sm font-medium text-mist-500"><ChevronLeft className="size-4" /> Cubic survey</Link><h1 className="font-display text-2xl font-bold">Review AI inventory</h1><p className="mt-1 text-sm text-mist-500">{survey.lead?.name ?? "Estimator survey"} · verify every room before adding it to the quote</p></div><Link href={`/leads/${leadId}/cubic/review`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold"><RefreshCw className="size-4" /> Refresh analysis</Link></header>
+    <ReviewWorkspace surveyId={survey.id} leadId={leadId} initialUpdatedAt={survey.updated_at} manifestComplete={survey.room_manifest_complete} rooms={rooms ?? []} media={media} detections={reviewDetections} catalogue={catalogue} />
+  </main>;
+}

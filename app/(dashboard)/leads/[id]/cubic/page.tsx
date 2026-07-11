@@ -65,9 +65,7 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
         </div>
         <div className="flex items-center gap-2">
           {settings.aiSurveyEnabled && (
-            <Link href={`/leads/${id}/cubic/scan`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep">
-              <ScanLine className="size-4" /> AI room capture
-            </Link>
+            <><Link href={`/leads/${id}/cubic/review`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg border border-mm-red px-4 text-sm font-semibold text-mm-red"><ScanLine className="size-4" /> Review AI inventory</Link><Link href={`/leads/${id}/cubic/scan`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep"><ScanLine className="size-4" /> AI room capture</Link></>
           )}
           <CopyCubicLinkButton surveyId={survey.id} />
         </div>
