@@ -1293,6 +1293,12 @@ begin
       updated_by = p_actor_id
   where id = segment.survey_id
   returning updated_at into survey_updated_at;
+  insert into public.activities(client_id, lead_id, actor_id, type, summary, meta)
+  select survey.client_id, survey.lead_id, p_actor_id, 'note',
+    case when p_action = 'reject' then 'AI proposed room rejected' when p_action = 'merge' then 'AI proposed room merged' else 'AI proposed room assigned' end,
+    jsonb_build_object('segmentId', segment.id, 'roomId', target_room.id, 'proposedRoom', segment.proposed_name)
+  from public.cubic_surveys as survey
+  where survey.id = segment.survey_id and (survey.lead_id is not null or survey.client_id is not null);
 
   return jsonb_build_object(
     'roomId', target_room.id,
@@ -1332,6 +1338,9 @@ begin
   set ai_status = 'active', planning_ready = false,
       last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
   where id = job.survey_id;
+  insert into public.activities(client_id, lead_id, actor_id, type, summary, meta)
+  select survey.client_id, survey.lead_id, p_actor_id, 'note', 'AI analysis retried', jsonb_build_object('jobId', job.id, 'mediaId', job.media_id)
+  from public.cubic_surveys as survey where survey.id = job.survey_id and (survey.lead_id is not null or survey.client_id is not null);
   return job;
 end
 $function$;
@@ -1358,22 +1367,38 @@ begin
   set room_manifest_complete = false, planning_ready = false,
       last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
   where id = media.survey_id;
+  insert into public.activities(client_id, lead_id, actor_id, type, summary, meta)
+  select survey.client_id, survey.lead_id, p_actor_id, 'note', 'Failed AI clip discarded', jsonb_build_object('mediaId', media.id, 'roomId', media.room_id)
+  from public.cubic_surveys as survey where survey.id = media.survey_id and (survey.lead_id is not null or survey.client_id is not null);
   return true;
 end
 $function$;
 
-create or replace function public.finish_ai_room_manually(p_room_id uuid, p_actor_id uuid)
-returns boolean
+create or replace function public.complete_ai_room_manually(
+  p_survey_id uuid,
+  p_room_id uuid,
+  p_base_updated_at timestamptz,
+  p_actor_id uuid
+)
+returns public.cubic_surveys
 language plpgsql
 security definer
 set search_path = ''
 as $function$
 declare
+  survey public.cubic_surveys%rowtype;
   room public.cubic_survey_rooms%rowtype;
+  result public.cubic_surveys%rowtype;
+  ready boolean;
 begin
-  select * into room from public.cubic_survey_rooms where id = p_room_id for update;
+  select * into survey from public.cubic_surveys where id = p_survey_id for update;
+  if survey.id is null then raise exception 'survey not found' using errcode = 'P0002'; end if;
+  select * into room from public.cubic_survey_rooms where id = p_room_id and survey_id = p_survey_id for update;
   if room.id is null or room.status not in ('failed', 'needs_attention', 'pending') then
     raise exception 'room is not eligible for manual completion' using errcode = '22023';
+  end if;
+  if survey.updated_at is distinct from p_base_updated_at then
+    raise exception 'cubic survey changed in another session' using errcode = '40001';
   end if;
   if exists (
     select 1 from public.ai_jobs as job
@@ -1383,15 +1408,117 @@ begin
   if exists (select 1 from public.cubic_survey_media where room_id = room.id and status = 'failed') then
     raise exception 'discard or retry failed clips first' using errcode = '55000';
   end if;
+  if exists (
+    select 1 from public.cubic_ai_detections
+    where room_id = room.id and state not in ('merged', 'rejected')
+  ) then raise exception 'resolve or reject detections before manual completion' using errcode = '55000'; end if;
   update public.cubic_survey_rooms
   set status = 'confirmed', completion_method = 'manual'
   where id = room.id;
+
+  select survey.room_manifest_complete
+    and not exists (select 1 from public.cubic_survey_rooms where survey_id = survey.id and status <> 'confirmed')
+    and not exists (select 1 from public.cubic_ai_detections where survey_id = survey.id and state not in ('merged', 'rejected'))
+    and not exists (select 1 from public.cubic_survey_segments where survey_id = survey.id and status = 'proposed')
+  into ready;
   update public.cubic_surveys
-  set room_manifest_complete = false, planning_ready = false, ai_status = 'active',
+  set planning_ready = ready,
+      ai_status = case when ready then 'complete' else 'active' end,
       contingency_pct = greatest(contingency_pct, 20),
       last_ai_user_activity_at = pg_catalog.now(), updated_by = p_actor_id
-  where id = room.survey_id;
-  return true;
+  where id = survey.id;
+  insert into public.activities(client_id, lead_id, actor_id, type, summary, meta)
+  select survey.client_id, survey.lead_id, p_actor_id, 'note', 'AI room completed manually',
+    jsonb_build_object('roomId', room.id, 'room', room.name)
+  where survey.lead_id is not null or survey.client_id is not null;
+  select * into result from public.cubic_surveys where id = survey.id;
+  return result;
+end
+$function$;
+
+create or replace function public.resolve_ai_duplicate_group(
+  p_detection_ids uuid[],
+  p_choice text,
+  p_qty int,
+  p_actor_id uuid
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $function$
+declare
+  first_detection public.cubic_ai_detections%rowtype;
+  detection_count int;
+  media_count int;
+  chosen_qty int;
+  rejected_ids uuid[];
+  survey_updated_at timestamptz;
+begin
+  if coalesce(array_length(p_detection_ids, 1), 0) < 2 or p_choice not in ('max', 'sum', 'distinct', 'quantity') then
+    raise exception 'invalid duplicate resolution' using errcode = '22023';
+  end if;
+  select * into first_detection from public.cubic_ai_detections where id = p_detection_ids[1] for update;
+  if first_detection.id is null or first_detection.catalogue_key is null then
+    raise exception 'duplicate group not found' using errcode = 'P0002';
+  end if;
+  select count(*), count(distinct run.media_id)
+  into detection_count, media_count
+  from public.cubic_ai_detections as detection
+  join public.cubic_analysis_runs as run on run.id = detection.run_id
+  where detection.id = any(p_detection_ids)
+    and detection.survey_id = first_detection.survey_id
+    and detection.room_id = first_detection.room_id
+    and detection.catalogue_key = first_detection.catalogue_key
+    and detection.review_reason = 'seen-in-multiple-clips'
+    and detection.state <> 'merged';
+  if detection_count <> array_length(p_detection_ids, 1) or media_count < 2 then
+    raise exception 'detections are not one duplicate group' using errcode = '23514';
+  end if;
+  if exists (select 1 from public.cubic_ai_detections where id = any(p_detection_ids) and moving = 'uncertain') then
+    raise exception 'moving status must be resolved first' using errcode = '23514';
+  end if;
+
+  if p_choice = 'distinct' then
+    update public.cubic_ai_detections set state = 'accepted', review_reason = null where id = any(p_detection_ids);
+    rejected_ids := '{}'::uuid[];
+  else
+    select case p_choice
+      when 'max' then max(qty)
+      when 'sum' then sum(qty)
+      else p_qty
+    end into chosen_qty
+    from public.cubic_ai_detections where id = any(p_detection_ids);
+    if chosen_qty is null or chosen_qty < 1 or chosen_qty > 999 then
+      raise exception 'invalid resolved quantity' using errcode = '22023';
+    end if;
+    update public.cubic_ai_detections
+    set state = 'edited', review_reason = null,
+        resolution = jsonb_build_object(
+          'type', 'catalogue', 'catalogueKey', first_detection.catalogue_key,
+          'qty', chosen_qty,
+          'moving', case when first_detection.moving = 'staying' then 'staying' else 'moving' end,
+          'flags', jsonb_build_object(
+            'dismantle', coalesce((first_detection.flags ->> 'dismantle')::boolean, false),
+            'fragile', coalesce((first_detection.flags ->> 'fragile')::boolean, false)
+          )
+        )
+    where id = first_detection.id;
+    update public.cubic_ai_detections set state = 'rejected', review_reason = null
+    where id = any(p_detection_ids) and id <> first_detection.id;
+    select coalesce(array_agg(id), '{}'::uuid[]) into rejected_ids
+    from public.cubic_ai_detections where id = any(p_detection_ids) and id <> first_detection.id;
+  end if;
+
+  update public.cubic_surveys
+  set last_ai_user_activity_at = pg_catalog.now(), planning_ready = false, updated_by = p_actor_id
+  where id = first_detection.survey_id returning updated_at into survey_updated_at;
+  insert into public.activities(client_id, lead_id, actor_id, type, summary, meta)
+  select survey.client_id, survey.lead_id, p_actor_id, 'note', 'AI duplicate group resolved',
+    jsonb_build_object('roomId', first_detection.room_id, 'catalogueKey', first_detection.catalogue_key, 'choice', p_choice)
+  from public.cubic_surveys as survey
+  where survey.id = first_detection.survey_id and (survey.lead_id is not null or survey.client_id is not null);
+  return jsonb_build_object('primaryId', first_detection.id, 'rejectedIds', rejected_ids, 'updatedAt', survey_updated_at, 'choice', p_choice);
 end
 $function$;
 
@@ -1425,7 +1552,8 @@ revoke all on function public.assign_ai_segment(uuid, text, uuid, text, uuid)
   from public, anon, authenticated;
 revoke all on function public.retry_ai_job(uuid, uuid) from public, anon, authenticated;
 revoke all on function public.ignore_failed_ai_media(uuid, uuid) from public, anon, authenticated;
-revoke all on function public.finish_ai_room_manually(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.complete_ai_room_manually(uuid, uuid, timestamptz, uuid) from public, anon, authenticated;
+revoke all on function public.resolve_ai_duplicate_group(uuid[], text, int, uuid) from public, anon, authenticated;
 
 grant execute on function public.finalize_ai_media(uuid, uuid, bigint, numeric, jsonb, text)
   to service_role;
@@ -1455,4 +1583,5 @@ grant execute on function public.assign_ai_segment(uuid, text, uuid, text, uuid)
   to service_role;
 grant execute on function public.retry_ai_job(uuid, uuid) to service_role;
 grant execute on function public.ignore_failed_ai_media(uuid, uuid) to service_role;
-grant execute on function public.finish_ai_room_manually(uuid, uuid) to service_role;
+grant execute on function public.complete_ai_room_manually(uuid, uuid, timestamptz, uuid) to service_role;
+grant execute on function public.resolve_ai_duplicate_group(uuid[], text, int, uuid) to service_role;

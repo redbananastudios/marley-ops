@@ -22,6 +22,13 @@ const roomInput = z.object({
   floor: z.string().trim().max(60).optional(),
   hiddenStorageChecked: z.boolean().default(false),
 });
+const roomPatch = z.object({
+  name: roomName.optional(),
+  roomType: z.string().trim().max(60).nullable().optional(),
+  floor: z.string().trim().max(60).nullable().optional(),
+  hiddenStorageChecked: z.boolean().optional(),
+  sort: z.number().int().min(0).max(200).optional(),
+}).refine((value) => Object.keys(value).length > 0, "No room changes supplied.");
 const consentInput = z.object({
   textVersion: z.string().trim().min(1).max(40),
   customerAgreed: z.literal(true),
@@ -187,6 +194,80 @@ export async function createRoomAction(
   return { ok: true, roomId: room.id };
 }
 
+export async function updateRoomAction(
+  roomId: string,
+  raw: z.input<typeof roomPatch>,
+): Promise<ActionResult> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(roomId);
+  const input = roomPatch.safeParse(raw);
+  if (!id.success || !input.success) return { ok: false, error: "Check the room details." };
+  const admin = createAdminClient();
+  const { data: room } = await admin
+    .from("cubic_survey_rooms")
+    .select("id, survey_id, name, survey:cubic_surveys(lead_id, client_id, ai_consent_withdrawn_at, ai_status)")
+    .eq("id", id.data)
+    .maybeSingle();
+  if (!room || room.survey?.ai_consent_withdrawn_at || room.survey?.ai_status === "abandoned") {
+    return { ok: false, error: "Room is not editable." };
+  }
+  if (input.data.name && input.data.name !== room.name) {
+    const { count } = await admin.from("cubic_ai_detections").select("id", { count: "exact", head: true }).eq("room_id", room.id).eq("state", "merged");
+    if (count) return { ok: false, error: "A confirmed AI room cannot be renamed because its inventory already uses this room label." };
+  }
+  const changes = {
+    ...(input.data.name !== undefined ? { name: input.data.name } : {}),
+    ...(input.data.roomType !== undefined ? { room_type: input.data.roomType || null } : {}),
+    ...(input.data.floor !== undefined ? { floor: input.data.floor || null } : {}),
+    ...(input.data.hiddenStorageChecked !== undefined ? { hidden_storage_checked: input.data.hiddenStorageChecked } : {}),
+    ...(input.data.sort !== undefined ? { sort: input.data.sort } : {}),
+  };
+  const { error } = await admin.from("cubic_survey_rooms").update(changes).eq("id", room.id);
+  if (error) return { ok: false, error: "Could not update the room." };
+  await admin.from("cubic_surveys").update({ room_manifest_complete: false, planning_ready: false, last_ai_user_activity_at: new Date().toISOString(), updated_by: actor.id }).eq("id", room.survey_id);
+  await recordActivity({ leadId: room.survey?.lead_id ?? null, clientId: room.survey?.client_id ?? null, actorId: actor.id, summary: "AI survey room updated", meta: { roomId: room.id, room: input.data.name ?? room.name } });
+  if (room.survey?.lead_id) revalidatePath(`/leads/${room.survey.lead_id}/cubic`);
+  return { ok: true };
+}
+
+export async function deleteRoomAction(roomId: string): Promise<ActionResult> {
+  const actor = await requireOfficeProfile();
+  if (!actor) return { ok: false, error: "Office access required." };
+  const id = uuid.safeParse(roomId);
+  if (!id.success) return { ok: false, error: "Invalid room." };
+  const admin = createAdminClient();
+  const { data: room } = await admin
+    .from("cubic_survey_rooms")
+    .select("id, survey_id, name, survey:cubic_surveys(lead_id, client_id, ai_consent_withdrawn_at, ai_status)")
+    .eq("id", id.data)
+    .maybeSingle();
+  if (!room || room.survey?.ai_consent_withdrawn_at || room.survey?.ai_status === "abandoned") return { ok: false, error: "Room is not deletable." };
+  const [{ count: merged }, { count: liveJobs }, { data: media }] = await Promise.all([
+    admin.from("cubic_ai_detections").select("id", { count: "exact", head: true }).eq("room_id", room.id).eq("state", "merged"),
+    admin.from("ai_jobs").select("id, media:cubic_survey_media!inner(room_id)", { count: "exact", head: true }).eq("media.room_id", room.id).in("status", ["queued", "running", "blocked"]),
+    admin.from("cubic_survey_media").select("id, storage_path, frames").eq("room_id", room.id),
+  ]);
+  if (merged) return { ok: false, error: "This room already has confirmed AI inventory and cannot be deleted." };
+  if (liveJobs) return { ok: false, error: "Wait for room processing to stop before deleting it." };
+  try {
+    const store = createMediaStore();
+    for (const item of media ?? []) {
+      const framePaths = Array.isArray(item.frames) ? item.frames.flatMap((frame) => frame && typeof frame === "object" && "path" in frame && typeof frame.path === "string" ? [frame.path] : []) : [];
+      await store.deleteObjects([item.storage_path, ...framePaths]);
+    }
+  } catch {
+    return { ok: false, error: "Could not remove the room media. Try again before deleting the room." };
+  }
+  if (media?.length) await admin.from("cubic_survey_media").delete().in("id", media.map((item) => item.id));
+  const { error } = await admin.from("cubic_survey_rooms").delete().eq("id", room.id);
+  if (error) return { ok: false, error: "Could not delete the room." };
+  await admin.from("cubic_surveys").update({ room_manifest_complete: false, planning_ready: false, last_ai_user_activity_at: new Date().toISOString(), updated_by: actor.id }).eq("id", room.survey_id);
+  await recordActivity({ leadId: room.survey?.lead_id ?? null, clientId: room.survey?.client_id ?? null, actorId: actor.id, summary: "AI survey room deleted", meta: { roomId: room.id, room: room.name } });
+  if (room.survey?.lead_id) revalidatePath(`/leads/${room.survey.lead_id}/cubic`);
+  return { ok: true };
+}
+
 export async function registerMediaAction(
   surveyId: string,
   raw: z.input<typeof mediaInput>,
@@ -295,7 +376,8 @@ export async function finalizeMediaUploadAction(
       p_prompt_version: "ai-survey-v1",
     });
     if (error) throw error;
-  } catch {
+  } catch (error) {
+    console.error("AI media upload verification failed", { mediaId: media.id, error });
     return { ok: false, error: "Upload verification failed. Retry from this screen." };
   }
   const kickUrl = process.env.AI_JOBS_KICK_URL;

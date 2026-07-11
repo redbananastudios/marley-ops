@@ -39,14 +39,17 @@ function storageEndpoint(environment: MediaStoreEnvironment): string {
 
 function metadataFromProvider(value: {
   size?: number;
+  contentType?: string;
+  etag?: string;
+  lastModified?: string;
   metadata?: { size?: number; mimetype?: string; eTag?: string } | null;
   updated_at?: string | null;
 }): MediaObjectMetadata {
   return {
     bytes: value.metadata?.size ?? value.size ?? 0,
-    contentType: value.metadata?.mimetype ?? null,
-    etag: value.metadata?.eTag ?? null,
-    updatedAt: value.updated_at ?? null,
+    contentType: value.contentType ?? value.metadata?.mimetype ?? null,
+    etag: value.etag ?? value.metadata?.eTag ?? null,
+    updatedAt: value.lastModified ?? value.updated_at ?? null,
   };
 }
 

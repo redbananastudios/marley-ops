@@ -171,6 +171,32 @@ async function checkGoogleAds(): Promise<HealthCheck> {
   return { name, status: "ok", detail: "Credentials configured (verified by the dashboard spend card)" };
 }
 
+async function checkAi(): Promise<HealthCheck> {
+  const name = "AI (Gemini)";
+  const baseUrl = process.env.GEMINI_API_BASE_URL?.replace(/\/$/, "");
+  const key = process.env.GEMINI_API_KEY;
+  if (!baseUrl || !key) return { name, status: "fail", detail: "Gemini API URL/key not configured" };
+  try {
+    const month = `${new Date().toISOString().slice(0, 7)}-01`;
+    const admin = createAdminClient();
+    const [{ data: spend }, { count: deadJobs }, response] = await Promise.all([
+      admin.from("ai_spend_months").select("spent_usd, reserved_usd").eq("month", month).maybeSingle(),
+      admin.from("ai_jobs").select("id", { count: "exact", head: true }).eq("status", "dead"),
+      fetch(`${baseUrl}/models`, { headers: { "x-goog-api-key": key }, signal: timeout(8000), cache: "no-store" }),
+    ]);
+    if (!response.ok) return { name, status: "fail", detail: `Provider rejected health check (HTTP ${response.status})` };
+    const spent = Number(spend?.spent_usd ?? 0);
+    const reserved = Number(spend?.reserved_usd ?? 0);
+    return {
+      name,
+      status: deadJobs ? "warn" : "ok",
+      detail: `Provider reachable · $${spent.toFixed(2)} spent · $${reserved.toFixed(2)} reserved · ${deadJobs ?? 0} dead jobs`,
+    };
+  } catch (e) {
+    return { name, status: "fail", detail: e instanceof Error ? e.message : "Unreachable" };
+  }
+}
+
 /** Run every check in parallel. Any signed-in user may run it (read-only diagnostics). */
 export async function runHealthChecks(): Promise<{ ok: boolean; checks: HealthCheck[]; ranAt: string }> {
   if (!(await requireStaff())) return { ok: false, checks: [], ranAt: new Date().toISOString() };
@@ -183,6 +209,7 @@ export async function runHealthChecks(): Promise<{ ok: boolean; checks: HealthCh
     checkMaps(),
     checkPostHog(),
     checkGoogleAds(),
+    checkAi(),
   ]);
   return { ok: true, checks, ranAt: new Date().toISOString() };
 }

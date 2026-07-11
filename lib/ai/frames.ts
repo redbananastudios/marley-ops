@@ -5,6 +5,10 @@ export interface EvidenceFrame {
 
 function waitForEvent(target: HTMLMediaElement, event: string): Promise<void> {
   return new Promise((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      cleanup();
+      reject(new Error(`Video timed out while waiting for ${event}.`));
+    }, 8_000);
     const done = () => {
       cleanup();
       resolve();
@@ -14,11 +18,27 @@ function waitForEvent(target: HTMLMediaElement, event: string): Promise<void> {
       reject(new Error("Video could not be decoded for evidence frames."));
     };
     const cleanup = () => {
+      window.clearTimeout(timer);
       target.removeEventListener(event, done);
       target.removeEventListener("error", failed);
     };
     target.addEventListener(event, done, { once: true });
     target.addEventListener("error", failed, { once: true });
+  });
+}
+
+function waitForPresentedFrame(video: HTMLVideoElement): Promise<void> {
+  if (!("requestVideoFrameCallback" in video)) return Promise.resolve();
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, 250);
+    video.requestVideoFrameCallback(finish);
   });
 }
 
@@ -66,9 +86,7 @@ export async function extractEvidenceFrames(
     for (const t of timestamps) {
       video.currentTime = t;
       await waitForEvent(video, "seeked");
-      if ("requestVideoFrameCallback" in video) {
-        await new Promise<void>((resolve) => video.requestVideoFrameCallback(() => resolve()));
-      }
+      await waitForPresentedFrame(video);
       context.drawImage(video, 0, 0, width, height);
       let blob = await canvasBlob(canvas, 0.75);
       if (blob.size > 307_200) blob = await canvasBlob(canvas, 0.55);

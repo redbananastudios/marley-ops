@@ -62,10 +62,13 @@ export async function saveCubicSurveyAction(
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("cubic_surveys")
-    .select("id, lead_id, client_id, status, items")
+    .select("id, lead_id, client_id, status, items, ai_status, planning_ready")
     .eq("id", surveyId)
     .single();
   if (!row) return { ok: false, error: "Survey not found." };
+  if (parsed.data.status === "complete" && !["not_started", "abandoned"].includes(row.ai_status) && !row.planning_ready) {
+    return { ok: false, error: "Complete or abandon the AI room review before marking this survey complete." };
+  }
   const trustedLines = sanitizeCubicLines(row.items);
   if (trustedLines === null) return { ok: false, error: "The saved survey needs attention before it can be updated." };
   const lines = reconcileCubicLineProvenance(incomingLines, trustedLines);

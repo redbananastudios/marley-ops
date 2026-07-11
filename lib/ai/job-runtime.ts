@@ -1,6 +1,6 @@
 import "server-only";
 
-import { calculateAiCallCostUsd, estimateAiCallCost, isApprovedAiModelId } from "@/lib/ai/budget";
+import { calculateAiCallCostUsd, estimateAiCallCost, gbpToUsd, isApprovedAiModelId } from "@/lib/ai/budget";
 import { analyseGeminiMedia } from "@/lib/ai/gemini";
 import type { AiJobProcessResult, AiJobRuntime } from "@/lib/ai/jobs";
 import { AI_SURVEY_PROMPT_VERSION, importedVideoPrompt, photoPrompt, roomVideoPrompt } from "@/lib/ai/prompts";
@@ -8,6 +8,7 @@ import { photoDetectionSchema, videoDetectionSchema } from "@/lib/ai/survey-sche
 import { validatePhotoOutput, validateVideoOutput } from "@/lib/ai/validate";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendOpsAlert } from "@/lib/comms/dispatch";
 import type { Database } from "@/lib/supabase/database.types";
 
 type Job = Database["public"]["Tables"]["ai_jobs"]["Row"];
@@ -71,12 +72,15 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
       if (!media) throw new Error("Job media was not found");
       const { data: settings } = await admin
         .from("business_settings")
-        .select("ai_model_default")
+        .select("ai_model_default, ai_model_escalation, ai_monthly_alert_gbp")
         .eq("id", true)
         .single();
-      const model = isApprovedAiModelId(settings?.ai_model_default)
+      const defaultModel = isApprovedAiModelId(settings?.ai_model_default)
         ? settings.ai_model_default
         : "gemini-3.5-flash";
+      const escalationModel = isApprovedAiModelId(settings?.ai_model_escalation) ? settings.ai_model_escalation : defaultModel;
+      const escalatedAttempt = job.attempts > 1;
+      const model = escalatedAttempt ? escalationModel : defaultModel;
       const estimate = estimateAiCallCost({ durationS: Math.max(media.duration_s ?? 1, 1), model });
       if (media.kind === "photo" && !media.room_id) throw new Error("Photo media must belong to a room");
       const attemptKey = `${job.id}:${job.attempts}`;
@@ -90,6 +94,12 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
       if (!reservation?.[0]?.allowed) {
         return { status: "blocked", reason: reservation?.[0]?.reason ?? "budget_cap" };
       }
+      const month = new Date().toISOString().slice(0, 7) + "-01";
+      const { data: monthSpend } = await admin.from("ai_spend_months").select("spent_usd, reserved_usd, alerted_at").eq("month", month).maybeSingle();
+      if (monthSpend && !monthSpend.alerted_at && Number(monthSpend.spent_usd) + Number(monthSpend.reserved_usd) >= gbpToUsd(Number(settings?.ai_monthly_alert_gbp ?? 40))) {
+        const { data: claimedAlert } = await admin.from("ai_spend_months").update({ alerted_at: new Date().toISOString() }).eq("month", month).is("alerted_at", null).select("month").maybeSingle();
+        if (claimedAlert) await sendOpsAlert("AI survey monthly spend alert", [`Gemini spend plus live reservations has reached $${(Number(monthSpend.spent_usd) + Number(monthSpend.reserved_usd)).toFixed(2)} this month.`, "Review the AI Survey controls in Marley Ops Settings."]);
+      }
 
       const { data: run, error: runError } = await admin
         .from("cubic_analysis_runs")
@@ -98,7 +108,7 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
           media_id: media.id,
           model,
           prompt_version: AI_SURVEY_PROMPT_VERSION,
-          purpose: "itemise",
+          purpose: escalatedAttempt ? "escalation" : media.kind === "import_video" && !media.room_id ? "segmentation" : "itemise",
           attempt_key: attemptKey,
           reserved_cost_usd: estimate.estimatedCostUsd,
         })
@@ -220,15 +230,21 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
     async block(jobId, workerId, reason) {
       const { error } = await admin.from("ai_jobs").update({ status: "blocked", error: reason, next_run_at: new Date(Date.now() + 300_000).toISOString(), locked_by: null, locked_at: null, lease_expires_at: null, heartbeat_at: null }).eq("id", jobId).eq("status", "running").eq("locked_by", workerId);
       if (error) throw error;
+      const { data: job } = await admin.from("ai_jobs").select("media_id").eq("id", jobId).maybeSingle();
+      if (job?.media_id) {
+        const { data: media } = await admin.from("cubic_survey_media").update({ status: "failed", error: reason }).eq("id", job.media_id).select("room_id").maybeSingle();
+        if (media?.room_id) await admin.rpc("recompute_ai_room_state", { p_room_id: media.room_id });
+      }
     },
 
     async fail(jobId, workerId, error) {
-      const { error: failError } = await admin.rpc("fail_ai_job", {
+      const { data: failedJob, error: failError } = await admin.rpc("fail_ai_job", {
         p_job_id: jobId,
         p_worker: workerId,
         p_error: errorMessage(error),
       });
       if (failError) throw failError;
+      if (failedJob?.status === "dead") await sendOpsAlert("AI survey job exhausted retries", [`Job ${failedJob.id} could not process its survey media after ${failedJob.attempts} attempts.`, `Last error: ${errorMessage(error)}`]);
     },
   };
 }

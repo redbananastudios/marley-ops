@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(62);
+select plan(65);
 
 select has_table('public', 'cubic_survey_rooms', 'rooms table exists');
 select has_table('public', 'cubic_survey_media', 'media table exists');
@@ -120,9 +120,12 @@ select ok(not has_function_privilege('anon', 'public.retry_ai_job(uuid,uuid)', '
 select ok(has_function_privilege('service_role', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'service role can ignore failed media');
 select ok(not has_function_privilege('authenticated', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'authenticated users cannot ignore failed media directly');
 select ok(not has_function_privilege('anon', 'public.ignore_failed_ai_media(uuid,uuid)', 'EXECUTE'), 'anonymous users cannot ignore failed media');
-select ok(has_function_privilege('service_role', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'service role can finish AI rooms manually');
-select ok(not has_function_privilege('authenticated', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'authenticated users cannot finish AI rooms directly');
-select ok(not has_function_privilege('anon', 'public.finish_ai_room_manually(uuid,uuid)', 'EXECUTE'), 'anonymous users cannot finish AI rooms');
+select ok(has_function_privilege('service_role', 'public.complete_ai_room_manually(uuid,uuid,timestamp with time zone,uuid)', 'EXECUTE'), 'service role can finish AI rooms manually');
+select ok(not has_function_privilege('authenticated', 'public.complete_ai_room_manually(uuid,uuid,timestamp with time zone,uuid)', 'EXECUTE'), 'authenticated users cannot finish AI rooms directly');
+select ok(not has_function_privilege('anon', 'public.complete_ai_room_manually(uuid,uuid,timestamp with time zone,uuid)', 'EXECUTE'), 'anonymous users cannot finish AI rooms');
+select ok(has_function_privilege('service_role', 'public.resolve_ai_duplicate_group(uuid[],text,integer,uuid)', 'EXECUTE'), 'service role can resolve duplicate groups');
+select ok(not has_function_privilege('authenticated', 'public.resolve_ai_duplicate_group(uuid[],text,integer,uuid)', 'EXECUTE'), 'authenticated users cannot resolve duplicate groups directly');
+select ok(not has_function_privilege('anon', 'public.resolve_ai_duplicate_group(uuid[],text,integer,uuid)', 'EXECUTE'), 'anonymous users cannot resolve duplicate groups');
 
 select is(
   (select count(*)::int from storage.buckets where id = 'survey-media' and not public),
@@ -333,7 +336,16 @@ update public.cubic_survey_media set status = 'failed' where id = '40000000-0000
 select is(public.ignore_failed_ai_media('40000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'), true, 'failed media can be explicitly discarded');
 select is((select status from public.cubic_survey_media where id = '40000000-0000-4000-8000-000000000001'), 'ignored', 'discard marks the failed media ignored');
 select is((select status from public.cubic_survey_rooms where id = '30000000-0000-4000-8000-000000000001'), 'pending', 'discarding the only failed clip leaves the room pending');
-select is(public.finish_ai_room_manually('30000000-0000-4000-8000-000000000001', '10000000-0000-4000-8000-000000000002'), true, 'acknowledged failed room can be finished manually');
+select lives_ok(
+  format(
+    'select public.complete_ai_room_manually(%L, %L, %L, %L)',
+    '20000000-0000-4000-8000-000000000001',
+    '30000000-0000-4000-8000-000000000001',
+    (select updated_at from public.cubic_surveys where id = '20000000-0000-4000-8000-000000000001'),
+    '10000000-0000-4000-8000-000000000002'
+  ),
+  'acknowledged failed room can be finished manually'
+);
 select is((select status || ':' || completion_method from public.cubic_survey_rooms where id = '30000000-0000-4000-8000-000000000001'), 'confirmed:manual', 'manual finish records confirmed provenance');
 
 insert into public.cubic_survey_media(id, survey_id, kind, storage_path, mime, status, created_by)

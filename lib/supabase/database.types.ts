@@ -2634,9 +2634,15 @@ export type Database = {
         Args: { p_job_id: string; p_lease_seconds?: number; p_worker: string }
         Returns: boolean
       }
-      finish_ai_room_manually: {
-        Args: { p_actor_id: string; p_room_id: string }
-        Returns: boolean
+      complete_ai_room_manually: {
+        Args: { p_actor_id: string; p_base_updated_at: string; p_room_id: string; p_survey_id: string }
+        Returns: Database["public"]["Tables"]["cubic_surveys"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "cubic_surveys"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       ignore_failed_ai_media: {
         Args: { p_actor_id: string; p_media_id: string }
@@ -2663,6 +2669,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      resolve_ai_duplicate_group: {
+        Args: { p_actor_id: string; p_choice: string; p_detection_ids: string[]; p_qty: number | null }
+        Returns: Json
       }
       reserve_ai_call: {
         Args: {

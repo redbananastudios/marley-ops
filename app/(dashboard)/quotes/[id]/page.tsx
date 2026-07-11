@@ -11,6 +11,7 @@ import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
 import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
+import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { CubicSurveyCard, type CubicCardData } from "@/components/cubic/cubic-survey-card";
 import { QuoteView } from "@/components/quote/quote-view";
 import {
@@ -103,14 +104,15 @@ export default async function QuoteDetailPage({
   if (quote.lead_id) {
     const { data: cubic } = await sb
       .from("cubic_surveys")
-      .select("total_ft3, items, status")
+      .select("total_ft3, items, status, ai_status, planning_ready, contingency_pct")
       .eq("lead_id", quote.lead_id)
       .maybeSingle();
     if (cubic) {
       const totalFt3 = Number(cubic.total_ft3) || 0;
+      const planning = getSurveyPlanningState({ rawFt3: totalFt3, aiStatus: cubic.ai_status, planningReady: cubic.planning_ready, contingencyPct: cubic.contingency_pct });
       const rec =
-        totalFt3 > 0
-          ? recommendVans(totalFt3, {
+        planning.guidanceReady && planning.planningFt3 > 0
+          ? recommendVans(planning.planningFt3, {
               fillPct: settings.cubicFillPct,
               transitFt3: settings.cubicTransitFt3,
               lutonFt3: settings.cubicLutonFt3,
@@ -119,7 +121,10 @@ export default async function QuoteDetailPage({
           : null;
       const totals = computeCubicTotals(sanitizeCubicLines(cubic.items) ?? []);
       cubicCard = {
-        totalFt3,
+        rawFt3: totalFt3,
+        planningFt3: planning.planningFt3,
+        contingencyPct: planning.contingencyPct,
+        guidanceReady: planning.guidanceReady,
         vanLabel: rec ? vehicleShortLabel(rec) : null,
         itemCount: totals.itemCount,
         status: cubic.status ?? "draft",
@@ -127,7 +132,9 @@ export default async function QuoteDetailPage({
       };
       if (rec) {
         cubicHint = {
-          totalFt3,
+          rawFt3: totalFt3,
+          planningFt3: planning.planningFt3,
+          contingencyPct: planning.contingencyPct,
           vehicleKey: rec.vehicleKey,
           shortLabel: vehicleShortLabel(rec),
           detail: rec.label + (rec.consider75t ? " · consider the 7.5t" : ""),

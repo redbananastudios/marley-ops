@@ -4,16 +4,31 @@ import { Upload } from "tus-js-client";
 
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
 
+export interface MediaUploadControl {
+  pause: () => void;
+  resume: () => void;
+  isPaused: () => boolean;
+}
+
 export function uploadToMediaTarget(input: {
   target: MediaUploadTarget;
   file: Blob;
   onProgress?: (percentage: number) => void;
+  onControl?: (control: MediaUploadControl) => void;
 }): Promise<void> {
   const target = input.target;
   if (target.protocol === "multipart") {
     return (async () => {
+      let paused = false;
+      let resume: (() => void) | null = null;
+      input.onControl?.({
+        pause: () => { paused = true; },
+        resume: () => { paused = false; resume?.(); resume = null; },
+        isPaused: () => paused,
+      });
       const completed: { partNumber: number; etag: string }[] = [];
       for (const part of target.parts) {
+        if (paused) await new Promise<void>((resolve) => { resume = resolve; });
         const start = (part.partNumber - 1) * target.partSizeBytes;
         const body = input.file.slice(start, start + target.partSizeBytes);
         const response = await fetch(part.url, { method: "PUT", headers: part.headers, body });
@@ -31,6 +46,8 @@ export function uploadToMediaTarget(input: {
   }
 
   return new Promise((resolve, reject) => {
+    let paused = false;
+    let aborting = Promise.resolve();
     const upload = new Upload(input.file, {
       endpoint: target.endpoint,
       headers: target.headers,
@@ -50,9 +67,22 @@ export function uploadToMediaTarget(input: {
       },
       onSuccess: () => resolve(),
     });
+    input.onControl?.({
+      pause() {
+        if (paused) return;
+        paused = true;
+        aborting = upload.abort(false).catch(reject);
+      },
+      resume() {
+        if (!paused) return;
+        paused = false;
+        void aborting.then(() => upload.start());
+      },
+      isPaused: () => paused,
+    });
     upload.findPreviousUploads().then((previous) => {
       if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
-      upload.start();
+      if (!paused) upload.start();
     }, reject);
   });
 }

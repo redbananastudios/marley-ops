@@ -72,6 +72,8 @@ export interface CubicBuilderProps {
   customerNotes?: string;
   /** Customer mode: localStorage key for the pre-submit draft. */
   draftKey?: string;
+  /** Server-owned AI readiness and contingency; omitted for manual/customer surveys. */
+  planning?: { planningFt3: number; contingencyPct: number; guidanceReady: boolean; aiInProgress: boolean };
 }
 
 const CUSTOM_CATEGORY = "custom";
@@ -87,12 +89,14 @@ export function CubicBuilder({
   leadId,
   customerNotes,
   draftKey,
+  planning,
 }: CubicBuilderProps) {
   const office = mode === "office";
   const [lines, setLines] = useState<CubicLine[]>(initialLines);
   const [notes, setNotes] = useState(initialNotes);
   const [status, setStatus] = useState(initialStatus);
   const [search, setSearch] = useState("");
+  const [groupByRoom, setGroupByRoom] = useState(false);
   const [activeCat, setActiveCat] = useState(CUBIC_CATEGORIES[0].key);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [conflict, setConflict] = useState(false);
@@ -100,7 +104,8 @@ export function CubicBuilder({
   const [submitted, setSubmitted] = useState(false);
 
   const totals = useMemo(() => computeCubicTotals(lines), [lines]);
-  const rec = useMemo(() => recommendVans(totals.totalFt3, capacities), [totals.totalFt3, capacities]);
+  const recommendationFt3 = planning?.guidanceReady ? planning.planningFt3 : planning ? 0 : totals.totalFt3;
+  const rec = useMemo(() => recommendVans(recommendationFt3, capacities), [recommendationFt3, capacities]);
   const manualLineByCatalogueKey = useMemo(() => {
     const map = new Map<string, CubicLine>();
     for (const line of lines) {
@@ -319,6 +324,16 @@ export function CubicBuilder({
   /* ---------------- grouped added list ---------------- */
 
   const grouped = useMemo(() => {
+    if (groupByRoom) {
+      const byRoom = new Map<string, CubicLine[]>();
+      for (const line of lines) {
+        const key = line.room?.trim() || "Manual / unassigned";
+        const group = byRoom.get(key) ?? [];
+        group.push(line);
+        byRoom.set(key, group);
+      }
+      return [...byRoom.entries()].sort(([a], [b]) => a.localeCompare(b, "en-GB"));
+    }
     const order = [...CUBIC_CATEGORIES.map((c) => c.key), CUSTOM_CATEGORY];
     const map = new Map<string, CubicLine[]>();
     for (const l of lines) {
@@ -327,7 +342,7 @@ export function CubicBuilder({
       map.set(l.category, g);
     }
     return [...map.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-  }, [lines]);
+  }, [groupByRoom, lines]);
 
   if (submitted) {
     return (
@@ -374,6 +389,7 @@ export function CubicBuilder({
             <span className="tabular text-xs text-mist-400">
               {totals.totalM3} m³ · {totals.itemCount} item{totals.itemCount === 1 ? "" : "s"}
             </span>
+            {planning?.guidanceReady && planning.contingencyPct > 0 ? <span className="rounded-pill bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">+{planning.contingencyPct}% · planning {planning.planningFt3.toLocaleString("en-GB")} ft³</span> : null}
           </div>
 
           {rec ? (
@@ -398,7 +414,7 @@ export function CubicBuilder({
               </div>
             </div>
           ) : (
-            <span className="text-sm text-mist-400">Tap items to build the volume — the van maths appears here.</span>
+            <span className="text-sm text-mist-400">{planning?.aiInProgress ? `Provisional raw ${totals.totalFt3.toLocaleString("en-GB")} ft³ · complete all rooms for vehicle guidance` : "Tap items to build the volume — the van maths appears here."}</span>
           )}
 
           <div className="ml-auto flex items-center gap-2">
@@ -415,7 +431,7 @@ export function CubicBuilder({
                   <button
                     type="button"
                     onClick={markComplete}
-                    disabled={completing || conflict || lines.length === 0}
+                    disabled={completing || conflict || lines.length === 0 || planning?.aiInProgress}
                     className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-50"
                   >
                     {completing ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : null}
@@ -585,6 +601,7 @@ export function CubicBuilder({
                 {totals.itemCount} item{totals.itemCount === 1 ? "" : "s"}
               </span>
             </div>
+            {lines.some((line) => !!line.room) && <div className="flex items-center justify-end border-b px-4 py-2"><label className="flex min-h-10 items-center gap-2 text-xs font-semibold text-mist-500"><input type="checkbox" checked={groupByRoom} onChange={(event) => setGroupByRoom(event.target.checked)} className="size-5 accent-mm-red" /> Group by room</label></div>}
 
             <div className="max-h-[60vh] overflow-y-auto">
               {grouped.length === 0 ? (
@@ -600,7 +617,7 @@ export function CubicBuilder({
                     <div key={cat} className="border-b last:border-b-0">
                       <div className="flex items-baseline justify-between bg-muted/60 px-4 py-1.5">
                         <span className="text-[11px] font-bold uppercase tracking-wide text-mist-500">
-                          {CUBIC_CATEGORY_TITLES[cat] ?? "Custom items"}
+                          {groupByRoom ? cat : CUBIC_CATEGORY_TITLES[cat] ?? "Custom items"}
                         </span>
                         <span className="tabular text-[11px] font-semibold text-mist-500">
                           {Math.round(catFt3 * 10) / 10} ft³
@@ -610,7 +627,7 @@ export function CubicBuilder({
                         {catLines.map((l) => (
                           <li key={l.id} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}</span>
+                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}{l.source === "ai" ? <span className="ml-1.5 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-bold text-mm-red-deep">AI</span> : null}{l.room && !groupByRoom ? <span className="ml-1.5 text-[10px] font-normal text-mist-400">{l.room}</span> : null}</span>
                               <div className="flex shrink-0 items-center gap-1.5">
                                 <button
                                   type="button"

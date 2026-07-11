@@ -4,7 +4,7 @@
 import { useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Check, CheckCircle2, ChevronRight, Play, ScanLine, X } from "lucide-react";
+import { Check, CheckCircle2, ChevronRight, Play, ScanLine, Search, Truck, X } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -12,38 +12,75 @@ import {
   assignSegmentAction,
   confirmAiItemsAction,
   resolveDetectionAction,
+  resolveDuplicateGroupAction,
   setRoomManifestCompleteAction,
+  type ManualInventoryConflict,
 } from "@/app/actions/ai-survey-review";
 import { cn } from "@/lib/utils";
+import { recommendVans, vehicleShortLabel, type VanCapacities } from "@/lib/cubic-survey";
 
 export interface ReviewRoom { id: string; name: string; status: string; coverage: string | null }
 export interface ReviewMedia { id: string; roomId: string | null; kind: string; url: string }
 export interface ReviewDetection {
-  id: string; roomId: string | null; segmentId: string | null; label: string; catalogueKey: string | null;
+  id: string; roomId: string | null; segmentId: string | null; mediaId: string | null; label: string; catalogueKey: string | null;
   candidates: { key: string; confidence: number }[]; qty: number; confidence: number;
   moving: string; flags: { dismantle?: boolean; fragile?: boolean }; evidence: { kind?: string; timestampsS?: number[]; box2d?: number[] };
+  resolution: { type?: string; catalogueKey?: string; qty?: number; moving?: string; unitFt3?: number } | null;
   reviewReason: string | null; state: string;
 }
 export interface CatalogueOption { key: string; title: string; ft3: number; category: string }
 export interface ReviewSegment { id: string; proposedName: string; startS: number; endS: number; roomId: string | null; status: string }
 
-export function ReviewWorkspace({ surveyId, leadId, initialUpdatedAt, manifestComplete, rooms, media, detections, catalogue, initialSegments }: {
+export function ReviewWorkspace({ surveyId, leadId, initialRoomId, initialUpdatedAt, manifestComplete, initialRawFt3, contingencyPct, planningReady, groundedReplayEnabled, capacities, rooms, media, detections, catalogue, initialSegments }: {
   surveyId: string; leadId: string; initialUpdatedAt: string; manifestComplete: boolean;
+  initialRoomId?: string;
+  initialRawFt3: number; contingencyPct: number; planningReady: boolean; groundedReplayEnabled: boolean; capacities: VanCapacities;
   rooms: ReviewRoom[]; media: ReviewMedia[]; detections: ReviewDetection[]; catalogue: CatalogueOption[]; initialSegments: ReviewSegment[];
 }) {
   const router = useRouter();
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [activeRoomId, setActiveRoomId] = useState(rooms[0]?.id ?? "");
+  const [activeRoomId, setActiveRoomId] = useState(initialRoomId ?? rooms[0]?.id ?? "");
+  const [activeMediaId, setActiveMediaId] = useState<string | null>(null);
+  const [activeBox, setActiveBox] = useState<number[] | null>(null);
   const [items, setItems] = useState(detections);
   const [manifest, setManifest] = useState(manifestComplete);
   const [segments, setSegments] = useState(initialSegments);
   const [updatedAt, setUpdatedAt] = useState(initialUpdatedAt);
+  const [manualConflicts, setManualConflicts] = useState<ManualInventoryConflict[]>([]);
+  const [manualChoices, setManualChoices] = useState<Record<string, "skip_ai" | "separate">>({});
+  const [tab, setTab] = useState<"needs" | "room" | "all">("needs");
+  const [search, setSearch] = useState("");
   const [busy, startTransition] = useTransition();
   const activeRoom = rooms.find((room) => room.id === activeRoomId);
   const roomItems = items.filter((item) => item.roomId === activeRoomId);
-  const activeMedia = media.find((item) => item.roomId === activeRoomId);
+  const activeMedia = media.find((item) => item.id === activeMediaId && item.roomId === activeRoomId) ?? media.find((item) => item.roomId === activeRoomId);
   const unresolved = roomItems.filter((item) => item.state === "proposed").length;
+  const duplicateGroups = useMemo(() => {
+    const groups = new Map<string, ReviewDetection[]>();
+    for (const item of roomItems) {
+      if (item.reviewReason !== "seen-in-multiple-clips" || !item.catalogueKey || !item.mediaId || item.state === "rejected") continue;
+      const group = groups.get(item.catalogueKey) ?? [];
+      group.push(item);
+      groups.set(item.catalogueKey, group);
+    }
+    return [...groups.values()].filter((group) => new Set(group.map((item) => item.mediaId)).size > 1);
+  }, [roomItems]);
+  const duplicateIds = new Set(duplicateGroups.flatMap((group) => group.map((item) => item.id)));
   const catalogueByKey = useMemo(() => new Map(catalogue.map((item) => [item.key, item])), [catalogue]);
+  const visibleItems = (tab === "all" ? items : roomItems).filter((item) => !duplicateIds.has(item.id)).filter((item) => tab !== "needs" || (item.state === "proposed" && !!item.reviewReason)).filter((item) => !search.trim() || item.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()));
+  const provisionalAddedFt3 = items.reduce((sum, item) => {
+    if (item.state === "merged" || item.state === "rejected") return sum;
+    const moving = item.resolution?.moving ?? item.moving;
+    if (moving !== "moving") return sum;
+    const qty = Number(item.resolution?.qty ?? item.qty);
+    if (!Number.isFinite(qty) || qty < 1) return sum;
+    if (item.resolution?.type === "custom") return sum + Number(item.resolution.unitFt3 ?? 0) * qty;
+    const key = item.resolution?.catalogueKey ?? item.catalogueKey;
+    return sum + (catalogueByKey.get(key ?? "")?.ft3 ?? 0) * qty;
+  }, 0);
+  const provisionalRawFt3 = Math.round((initialRawFt3 + provisionalAddedFt3) * 10) / 10;
+  const planningFt3 = Math.round(initialRawFt3 * (1 + contingencyPct / 100) * 10) / 10;
+  const recommendation = planningReady ? recommendVans(planningFt3, capacities) : null;
 
   function mutate<T extends { ok: boolean; error?: string }>(task: () => Promise<T>, onSuccess: (result: T) => void) {
     startTransition(async () => {
@@ -59,14 +96,47 @@ export function ReviewWorkspace({ surveyId, leadId, initialUpdatedAt, manifestCo
 
   function review(id: string, state: "accepted" | "rejected", resolution?: Parameters<typeof resolveDetectionAction>[1]["resolution"]) {
     mutate(() => resolveDetectionAction(id, { state: resolution ? "edited" : state, resolution }), () => {
-      setItems((current) => current.map((item) => item.id === id ? { ...item, state: resolution ? "edited" : state } : item));
+      setItems((current) => current.map((item) => item.id === id ? { ...item, state: resolution ? "edited" : state, resolution: resolution ?? item.resolution, reviewReason: null } : item));
     });
   }
 
-  function seek(seconds: number) {
-    if (!videoRef.current) return;
-    videoRef.current.currentTime = seconds;
-    void videoRef.current.play();
+  function seek(seconds: number, item: ReviewDetection) {
+    setActiveMediaId(item.mediaId);
+    setActiveBox(groundedReplayEnabled && item.evidence.box2d?.length === 4 ? item.evidence.box2d : null);
+    window.setTimeout(() => {
+      if (!videoRef.current) return;
+      videoRef.current.currentTime = seconds;
+      void videoRef.current.play();
+    }, 0);
+  }
+
+  function resolveDuplicate(group: ReviewDetection[], choice: "max" | "sum" | "distinct" | "quantity", qty?: number) {
+    mutate(() => resolveDuplicateGroupAction(group.map((item) => item.id), { choice, qty }), (result) => {
+      if (!result.ok) return;
+      const rejected = new Set(result.rejectedIds);
+      const resolvedQty = choice === "sum" ? group.reduce((sum, item) => sum + item.qty, 0) : choice === "max" ? Math.max(...group.map((item) => item.qty)) : choice === "quantity" ? qty : undefined;
+      setItems((current) => current.map((item) => group.some((entry) => entry.id === item.id) ? { ...item, reviewReason: null, state: rejected.has(item.id) ? "rejected" : result.choice === "distinct" ? "accepted" : item.id === result.primaryId ? "edited" : item.state, ...(item.id === result.primaryId && resolvedQty ? { resolution: { type: "catalogue", catalogueKey: item.catalogueKey ?? undefined, qty: resolvedQty, moving: item.moving === "staying" ? "staying" : "moving" } } : {}) } : item));
+    });
+  }
+
+  function confirmRoom() {
+    startTransition(async () => {
+      const choices = Object.entries(manualChoices).map(([detectionId, choice]) => ({ detectionId, choice }));
+      const result = await confirmAiItemsAction(surveyId, activeRoomId, updatedAt, choices);
+      if (!result.ok) {
+        if (result.needsChoices?.length) {
+          setManualConflicts(result.needsChoices);
+          toast.error("Resolve the items already present in the manual inventory.");
+        } else toast.error(result.error);
+        return;
+      }
+      setUpdatedAt(result.updatedAt);
+      setManualConflicts([]);
+      setManualChoices({});
+      setItems((current) => current.map((item) => item.roomId === activeRoomId && item.state !== "rejected" ? { ...item, state: "merged" } : item));
+      toast.success(`${activeRoom?.name} confirmed and added to the cubic survey.`);
+      router.refresh();
+    });
   }
 
   return (
@@ -77,7 +147,7 @@ export function ReviewWorkspace({ surveyId, leadId, initialUpdatedAt, manifestCo
         <p className="px-2 py-2 text-xs font-bold uppercase tracking-[0.18em] text-mist-400">Room by room</p>
         <div className="space-y-2">{rooms.map((room) => {
           const count = items.filter((item) => item.roomId === room.id && item.state !== "rejected").length;
-          return <button key={room.id} type="button" onClick={() => setActiveRoomId(room.id)} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left", room.id === activeRoomId ? "border-mm-red bg-mm-red-tint" : "border-border")}><span><span className="block text-sm font-semibold">{room.name}</span><span className="text-xs text-mist-400">{count} items · {room.status.replace("_", " ")}</span></span><ChevronRight className="size-4 text-mist-400" /></button>;
+          return <button key={room.id} type="button" onClick={() => { setActiveRoomId(room.id); setActiveMediaId(null); setActiveBox(null); }} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left", room.id === activeRoomId ? "border-mm-red bg-mm-red-tint" : "border-border")}><span><span className="block text-sm font-semibold">{room.name}</span><span className="text-xs text-mist-400">{count} items · {room.status.replace("_", " ")}</span></span><ChevronRight className="size-4 text-mist-400" /></button>;
         })}</div>
         <label className="mt-4 flex min-h-12 items-start gap-3 rounded-xl border border-border p-3 text-sm"><input type="checkbox" checked={manifest} onChange={(event) => { const checked = event.target.checked; mutate(() => setRoomManifestCompleteAction(surveyId, checked), () => setManifest(checked)); }} className="mt-0.5 size-5 accent-mm-red" /><span><strong>All rooms listed</strong><span className="mt-1 block text-xs text-mist-400">Required before final totals.</span></span></label>
         <Link href={`/leads/${leadId}/cubic/scan`} className="focus-ring mt-3 flex min-h-11 items-center justify-center gap-2 rounded-xl border border-border text-sm font-semibold"><ScanLine className="size-4" /> Capture another room</Link>
@@ -88,18 +158,29 @@ export function ReviewWorkspace({ surveyId, leadId, initialUpdatedAt, manifestCo
         <div className="relative aspect-video bg-black">
           {activeMedia?.kind === "photo" ? <img src={activeMedia.url} alt="Room evidence" className="size-full object-contain" /> : activeMedia ? <video ref={videoRef} src={activeMedia.url} controls playsInline className="size-full object-contain" /> : <div className="grid size-full place-items-center text-sm text-white/45">No processed media for this room</div>}
           {activeMedia && <div className="pointer-events-none absolute inset-5 border border-cyan-300/20"><span className="absolute -left-px -top-px size-7 border-l-2 border-t-2 border-cyan-300" /><span className="absolute -bottom-px -right-px size-7 border-b-2 border-r-2 border-cyan-300" /></div>}
+          {groundedReplayEnabled && activeBox && <div className="pointer-events-none absolute border-2 border-cyan-300 bg-cyan-300/10 shadow-[0_0_12px_rgba(103,232,249,.8)]" style={{ top: `${activeBox[0] / 10}%`, left: `${activeBox[1] / 10}%`, width: `${(activeBox[3] - activeBox[1]) / 10}%`, height: `${(activeBox[2] - activeBox[0]) / 10}%` }} />}
         </div>
-        <div className="p-4"><p className="text-sm text-white/60">Tap an evidence time beside an item to replay where AI saw it. The boxes and scan treatment show evidence context, not an automatic final decision.</p></div>
+        <div className="p-4"><p className="text-sm text-white/60">Tap an evidence time beside an item to replay where AI saw it.{groundedReplayEnabled ? " Stored evidence boxes show context, not an automatic final decision." : " Timestamp replay is shown without fabricated object boxes."}</p></div>
       </section>
 
       <aside className="rounded-2xl border border-border bg-card p-4">
         <div className="flex items-center justify-between"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-mist-400">Detected inventory</p><p className="mt-1 text-sm text-mist-500">{unresolved ? `${unresolved} need review` : "Room review complete"}</p></div><button type="button" disabled={busy} onClick={() => mutate(() => acceptRoomDetectionsAction(activeRoomId), () => setItems((current) => current.map((item) => item.roomId === activeRoomId && item.state === "proposed" && !item.reviewReason ? { ...item, state: "accepted" } : item)))} className="focus-ring min-h-10 rounded-lg bg-mm-red-tint px-3 text-xs font-bold text-mm-red-deep">Accept clear items</button></div>
-        <div className="mt-4 max-h-[62vh] space-y-3 overflow-y-auto pr-1">{roomItems.map((item) => <DetectionCard key={item.id} item={item} catalogue={catalogue} catalogueByKey={catalogueByKey} busy={busy} onSeek={seek} onReview={review} />)}</div>
-        <button type="button" disabled={busy || unresolved > 0 || !manifest || !activeRoomId || activeRoom?.status === "confirmed" || segments.some((segment) => segment.status === "proposed")} onClick={() => mutate(() => confirmAiItemsAction(surveyId, activeRoomId, updatedAt), (result) => { if (result.ok) setUpdatedAt(result.updatedAt); toast.success(`${activeRoom?.name} confirmed and added to the cubic survey.`); router.refresh(); })} className="focus-ring mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-mm-red font-semibold text-white disabled:opacity-35"><CheckCircle2 className="size-5" /> {activeRoom?.status === "confirmed" ? "Room confirmed" : "Confirm room inventory"}</button>
+        <div className="mt-3 grid grid-cols-3 rounded-lg bg-muted p-1 text-xs font-bold"><button type="button" onClick={() => setTab("needs")} className={cn("min-h-10 rounded-md", tab === "needs" && "bg-card shadow-sm")}>Needs attention ({roomItems.filter((item) => item.state === "proposed" && !!item.reviewReason).length})</button><button type="button" onClick={() => setTab("room")} className={cn("min-h-10 rounded-md", tab === "room" && "bg-card shadow-sm")}>By room</button><button type="button" onClick={() => setTab("all")} className={cn("min-h-10 rounded-md", tab === "all" && "bg-card shadow-sm")}>All items</button></div>
+        {tab === "all" && <label className="relative mt-2 block"><Search className="pointer-events-none absolute left-3 top-3.5 size-4 text-mist-400" /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search detected items…" className="focus-ring h-11 w-full rounded-lg border border-input pl-9 pr-3 text-base" /></label>}
+        {!!duplicateGroups.length && <div className="mt-4 space-y-3">{duplicateGroups.map((group) => <DuplicateGroupCard key={group[0].catalogueKey} group={group} title={catalogueByKey.get(group[0].catalogueKey ?? "")?.title ?? group[0].label} busy={busy} onResolve={resolveDuplicate} />)}</div>}
+        {!!manualConflicts.length && <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-bold text-amber-950">Already in the manual inventory?</p><div className="mt-2 space-y-2">{manualConflicts.map((conflict) => <div key={conflict.detectionId} className="rounded-lg bg-white p-2"><p className="text-xs font-semibold">AI: {conflict.detectionLabel} · Manual: {conflict.existingTitle}</p><div className="mt-2 grid grid-cols-2 gap-2"><button type="button" onClick={() => setManualChoices((current) => ({ ...current, [conflict.detectionId]: "skip_ai" }))} className={cn("focus-ring min-h-10 rounded-lg border text-xs font-bold", manualChoices[conflict.detectionId] === "skip_ai" && "border-mm-red bg-mm-red-tint text-mm-red-deep")}>Already counted</button><button type="button" onClick={() => setManualChoices((current) => ({ ...current, [conflict.detectionId]: "separate" }))} className={cn("focus-ring min-h-10 rounded-lg border text-xs font-bold", manualChoices[conflict.detectionId] === "separate" && "border-mm-red bg-mm-red-tint text-mm-red-deep")}>Separate item</button></div></div>)}</div></div>}
+        <div className="mt-4 max-h-[62vh] space-y-3 overflow-y-auto pr-1">{visibleItems.map((item) => <DetectionCard key={item.id} item={item} catalogue={catalogue} catalogueByKey={catalogueByKey} busy={busy} onSeek={seek} onReview={review} />)}{!visibleItems.length && <p className="rounded-xl bg-muted p-4 text-center text-sm text-mist-400">No items in this view.</p>}</div>
+        <button type="button" disabled={busy || unresolved > 0 || duplicateGroups.length > 0 || !manifest || !activeRoomId || activeRoom?.status === "confirmed" || segments.some((segment) => segment.status === "proposed") || (manualConflicts.length > 0 && manualConflicts.some((conflict) => !manualChoices[conflict.detectionId]))} onClick={confirmRoom} className="focus-ring mt-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-mm-red font-semibold text-white disabled:opacity-35"><CheckCircle2 className="size-5" /> {activeRoom?.status === "confirmed" ? "Room confirmed" : unresolved ? `Resolve ${unresolved} item${unresolved === 1 ? "" : "s"} first` : "Confirm room inventory"}</button>
       </aside>
       </div>
+      <div className="sticky bottom-3 z-20 mt-4 flex flex-wrap items-center gap-3 rounded-2xl border border-border bg-card/95 px-4 py-3 shadow-lg backdrop-blur"><div><p className="text-xs font-bold uppercase tracking-wide text-mist-400">{planningReady ? "Planning volume" : "Provisional inventory"}</p><p className="text-sm font-semibold">{planningReady ? <>Raw {initialRawFt3.toLocaleString("en-GB")} ft³ · +{contingencyPct}% · Planning {planningFt3.toLocaleString("en-GB")} ft³</> : <>Provisional raw {provisionalRawFt3.toLocaleString("en-GB")} ft³ · complete all rooms for vehicle guidance</>}</p></div>{recommendation && <span className="ml-auto inline-flex min-h-10 items-center gap-2 rounded-pill bg-mm-red-tint px-3 text-sm font-bold text-mm-red-deep"><Truck className="size-4" /> {vehicleShortLabel(recommendation)}</span>}</div>
     </div>
   );
+}
+
+function DuplicateGroupCard({ group, title, busy, onResolve }: { group: ReviewDetection[]; title: string; busy: boolean; onResolve: (group: ReviewDetection[], choice: "max" | "sum" | "distinct" | "quantity", qty?: number) => void }) {
+  const [customQty, setCustomQty] = useState("");
+  return <article className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-sm font-bold text-amber-950">Repeated sighting: {title}</p><p className="mt-1 text-xs text-amber-800">Seen in {new Set(group.map((item) => item.mediaId)).size} clips with quantities {group.map((item) => item.qty).join(" and ")}. Choose how many physical items this represents.</p><div className="mt-3 grid grid-cols-3 gap-2"><button type="button" disabled={busy} onClick={() => onResolve(group, "max")} className="focus-ring min-h-10 rounded-lg bg-white text-xs font-bold">Same items</button><button type="button" disabled={busy} onClick={() => onResolve(group, "sum")} className="focus-ring min-h-10 rounded-lg bg-white text-xs font-bold">Add quantities</button><button type="button" disabled={busy} onClick={() => onResolve(group, "distinct")} className="focus-ring min-h-10 rounded-lg bg-white text-xs font-bold">Keep separate</button></div><div className="mt-2 grid grid-cols-[1fr_auto] gap-2"><input value={customQty} onChange={(event) => setCustomQty(event.target.value.replace(/\D/g, "").slice(0, 3))} inputMode="numeric" aria-label={`Correct quantity for ${title}`} placeholder="Correct quantity" className="focus-ring h-11 rounded-lg border border-amber-200 bg-white px-3 text-base" /><button type="button" disabled={busy || !Number(customQty)} onClick={() => onResolve(group, "quantity", Number(customQty))} className="focus-ring min-h-11 rounded-lg bg-amber-900 px-3 text-xs font-bold text-white">Use quantity</button></div></article>;
 }
 
 function SegmentAssignment({ segment, rooms, busy, onAssign }: { segment: ReviewSegment; rooms: ReviewRoom[]; busy: boolean; onAssign: (input: Parameters<typeof assignSegmentAction>[1]) => void }) {
@@ -110,7 +191,7 @@ function SegmentAssignment({ segment, rooms, busy, onAssign }: { segment: Review
   return <article className="rounded-xl border border-amber-200 bg-white p-3"><div className="flex items-center justify-between gap-3"><div><p className="font-semibold text-amber-950">{segment.proposedName}</p><p className="text-xs text-amber-700">Video {range}</p></div><button type="button" disabled={busy} onClick={() => onAssign({ action: "reject" })} className="focus-ring min-h-9 rounded-lg px-2 text-xs font-bold text-danger">Reject segment</button></div><div className="mt-3 grid grid-cols-[1fr_auto] gap-2">{createNew ? <input value={newRoom} onChange={(event) => setNewRoom(event.target.value.slice(0, 60))} aria-label="New room name" className="focus-ring h-11 rounded-lg border border-input px-3 text-sm" /> : <select value={roomId} onChange={(event) => setRoomId(event.target.value)} className="focus-ring h-11 rounded-lg border border-input bg-background px-2 text-sm">{rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}</select>}<button type="button" disabled={busy || (createNew ? !newRoom.trim() : !roomId)} onClick={() => onAssign(createNew ? { action: "assign", newRoom } : { action: "merge", roomId })} className="focus-ring min-h-11 rounded-lg bg-amber-900 px-3 text-sm font-bold text-white">{createNew ? "Create room" : "Merge"}</button></div><button type="button" onClick={() => setCreateNew((value) => !value)} className="focus-ring mt-2 min-h-8 rounded text-xs font-semibold text-amber-800">{createNew && rooms.length ? "Use an existing room" : "Create a new room"}</button></article>;
 }
 
-function DetectionCard({ item, catalogue, catalogueByKey, busy, onSeek, onReview }: { item: ReviewDetection; catalogue: CatalogueOption[]; catalogueByKey: Map<string, CatalogueOption>; busy: boolean; onSeek: (seconds: number) => void; onReview: (id: string, state: "accepted" | "rejected", resolution?: Parameters<typeof resolveDetectionAction>[1]["resolution"]) => void }) {
+function DetectionCard({ item, catalogue, catalogueByKey, busy, onSeek, onReview }: { item: ReviewDetection; catalogue: CatalogueOption[]; catalogueByKey: Map<string, CatalogueOption>; busy: boolean; onSeek: (seconds: number, item: ReviewDetection) => void; onReview: (id: string, state: "accepted" | "rejected", resolution?: Parameters<typeof resolveDetectionAction>[1]["resolution"]) => void }) {
   const [key, setKey] = useState(item.catalogueKey ?? item.candidates[0]?.key ?? "");
   const [catalogueSearch, setCatalogueSearch] = useState(catalogueByKey.get(item.catalogueKey ?? item.candidates[0]?.key ?? "")?.title ?? "");
   const [qty, setQty] = useState(String(item.qty));
@@ -129,7 +210,7 @@ function DetectionCard({ item, catalogue, catalogueByKey, busy, onSeek, onReview
   const correctionInvalid = !numericQty || (custom ? !customTitle.trim() || !customCategory.trim() || !numericCustomFt3 : !key);
   return <article className={cn("rounded-xl border p-3", item.state === "rejected" ? "border-border bg-muted opacity-55" : item.state === "accepted" || item.state === "edited" ? "border-success-border bg-success-bg/40" : "border-border")}>
     <div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{item.label}</p><p className="mt-0.5 text-xs text-mist-400">{selected?.title ?? "No catalogue match"} · {Math.round(item.confidence * 100)}% confidence</p></div><span className="rounded-full bg-muted px-2 py-1 text-xs font-bold">×{item.qty}</span></div>
-    {!!item.evidence.timestampsS?.length && <div className="mt-2 flex flex-wrap gap-1">{item.evidence.timestampsS.map((time) => <button type="button" key={time} onClick={() => onSeek(time)} className="focus-ring inline-flex min-h-8 items-center gap-1 rounded-full bg-cyan-50 px-2 text-xs font-semibold text-cyan-800"><Play className="size-3" /> {Math.floor(time / 60)}:{String(Math.round(time % 60)).padStart(2, "0")}</button>)}</div>}
+    {!!item.evidence.timestampsS?.length && <div className="mt-2 flex flex-wrap gap-1">{item.evidence.timestampsS.map((time) => <button type="button" key={time} onClick={() => onSeek(time, item)} className="focus-ring inline-flex min-h-8 items-center gap-1 rounded-full bg-cyan-50 px-2 text-xs font-semibold text-cyan-800"><Play className="size-3" /> {Math.floor(time / 60)}:{String(Math.round(time % 60)).padStart(2, "0")}</button>)}</div>}
     {needsEdit && item.state === "proposed" && <div className="mt-3 space-y-2">
       <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1 text-xs font-bold"><button type="button" onClick={() => setCustom(false)} className={cn("min-h-9 rounded-md", !custom && "bg-background shadow-sm")}>Catalogue item</button><button type="button" onClick={() => setCustom(true)} className={cn("min-h-9 rounded-md", custom && "bg-background shadow-sm")}>Custom item</button></div>
       <div className="grid grid-cols-[1fr_64px] gap-2">

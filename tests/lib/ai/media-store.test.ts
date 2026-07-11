@@ -144,4 +144,14 @@ describe("AI media storage seam", () => {
       "survey/media/frames/0001.jpg",
     ]);
   });
+
+  it("normalises the current Supabase info response shape", async () => {
+    const provider = providerClient();
+    provider.info.mockResolvedValue({
+      data: { size: 123, contentType: "video/mp4", etag: "etag-current", lastModified: "2026-07-11T23:32:45Z", metadata: null },
+      error: null,
+    });
+    const store = createSupabaseMediaStore({ environment: { SUPABASE_URL: "https://database.example.test" }, client: provider.client });
+    await expect(store.getObjectMetadata("survey/media/source.mp4")).resolves.toEqual({ bytes: 123, contentType: "video/mp4", etag: "etag-current", updatedAt: "2026-07-11T23:32:45Z" });
+  });
 });

@@ -520,7 +520,9 @@ export function Step2Job({ values, set, pricing }: StepProps) {
 /* ---------- STEP 3 — VEHICLE & PACKING ---------- */
 
 export interface CubicQuoteHint {
-  totalFt3: number;
+  rawFt3: number;
+  planningFt3: number;
+  contingencyPct: number;
   vehicleKey: VehicleKey;
   /** "2 Lutons" / "Transit van" */
   shortLabel: string;
@@ -554,7 +556,7 @@ export function Step3Vehicle({
       {cubicHint ? (
         <div className="mb-4 flex flex-wrap items-center gap-2.5 rounded-md border border-mm-red/25 bg-mm-red-tint/40 px-3.5 py-2.5">
           <span className="text-sm text-foreground">
-            Cubic survey: <strong className="tabular">{cubicHint.totalFt3.toLocaleString("en-GB")} ft³</strong> →{" "}
+            Cubic survey: <strong className="tabular">{cubicHint.rawFt3.toLocaleString("en-GB")} ft³ raw</strong>{cubicHint.contingencyPct > 0 ? <> + {cubicHint.contingencyPct}% = <strong>{cubicHint.planningFt3.toLocaleString("en-GB")} ft³ planning</strong></> : null} →{" "}
             <strong>{cubicHint.shortLabel}</strong>
             <span className="ml-1.5 text-xs text-mist-500">{cubicHint.detail}</span>
           </span>
@@ -866,10 +868,10 @@ export function Step7Review({
 }) {
   const r = values.review;
   const b = breakdown;
-  const expiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toLocaleDateString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
+  const [expiry] = useState(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 30);
+    return date.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
   });
 
   // Internal margin on the ex-VAT total vs the job's cost from the Settings rate card.
