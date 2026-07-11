@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClipboardCheck } from "lucide-react";
+import { ClipboardCheck, Boxes } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
@@ -190,6 +190,15 @@ export default async function QuoteDetailPage({
       >
         <div className="flex items-center gap-3">
           {leadOption ? <ViewLeadDialog lead={leadOption} status={leadStatus} /> : null}
+          {quote.lead_id ? (
+            <Link
+              href={`/leads/${quote.lead_id}/cubic`}
+              className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted"
+            >
+              <Boxes className="size-3.5 text-mm-red" strokeWidth={2} />
+              Cubic survey
+            </Link>
+          ) : null}
           {emailedCount > 0 ? (
             <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
               Emailed ×{emailedCount}
