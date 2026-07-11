@@ -21,6 +21,13 @@ const RATES: BusinessSettings = {
   cubicTransitFt3: 280,
   cubicLutonFt3: 550,
   cubic75tFt3: 1400,
+  aiSurveyEnabled: false,
+  aiGroundedReplayEnabled: false,
+  aiModelDefault: "gemini-3.5-flash",
+  aiModelEscalation: "gemini-3.5-flash",
+  aiSurveyCapGbp: 2,
+  aiMonthlyCapGbp: 50,
+  aiMonthlyAlertGbp: 40,
 };
 
 describe("crewSize", () => {

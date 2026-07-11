@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/select";
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
 import { VAN_COUNT, type PackingKey, type VehicleKey } from "@/lib/quote/constants";
-import type { BusinessSettings } from "@/lib/settings";
+import { DEFAULT_SETTINGS, type BusinessSettings } from "@/lib/settings";
 import { crewSize, jobCost } from "@/lib/margin";
 
 const gbp = (n: number): string =>
@@ -121,9 +121,11 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
   const [congestionPerVan, setCongestionPerVan] = useState(DEFAULT_PRICING.congestionPerVan);
 
   useEffect(() => {
-    setBase(DEFAULT_PRICING.base[job.vehicle]);
-    setPackPrice(DEFAULT_PRICING.pack[job.vehicle][job.packing]);
-    setAddon75Pack(DEFAULT_PRICING.addon75Pack[job.packing]);
+    queueMicrotask(() => {
+      setBase(DEFAULT_PRICING.base[job.vehicle]);
+      setPackPrice(DEFAULT_PRICING.pack[job.vehicle][job.packing]);
+      setAddon75Pack(DEFAULT_PRICING.addon75Pack[job.packing]);
+    });
   }, [job.vehicle, job.packing]);
 
   // Editable cost rates (seed from the saved rate card).
@@ -200,6 +202,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           days: job.days,
         },
         {
+          ...DEFAULT_SETTINGS,
           estimatorFee: estFee,
           costFuelPerMile: fuel,
           costFuel75PerMile: fuel75,
@@ -209,15 +212,6 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           costTransitDay: transitDay,
           cost75t,
           costMisc: misc,
-          vatDefault: true,
-          vatNumber: "",
-          baseLocation: "",
-          defaultDeposit: 0,
-          googleReviewUrl: "",
-          cubicFillPct: 90,
-          cubicTransitFt3: 280,
-          cubicLutonFt3: 550,
-          cubic75tFt3: 1400,
         },
       ),
     [job, labourDay, vanDay, transitDay, cost75t, fuel, fuel75, boxCost, misc, estFee],
