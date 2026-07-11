@@ -20,7 +20,7 @@ import { revalidatePath } from "next/cache";
 import { randomBytes } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { computeCubicTotals, sanitizeCubicLines } from "@/lib/cubic-survey";
+import { computeCubicTotals, reconcileCubicLineProvenance, sanitizeCubicLines } from "@/lib/cubic-survey";
 
 async function requireActiveProfile() {
   const sb = await createClient();
@@ -56,17 +56,20 @@ export async function saveCubicSurveyAction(
   const parsed = saveSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Something in the survey didn't come through — try again." };
 
-  const lines = sanitizeCubicLines(parsed.data.items);
-  if (lines === null) return { ok: false, error: "An item didn't come through cleanly — check the list and retry." };
-  const totals = computeCubicTotals(lines);
+  const incomingLines = sanitizeCubicLines(parsed.data.items);
+  if (incomingLines === null) return { ok: false, error: "An item didn't come through cleanly — check the list and retry." };
 
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("cubic_surveys")
-    .select("id, lead_id, client_id, status")
+    .select("id, lead_id, client_id, status, items")
     .eq("id", surveyId)
     .single();
   if (!row) return { ok: false, error: "Survey not found." };
+  const trustedLines = sanitizeCubicLines(row.items);
+  if (trustedLines === null) return { ok: false, error: "The saved survey needs attention before it can be updated." };
+  const lines = reconcileCubicLineProvenance(incomingLines, trustedLines);
+  const totals = computeCubicTotals(lines);
 
   const nextStatus = parsed.data.status ?? (row.status === "draft" ? "draft" : row.status);
   // The update lands only if nobody wrote since this tab loaded/last saved.

@@ -68,7 +68,6 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
 
       <CubicBuilder
         mode="office"
-        customerName={lead.name ?? ""}
         initialLines={lines}
         initialNotes={survey.notes ?? ""}
         customerNotes={survey.customer_notes ?? ""}

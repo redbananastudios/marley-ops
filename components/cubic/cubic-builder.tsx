@@ -38,7 +38,9 @@ import { cn } from "@/lib/utils";
 import { CUBIC_CATEGORIES, CUBIC_CATEGORY_TITLES, type CubicCatalogueItem } from "@/lib/cubic-catalogue";
 import {
   computeCubicTotals,
+  createCubicLineId,
   recommendVans,
+  sanitizeCubicLines,
   vehicleShortLabel,
   type CubicLine,
   type VanCapacities,
@@ -51,7 +53,6 @@ export type CubicSaveResult =
 
 export interface CubicBuilderProps {
   mode: "office" | "customer";
-  customerName: string;
   initialLines: CubicLine[];
   initialNotes: string;
   initialStatus: string;
@@ -77,7 +78,6 @@ const CUSTOM_CATEGORY = "custom";
 
 export function CubicBuilder({
   mode,
-  customerName,
   initialLines,
   initialNotes,
   initialStatus,
@@ -101,45 +101,64 @@ export function CubicBuilder({
 
   const totals = useMemo(() => computeCubicTotals(lines), [lines]);
   const rec = useMemo(() => recommendVans(totals.totalFt3, capacities), [totals.totalFt3, capacities]);
-  const qtyByKey = useMemo(() => new Map(lines.map((l) => [l.key, l.qty])), [lines]);
+  const manualLineByCatalogueKey = useMemo(() => {
+    const map = new Map<string, CubicLine>();
+    for (const line of lines) {
+      if (!line.room && line.source !== "ai" && !map.has(line.key)) map.set(line.key, line);
+    }
+    return map;
+  }, [lines]);
 
   /* ---------------- mutations ---------------- */
 
   const addCatalogueItem = useCallback((item: CubicCatalogueItem, category: string) => {
     setLines((prev) => {
-      const hit = prev.find((l) => l.key === item.key);
-      if (hit) return prev.map((l) => (l.key === item.key ? { ...l, qty: Math.min(999, l.qty + 1) } : l));
-      return [...prev, { key: item.key, title: item.title, category, qty: 1, unitFt3: item.ft3, flags: {} }];
+      const hit = prev.find((line) => line.key === item.key && !line.room && line.source !== "ai");
+      if (hit) return prev.map((line) => (line.id === hit.id ? { ...line, qty: Math.min(999, line.qty + 1) } : line));
+      return [
+        ...prev,
+        { id: createCubicLineId(), key: item.key, title: item.title, category, qty: 1, unitFt3: item.ft3, flags: {} },
+      ];
     });
   }, []);
 
-  const bump = useCallback((key: string, delta: number) => {
+  const bump = useCallback((lineId: string, delta: number) => {
     setLines((prev) =>
       prev
-        .map((l) => (l.key === key ? { ...l, qty: Math.min(999, l.qty + delta) } : l))
+        .map((line) => (line.id === lineId ? { ...line, qty: Math.min(999, line.qty + delta) } : line))
         .filter((l) => l.qty > 0),
     );
   }, []);
 
-  const setUnit = useCallback((key: string, unitFt3: number) => {
+  const setUnit = useCallback((lineId: string, unitFt3: number) => {
     const rounded = Math.round(Math.max(0, Math.min(2000, unitFt3)) * 10) / 10;
-    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, unitFt3: rounded } : l)));
+    setLines((prev) => prev.map((line) => (line.id === lineId ? { ...line, unitFt3: rounded } : line)));
   }, []);
 
-  const toggleFlag = useCallback((key: string, flag: "dismantle" | "fragile" | "notMoving") => {
+  const toggleFlag = useCallback((lineId: string, flag: "dismantle" | "fragile" | "notMoving") => {
     setLines((prev) =>
-      prev.map((l) => (l.key === key ? { ...l, flags: { ...l.flags, [flag]: !l.flags?.[flag] } } : l)),
+      prev.map((line) =>
+        line.id === lineId ? { ...line, flags: { ...line.flags, [flag]: !line.flags?.[flag] } } : line,
+      ),
     );
   }, []);
 
-  const removeLine = useCallback((key: string) => {
-    setLines((prev) => prev.filter((l) => l.key !== key));
+  const removeLine = useCallback((lineId: string) => {
+    setLines((prev) => prev.filter((line) => line.id !== lineId));
   }, []);
 
   const addCustom = useCallback((title: string, ft3: number, qty: number, category: string) => {
     setLines((prev) => [
       ...prev,
-      { key: `custom:${crypto.randomUUID()}`, title, category, qty, unitFt3: ft3, flags: {} },
+      {
+        id: createCubicLineId(),
+        key: `custom:${crypto.randomUUID()}`,
+        title,
+        category,
+        qty,
+        unitFt3: ft3,
+        flags: {},
+      },
     ]);
   }, []);
 
@@ -150,11 +169,14 @@ export function CubicBuilder({
     try {
       const raw = localStorage.getItem(draftKey);
       if (!raw) return;
-      const d = JSON.parse(raw) as { lines?: CubicLine[]; notes?: string };
-      if (Array.isArray(d.lines) && d.lines.length) {
-        setLines(d.lines);
-        if (typeof d.notes === "string") setNotes(d.notes);
-        toast.info("Restored your unsent list from this device.");
+      const d = JSON.parse(raw) as { lines?: unknown; notes?: string };
+      const restored = sanitizeCubicLines(d.lines);
+      if (restored?.length) {
+        queueMicrotask(() => {
+          setLines(restored);
+          if (typeof d.notes === "string") setNotes(d.notes);
+          toast.info("Restored your unsent list from this device.");
+        });
       }
     } catch {
       /* corrupt draft — ignore */
@@ -175,7 +197,9 @@ export function CubicBuilder({
 
   const baseUpdatedAt = useRef(initialUpdatedAt);
   const latest = useRef({ lines, notes });
-  latest.current = { lines, notes };
+  useEffect(() => {
+    latest.current = { lines, notes };
+  }, [lines, notes]);
   const dirty = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -209,7 +233,7 @@ export function CubicBuilder({
     if (conflict) return; // stop writing over someone else — reload first
     dirty.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveState("saving");
+    queueMicrotask(() => setSaveState("saving"));
     saveTimer.current = setTimeout(async () => {
       const res = await runSave();
       setSaveState(res.ok ? "saved" : "idle");
@@ -475,9 +499,10 @@ export function CubicBuilder({
               (a near-miss on − must never read as +1: review, 2026-07-10) */}
           <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
             {visible.map(({ category, item }) => {
-              const qty = qtyByKey.get(item.key) ?? 0;
+              const manualLine = manualLineByCatalogueKey.get(item.key);
+              const qty = manualLine?.qty ?? 0;
               const addFirst = () => {
-                if ((qtyByKey.get(item.key) ?? 0) === 0) addCatalogueItem(item, category);
+                if (!manualLine) addCatalogueItem(item, category);
               };
               return (
                 <div
@@ -514,12 +539,12 @@ export function CubicBuilder({
                     ) : (
                       <span />
                     )}
-                    {qty > 0 ? (
+                    {manualLine ? (
                       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           aria-label={`Remove one ${item.title}`}
-                          onClick={() => bump(item.key, -1)}
+                          onClick={() => bump(manualLine.id, -1)}
                           className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground hover:bg-muted"
                         >
                           <Minus className="size-4" strokeWidth={2} />
@@ -528,7 +553,7 @@ export function CubicBuilder({
                         <button
                           type="button"
                           aria-label={`Add one ${item.title}`}
-                          onClick={() => bump(item.key, 1)}
+                          onClick={() => bump(manualLine.id, 1)}
                           className="focus-ring flex size-11 items-center justify-center rounded-md bg-mm-red text-white hover:bg-mm-red-deep"
                         >
                           <Plus className="size-4" strokeWidth={2} />
@@ -583,14 +608,14 @@ export function CubicBuilder({
                       </div>
                       <ul className="divide-y">
                         {catLines.map((l) => (
-                          <li key={l.key} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
+                          <li key={l.id} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
                             <div className="flex items-center justify-between gap-2">
                               <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}</span>
                               <div className="flex shrink-0 items-center gap-1.5">
                                 <button
                                   type="button"
                                   aria-label={`Remove one ${l.title}`}
-                                  onClick={() => bump(l.key, -1)}
+                                  onClick={() => bump(l.id, -1)}
                                   className="focus-ring flex size-11 items-center justify-center rounded-md border border-input text-foreground hover:bg-muted"
                                 >
                                   <Minus className="size-4" strokeWidth={2} />
@@ -599,7 +624,7 @@ export function CubicBuilder({
                                 <button
                                   type="button"
                                   aria-label={`Add one ${l.title}`}
-                                  onClick={() => bump(l.key, 1)}
+                                  onClick={() => bump(l.id, 1)}
                                   className="focus-ring flex size-11 items-center justify-center rounded-md border border-input text-foreground hover:bg-muted"
                                 >
                                   <Plus className="size-4" strokeWidth={2} />
@@ -618,7 +643,7 @@ export function CubicBuilder({
                                     value={l.unitFt3 === 0 ? "" : l.unitFt3}
                                     placeholder="0"
                                     onChange={(e) =>
-                                      setUnit(l.key, e.target.value === "" ? 0 : Number(e.target.value) || 0)
+                                      setUnit(l.id, e.target.value === "" ? 0 : Number(e.target.value) || 0)
                                     }
                                     className="focus-ring tabular h-11 w-20 rounded-md border border-input bg-card px-1.5 text-center text-base text-foreground"
                                   />
@@ -643,7 +668,7 @@ export function CubicBuilder({
                                   <button
                                     key={flag}
                                     type="button"
-                                    onClick={() => toggleFlag(l.key, flag)}
+                                    onClick={() => toggleFlag(l.id, flag)}
                                     className={cn(
                                       "focus-ring min-h-11 rounded-pill border px-3 text-xs font-medium",
                                       l.flags?.[flag]
@@ -658,7 +683,7 @@ export function CubicBuilder({
                                 ))}
                                 <button
                                   type="button"
-                                  onClick={() => removeLine(l.key)}
+                                  onClick={() => removeLine(l.id)}
                                   className="focus-ring ml-auto min-h-11 rounded-pill px-2.5 text-xs text-mist-400 hover:text-mm-red"
                                 >
                                   Remove

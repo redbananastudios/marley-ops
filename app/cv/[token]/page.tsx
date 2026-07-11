@@ -65,7 +65,6 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
           <div className="rounded-lg border border-[#E8E4DD] bg-white px-5 pb-6 md:px-8">
             <CubicBuilder
               mode="customer"
-              customerName={firstName}
               initialLines={lines}
               initialNotes={survey.customer_notes ?? ""}
               initialStatus={survey.status ?? "draft"}
