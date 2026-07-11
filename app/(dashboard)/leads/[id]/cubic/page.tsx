@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, ScanLine } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBusinessSettings } from "@/lib/settings";
@@ -63,7 +63,14 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
           </Link>
           <h1 className="font-display text-2xl font-bold text-foreground">Cubic survey</h1>
         </div>
-        <CopyCubicLinkButton surveyId={survey.id} />
+        <div className="flex items-center gap-2">
+          {settings.aiSurveyEnabled && (
+            <Link href={`/leads/${id}/cubic/scan`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep">
+              <ScanLine className="size-4" /> AI room capture
+            </Link>
+          )}
+          <CopyCubicLinkButton surveyId={survey.id} />
+        </div>
       </div>
 
       <CubicBuilder

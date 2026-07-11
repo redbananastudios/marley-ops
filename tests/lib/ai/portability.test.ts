@@ -4,7 +4,13 @@ import { join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const ROOT = resolve(__dirname, "../../..");
-const AI_ROOTS = ["lib/ai", "lib/storage", "app/api/ai-surveys", "app/api/cron/ai-jobs"];
+const AI_ROOTS = [
+  "lib/ai",
+  "lib/storage",
+  "app/actions/ai-survey.ts",
+  "app/api/ai-surveys",
+  "app/api/cron/ai-jobs",
+];
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs"]);
 
 function codeFiles(path: string): string[] {

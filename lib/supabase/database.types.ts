@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -34,453 +34,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      vehicles: {
-        Row: {
-          id: string
-          name: string
-          vehicle_type: string
-          registration: string
-          tax_due: string | null
-          mot_due: string | null
-          insurance_renewal: string | null
-          last_service: string | null
-          cost_per_month: number | null
-          payment_day: number | null
-          end_of_term: string | null
-          notes: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          name: string
-          vehicle_type?: string
-          registration?: string
-          tax_due?: string | null
-          mot_due?: string | null
-          insurance_renewal?: string | null
-          last_service?: string | null
-          cost_per_month?: number | null
-          payment_day?: number | null
-          end_of_term?: string | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          name?: string
-          vehicle_type?: string
-          registration?: string
-          tax_due?: string | null
-          mot_due?: string | null
-          insurance_renewal?: string | null
-          last_service?: string | null
-          cost_per_month?: number | null
-          payment_day?: number | null
-          end_of_term?: string | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      staff: {
-        Row: {
-          id: string
-          profile_id: string | null
-          full_name: string
-          staff_role: string
-          phone: string | null
-          email: string | null
-          day_rate: number | null
-          notes: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          profile_id?: string | null
-          full_name: string
-          staff_role?: string
-          phone?: string | null
-          email?: string | null
-          day_rate?: number | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          profile_id?: string | null
-          full_name?: string
-          staff_role?: string
-          phone?: string | null
-          email?: string | null
-          day_rate?: number | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      appointment_assignments: {
-        Row: {
-          id: string
-          appointment_id: string
-          staff_id: string | null
-          vehicle_id: string | null
-          reminded_at: string | null
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          appointment_id: string
-          staff_id?: string | null
-          vehicle_id?: string | null
-          reminded_at?: string | null
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          appointment_id?: string
-          staff_id?: string | null
-          vehicle_id?: string | null
-          reminded_at?: string | null
-          created_at?: string
-        }
-        Relationships: []
-      }
-      signatures: {
-        Row: {
-          id: string
-          kind: string
-          quote_id: string | null
-          lead_id: string | null
-          client_id: string | null
-          storage_let_id: string | null
-          signer_name: string
-          signature_data: string | null
-          method: string
-          channel: string
-          acknowledgments: Json
-          terms_version: string | null
-          ip: string | null
-          user_agent: string | null
-          collected_by: string | null
-          signed_at: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          kind: string
-          quote_id?: string | null
-          lead_id?: string | null
-          client_id?: string | null
-          storage_let_id?: string | null
-          signer_name: string
-          signature_data?: string | null
-          method: string
-          channel: string
-          acknowledgments?: Json
-          terms_version?: string | null
-          ip?: string | null
-          user_agent?: string | null
-          collected_by?: string | null
-          signed_at?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          kind?: string
-          quote_id?: string | null
-          lead_id?: string | null
-          client_id?: string | null
-          storage_let_id?: string | null
-          signer_name?: string
-          signature_data?: string | null
-          method?: string
-          channel?: string
-          acknowledgments?: Json
-          terms_version?: string | null
-          ip?: string | null
-          user_agent?: string | null
-          collected_by?: string | null
-          signed_at?: string
-          created_at?: string
-        }
-        Relationships: []
-      }
-      job_completions: {
-        Row: {
-          id: string
-          appointment_id: string
-          lead_id: string | null
-          client_id: string | null
-          customer_name: string | null
-          customer_signature: string | null
-          customer_absent: boolean
-          absent_reason: string | null
-          exceptions: string
-          crew_staff_id: string | null
-          crew_name: string
-          crew_signature: string
-          completed_by: string | null
-          certificate_path: string | null
-          certificate_emailed_at: string | null
-          signed_at: string
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          appointment_id: string
-          lead_id?: string | null
-          client_id?: string | null
-          customer_name?: string | null
-          customer_signature?: string | null
-          customer_absent?: boolean
-          absent_reason?: string | null
-          exceptions?: string
-          crew_staff_id?: string | null
-          crew_name?: string
-          crew_signature?: string
-          completed_by?: string | null
-          certificate_path?: string | null
-          certificate_emailed_at?: string | null
-          signed_at?: string
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          appointment_id?: string
-          lead_id?: string | null
-          client_id?: string | null
-          customer_name?: string | null
-          customer_signature?: string | null
-          customer_absent?: boolean
-          absent_reason?: string | null
-          exceptions?: string
-          crew_staff_id?: string | null
-          crew_name?: string
-          crew_signature?: string
-          completed_by?: string | null
-          certificate_path?: string | null
-          certificate_emailed_at?: string | null
-          signed_at?: string
-          created_at?: string
-        }
-        Relationships: []
-      }
-      job_notes: {
-        Row: {
-          id: string
-          appointment_id: string | null
-          lead_id: string | null
-          client_id: string | null
-          author_id: string | null
-          author_name: string
-          body: string
-          photo_paths: string[]
-          created_at: string
-        }
-        Insert: {
-          id?: string
-          appointment_id?: string | null
-          lead_id?: string | null
-          client_id?: string | null
-          author_id?: string | null
-          author_name: string
-          body?: string
-          photo_paths?: string[]
-          created_at?: string
-        }
-        Update: {
-          id?: string
-          appointment_id?: string | null
-          lead_id?: string | null
-          client_id?: string | null
-          author_id?: string | null
-          author_name?: string
-          body?: string
-          photo_paths?: string[]
-          created_at?: string
-        }
-        Relationships: []
-      }
-      storage_invoices: {
-        Row: {
-          id: string
-          let_id: string
-          client_id: string | null
-          period_start: string
-          period_end: string
-          amount: number
-          zoho_invoice_id: string | null
-          zoho_invoice_number: string | null
-          zoho_invoice_url: string | null
-          status: string
-          emailed_at: string | null
-          error: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          let_id: string
-          client_id?: string | null
-          period_start: string
-          period_end: string
-          amount: number
-          zoho_invoice_id?: string | null
-          zoho_invoice_number?: string | null
-          zoho_invoice_url?: string | null
-          status?: string
-          emailed_at?: string | null
-          error?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          let_id?: string
-          client_id?: string | null
-          period_start?: string
-          period_end?: string
-          amount?: number
-          zoho_invoice_id?: string | null
-          zoho_invoice_number?: string | null
-          zoho_invoice_url?: string | null
-          status?: string
-          emailed_at?: string | null
-          error?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      storage_sites: {
-        Row: {
-          id: string
-          name: string
-          address: string
-          notes: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          name: string
-          address?: string
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          name?: string
-          address?: string
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      storage_units: {
-        Row: {
-          id: string
-          site_id: string
-          code: string
-          name: string
-          unit_type: string
-          size_cuft: number | null
-          notes: string | null
-          is_active: boolean
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          site_id: string
-          code?: string
-          name?: string
-          unit_type?: string
-          size_cuft?: number | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          site_id?: string
-          code?: string
-          name?: string
-          unit_type?: string
-          size_cuft?: number | null
-          notes?: string | null
-          is_active?: boolean
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
-      storage_lets: {
-        Row: {
-          id: string
-          unit_id: string
-          client_id: string
-          lead_id: string | null
-          start_date: string
-          end_date: string | null
-          rate: number | null
-          rate_period: string
-          notes: string | null
-          billing_paused: boolean
-          sign_token: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          unit_id: string
-          client_id: string
-          lead_id?: string | null
-          start_date: string
-          end_date?: string | null
-          rate?: number | null
-          rate_period?: string
-          notes?: string | null
-          billing_paused?: boolean
-          sign_token?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          unit_id?: string
-          client_id?: string
-          lead_id?: string | null
-          start_date?: string
-          end_date?: string | null
-          rate?: number | null
-          rate_period?: string
-          notes?: string | null
-          billing_paused?: boolean
-          sign_token?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       activities: {
         Row: {
           actor_id: string | null
@@ -532,6 +85,221 @@ export type Database = {
             columns: ["lead_id"]
             isOneToOne: false
             referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ai_jobs: {
+        Row: {
+          attempts: number
+          created_at: string
+          error: string | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          media_id: string | null
+          next_run_at: string
+          payload: Json
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          media_id?: string | null
+          next_run_at?: string
+          payload?: Json
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          error?: string | null
+          heartbeat_at?: string | null
+          id?: string
+          idempotency_key?: string
+          kind?: string
+          lease_expires_at?: string | null
+          locked_at?: string | null
+          locked_by?: string | null
+          max_attempts?: number
+          media_id?: string | null
+          next_run_at?: string
+          payload?: Json
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_jobs_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_jobs_survey_id_media_id_fkey"
+            columns: ["survey_id", "media_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_media"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      ai_spend_months: {
+        Row: {
+          alerted_at: string | null
+          created_at: string
+          month: string
+          reserved_usd: number
+          spent_usd: number
+          updated_at: string
+        }
+        Insert: {
+          alerted_at?: string | null
+          created_at?: string
+          month: string
+          reserved_usd?: number
+          spent_usd?: number
+          updated_at?: string
+        }
+        Update: {
+          alerted_at?: string | null
+          created_at?: string
+          month?: string
+          reserved_usd?: number
+          spent_usd?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      ai_spend_reservations: {
+        Row: {
+          actual_usd: number | null
+          attempt_key: string
+          created_at: string
+          estimated_usd: number
+          finalised_at: string | null
+          id: string
+          job_id: string
+          month: string
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          actual_usd?: number | null
+          attempt_key: string
+          created_at?: string
+          estimated_usd: number
+          finalised_at?: string | null
+          id?: string
+          job_id: string
+          month: string
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          actual_usd?: number | null
+          attempt_key?: string
+          created_at?: string
+          estimated_usd?: number
+          finalised_at?: string | null
+          id?: string
+          job_id?: string
+          month?: string
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_spend_reservations_month_fkey"
+            columns: ["month"]
+            isOneToOne: false
+            referencedRelation: "ai_spend_months"
+            referencedColumns: ["month"]
+          },
+          {
+            foreignKeyName: "ai_spend_reservations_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ai_spend_reservations_survey_id_job_id_fkey"
+            columns: ["survey_id", "job_id"]
+            isOneToOne: false
+            referencedRelation: "ai_jobs"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      appointment_assignments: {
+        Row: {
+          appointment_id: string
+          created_at: string
+          id: string
+          reminded_at: string | null
+          staff_id: string | null
+          vehicle_id: string | null
+        }
+        Insert: {
+          appointment_id: string
+          created_at?: string
+          id?: string
+          reminded_at?: string | null
+          staff_id?: string | null
+          vehicle_id?: string | null
+        }
+        Update: {
+          appointment_id?: string
+          created_at?: string
+          id?: string
+          reminded_at?: string | null
+          staff_id?: string | null
+          vehicle_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "appointment_assignments_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointment_assignments_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "appointment_assignments_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
             referencedColumns: ["id"]
           },
         ]
@@ -622,59 +390,15 @@ export type Database = {
           },
         ]
       }
-      cubic_surveys: {
-        Row: {
-          id: string
-          lead_id: string | null
-          client_id: string | null
-          appointment_id: string | null
-          items: Json
-          total_ft3: number
-          notes: string
-          customer_notes: string
-          status: string
-          share_token: string | null
-          created_by: string | null
-          updated_by: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          lead_id?: string | null
-          client_id?: string | null
-          appointment_id?: string | null
-          items?: Json
-          total_ft3?: number
-          notes?: string
-          customer_notes?: string
-          status?: string
-          share_token?: string | null
-          created_by?: string | null
-          updated_by?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          lead_id?: string | null
-          client_id?: string | null
-          appointment_id?: string | null
-          items?: Json
-          total_ft3?: number
-          notes?: string
-          customer_notes?: string
-          status?: string
-          share_token?: string | null
-          created_by?: string | null
-          updated_by?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       business_settings: {
         Row: {
+          ai_grounded_replay_enabled: boolean
+          ai_model_default: string
+          ai_model_escalation: string
+          ai_monthly_alert_gbp: number
+          ai_monthly_cap_gbp: number
+          ai_survey_cap_gbp: number
+          ai_survey_enabled: boolean
           base_location: string
           cost_75t: number
           cost_box: number
@@ -684,19 +408,27 @@ export type Database = {
           cost_misc: number
           cost_transit_day: number
           cost_van_day: number
+          cubic_75t_ft3: number
+          cubic_fill_pct: number
+          cubic_luton_ft3: number
+          cubic_transit_ft3: number
           default_deposit: number
           estimator_fee: number
           google_review_url: string
-          cubic_fill_pct: number
-          cubic_transit_ft3: number
-          cubic_luton_ft3: number
-          cubic_75t_ft3: number
           id: boolean
           pricing: Json | null
           updated_at: string
           vat_default: boolean
+          vat_number: string | null
         }
         Insert: {
+          ai_grounded_replay_enabled?: boolean
+          ai_model_default?: string
+          ai_model_escalation?: string
+          ai_monthly_alert_gbp?: number
+          ai_monthly_cap_gbp?: number
+          ai_survey_cap_gbp?: number
+          ai_survey_enabled?: boolean
           base_location?: string
           cost_75t?: number
           cost_box?: number
@@ -706,19 +438,27 @@ export type Database = {
           cost_misc?: number
           cost_transit_day?: number
           cost_van_day?: number
+          cubic_75t_ft3?: number
+          cubic_fill_pct?: number
+          cubic_luton_ft3?: number
+          cubic_transit_ft3?: number
           default_deposit?: number
           estimator_fee?: number
           google_review_url?: string
-          cubic_fill_pct?: number
-          cubic_transit_ft3?: number
-          cubic_luton_ft3?: number
-          cubic_75t_ft3?: number
           id?: boolean
           pricing?: Json | null
           updated_at?: string
           vat_default?: boolean
+          vat_number?: string | null
         }
         Update: {
+          ai_grounded_replay_enabled?: boolean
+          ai_model_default?: string
+          ai_model_escalation?: string
+          ai_monthly_alert_gbp?: number
+          ai_monthly_cap_gbp?: number
+          ai_survey_cap_gbp?: number
+          ai_survey_enabled?: boolean
           base_location?: string
           cost_75t?: number
           cost_box?: number
@@ -728,17 +468,18 @@ export type Database = {
           cost_misc?: number
           cost_transit_day?: number
           cost_van_day?: number
+          cubic_75t_ft3?: number
+          cubic_fill_pct?: number
+          cubic_luton_ft3?: number
+          cubic_transit_ft3?: number
           default_deposit?: number
           estimator_fee?: number
           google_review_url?: string
-          cubic_fill_pct?: number
-          cubic_transit_ft3?: number
-          cubic_luton_ft3?: number
-          cubic_75t_ft3?: number
           id?: boolean
           pricing?: Json | null
           updated_at?: string
           vat_default?: boolean
+          vat_number?: string | null
         }
         Relationships: []
       }
@@ -938,6 +679,509 @@ export type Database = {
           },
         ]
       }
+      cubic_ai_detections: {
+        Row: {
+          candidates: Json
+          catalogue_key: string | null
+          confidence: number
+          created_at: string
+          evidence: Json
+          flags: Json
+          id: string
+          label: string
+          moving: string
+          qty: number
+          resolution: Json | null
+          review_reason: string | null
+          room_id: string | null
+          run_id: string
+          segment_id: string | null
+          state: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          candidates?: Json
+          catalogue_key?: string | null
+          confidence?: number
+          created_at?: string
+          evidence?: Json
+          flags?: Json
+          id?: string
+          label: string
+          moving?: string
+          qty?: number
+          resolution?: Json | null
+          review_reason?: string | null
+          room_id?: string | null
+          run_id: string
+          segment_id?: string | null
+          state?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          candidates?: Json
+          catalogue_key?: string | null
+          confidence?: number
+          created_at?: string
+          evidence?: Json
+          flags?: Json
+          id?: string
+          label?: string
+          moving?: string
+          qty?: number
+          resolution?: Json | null
+          review_reason?: string | null
+          room_id?: string | null
+          run_id?: string
+          segment_id?: string | null
+          state?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_ai_detections_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_ai_detections_survey_id_room_id_fkey"
+            columns: ["survey_id", "room_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_rooms"
+            referencedColumns: ["survey_id", "id"]
+          },
+          {
+            foreignKeyName: "cubic_ai_detections_survey_id_run_id_fkey"
+            columns: ["survey_id", "run_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_analysis_runs"
+            referencedColumns: ["survey_id", "id"]
+          },
+          {
+            foreignKeyName: "cubic_ai_detections_survey_id_segment_id_fkey"
+            columns: ["survey_id", "segment_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_segments"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      cubic_analysis_runs: {
+        Row: {
+          attempt_key: string
+          cost_usd: number | null
+          error: string | null
+          finished_at: string | null
+          id: string
+          input_tokens: number | null
+          media_id: string | null
+          model: string
+          output_tokens: number | null
+          prompt_version: string
+          purpose: string
+          reserved_cost_usd: number
+          started_at: string
+          status: string
+          survey_id: string
+        }
+        Insert: {
+          attempt_key: string
+          cost_usd?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input_tokens?: number | null
+          media_id?: string | null
+          model: string
+          output_tokens?: number | null
+          prompt_version: string
+          purpose: string
+          reserved_cost_usd?: number
+          started_at?: string
+          status?: string
+          survey_id: string
+        }
+        Update: {
+          attempt_key?: string
+          cost_usd?: number | null
+          error?: string | null
+          finished_at?: string | null
+          id?: string
+          input_tokens?: number | null
+          media_id?: string | null
+          model?: string
+          output_tokens?: number | null
+          prompt_version?: string
+          purpose?: string
+          reserved_cost_usd?: number
+          started_at?: string
+          status?: string
+          survey_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_analysis_runs_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_analysis_runs_survey_id_media_id_fkey"
+            columns: ["survey_id", "media_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_media"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      cubic_survey_media: {
+        Row: {
+          bytes: number | null
+          coverage: string | null
+          created_at: string
+          created_by: string | null
+          duration_s: number | null
+          error: string | null
+          finalized_at: string | null
+          frames: Json
+          id: string
+          kind: string
+          mime: string
+          quality_flags: Json
+          room_id: string | null
+          status: string
+          storage_path: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          bytes?: number | null
+          coverage?: string | null
+          created_at?: string
+          created_by?: string | null
+          duration_s?: number | null
+          error?: string | null
+          finalized_at?: string | null
+          frames?: Json
+          id?: string
+          kind: string
+          mime: string
+          quality_flags?: Json
+          room_id?: string | null
+          status?: string
+          storage_path: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          bytes?: number | null
+          coverage?: string | null
+          created_at?: string
+          created_by?: string | null
+          duration_s?: number | null
+          error?: string | null
+          finalized_at?: string | null
+          frames?: Json
+          id?: string
+          kind?: string
+          mime?: string
+          quality_flags?: Json
+          room_id?: string | null
+          status?: string
+          storage_path?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_survey_media_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_survey_media_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_survey_media_survey_id_room_id_fkey"
+            columns: ["survey_id", "room_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_rooms"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      cubic_survey_rooms: {
+        Row: {
+          completion_method: string | null
+          coverage: string | null
+          created_at: string
+          created_by: string | null
+          floor: string | null
+          hidden_storage_checked: boolean
+          id: string
+          name: string
+          quality_flags: Json
+          quality_warnings: Json
+          room_type: string | null
+          sort: number
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          completion_method?: string | null
+          coverage?: string | null
+          created_at?: string
+          created_by?: string | null
+          floor?: string | null
+          hidden_storage_checked?: boolean
+          id?: string
+          name: string
+          quality_flags?: Json
+          quality_warnings?: Json
+          room_type?: string | null
+          sort?: number
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          completion_method?: string | null
+          coverage?: string | null
+          created_at?: string
+          created_by?: string | null
+          floor?: string | null
+          hidden_storage_checked?: boolean
+          id?: string
+          name?: string
+          quality_flags?: Json
+          quality_warnings?: Json
+          room_type?: string | null
+          sort?: number
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_survey_rooms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_survey_rooms_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      cubic_survey_segments: {
+        Row: {
+          created_at: string
+          end_s: number
+          id: string
+          media_id: string
+          model_ref: string
+          proposed_name: string
+          room_id: string | null
+          start_s: number
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          end_s: number
+          id?: string
+          media_id: string
+          model_ref: string
+          proposed_name: string
+          room_id?: string | null
+          start_s: number
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          end_s?: number
+          id?: string
+          media_id?: string
+          model_ref?: string
+          proposed_name?: string
+          room_id?: string | null
+          start_s?: number
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_survey_segments_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_surveys"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_survey_segments_survey_id_media_id_fkey"
+            columns: ["survey_id", "media_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_media"
+            referencedColumns: ["survey_id", "id"]
+          },
+          {
+            foreignKeyName: "cubic_survey_segments_survey_id_room_id_fkey"
+            columns: ["survey_id", "room_id"]
+            isOneToOne: false
+            referencedRelation: "cubic_survey_rooms"
+            referencedColumns: ["survey_id", "id"]
+          },
+        ]
+      }
+      cubic_surveys: {
+        Row: {
+          ai_abandoned_at: string | null
+          ai_consent: Json | null
+          ai_consent_withdrawn_at: string | null
+          ai_consent_withdrawn_by: string | null
+          ai_status: string
+          appointment_id: string | null
+          client_id: string | null
+          contingency_pct: number
+          created_at: string
+          created_by: string | null
+          customer_notes: string
+          id: string
+          items: Json
+          last_ai_user_activity_at: string | null
+          lead_id: string | null
+          legal_hold: boolean
+          media_retention_anchor_at: string | null
+          notes: string
+          planning_ready: boolean
+          room_manifest_complete: boolean
+          share_token: string | null
+          status: string
+          total_ft3: number
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          ai_abandoned_at?: string | null
+          ai_consent?: Json | null
+          ai_consent_withdrawn_at?: string | null
+          ai_consent_withdrawn_by?: string | null
+          ai_status?: string
+          appointment_id?: string | null
+          client_id?: string | null
+          contingency_pct?: number
+          created_at?: string
+          created_by?: string | null
+          customer_notes?: string
+          id?: string
+          items?: Json
+          last_ai_user_activity_at?: string | null
+          lead_id?: string | null
+          legal_hold?: boolean
+          media_retention_anchor_at?: string | null
+          notes?: string
+          planning_ready?: boolean
+          room_manifest_complete?: boolean
+          share_token?: string | null
+          status?: string
+          total_ft3?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          ai_abandoned_at?: string | null
+          ai_consent?: Json | null
+          ai_consent_withdrawn_at?: string | null
+          ai_consent_withdrawn_by?: string | null
+          ai_status?: string
+          appointment_id?: string | null
+          client_id?: string | null
+          contingency_pct?: number
+          created_at?: string
+          created_by?: string | null
+          customer_notes?: string
+          id?: string
+          items?: Json
+          last_ai_user_activity_at?: string | null
+          lead_id?: string | null
+          legal_hold?: boolean
+          media_retention_anchor_at?: string | null
+          notes?: string
+          planning_ready?: boolean
+          room_manifest_complete?: boolean
+          share_token?: string | null
+          status?: string
+          total_ft3?: number
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cubic_surveys_ai_consent_withdrawn_by_fkey"
+            columns: ["ai_consent_withdrawn_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_surveys_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_surveys_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_surveys_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_surveys_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cubic_surveys_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       estimator_payouts: {
         Row: {
           amount: number
@@ -1113,26 +1357,181 @@ export type Database = {
           },
         ]
       }
+      job_completions: {
+        Row: {
+          absent_reason: string | null
+          appointment_id: string
+          certificate_emailed_at: string | null
+          certificate_path: string | null
+          client_id: string | null
+          completed_by: string | null
+          created_at: string
+          crew_name: string
+          crew_signature: string
+          crew_staff_id: string | null
+          customer_absent: boolean
+          customer_name: string | null
+          customer_signature: string | null
+          exceptions: string
+          id: string
+          lead_id: string | null
+          signed_at: string
+        }
+        Insert: {
+          absent_reason?: string | null
+          appointment_id: string
+          certificate_emailed_at?: string | null
+          certificate_path?: string | null
+          client_id?: string | null
+          completed_by?: string | null
+          created_at?: string
+          crew_name: string
+          crew_signature: string
+          crew_staff_id?: string | null
+          customer_absent?: boolean
+          customer_name?: string | null
+          customer_signature?: string | null
+          exceptions?: string
+          id?: string
+          lead_id?: string | null
+          signed_at?: string
+        }
+        Update: {
+          absent_reason?: string | null
+          appointment_id?: string
+          certificate_emailed_at?: string | null
+          certificate_path?: string | null
+          client_id?: string | null
+          completed_by?: string | null
+          created_at?: string
+          crew_name?: string
+          crew_signature?: string
+          crew_staff_id?: string | null
+          customer_absent?: boolean
+          customer_name?: string | null
+          customer_signature?: string | null
+          exceptions?: string
+          id?: string
+          lead_id?: string | null
+          signed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_completions_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: true
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_completions_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_completions_completed_by_fkey"
+            columns: ["completed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_completions_crew_staff_id_fkey"
+            columns: ["crew_staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_completions_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      job_notes: {
+        Row: {
+          appointment_id: string | null
+          author_id: string | null
+          author_name: string
+          body: string
+          client_id: string | null
+          created_at: string
+          id: string
+          lead_id: string | null
+          photo_paths: string[]
+        }
+        Insert: {
+          appointment_id?: string | null
+          author_id?: string | null
+          author_name: string
+          body?: string
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          photo_paths?: string[]
+        }
+        Update: {
+          appointment_id?: string | null
+          author_id?: string | null
+          author_name?: string
+          body?: string
+          client_id?: string | null
+          created_at?: string
+          id?: string
+          lead_id?: string | null
+          photo_paths?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_notes_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_notes_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leads: {
         Row: {
           balance_amount: number | null
           balance_due_date: string | null
           balance_paid_at: string | null
           campaign: string | null
+          chase_paused: boolean
           client_id: string
           created_at: string
           deposit_amount: number | null
-          deposit_paid_at: string | null
-          deposit_requested_at: string | null
-          chase_paused: boolean
           deposit_chase_at: string | null
           deposit_chase_step: number
-          lost_at: string | null
-          lost_note: string | null
-          lost_reason: string | null
-          review_requested_at: string | null
-          quote_chase_at: string | null
-          quote_chase_step: number
+          deposit_paid_at: string | null
+          deposit_requested_at: string | null
           email: string | null
           entry_channel: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given: number | null
@@ -1148,6 +1547,9 @@ export type Database = {
           landing_referrer: string | null
           landing_url: string | null
           li_fat_id: string | null
+          lost_at: string | null
+          lost_note: string | null
+          lost_reason: string | null
           msclkid: string | null
           name: string | null
           notes: string | null
@@ -1155,7 +1557,10 @@ export type Database = {
           posthog_distinct_id: string | null
           preferred_date: string | null
           property_size: string | null
+          quote_chase_at: string | null
+          quote_chase_step: number
           referrer_answer: string | null
+          review_requested_at: string | null
           sanity_id: string | null
           services: string[]
           source_form: string | null
@@ -1180,20 +1585,14 @@ export type Database = {
           balance_due_date?: string | null
           balance_paid_at?: string | null
           campaign?: string | null
+          chase_paused?: boolean
           client_id: string
           created_at?: string
           deposit_amount?: number | null
-          deposit_paid_at?: string | null
-          deposit_requested_at?: string | null
-          chase_paused?: boolean
           deposit_chase_at?: string | null
           deposit_chase_step?: number
-          lost_at?: string | null
-          lost_note?: string | null
-          lost_reason?: string | null
-          review_requested_at?: string | null
-          quote_chase_at?: string | null
-          quote_chase_step?: number
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null
@@ -1209,6 +1608,9 @@ export type Database = {
           landing_referrer?: string | null
           landing_url?: string | null
           li_fat_id?: string | null
+          lost_at?: string | null
+          lost_note?: string | null
+          lost_reason?: string | null
           msclkid?: string | null
           name?: string | null
           notes?: string | null
@@ -1216,7 +1618,10 @@ export type Database = {
           posthog_distinct_id?: string | null
           preferred_date?: string | null
           property_size?: string | null
+          quote_chase_at?: string | null
+          quote_chase_step?: number
           referrer_answer?: string | null
+          review_requested_at?: string | null
           sanity_id?: string | null
           services?: string[]
           source_form?: string | null
@@ -1241,20 +1646,14 @@ export type Database = {
           balance_due_date?: string | null
           balance_paid_at?: string | null
           campaign?: string | null
+          chase_paused?: boolean
           client_id?: string
           created_at?: string
           deposit_amount?: number | null
-          deposit_paid_at?: string | null
-          deposit_requested_at?: string | null
-          chase_paused?: boolean
           deposit_chase_at?: string | null
           deposit_chase_step?: number
-          lost_at?: string | null
-          lost_note?: string | null
-          lost_reason?: string | null
-          review_requested_at?: string | null
-          quote_chase_at?: string | null
-          quote_chase_step?: number
+          deposit_paid_at?: string | null
+          deposit_requested_at?: string | null
           email?: string | null
           entry_channel?: Database["public"]["Enums"]["lead_entry_channel"]
           estimate_given?: number | null
@@ -1270,6 +1669,9 @@ export type Database = {
           landing_referrer?: string | null
           landing_url?: string | null
           li_fat_id?: string | null
+          lost_at?: string | null
+          lost_note?: string | null
+          lost_reason?: string | null
           msclkid?: string | null
           name?: string | null
           notes?: string | null
@@ -1277,7 +1679,10 @@ export type Database = {
           posthog_distinct_id?: string | null
           preferred_date?: string | null
           property_size?: string | null
+          quote_chase_at?: string | null
+          quote_chase_step?: number
           referrer_answer?: string | null
+          review_requested_at?: string | null
           sanity_id?: string | null
           services?: string[]
           source_form?: string | null
@@ -1360,12 +1765,12 @@ export type Database = {
           customer_email: string | null
           customer_name: string | null
           customer_phone: string | null
+          declined_at: string | null
+          declined_reason: string | null
           deposit_amount: number | null
           deposit_paid_at: string | null
           deposit_paid_method: string | null
           deposit_selfreport_at: string | null
-          declined_at: string | null
-          declined_reason: string | null
           dest_addr: string | null
           discount: number
           email_error: string | null
@@ -1415,12 +1820,12 @@ export type Database = {
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          declined_at?: string | null
+          declined_reason?: string | null
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_paid_method?: string | null
           deposit_selfreport_at?: string | null
-          declined_at?: string | null
-          declined_reason?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null
@@ -1470,12 +1875,12 @@ export type Database = {
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          declined_at?: string | null
+          declined_reason?: string | null
           deposit_amount?: number | null
           deposit_paid_at?: string | null
           deposit_paid_method?: string | null
           deposit_selfreport_at?: string | null
-          declined_at?: string | null
-          declined_reason?: string | null
           dest_addr?: string | null
           discount?: number
           email_error?: string | null
@@ -1530,6 +1935,365 @@ export type Database = {
             columns: ["lead_id"]
             isOneToOne: false
             referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signatures: {
+        Row: {
+          acknowledgments: Json
+          channel: string
+          client_id: string | null
+          collected_by: string | null
+          created_at: string
+          id: string
+          ip: string | null
+          kind: string
+          lead_id: string | null
+          method: string
+          quote_id: string | null
+          signature_data: string | null
+          signed_at: string
+          signer_name: string
+          storage_let_id: string | null
+          terms_version: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          acknowledgments?: Json
+          channel: string
+          client_id?: string | null
+          collected_by?: string | null
+          created_at?: string
+          id?: string
+          ip?: string | null
+          kind: string
+          lead_id?: string | null
+          method: string
+          quote_id?: string | null
+          signature_data?: string | null
+          signed_at?: string
+          signer_name: string
+          storage_let_id?: string | null
+          terms_version?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          acknowledgments?: Json
+          channel?: string
+          client_id?: string | null
+          collected_by?: string | null
+          created_at?: string
+          id?: string
+          ip?: string | null
+          kind?: string
+          lead_id?: string | null
+          method?: string
+          quote_id?: string | null
+          signature_data?: string | null
+          signed_at?: string
+          signer_name?: string
+          storage_let_id?: string | null
+          terms_version?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signatures_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signatures_collected_by_fkey"
+            columns: ["collected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signatures_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signatures_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signatures_storage_let_id_fkey"
+            columns: ["storage_let_id"]
+            isOneToOne: false
+            referencedRelation: "storage_lets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff: {
+        Row: {
+          created_at: string
+          day_rate: number | null
+          email: string | null
+          full_name: string
+          id: string
+          is_active: boolean
+          notes: string | null
+          phone: string | null
+          profile_id: string | null
+          staff_role: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          day_rate?: number | null
+          email?: string | null
+          full_name: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          phone?: string | null
+          profile_id?: string | null
+          staff_role?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          day_rate?: number | null
+          email?: string | null
+          full_name?: string
+          id?: string
+          is_active?: boolean
+          notes?: string | null
+          phone?: string | null
+          profile_id?: string | null
+          staff_role?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      storage_invoices: {
+        Row: {
+          amount: number
+          client_id: string | null
+          created_at: string
+          emailed_at: string | null
+          error: string | null
+          id: string
+          let_id: string
+          period_end: string
+          period_start: string
+          status: string
+          updated_at: string
+          zoho_invoice_id: string | null
+          zoho_invoice_number: string | null
+          zoho_invoice_url: string | null
+        }
+        Insert: {
+          amount: number
+          client_id?: string | null
+          created_at?: string
+          emailed_at?: string | null
+          error?: string | null
+          id?: string
+          let_id: string
+          period_end: string
+          period_start: string
+          status?: string
+          updated_at?: string
+          zoho_invoice_id?: string | null
+          zoho_invoice_number?: string | null
+          zoho_invoice_url?: string | null
+        }
+        Update: {
+          amount?: number
+          client_id?: string | null
+          created_at?: string
+          emailed_at?: string | null
+          error?: string | null
+          id?: string
+          let_id?: string
+          period_end?: string
+          period_start?: string
+          status?: string
+          updated_at?: string
+          zoho_invoice_id?: string | null
+          zoho_invoice_number?: string | null
+          zoho_invoice_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storage_invoices_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_invoices_let_id_fkey"
+            columns: ["let_id"]
+            isOneToOne: false
+            referencedRelation: "storage_lets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      storage_lets: {
+        Row: {
+          billing_paused: boolean
+          client_id: string
+          created_at: string
+          end_date: string | null
+          id: string
+          lead_id: string | null
+          notes: string | null
+          rate: number | null
+          rate_period: string
+          sign_token: string | null
+          start_date: string
+          unit_id: string
+          updated_at: string
+        }
+        Insert: {
+          billing_paused?: boolean
+          client_id: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          rate?: number | null
+          rate_period?: string
+          sign_token?: string | null
+          start_date: string
+          unit_id: string
+          updated_at?: string
+        }
+        Update: {
+          billing_paused?: boolean
+          client_id?: string
+          created_at?: string
+          end_date?: string | null
+          id?: string
+          lead_id?: string | null
+          notes?: string | null
+          rate?: number | null
+          rate_period?: string
+          sign_token?: string | null
+          start_date?: string
+          unit_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storage_lets_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_lets_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_lets_unit_id_fkey"
+            columns: ["unit_id"]
+            isOneToOne: false
+            referencedRelation: "storage_units"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      storage_sites: {
+        Row: {
+          address: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          updated_at: string
+        }
+        Insert: {
+          address?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Update: {
+          address?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      storage_units: {
+        Row: {
+          code: string
+          created_at: string
+          id: string
+          is_active: boolean
+          name: string
+          notes: string | null
+          site_id: string
+          size_cuft: number | null
+          unit_type: string
+          updated_at: string
+        }
+        Insert: {
+          code?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          site_id: string
+          size_cuft?: number | null
+          unit_type?: string
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          name?: string
+          notes?: string | null
+          site_id?: string
+          size_cuft?: number | null
+          unit_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storage_units_site_id_fkey"
+            columns: ["site_id"]
+            isOneToOne: false
+            referencedRelation: "storage_sites"
             referencedColumns: ["id"]
           },
         ]
@@ -1634,13 +2398,247 @@ export type Database = {
           },
         ]
       }
+      vehicles: {
+        Row: {
+          cost_per_month: number | null
+          created_at: string
+          end_of_term: string | null
+          id: string
+          insurance_renewal: string | null
+          is_active: boolean
+          last_service: string | null
+          mot_due: string | null
+          name: string
+          notes: string | null
+          payment_day: number | null
+          registration: string
+          tax_due: string | null
+          updated_at: string
+          vehicle_type: string
+        }
+        Insert: {
+          cost_per_month?: number | null
+          created_at?: string
+          end_of_term?: string | null
+          id?: string
+          insurance_renewal?: string | null
+          is_active?: boolean
+          last_service?: string | null
+          mot_due?: string | null
+          name: string
+          notes?: string | null
+          payment_day?: number | null
+          registration?: string
+          tax_due?: string | null
+          updated_at?: string
+          vehicle_type?: string
+        }
+        Update: {
+          cost_per_month?: number | null
+          created_at?: string
+          end_of_term?: string | null
+          id?: string
+          insurance_renewal?: string | null
+          is_active?: boolean
+          last_service?: string | null
+          mot_due?: string | null
+          name?: string
+          notes?: string | null
+          payment_day?: number | null
+          registration?: string
+          tax_due?: string | null
+          updated_at?: string
+          vehicle_type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      claim_ai_jobs: {
+        Args: { p_batch?: number; p_lease_seconds?: number; p_worker: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          error: string | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          media_id: string | null
+          next_run_at: string
+          payload: Json
+          status: string
+          survey_id: string
+          updated_at: string
+        }[]
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: false
+          isSetofReturn: true
+        }
+      }
+      complete_ai_media_job: {
+        Args: {
+          p_actual_usd: number
+          p_coverage: string
+          p_detections: Json
+          p_input_tokens: number
+          p_job_id: string
+          p_output_tokens: number
+          p_provider_deleted?: boolean
+          p_quality_flags: Json
+          p_quality_warnings: Json
+          p_run_id: string
+          p_worker: string
+        }
+        Returns: boolean
+      }
+      confirm_ai_room: {
+        Args: {
+          p_actor_id: string
+          p_base_updated_at: string
+          p_contingency_pct: number
+          p_detection_ids: string[]
+          p_new_lines: Json
+          p_planning_ready: boolean
+          p_room_id: string
+          p_survey_id: string
+          p_total_ft3: number
+        }
+        Returns: {
+          ai_abandoned_at: string | null
+          ai_consent: Json | null
+          ai_consent_withdrawn_at: string | null
+          ai_consent_withdrawn_by: string | null
+          ai_status: string
+          appointment_id: string | null
+          client_id: string | null
+          contingency_pct: number
+          created_at: string
+          created_by: string | null
+          customer_notes: string
+          id: string
+          items: Json
+          last_ai_user_activity_at: string | null
+          lead_id: string | null
+          legal_hold: boolean
+          media_retention_anchor_at: string | null
+          notes: string
+          planning_ready: boolean
+          room_manifest_complete: boolean
+          share_token: string | null
+          status: string
+          total_ft3: number
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cubic_surveys"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fail_ai_job: {
+        Args: { p_error: string; p_job_id: string; p_worker: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          error: string | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          media_id: string | null
+          next_run_at: string
+          payload: Json
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      finalise_ai_call: {
+        Args: { p_actual_usd: number; p_attempt_key: string }
+        Returns: boolean
+      }
+      finalize_ai_media: {
+        Args: {
+          p_actor_id: string
+          p_bytes: number
+          p_duration_s: number
+          p_frames: Json
+          p_media_id: string
+          p_prompt_version: string
+        }
+        Returns: {
+          attempts: number
+          created_at: string
+          error: string | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          media_id: string | null
+          next_run_at: string
+          payload: Json
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      heartbeat_ai_job: {
+        Args: { p_job_id: string; p_lease_seconds?: number; p_worker: string }
+        Returns: boolean
+      }
       is_admin: { Args: never; Returns: boolean }
+      is_office: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
+      recompute_ai_room_state: {
+        Args: { p_room_id: string }
+        Returns: undefined
+      }
+      release_ai_call: { Args: { p_attempt_key: string }; Returns: boolean }
+      reserve_ai_call: {
+        Args: {
+          p_attempt_key: string
+          p_estimated_usd: number
+          p_job_id: string
+          p_survey_id: string
+        }
+        Returns: {
+          allowed: boolean
+          reason: string
+          reservation_id: string
+        }[]
+      }
     }
     Enums: {
       activity_type:
@@ -1868,7 +2866,7 @@ export const Constants = {
         "completed",
         "declined",
       ],
-      photo_category: ["access", "large_items"],
+      photo_category: ["access", "large_items", "cubic"],
       quote_status: ["draft", "sent", "accepted", "rejected", "superseded"],
       survey_status: ["scheduled", "completed", "cancelled"],
       user_role: ["admin", "estimator", "crew"],

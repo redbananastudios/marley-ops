@@ -183,6 +183,7 @@ export async function getCubicShareLinkAction(
     }
   }
   if (!token) return { ok: false, error: "Could not create the link." };
-  const base = process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk";
+  const base = process.env.NEXT_PUBLIC_APP_URL;
+  if (!base) return { ok: false, error: "The application URL is not configured." };
   return { ok: true, url: `${base}/cv/${token}` };
 }
