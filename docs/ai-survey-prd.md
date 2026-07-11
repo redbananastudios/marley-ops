@@ -46,7 +46,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 
 | Fact | Verified value | Consequence |
 |---|---|---|
-| `GEMINI_API_KEY` | EXISTS in `credentials.env` and marley-ops `.env.local` (`AIzaS…`); both required stable models are exposed to the key; **not yet verified in Vercel** | Phase 0 links the correct `marley-ops` Vercel project, wires/verifies the key in development + production, and confirms paid billing |
+| `GEMINI_API_KEY` | EXISTS in `credentials.env` and the primary checkout `.env.local` (`AIzaS…`); both required stable models are exposed; Vercel Production configured 2026-07-11; feature Preview awaits a remote branch | Worktree-local spike injects the central credential without committing it; after the feature branch is pushed, add the key only to that branch's Preview environment; confirm paid billing |
 | Gemini video ingestion | Files API: 2 GB/file, 20 GB/project, 48 h retention, resumable upload, **free**; signed HTTPS URLs ≤100 MB also accepted | **Always use Files API** (single code path, no URL leak to third parties); signed-URL direct ingest is an optimisation, not the design |
 | Gemini video tokens | ~300 tok/s default res (258 frame + 32 audio), ~100 tok/s low res; 1 fps sampling | 12-min survey ≈ 216k input tokens |
 | Gemini cost | 3.1 Flash-Lite $0.25/$1.50 per 1M (stable); 3.5 Flash $1.50/$9.00 (stable) | Full survey ≈ **$0.06** default / ≈ $0.35 all-escalated. £2/survey cap = 10–30× margin, keep as circuit breaker |
@@ -620,7 +620,7 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 **Phase 0 — Preflight (gates everything; ~half a day)**
 1. **Before touching any project file:** fetch latest `master`, verify lineage/clean state, create the dedicated worktree + `codex/ai-surveyor-v1` feature branch, and establish the 200-test/typecheck/build/lint baseline inside it.
-2. Link that worktree to the existing Red Banana `marley-ops` Vercel project. `GEMINI_API_KEY` is already in local `.env.local`; add/verify it in Vercel development + production and confirm paid billing tier in AI Studio.
+2. Link that worktree to the existing Red Banana `marley-ops` Vercel project. Inject `GEMINI_API_KEY` into the local spike process from `credentials.env` (worktrees do not inherit ignored `.env.local`). Verify the existing Production variable; after the feature branch exists remotely, add a branch-scoped Preview variable. Confirm paid billing tier in AI Studio.
 3. Marley records two representative 30–90 second clips on the actual estimator iPad and places them in worktree-local `.private/ai-survey-spike/` (git-ignored; never committed). **Spike** `scripts/ai-spike.mjs`: Files API upload → `Output.object(videoDetectionSchema)` on both models → confirm schema honoured with video+audio, timestamps sane, catalogue matching plausible and cost logged. Sanitised JSON responses become committed fixtures; raw home video does not. If schema-with-video misbehaves → fall back to JSON-in-prompt + zod salvage and update this PRD before Phase 1.
 4. Only after the AI spike passes: vps1 ops `FILE_SIZE_LIMIT=524288000` + recreate storage container; verify with a >50 MB TUS upload from a browser session (session JWT, 6 MB chunks). Capture before/after service health and rollback instructions.
 
