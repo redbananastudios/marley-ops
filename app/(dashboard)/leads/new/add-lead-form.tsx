@@ -10,6 +10,7 @@ import { toast } from "sonner";
 
 import { newLeadSchema, MANUAL_ENTRY_CHANNELS, PROPERTY_SIZES, type NewLeadInput } from "@/lib/leads/schema";
 import { checkDuplicateAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
+import { createQuoteWithLeadAction } from "@/app/(dashboard)/quotes/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -66,7 +67,15 @@ function Field({
 
 const INPUT_H = "h-11";
 
-export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
+export function AddLeadForm({
+  clients,
+  mode = "lead",
+}: {
+  clients: ClientOption[];
+  /** "lead" → save + go to the lead. "quote" → create the lead AND a draft
+   *  quote seeded from it, then open the builder (the "New quote" flow). */
+  mode?: "lead" | "quote";
+}) {
   const router = useRouter();
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
@@ -144,14 +153,25 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
   }
 
   const onSubmit = async (values: NewLeadInput) => {
-    const res = await createLeadAction({
+    const payload: NewLeadInput = {
       ...values,
       client_id: clientId || undefined,
       from_postcode: fromAddr.postcode.trim(),
       to_postcode: toAddr.postcode.trim(),
       from_address: formatAddress(fromAddr),
       to_address: formatAddress(toAddr),
-    });
+    };
+    if (mode === "quote") {
+      const res = await createQuoteWithLeadAction(payload);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success("Quote started");
+      router.push(`/quotes/${res.quoteId}`);
+      return;
+    }
+    const res = await createLeadAction(payload);
     if (!res.ok) {
       toast.error(res.error);
       return;
@@ -301,7 +321,7 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
 
       <div className="flex items-center justify-end gap-3 border-t pt-5">
         <Button asChild variant="ghost" size="lg">
-          <Link href="/leads">Cancel</Link>
+          <Link href={mode === "quote" ? "/quotes" : "/leads"}>Cancel</Link>
         </Button>
         <Button
           type="submit"
@@ -309,7 +329,13 @@ export function AddLeadForm({ clients }: { clients: ClientOption[] }) {
           disabled={isSubmitting}
           className="bg-mm-red text-white hover:bg-mm-red/90"
         >
-          {isSubmitting ? "Adding…" : "Add lead"}
+          {mode === "quote"
+            ? isSubmitting
+              ? "Starting quote…"
+              : "Create quote"
+            : isSubmitting
+              ? "Adding…"
+              : "Add lead"}
         </Button>
       </div>
     </form>

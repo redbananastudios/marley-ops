@@ -11,7 +11,8 @@ import {
 } from "@/lib/quote/form-types";
 import { addressFromString } from "@/lib/places/parse";
 import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
-import { markLeadLostAction } from "@/app/(dashboard)/leads/actions";
+import { markLeadLostAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
+import type { NewLeadInput } from "@/lib/leads/schema";
 import { getBusinessSettings } from "@/lib/settings";
 import { recommendVans } from "@/lib/cubic-survey";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
@@ -119,6 +120,21 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     }
   }
   return { ok: false as const, error: "Could not allocate a quote reference" };
+}
+
+/**
+ * Create a lead (client dedupe + capture the move details) AND a draft quote
+ * seeded from it, in one step — the "New quote" flow (Peter, 2026-07-11: every
+ * quote should belong to a client→lead, no orphan quotes). Returns the quote id.
+ */
+export async function createQuoteWithLeadAction(
+  input: NewLeadInput,
+): Promise<{ ok: true; quoteId: string } | { ok: false; error: string }> {
+  const leadRes = await createLeadAction(input);
+  if (!leadRes.ok) return { ok: false, error: leadRes.error };
+  const quoteRes = await createDraftQuote({ leadId: leadRes.leadId });
+  if (!quoteRes.ok) return { ok: false, error: quoteRes.error };
+  return { ok: true, quoteId: quoteRes.id };
 }
 
 /** Persist wizard state + the computed breakdown. Money columns always come from computeQuote(). */
