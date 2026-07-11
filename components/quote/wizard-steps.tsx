@@ -9,7 +9,8 @@
  */
 
 import { useState } from "react";
-import { Minus, Plus, Loader2, MapPin } from "lucide-react";
+import Link from "next/link";
+import { Minus, Plus, Loader2, MapPin, Boxes } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AddressFields, type AddressValue } from "@/components/places/address-fields";
 import {
@@ -530,6 +531,7 @@ export interface CubicQuoteHint {
 export function Step3Vehicle({
   values,
   set,
+  leadId,
   pricing,
   cubicHint,
 }: StepProps & { cubicHint?: CubicQuoteHint | null }) {
@@ -556,18 +558,40 @@ export function Step3Vehicle({
             <strong>{cubicHint.shortLabel}</strong>
             <span className="ml-1.5 text-xs text-mist-500">{cubicHint.detail}</span>
           </span>
-          {values.vehicle !== cubicHint.vehicleKey ? (
-            <button
-              type="button"
-              onClick={() => set("vehicle", cubicHint.vehicleKey)}
-              className="focus-ring ml-auto inline-flex min-h-9 items-center rounded-md bg-mm-red px-3 text-xs font-semibold text-white hover:bg-mm-red-deep"
-            >
-              Use {cubicHint.shortLabel}
-            </button>
-          ) : (
-            <span className="ml-auto text-xs font-semibold text-success">Matches selection</span>
-          )}
+          <span className="ml-auto flex items-center gap-2">
+            {values.vehicle !== cubicHint.vehicleKey ? (
+              <button
+                type="button"
+                onClick={() => set("vehicle", cubicHint.vehicleKey)}
+                className="focus-ring inline-flex min-h-9 items-center rounded-md bg-mm-red px-3 text-xs font-semibold text-white hover:bg-mm-red-deep"
+              >
+                Use {cubicHint.shortLabel}
+              </button>
+            ) : (
+              <span className="text-xs font-semibold text-success">Matches selection</span>
+            )}
+            {leadId ? (
+              <Link
+                href={`/leads/${leadId}/cubic`}
+                className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-md border border-input bg-card px-3 text-xs font-medium text-foreground hover:bg-muted"
+              >
+                <Boxes className="size-3.5" strokeWidth={1.75} />
+                Open survey
+              </Link>
+            ) : null}
+          </span>
         </div>
+      ) : leadId ? (
+        /* No survey yet — offer to do one right from the quote form. */
+        <Link
+          href={`/leads/${leadId}/cubic`}
+          className="focus-ring mb-4 flex items-center gap-2.5 rounded-md border border-dashed border-mm-red/40 bg-mm-red-tint/20 px-3.5 py-2.5 text-sm text-foreground hover:bg-mm-red-tint/40"
+        >
+          <Boxes className="size-4 text-mm-red" strokeWidth={1.75} />
+          <span>
+            <strong>Do a cubic survey</strong> to size the vans from the actual volume — opens the tablet survey.
+          </span>
+        </Link>
       ) : null}
 
       <div className="mb-5">

@@ -3,10 +3,20 @@
 import { useState } from "react";
 import { Check, Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { getCubicShareLinkAction } from "@/app/actions/cubic-survey";
+import { getCubicShareLinkAction, getCubicShareLinkByLeadAction } from "@/app/actions/cubic-survey";
 
-/** Mints (lazily) + copies the customer self-fill link — /q "copy link" model. */
-export function CopyCubicLinkButton({ surveyId }: { surveyId: string }) {
+/** Mints (lazily) + copies the customer self-fill link — /q "copy link" model.
+ *  Works from a surveyId (builder) or a leadId (quote card, before a survey
+ *  exists — the action creates it). */
+export function CopyCubicLinkButton({
+  surveyId,
+  leadId,
+  label = "Copy customer link",
+}: {
+  surveyId?: string;
+  leadId?: string;
+  label?: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   return (
@@ -15,7 +25,11 @@ export function CopyCubicLinkButton({ surveyId }: { surveyId: string }) {
       disabled={busy}
       onClick={async () => {
         setBusy(true);
-        const res = await getCubicShareLinkAction(surveyId);
+        const res = surveyId
+          ? await getCubicShareLinkAction(surveyId)
+          : leadId
+            ? await getCubicShareLinkByLeadAction(leadId)
+            : ({ ok: false, error: "No survey reference." } as const);
         setBusy(false);
         if (!res.ok) {
           toast.error(res.error);
@@ -39,7 +53,7 @@ export function CopyCubicLinkButton({ surveyId }: { surveyId: string }) {
       ) : (
         <Link2 className="size-4" strokeWidth={1.75} />
       )}
-      {copied ? "Copied" : "Copy customer link"}
+      {copied ? "Copied" : label}
     </button>
   );
 }

@@ -10,7 +10,8 @@ import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
-import { recommendVans, vehicleShortLabel } from "@/lib/cubic-survey";
+import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
+import { CubicSurveyCard, type CubicCardData } from "@/components/cubic/cubic-survey-card";
 import { QuoteView } from "@/components/quote/quote-view";
 import {
   CompletionCard,
@@ -95,25 +96,38 @@ export default async function QuoteDetailPage({
   }
   const contractSignature = sigRow ? ({ ...sigRow, collectedByName } as ContractSignatureView) : null;
 
-  // Cubic-survey van suggestion for the Vehicle step (suggest-only here; new
-  // drafts were pre-selected at creation).
+  // Cubic-survey: the van suggestion for the Vehicle step (suggest-only here;
+  // new drafts were pre-selected at creation) + the card for the quote View.
   let cubicHint: CubicQuoteHint | null = null;
+  let cubicCard: CubicCardData | null = null;
   if (quote.lead_id) {
     const { data: cubic } = await sb
       .from("cubic_surveys")
-      .select("total_ft3")
+      .select("total_ft3, items, status")
       .eq("lead_id", quote.lead_id)
       .maybeSingle();
-    if (cubic && Number(cubic.total_ft3) > 0) {
-      const rec = recommendVans(Number(cubic.total_ft3), {
-        fillPct: settings.cubicFillPct,
-        transitFt3: settings.cubicTransitFt3,
-        lutonFt3: settings.cubicLutonFt3,
-        sevenFiveTFt3: settings.cubic75tFt3,
-      });
+    if (cubic) {
+      const totalFt3 = Number(cubic.total_ft3) || 0;
+      const rec =
+        totalFt3 > 0
+          ? recommendVans(totalFt3, {
+              fillPct: settings.cubicFillPct,
+              transitFt3: settings.cubicTransitFt3,
+              lutonFt3: settings.cubicLutonFt3,
+              sevenFiveTFt3: settings.cubic75tFt3,
+            })
+          : null;
+      const totals = computeCubicTotals(sanitizeCubicLines(cubic.items) ?? []);
+      cubicCard = {
+        totalFt3,
+        vanLabel: rec ? vehicleShortLabel(rec) : null,
+        itemCount: totals.itemCount,
+        status: cubic.status ?? "draft",
+        hasSurvey: true,
+      };
       if (rec) {
         cubicHint = {
-          totalFt3: Number(cubic.total_ft3),
+          totalFt3,
           vehicleKey: rec.vehicleKey,
           shortLabel: vehicleShortLabel(rec),
           detail: rec.label + (rec.consider75t ? " · consider the 7.5t" : ""),
@@ -251,6 +265,7 @@ export default async function QuoteDetailPage({
             editHref={`/quotes/${quote.id}?edit=1`}
           />
           <div className="mt-4 space-y-4">
+            {quote.lead_id ? <CubicSurveyCard leadId={quote.lead_id} data={cubicCard} /> : null}
             <ContractSignatureCard signature={contractSignature} quoteStatus={quote.status ?? "draft"} />
             <CompletionCard completion={completion} />
             <CrewNotesCard notes={crewNotes} canDelete />

@@ -26,7 +26,6 @@ import {
   CalendarPlus,
   CheckCircle2,
   RotateCcw,
-  Boxes,
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -139,12 +138,6 @@ export function LeadActionBar({
           <PhoneMissed className="size-4 text-mm-red" strokeWidth={1.75} />
           No reply
         </button>
-      ) : null}
-      {!CLOSED.has(status) ? (
-        <Link href={`/leads/${leadId}/cubic`} className={btn} title="Itemise the move for a volume + van estimate">
-          <Boxes className="size-4 text-mm-red" strokeWidth={1.75} />
-          Cubic survey
-        </Link>
       ) : null}
 
       {/* stage-driven next steps — pushed to the right */}

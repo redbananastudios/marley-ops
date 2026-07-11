@@ -107,6 +107,46 @@ export async function saveCubicSurveyAction(
   return { ok: true, totalFt3: totals.totalFt3, updatedAt: updated.updated_at };
 }
 
+/** Get-or-create the lead's survey. Returns its id (used by the quote-side
+ *  "Open cubic survey" / copy-link entry points, which only know the lead). */
+async function ensureSurveyForLead(
+  admin: ReturnType<typeof createAdminClient>,
+  leadId: string,
+  profileId: string,
+): Promise<string | null> {
+  const { data: existing } = await admin.from("cubic_surveys").select("id").eq("lead_id", leadId).maybeSingle();
+  if (existing) return existing.id;
+  const { data: lead } = await admin.from("leads").select("client_id").eq("id", leadId).single();
+  if (!lead) return null;
+  const { data, error } = await admin
+    .from("cubic_surveys")
+    .insert({ lead_id: leadId, client_id: lead.client_id, created_by: profileId, updated_by: profileId } as never)
+    .select("id")
+    .single();
+  if (error) {
+    if (error.code === "23505") {
+      const { data: again } = await admin.from("cubic_surveys").select("id").eq("lead_id", leadId).maybeSingle();
+      return again?.id ?? null;
+    }
+    return null;
+  }
+  return data.id;
+}
+
+/** Mint the customer self-fill link for a LEAD's survey (creating the survey
+ *  if needed) — the quote card offers this even before a survey exists. */
+export async function getCubicShareLinkByLeadAction(
+  leadId: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  if (!z.string().uuid().safeParse(leadId).success) return { ok: false, error: "Invalid lead" };
+  const prof = await requireActiveProfile();
+  if (!prof) return { ok: false, error: "Not signed in." };
+  const admin = createAdminClient();
+  const surveyId = await ensureSurveyForLead(admin, leadId, prof.id);
+  if (!surveyId) return { ok: false, error: "Could not start the survey." };
+  return getCubicShareLinkAction(surveyId);
+}
+
 /** Mint (or fetch) the customer self-fill link for a survey. */
 export async function getCubicShareLinkAction(
   surveyId: string,

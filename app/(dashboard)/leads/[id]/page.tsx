@@ -22,7 +22,6 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobNotesForLead } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
-import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -165,13 +164,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     loadJobNotesForLead(createAdminClient(), id),
   ]);
 
-  // Cubic (volume) survey — optional per lead; drives the van recommendation.
-  const { data: cubicRow } = await supabase
-    .from("cubic_surveys")
-    .select("id, total_ft3, status, items, updated_at")
-    .eq("lead_id", id)
-    .maybeSingle();
-
   let leadCompletion: CompletionView | null = null;
   if (completionRow) {
     let certificateUrl: string | null = null;
@@ -189,16 +181,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Payments context: standard deposit from Settings + the accepted quote's value.
   const settings = await getBusinessSettings(supabase);
   const { defaultDeposit } = settings;
-  const cubicTotals = cubicRow ? computeCubicTotals(sanitizeCubicLines(cubicRow.items) ?? []) : null;
-  const cubicRec = cubicRow
-    ? recommendVans(Number(cubicRow.total_ft3), {
-        fillPct: settings.cubicFillPct,
-        transitFt3: settings.cubicTransitFt3,
-        lutonFt3: settings.cubicLutonFt3,
-        sevenFiveTFt3: settings.cubic75tFt3,
-      })
-    : null;
-  const cubicVanLabel = cubicRec ? vehicleShortLabel(cubicRec) : null;
   const acceptedQuote = quoteRows.find((q) => q.status === "accepted");
   const agreedPrice = acceptedQuote
     ? Number(acceptedQuote.agreed_price ?? acceptedQuote.grand_total ?? 0) || null
@@ -474,39 +456,6 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <Fact label="Estimator" value={surveyEstimatorName} />
               <Fact label="Survey record" value={surveyRow ? `${surveyRow.status} · ${fmtDate(surveyRow.created_at)}` : "Starts with the first photo"} />
             </div>
-          </Card>
-
-          {/* Cubic (volume) survey — optional; totals feed the quote's van spec */}
-          <Card className="mb-5 p-0">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
-              <h2 className="font-display text-lg text-foreground">Cubic survey</h2>
-              <Button asChild size="sm" variant={cubicRow ? "outline" : "default"}>
-                <Link href={`/leads/${lead.id}/cubic`}>
-                  {cubicRow ? "Open survey" : (<><Plus strokeWidth={1.75} />Start cubic survey</>)}
-                </Link>
-              </Button>
-            </div>
-            {cubicRow ? (
-              <div className="grid gap-4 p-5 sm:grid-cols-3">
-                <Fact
-                  label="Volume"
-                  value={`${Number(cubicRow.total_ft3).toLocaleString("en-GB")} ft³${cubicVanLabel ? ` → ${cubicVanLabel}` : ""}`}
-                />
-                <Fact
-                  label="Items"
-                  value={`${cubicTotals?.itemCount ?? 0} moving${cubicTotals?.notMovingCount ? ` · ${cubicTotals.notMovingCount} staying` : ""}`}
-                />
-                <Fact
-                  label="Status"
-                  value={`${cubicRow.status === "customer_submitted" ? "Sent by the customer" : cubicRow.status} · ${fmtDate(cubicRow.updated_at)}`}
-                />
-              </div>
-            ) : (
-              <p className="px-5 py-5 text-sm text-mist-400">
-                Itemise what&apos;s moving with cubic-feet values — the total recommends the vans and pre-fills new
-                quotes. Optional, tablet-friendly, and there&apos;s a link the customer can fill in themselves.
-              </p>
-            )}
           </Card>
 
           <div className="grid gap-5 lg:grid-cols-2">
