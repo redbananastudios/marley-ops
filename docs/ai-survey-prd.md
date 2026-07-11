@@ -1,8 +1,8 @@
-# AI-Assisted Cubic Survey ("AI Surveyor") — PRD v2, build-ready
+# AI-Assisted Cubic Survey ("AI Surveyor") — PRD v2.1, build-ready
 
-**Status:** LOCKED for build — decisions confirmed by Peter 2026-07-11.
+**Status:** LOCKED for build — decisions confirmed by Peter 2026-07-11; production-hardening review incorporated 2026-07-11.
 **Supersedes:** the ChatGPT draft PRD (PLAN.md). Every technical claim in this document was verified against the live codebase, the live VPS, and current provider documentation on 2026-07-11 (7-agent recon + manual credential check). Where this document contradicts the old draft, this document wins.
-**Audience:** the implementing engineer/agent ("codex"). This is the single source of truth for the build. Section 14 lists the house conventions that MUST be followed.
+**Audience:** the implementing engineer/agent ("codex"). This is the single source of truth for the build. Section 13 lists the house conventions that MUST be followed.
 
 ## Locked decisions (Peter, 2026-07-11)
 
@@ -11,6 +11,8 @@
 3. **Retention: 30 days after the lead reaches a terminal state** (completed/declined); 90 days for abandoned drafts. Enforced by a daily cron. `legal_hold` blocks deletion.
 4. **Models: default `gemini-3.1-flash-lite`, auto-escalation to `gemini-3.5-flash`** for low-confidence rooms. Both configurable in Settings without deploy.
 5. **V1 is estimator-only.** The existing manual customer survey at `/cv/[token]` is untouched. Customer AI capture is V2, gated on V1 acceptance criteria.
+6. **Newly recorded clips are not promised to survive tab closure before upload completes.** TUS resumes network interruptions while the source `Blob` still exists, but its URL store does not persist the video bytes. The estimator is warned to keep the page open; closing early may require a retake. IndexedDB blob persistence is deliberately out of V1.
+7. **The Phase 0 spike uses two representative 30–90 second room clips recorded on the real estimator iPad.** Marley supplies them to a private, git-ignored local fixture folder; generic stock footage cannot pass the catalogue-quality gate.
 
 ---
 
@@ -44,7 +46,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 
 | Fact | Verified value | Consequence |
 |---|---|---|
-| `GEMINI_API_KEY` | EXISTS in `credentials.env` (`AIzaS…`), **not yet** in marley-ops envs | Phase 0 wires it into `.env.local` + Vercel (both marley-ops envs) |
+| `GEMINI_API_KEY` | EXISTS in `credentials.env` and marley-ops `.env.local` (`AIzaS…`); both required stable models are exposed to the key; **not yet verified in Vercel** | Phase 0 links the correct `marley-ops` Vercel project, wires/verifies the key in development + production, and confirms paid billing |
 | Gemini video ingestion | Files API: 2 GB/file, 20 GB/project, 48 h retention, resumable upload, **free**; signed HTTPS URLs ≤100 MB also accepted | **Always use Files API** (single code path, no URL leak to third parties); signed-URL direct ingest is an optimisation, not the design |
 | Gemini video tokens | ~300 tok/s default res (258 frame + 32 audio), ~100 tok/s low res; 1 fps sampling | 12-min survey ≈ 216k input tokens |
 | Gemini cost | 3.1 Flash-Lite $0.25/$1.50 per 1M (stable); 3.5 Flash $1.50/$9.00 (stable) | Full survey ≈ **$0.06** default / ≈ $0.35 all-escalated. £2/survey cap = 10–30× margin, keep as circuit breaker |
@@ -66,7 +68,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 
 | Concern | Pick | Why / critical detail |
 |---|---|---|
-| Resumable upload | **`tus-js-client`** (bare, no Uppy) | Framework-agnostic, no React peer-dep. **`chunkSize` MUST be 6 MB** (Supabase hard requirement). Endpoint `https://supabase.redbananastudios.com/storage/v1/upload/resumable`, `Authorization: Bearer <session access_token>` (RLS applies), metadata `{bucketName, objectName, contentType}`. localStorage fingerprint gives tab-close resume free. One tus client per upload URL (concurrent → 409) |
+| Resumable upload | **`tus-js-client`** (bare, no Uppy) | Framework-agnostic, no React peer-dep. **`chunkSize` MUST be 6 MB** (Supabase hard requirement). Endpoint `https://supabase.redbananastudios.com/storage/v1/upload/resumable`, `Authorization: Bearer <session access_token>` (RLS applies), metadata `{bucketName, objectName, contentType}`. The localStorage fingerprint preserves the upload URL, not an in-memory recorded `Blob`: same-tab network resume works; an imported file can resume after the estimator reselects it; a recorded clip may need retaking after tab closure. One tus client per upload URL (concurrent → 409) |
 | Camera recording | **Native `MediaRecorder`** — no wrapper libs (RecordRTC is dead) | iOS Safari ≥14.5 records `video/mp4` H.264+AAC (Gemini-perfect). Detect in order: `video/mp4;codecs=avc1` → `video/mp4` → `video/webm;codecs=vp9` → `video/webm`; persist actual `recorder.mimeType` on the media row. `getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } })` — `ideal` not `exact`. `videoBitsPerSecond: 3_000_000` → 2-min clip ≈ 45 MB. Deliver-on-stop (no `timeslice` reliance on iOS); belt-and-braces `dataavailable` timeout for the known iPad missing-`stop` bug; recording dies on tab background/lock → keep record→review→upload on ONE route |
 | Frame extraction | **`<video>` + canvas seek-and-draw** primary; **Mediabunny** for imports the video element won't seek | Just-recorded blobs are always decodable on the device that encoded them. Use `requestVideoFrameCallback` before drawing (Safari seek-paint gotcha). **ffmpeg.wasm is banned** — OOM-kills iPads |
 | AI calls | **AI SDK v7** (`ai@7`, `@ai-sdk/google`) | `generateObject` is deprecated — use `generateText({ output: Output.object({ schema }) })`. Files-API URIs (`generativelanguage.googleapis.com/…/files/…`) pass through untouched; any other URL gets auto-downloaded by the SDK (another reason Files API is the only media path) |
@@ -106,12 +108,15 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 - **The server owns volume.** Detections carry catalogue keys; `unitFt3` is always assigned server-side from `lib/cubic-catalogue.ts`. Any model output containing volume numbers is discarded on validation.
 - **One media path.** Every video goes to Gemini via the Files API (free, 48 h auto-delete, no third-party URL exposure). ≤100 MB clips stream whole (45 MB in a 2 GB function is nothing); >100 MB imports stream in 16 MB ranged chunks (`Range` GETs from Supabase → resumable PUTs to Google) — peak memory = one chunk.
 - **Fail open to manual.** Every failure state leaves the survey exactly as usable as it is today. The AI mode is a layer, not a gate.
+- **Atomic at every irreversible boundary.** Finalise+enqueue, reserve+reconcile spend, complete a worker attempt, and confirm+merge run in transactional RPCs with row locks and idempotency keys. A network retry or worker crash cannot duplicate inventory, jobs, detections or spend.
+- **Explicit readiness.** `planning_ready` is true only after the estimator has declared the room manifest complete, confirmed every room, and resolved every blocking exception. Until then, AI surveys show provisional totals but no vehicle recommendation. Manual-only or explicitly abandoned AI surveys retain today's raw-volume recommendation.
+- **Estimator/office access only.** AI tables and `survey-media` use `is_office()`, not the broader `is_staff()` role that includes crew. Upload RLS permits only pre-registered paths owned by the authenticated uploader.
 
 ---
 
 ## 4. Data model — migration `0031_ai_cubic_survey.sql`
 
-Follow house conventions exactly: uuid PKs `gen_random_uuid()`, `created_at/updated_at timestamptz default now()` + the existing `set_updated_at()` trigger, RLS on every table (`is_staff()` select/insert/update, `is_admin()` delete unless stated), text status columns with CHECK constraints (not enums — matches `cubic_surveys`).
+Follow house conventions exactly: uuid PKs `gen_random_uuid()`, `created_at/updated_at timestamptz default now()` + the existing `set_updated_at()` trigger, RLS on every AI table (`is_office()` select/insert/update, `is_admin()` delete unless stated), text status columns with CHECK constraints (not enums — matches `cubic_surveys`).
 
 ### 4.1 `cubic_survey_rooms` — capture-layer rooms (NOT canonical inventory structure)
 
@@ -125,8 +130,11 @@ create table cubic_survey_rooms (
   sort int not null default 0,
   hidden_storage_checked boolean not null default false,  -- estimator confirmed wardrobes/cupboards shown
   status text not null default 'pending'
-    check (status in ('pending','processing','ready','confirmed','failed')),
-  quality_warnings jsonb not null default '[]',           -- ["dark footage","fast panning"]
+    check (status in ('pending','processing','needs_attention','ready','confirmed','failed')),
+  coverage text check (coverage in ('good','partial','poor')),
+  quality_flags jsonb not null default '[]',              -- validated enum values, aggregated across active media
+  quality_warnings jsonb not null default '[]',           -- display-only model notes
+  completion_method text check (completion_method in ('ai','manual')),
   created_by uuid references profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -134,7 +142,7 @@ create table cubic_survey_rooms (
 create index on cubic_survey_rooms (survey_id, sort);
 ```
 
-Status meaning: `pending` (created, nothing analysed yet) → `processing` (≥1 media job in flight) → `ready` (all media analysed, detections await review) → `confirmed` (estimator confirmed the room; its accepted detections were merged). `failed` = all media for the room failed after retries (room stays manually editable).
+Status meaning: `pending` (created, nothing analysed yet) → `processing` (≥1 media job in flight) → `needs_attention` (no active jobs, but ≥1 non-ignored failed clip) → `ready` (every non-ignored media item processed, detections await review) → `confirmed` (AI items merged or estimator explicitly finished the room manually). `failed` = all media failed/ignored with no processed result. Room coverage is the worst `good < partial < poor` value across non-ignored processed media; quality flags are the validated union. Recompute both whenever media is processed, retried or ignored.
 
 ### 4.2 `cubic_survey_media`
 
@@ -144,20 +152,49 @@ create table cubic_survey_media (
   survey_id uuid not null references cubic_surveys(id) on delete cascade,
   room_id uuid references cubic_survey_rooms(id) on delete set null,  -- null = whole-property import
   kind text not null check (kind in ('room_video','import_video','photo')),
-  storage_path text not null,                -- survey-media/<surveyId>/<roomId|imports>/<uuid>.<ext>
+  storage_path text not null unique,         -- <surveyId>/<mediaId>/source.<ext>; server-generated before upload
   mime text not null,
   bytes bigint,
   duration_s numeric(8,1),
   frames jsonb not null default '[]',        -- [{"t": 4.0, "path": "<surveyId>/<mediaId>/frames/0004.jpg"}]
   status text not null default 'uploading'
-    check (status in ('uploading','uploaded','processing','processed','failed','deleted')),
+    check (status in ('uploading','uploaded','processing','processed','failed','ignored','deletion_pending','deleted')),
+  coverage text check (coverage in ('good','partial','poor')),
+  quality_flags jsonb not null default '[]',
   error text,
+  finalized_at timestamptz,
   created_by uuid references profiles(id),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 create index on cubic_survey_media (survey_id);
 ```
+
+The server pre-registers the media row and path before the browser receives upload details. All source and frame paths live under `<surveyId>/<mediaId>/…`, allowing storage RLS and finalisation to prove the authenticated uploader owns the exact registered prefix.
+
+### 4.2a `cubic_survey_segments` — persisted whole-property room proposals
+
+```sql
+create table cubic_survey_segments (
+  id uuid primary key default gen_random_uuid(),
+  survey_id uuid not null references cubic_surveys(id) on delete cascade,
+  media_id uuid not null references cubic_survey_media(id) on delete cascade,
+  model_ref text not null,                    -- stable ref emitted by the segmentation response
+  proposed_name text not null,
+  start_s numeric(8,2) not null,
+  end_s numeric(8,2) not null,
+  room_id uuid references cubic_survey_rooms(id) on delete set null,
+  status text not null default 'proposed'
+    check (status in ('proposed','assigned','merged','rejected')),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (media_id, model_ref),
+  check (end_s > start_s)
+);
+create index on cubic_survey_segments (survey_id, status);
+```
+
+Segments are written before review. Every whole-property item must reference one validated `model_ref`; missing, overlapping or out-of-range assignments become blocking exceptions. Rename/merge actions update segment assignment to a real room transactionally.
 
 ### 4.3 `cubic_analysis_runs` — one row per model call (audit + spend ledger)
 
@@ -168,10 +205,12 @@ create table cubic_analysis_runs (
   media_id uuid references cubic_survey_media(id) on delete set null,
   model text not null,                       -- "gemini-3.1-flash-lite"
   prompt_version text not null,              -- from lib/ai/prompts.ts PROMPT_VERSION
-  purpose text not null check (purpose in ('itemise','escalation','segmentation')),
+  purpose text not null check (purpose in ('itemise','escalation','segmentation','grounding')),
   status text not null default 'running'
     check (status in ('running','succeeded','failed')),
+  attempt_key text not null unique,            -- job id + attempt + purpose/model; retry idempotency
   input_tokens int, output_tokens int,
+  reserved_cost_usd numeric(8,4) not null default 0,
   cost_usd numeric(8,4),
   error text,
   started_at timestamptz not null default now(),
@@ -187,6 +226,7 @@ create table cubic_ai_detections (
   run_id uuid not null references cubic_analysis_runs(id) on delete cascade,
   survey_id uuid not null references cubic_surveys(id) on delete cascade,
   room_id uuid references cubic_survey_rooms(id) on delete set null,
+  segment_id uuid references cubic_survey_segments(id) on delete set null,
   label text not null,                       -- what the model saw: "large corner sofa"
   catalogue_key text,                        -- best match, validated against lib/cubic-catalogue.ts; null = unmatched
   candidates jsonb not null default '[]',    -- [{"key":"living-space:sofa-corner","confidence":0.91}, …] max 3
@@ -194,7 +234,7 @@ create table cubic_ai_detections (
   confidence numeric(3,2) not null default 0,
   moving text not null default 'moving' check (moving in ('moving','staying','uncertain')),
   flags jsonb not null default '{}',         -- {"dismantle":true,"fragile":false} (suggestions only)
-  evidence jsonb not null default '{}',      -- {"timestamps":[12,47],"note":"narration: 'wardrobe stays'"}
+  evidence jsonb not null default '{}',      -- video: timestamps; photo: photo/frame ref; optional grounded box
   review_reason text,                        -- null = high-confidence (bulk-acceptable); else why it needs eyes
   state text not null default 'proposed'
     check (state in ('proposed','accepted','edited','rejected','merged')),
@@ -217,12 +257,15 @@ create table ai_jobs (
   survey_id uuid not null references cubic_surveys(id) on delete cascade,
   media_id uuid references cubic_survey_media(id) on delete cascade,
   status text not null default 'queued'
-    check (status in ('queued','running','done','failed','dead')),
+    check (status in ('queued','running','blocked','done','failed','dead','cancelled')),
+  idempotency_key text not null unique,      -- e.g. process_media:<mediaId>:<promptVersion>
   attempts int not null default 0,
   max_attempts int not null default 4,
   next_run_at timestamptz not null default now(),
   locked_at timestamptz,
   locked_by text,
+  lease_expires_at timestamptz,
+  heartbeat_at timestamptz,
   payload jsonb not null default '{}',
   error text,
   created_at timestamptz not null default now(),
@@ -234,63 +277,88 @@ create index on ai_jobs (status, next_run_at);
 **Claim RPC** (PostgREST can't `FOR UPDATE SKIP LOCKED`; the drainer calls this via admin client `.rpc()`):
 
 ```sql
-create or replace function claim_ai_jobs(worker text, batch int default 3)
-returns setof ai_jobs language sql security definer as $$
-  update ai_jobs j
+create or replace function claim_ai_jobs(worker text, batch int default 1)
+returns setof public.ai_jobs language sql security definer set search_path = '' as $$
+   update public.ai_jobs j
      set status = 'running', locked_at = now(), locked_by = worker, updated_at = now()
    where j.id in (
-     select id from ai_jobs
+     select id from public.ai_jobs
       where status = 'queued' and next_run_at <= now()
       order by created_at
       limit batch
       for update skip locked)
   returning j.*;
 $$;
-revoke execute on function claim_ai_jobs from anon, authenticated;  -- service-role only
+revoke all on function public.claim_ai_jobs(text, int) from public, anon, authenticated;
+grant execute on function public.claim_ai_jobs(text, int) to service_role;
 ```
 
-Retry semantics (drainer code): on failure `attempts+1`; if `attempts >= max_attempts` → `dead` + ops alert (`sendOpsAlert` from `lib/comms/dispatch`); else `queued` with `next_run_at = now() + interval '30s' * 4^attempts` (30s/2m/8m). A `running` job whose `locked_at` is >15 min old is reclaimed as stale (function crash cover) — the claim query treats it as queued: add `or (status='running' and locked_at < now() - interval '15 minutes')` to the claim WHERE.
+The real migration fully qualifies every identifier; the excerpt is illustrative. The claim checks `business_settings.ai_survey_enabled` before changing any row. V1 claims one job at a time; after completion the route may claim another only when at least 120 seconds of its 800-second budget remains. Each running worker heartbeats its lease. An expired lease is reclaimable, but the attempt key and transactional completion RPC make overlapping late completion harmless.
+
+Retry semantics (drainer code): on failure increment attempts atomically; when the new count reaches `max_attempts`, set `dead` + one ops alert (`sendOpsAlert` from `lib/comms/dispatch`); otherwise queue with `next_run_at = now() + interval '30s' * 4^(attempts-1)` (30s/2m/8m). Budget/kill-switch blocks use `blocked`, not retry attempts; they can be requeued after a cap raise or re-enable.
+
+Room aggregation never waits forever on a dead clip. When no active job remains: all non-ignored media processed → `ready`; at least one processed plus at least one failed/dead → `needs_attention`; no processed media → `failed`. From `needs_attention/failed`, the estimator can Retry, **Discard failed clip** (media → `ignored`, activity logged), or **Finish room manually**. Manual finish requires no live jobs and every failed clip acknowledged/ignored; it marks the room confirmed with `completion_method='manual'`, resets manifest attestation for reconfirmation, and forces at least 20% contingency in a mixed AI survey. Abandoning AI for the whole survey returns to normal manual 0% behaviour.
 
 ### 4.6 `ai_spend_months` — budget ledger
 
 ```sql
 create table ai_spend_months (
   month date primary key,                    -- first of month
-  spent_usd numeric(10,4) not null default 0
+  reserved_usd numeric(10,4) not null default 0,
+  spent_usd numeric(10,4) not null default 0,
+  alerted_at timestamptz
 );
 
-create or replace function reserve_ai_spend(p_month date, p_est numeric, p_cap numeric)
-returns boolean language sql security definer as $$
-  insert into ai_spend_months (month, spent_usd) values (p_month, p_est)
-  on conflict (month) do update
-    set spent_usd = ai_spend_months.spent_usd + excluded.spent_usd
-    where ai_spend_months.spent_usd + excluded.spent_usd <= p_cap
-  returning true;
-$$;
+create table ai_spend_reservations (
+  id uuid primary key default gen_random_uuid(),
+  survey_id uuid not null references cubic_surveys(id) on delete cascade,
+  job_id uuid not null references ai_jobs(id) on delete cascade,
+  attempt_key text not null unique,
+  month date not null,
+  estimated_usd numeric(10,4) not null,
+  actual_usd numeric(10,4),
+  status text not null default 'reserved'
+    check (status in ('reserved','finalised','released')),
+  created_at timestamptz not null default now(),
+  finalised_at timestamptz
+);
 ```
 
-Returns null row (falsy) when the cap would be exceeded → the job parks as `failed` with error `budget_monthly_cap` (retryable next month or after a cap raise; never `dead`-alerts more than once — see §8). After each run, reconcile: `spent_usd += (actual − estimate)`. Per-survey cap enforced in code: `sum(cost_usd) over the survey's runs + estimate ≤ cap`.
+`reserve_ai_call(survey, job, attempt_key, estimate)` is one SECURITY DEFINER RPC. It locks the month and survey reservation set, reads both caps from `business_settings` internally (the caller cannot supply a cap), checks `spent + reserved` for the month and survey, inserts exactly one reservation, and increments `reserved_usd`. `finalise_ai_call(attempt_key, actual)` and `release_ai_call(attempt_key)` are idempotent RPCs that atomically move the reservation once. A crash leaves a visible reservation that a stale-reservation sweeper releases only when no live job/run owns it. Every RPC has `set search_path = ''`, fully qualified identifiers, `PUBLIC/anon/authenticated` revoked, and execute granted only to `service_role`.
 
 ### 4.7 `cubic_surveys` — additive columns
 
 ```sql
 alter table cubic_surveys
   add column contingency_pct int not null default 0 check (contingency_pct in (0,10,20,30)),
-  add column ai_consent jsonb,               -- {"byProfileId":…,"at":…,"acks":["filming","audio","personal-items","manual-alternative"]}
-  add column legal_hold boolean not null default false;
+  add column ai_consent jsonb,               -- textVersion + explicit customer agreement + witness + timestamp
+  add column legal_hold boolean not null default false,
+  add column ai_status text not null default 'not_started'
+    check (ai_status in ('not_started','active','ready','complete','abandoned','failed')),
+  add column planning_ready boolean not null default false,
+  add column room_manifest_complete boolean not null default false,
+  add column ai_abandoned_at timestamptz,
+  add column ai_consent_withdrawn_at timestamptz,
+  add column ai_consent_withdrawn_by uuid references profiles(id),
+  add column last_ai_user_activity_at timestamptz,
+  add column media_retention_anchor_at timestamptz;
 ```
+
+An `AFTER UPDATE OF status` lead trigger snapshots `media_retention_anchor_at = now()` on the related survey when a lead enters `completed` or `declined`, and clears it if the lead is explicitly reopened before deletion. This is the retention clock; mutable lead `updated_at` is never used.
 
 ### 4.8 `CubicLine` — additive fields (in `lib/cubic-survey.ts`, not SQL)
 
 ```ts
 interface CubicLine {
   // …existing: key, title, category, qty, unitFt3, flags?, note?
+  id: string;       // immutable line identity; key is catalogue identity, not UI identity
   room?: string;    // display label, ≤60 chars — grouping only, no FK
   source?: "ai" | "manual";  // absent = manual (all pre-existing lines)
+  aiDetectionIds?: string[];   // provenance + merge idempotency, server-validated
 }
 ```
 
-`sanitizeCubicLines` extends to validate/strip these (unknown fields still stripped; bad `room`/`source` → strip the field, not the line). **Zero behaviour change for existing surveys, the manual builder, `/cv`, crew views, and all 200 existing tests.**
+Migration 0031 backfills IDs into every existing canonical line. `sanitizeCubicLines` also assigns a new UUID when it receives a legitimate legacy/customer local draft without one, then returns/persists the normalised line. The builder's edit/step/delete keys change from catalogue `key` to line `id`, allowing the same catalogue item in different rooms. Unknown fields remain stripped; bad `room`/`source`/provenance strips that optional field, not the line. Behaviour remains unchanged for manual surveys, `/cv`, crew views and downstream totals; relevant tests are extended for identity.
 
 ### 4.9 Settings — `business_settings` additive columns (house pattern: column-per-setting singleton)
 
@@ -304,18 +372,18 @@ alter table business_settings
   add column ai_monthly_alert_gbp numeric(8,2) not null default 40;
 ```
 
-Wire through `lib/settings.ts` (interface + `DEFAULT_SETTINGS` + select string + mapper) per the existing pattern. GBP→USD for the ledger uses a conservative code constant `USD_PER_GBP = 1.40` in `lib/ai/budget.ts` (caps are circuit breakers, not accounting — precision is not the point).
+Wire through `lib/settings.ts` (interface + `DEFAULT_SETTINGS` + select string + mapper) per the existing pattern. Model settings render as a server-validated allow-list containing only the two approved IDs, not arbitrary text inputs. GBP→USD for the ledger uses a conservative code constant `USD_PER_GBP = 1.40` in `lib/ai/budget.ts` (caps are circuit breakers, not accounting — precision is not the point).
 
 ### 4.10 Storage bucket
 
 ```sql
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('survey-media', 'survey-media', false, 524288000);  -- 500 MB
--- RLS on storage.objects for this bucket: insert/select is_staff(), delete is_admin()
--- (mirror the survey-photos policies in 0001_init.sql:328)
+-- RLS on storage.objects for this bucket: select is_office(); insert is_office()
+-- AND exact path belongs to a pre-registered uploading media row owned by auth.uid(); delete is_admin()
 ```
 
-Paths: videos `survey-media/<surveyId>/<roomId|imports>/<uuid>.<ext>`; frames `survey-media/<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Server actions validate every client-reported path against the survey's folder prefix (same discipline as `app/actions/job-notes.ts`).
+Bucket-relative paths: source `<surveyId>/<mediaId>/source.<ext>`; frames `<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Server actions validate exact paths against the registered media record; the finaliser uses Storage `info()` for exact object metadata, not a folder `list()`. AI tables use `is_office()` read/write and `is_admin()` delete. All new SECURITY DEFINER routines fix `search_path`, fully qualify identifiers, revoke `PUBLIC/anon/authenticated`, and grant only `service_role`.
 
 **Ops prerequisite (Phase 0, before the bucket is usable for >50 MB):** raise the global cap on vps1 — `/opt/rbs/supabase/.env` → `FILE_SIZE_LIMIT=524288000`, recreate the `supabase-storage` container. Verified: TUS endpoint already live through Caddy→Kong with no proxy body limits; this env var is the only blocker.
 
@@ -330,30 +398,39 @@ Paths: videos `survey-media/<surveyId>/<roomId|imports>/<uuid>.<ext>`; frames `s
 | Guided room clip | ≤2 min, 720p @ ~3 Mbps → ~45 MB (soft-warn at 1:45, hard stop at 2:00) |
 | Imported video | ≤500 MB/file; mp4, mov, webm |
 | Photos | ≤15 MB each, ≤40 estimator photos/survey; HEIC converted client-side where supported |
-| Per survey | ≤20 videos, ≤20 min total video |
-| Evidence frames | 1 per 2 s, ≤40/room, JPEG ≤300 KB, ≤1280 px |
+| Per survey | ≤20 videos, ≤20 min total video, **≤2 GB total source media** |
+| Evidence frames | sample across the entire clip at `max(2 s, duration/40)`, ≤40/room, JPEG ≤300 KB, ≤1280 px |
+
+Admission is checked against server-verified object bytes, not the client report. New AI uploads fail open to manual when the survey has reached 2 GB, live `survey-media` exceeds 25 GB, or the latest health probe reports less than 10 GB disk free. Operations receives an alert; no existing media is deleted to make room.
 
 ### 5.2 Job flow — `process_media`
 
 Enqueued by `finalizeMediaUploadAction`; drained by `/api/cron/ai-jobs`.
 
-1. **Budget gate.** Estimate cost from `duration_s` (default-res: `duration × 300 tok/s × model input price` + 3k output tokens). Check per-survey cap (sum of `cubic_analysis_runs.cost_usd` + estimate), then `reserve_ai_spend()` for the month. Blocked → job `failed` with `budget_*` error; room shows "AI paused (budget)" and stays manually editable.
+1. **Budget gate.** Estimate cost from `duration_s` (default-res: `duration × 300 tok/s × model input price` + 3k output tokens). Call atomic `reserve_ai_call()` using the attempt key; it enforces both per-survey and monthly caps including live reservations. Blocked → job `blocked` with `budget_*`; room shows "AI paused (budget)" and stays manually editable.
 2. **Ship to Gemini.** Stream the object from Supabase Storage (admin client) to the **Files API** via resumable upload — whole-file for ≤100 MB, 16 MB ranged chunks above. Poll until file state `ACTIVE` (timeout 120 s). Store the `files/…` URI in the job payload (48 h validity ≫ job lifetime).
 3. **Analyse.** `generateText({ model, output: Output.object({ schema: detectionSchema }), messages: [system: PROMPT vN, user: [filePart(fileUri), text(roomContext)]] })`. Room context includes: room name/type, the estimator's hidden-storage answer, and — critically — the **catalogue allow-list** (all 219 keys+titles, ~5k tokens; cache-friendly static prefix).
-4. **Validate (server-owned, `lib/ai/validate.ts` — pure, tested).** Reject/repair per §5.4. Write one `cubic_analysis_runs` row (tokens + actual cost, reconcile ledger) and the surviving `cubic_ai_detections`.
+4. **Validate (server-owned, `lib/ai/validate.ts` — pure, tested).** Reject/repair per §5.4. The run row is created before the provider call with the same attempt key. A transactional completion RPC inserts the surviving detections, persists media coverage/quality, aggregates room assessment, finalises actual spend once, advances media/job/room state and records provider-file cleanup. It first rechecks consent: after withdrawal, output is discarded and media/provider copies move to deletion. Retrying the same attempt is a no-op.
 5. **Escalate if warranted (once).** If mean confidence <0.55, or zod salvage was required, or 0 detections on a clip >20 s: re-run with `ai_model_escalation` (new run row, purpose `escalation`); keep whichever run yields more validated detections (ties → higher mean confidence); mark the loser's detections `rejected` with `review_reason: 'superseded-by-escalation'`.
 6. **Room status.** When all the room's media are `processed` → room `ready`; notify nothing (the builder UI polls/refreshes — see §6.5).
 
-`reconcile_survey` (enqueued when the last outstanding media job of a survey finishes): runs the deterministic cross-clip dedup (§5.5) and computes quality warnings. No model call in V1.
+`reconcile_survey` (enqueued once, by unique idempotency key, when the last outstanding media job of a survey finishes): groups possible cross-clip duplicates (§5.5), computes normalised quality flags and updates readiness. No model call in V1.
 
-### 5.3 Model output contract — `detectionSchema` (zod, `lib/ai/survey-schema.ts`)
+### 5.3 Model output contracts (zod, `lib/ai/survey-schema.ts`)
 
 ```ts
-const detectionSchema = z.object({
+const qualityFlagSchema = z.enum([
+  "dark", "fast_pan", "blurred", "cluttered_moderate", "cluttered_heavy",
+  "occluded", "incomplete_view", "other"
+]);
+
+const videoDetectionSchema = z.object({
   roomAssessment: z.object({
     coverage: z.enum(["good", "partial", "poor"]),
-    warnings: z.array(z.string().max(120)).max(6),        // "very cluttered", "dark"
+    qualityFlags: z.array(qualityFlagSchema).max(6),
+    warningNotes: z.array(z.string().max(120)).max(6),
     proposedRooms: z.array(z.object({                      // whole-property imports only
+      ref: z.string().min(1).max(40),
       name: z.string().max(60),
       startS: z.number().min(0), endS: z.number().min(0),
     })).max(20).optional(),
@@ -369,12 +446,21 @@ const detectionSchema = z.object({
     dismantleLikely: z.boolean(),
     fragileLikely: z.boolean(),
     timestampsS: z.array(z.number().min(0)).min(1).max(5), // where it's visible
+    segmentRef: z.string().min(1).max(40).optional(),      // required for whole-property imports
     narrationNote: z.string().max(200).optional(),         // "'the piano stays' at 01:12"
   }).max(120)),
 });
+
+const photoDetectionSchema = z.object({
+  roomAssessment: videoDetectionSchema.shape.roomAssessment.omit({ proposedRooms: true }),
+  items: z.array(videoDetectionSchema.shape.items.element.omit({ timestampsS: true, segmentRef: true }).extend({
+    photoIndex: z.number().int().min(0),
+    box2d: z.tuple([z.number(), z.number(), z.number(), z.number()]).optional(),
+  })).max(120),
+});
 ```
 
-The prompt (versioned `PROMPT_VERSION` in `lib/ai/prompts.ts`) instructs: itemise furniture/effects room by room; match ONLY against the provided catalogue keys; never estimate sizes or volumes; treat narration as authoritative for moving/staying and hidden contents ("two boxes inside" → add `bedrooms:box-large` ×2 with the narration note); do not report fixtures (fitted kitchens, radiators, carpets); one entry per distinct item type per room with qty.
+The exact zod composition may be adjusted to AI SDK v7's supported JSON-Schema subset during the spike, but the persisted contracts above are mandatory. A room video inherits its registered `room_id`. A whole-property video must return non-overlapping proposed segments and every item must name a valid `segmentRef`. A photo result references `photoIndex`, never a fabricated timestamp. The prompt (versioned `PROMPT_VERSION` in `lib/ai/prompts.ts`) instructs: itemise furniture/effects room by room; match ONLY against the provided catalogue keys; never estimate sizes or volumes; treat narration as authoritative for moving/staying and hidden contents ("two boxes inside" → add the closest approved box key ×2 with the narration note); do not report fixtures (fitted kitchens, radiators, carpets); one entry per distinct item type per room with qty.
 
 ### 5.4 Server validation rules (the model is never trusted)
 
@@ -382,34 +468,37 @@ The prompt (versioned `PROMPT_VERSION` in `lib/ai/prompts.ts`) instructs: itemis
 - Volume fields anywhere in output → discarded (schema has none; any smuggled numbers in strings are ignored — volume only ever comes from `catalogueItem(key).ft3`).
 - `qty` clamped to 1–50 (a detection wanting more is suspicious → review exception).
 - Timestamps clamped to `[0, duration_s]`.
+- Whole-property `segmentRef` must map to exactly one persisted, non-overlapping segment containing the evidence timestamp; otherwise the item is a blocking unmatched-room exception.
+- Photo evidence validates `photoIndex` against the submitted image list; no timestamp is generated for a still image.
+- Free-text warning notes are display-only. Contingency uses only validated `coverage` and `qualityFlags` enums.
 - Top candidate ≥0.8 confidence AND qty ≤5 AND moving ≠ uncertain → auto-acceptable (no `review_reason`, included in bulk room-accept). Everything else gets a `review_reason`: `low-confidence` / `no-catalogue-match` / `uncertain-moving` / `high-qty` / `big-item` (any candidate ≥80 ft³ never auto-accepts — a wrong wardrobe costs a van).
 - Malformed output (zod fail after one salvage attempt: strip unknown keys, coerce numerics) → run `failed`, normal retry path (fresh generation usually differs).
 
 ### 5.5 Deduplication (deterministic, no model calls)
 
-- **Within room, across clips/runs:** same `catalogue_key` + same room from different media → merge into one detection with `qty = max(quantities)` (not sum — re-filming shows the same items), `review_reason: 'seen-in-multiple-clips'` if quantities disagreed.
+- **Within one model result:** repeated entries with the same catalogue key collapse to one detection only when their evidence points to the same timestamp/segment; otherwise they remain separate.
+- **Within room, across different media:** same `catalogue_key` becomes a duplicate group with `review_reason: 'seen-in-multiple-clips'`. The UI proposes `max(quantities)` but the estimator must choose same items (`max`), different items (`sum`) or a corrected quantity. It is never bulk-accepted. This avoids silently undercounting two clips that cover opposite sides of a room.
 - **Across rooms:** never auto-merged (two wardrobes in two bedrooms is reality, not duplication).
 - **Against existing manual lines:** if canonical `items` already has the same `catalogue_key` with `room` equal to this room's name, the confirm-merge step flags it ("Bedroom 2 already has Wardrobe ×1 — add anyway / increase qty / skip") rather than silently double-adding.
 
 ### 5.6 Contingency (deterministic, explainable — `lib/ai/contingency.ts`, pure + tested)
 
-- **10%** — every room `confirmed`, all coverage `good`, no unresolved detections, hidden-storage checked in every room.
-- **20%** — all rooms confirmed but any: coverage `partial`, whole-property import used, hidden storage unchecked somewhere, or >10% of detections were manually corrected.
-- **30%** — any coverage `poor` that was still accepted, or heavy clutter warnings — all exceptions must still be resolved.
-- **No van recommendation (fail closed)** — any declared room not confirmed, or any unresolved unmatched/big-item exception.
+- **10%** — `room_manifest_complete = true`, every declared room `confirmed`, all coverage `good`, no unresolved detections, hidden-storage checked in every room.
+- **20%** — all rooms confirmed but any: coverage `partial`, `cluttered_moderate`, whole-property import used, a room completed manually inside an otherwise AI survey, hidden storage unchecked somewhere, or >10% of detections were manually corrected.
+- **30%** — any accepted coverage `poor` or `cluttered_heavy` flag — all exceptions must still be resolved.
+- **No van recommendation (fail closed)** — the estimator has not attested that all relevant rooms are declared, any declared room is not confirmed, or any unresolved unmatched/big-item/duplicate exception remains.
 
-Written to `cubic_surveys.contingency_pct` at confirm time; recomputed on every subsequent confirm. **Planning volume = `total_ft3 × (1 + contingency_pct/100)`** feeds `recommendVans()` on the quote page, Step-3 hint, and the survey card (display: "Raw 850 ft³ · Planning 935 ft³ (+10%)"). Manual-only surveys keep `contingency_pct = 0` — identical behaviour to today. The crew/job-sheet volume line keeps showing **raw** (what's physically loaded), unchanged. Note: `cubicFillPct` (90%) already discounts van capacity for loading efficiency — that is a *van-side* margin and stacks intentionally with the *inventory-side* contingency; the two answer different questions and both being visible is a feature (iMVE hides both).
+Written to `cubic_surveys.contingency_pct` and `planning_ready` in the transactional confirm/readiness RPC; recomputed after every relevant correction. **Planning volume = `total_ft3 × (1 + contingency_pct/100)`** feeds `recommendVans()` only when `planning_ready = true`. While AI is active but incomplete, quote/survey surfaces show provisional raw/planning volume with "Complete AI review for vehicle guidance" and no recommendation/pre-select. Manual-only (`ai_status = not_started`) and explicitly abandoned AI surveys keep `contingency_pct = 0` and today's raw-volume recommendation. The crew/job-sheet volume line keeps showing **raw** (what's physically loaded), unchanged. Note: `cubicFillPct` (90%) already discounts van capacity for loading efficiency — that is a *van-side* margin and stacks intentionally with the *inventory-side* contingency; the two answer different questions and both being visible is a feature (iMVE hides both).
 
 ### 5.7 Confirm-merge (the only path into canonical items)
 
-`confirmAiItemsAction(surveyId, roomId, baseUpdatedAt)`:
+`confirmAiItemsAction(surveyId, roomId, baseUpdatedAt)` validates the request then calls service-only transactional `confirm_ai_room(...)`:
 1. Load detections for the room in state `accepted`/`edited` (bulk room-accept first promotes all no-`review_reason` `proposed` rows).
 2. Build `CubicLine[]`: `key = catalogue_key` (or `custom:<uuid>` + estimator-supplied `unitFt3` for mapped-to-custom items), `qty`, `flags` from resolution, `room = room.name`, `source = 'ai'`, `note = narrationNote`.
 3. Run the §5.5 against-manual check; apply the estimator's choices.
-4. Merge into `items` through the same optimistic-concurrency UPDATE shape as `saveCubicSurveyAction` (`.eq("updated_at", baseUpdatedAt)`; conflict → the existing reload banner, nothing written).
-5. Mark merged detections `merged`, room `confirmed`, recompute `contingency_pct`, insert an `activities` row ("AI survey: Bedroom 2 confirmed — 14 items, 212 ft³"), `revalidatePath` the lead + quote pages.
+4. The RPC locks the survey and room, compares `updated_at = baseUpdatedAt`, and in one transaction merges canonical items, marks detections `merged`, confirms the room, recomputes `contingency_pct/planning_ready`, and inserts the activity. A conflict or any error rolls back everything. The action then `revalidatePath`s lead + quote pages.
 
-Idempotent by construction: `merged` detections are excluded from any later merge; re-running with a stale token writes nothing.
+Idempotent by construction: stable line IDs + `aiDetectionIds` prevent a detection appearing twice, `merged` detections are excluded, and re-running with a stale token writes nothing. Room rename/delete is blocked after any detection has merged unless an admin transaction also updates every canonical line carrying that room label.
 
 ---
 
@@ -423,14 +512,18 @@ When `ai_survey_enabled`:
 - Header gains two buttons: **"AI room scan"** (primary, camera icon) and **"Import video"** (secondary). Manual search-first builder below is byte-for-byte unchanged.
 - Once rooms exist, a **Rooms strip** renders between header and builder: one chip per room — name + status ("Recording", "Uploading 64%", "Analysing…", "**Ready to review · 14 items**", "Confirmed ✓ 212 ft³", "Failed — retry"). Tap a `ready` chip → review workspace. `+ Room` chip at the end.
 - Lines merged from AI show a small "AI" badge and carry their room label; a **"Group by room"** toggle appears on the line list when any line has a `room` (default stays the current category grouping — zero change for manual-only users).
-- First AI action per survey opens the **consent sheet** (§9) — four checkboxes, stored to `cubic_surveys.ai_consent`, never asked again for that survey.
+- First AI action per survey opens the **consent sheet** (§9), records the consent text version and the estimator's witness of the customer's explicit agreement, and stores it to `cubic_surveys.ai_consent`.
+- A property-level **"All rooms with moving contents are listed"** attestation controls `room_manifest_complete`. It appears after at least one room exists and must be re-confirmed after adding/deleting/merging a room.
+- **"Stop using AI for this survey"** abandons queued/unconfirmed AI work and returns to today's manual behaviour. Confirmed AI lines remain normal editable canonical lines with provenance; raw-volume vehicle guidance resumes with `contingency_pct = 0`. It never deletes confirmed inventory.
+- **"Customer withdrew agreement"** is distinct from ordinary abandonment: prevent new AI calls, cancel queued jobs, make in-flight output discard-only, request best-effort Gemini Files deletion, and queue all unheld source/frame media for deletion. Confirmed canonical inventory is retained or removed only through Marley's documented rights-request decision, never silently by this action.
 
 ### 6.2 Capture — `/leads/[id]/cubic/scan` (one route: record → review clip → upload, so the camera stream never crosses a navigation)
 
 - **Room picker sheet** (on entry and after each room): existing rooms with status, or "New room" — name field pre-suggested from presets (Living room, Kitchen, Bedroom N auto-increments, Garage, Loft, Shed…), optional floor. One toggle: "Wardrobes/cupboards opened on camera or narrated?" (feeds hidden-storage + contingency).
 - **Camera view:** full-screen rear camera, big red record button, timer with 2:00 cap (amber at 1:45), mute toggle (audio ON by default — narration is a first-class input: *"the piano stays"*, *"two boxes in this wardrobe"*), static coverage hints ("pan slowly · open wardrobes · narrate what stays"). **No fake live detections** — a subtle Marley-red scan-line animation communicates "recording for analysis", honestly.
-- **On stop:** inline replay + **Use clip** / **Retake**. "Use clip" → frame extraction (~2 s, progress ring) → TUS upload with real progress + pause/resume; upload continues while the estimator moves to the next room (uploads are per-room and independent). Leaving with unsent media → confirm dialog (house `sheet-dismiss-confirm` pattern).
-- Failure honesty: upload failed → chip shows "Upload failed — tap to resume" (tus resumes from the last 6 MB chunk, even after tab close).
+- **On stop:** inline replay + **Use clip** / **Retake**. "Use clip" → frame extraction (~2 s, progress ring) → TUS upload with real progress + pause/resume; upload continues while the estimator moves to the next room inside the same mounted scan flow (uploads are per-room and independent). Leaving with unsent media → confirm dialog (house `sheet-dismiss-confirm` pattern): **"Keep this page open until the upload finishes. If you close it now, you may need to record this room again."**
+- Failure honesty: upload failed → chip shows "Upload failed — tap to resume" while the original Blob/File is still available. Imported files can resume after re-selection. A recorded clip lost through tab/browser termination must be retaken; V1 does not claim otherwise.
+- Analysis failure chips offer **Retry**, **Discard failed clip**, and **Finish room manually** where valid. A processed sibling clip is never held indefinitely by a dead clip.
 
 ### 6.3 Import — dialog on the builder
 
@@ -444,7 +537,7 @@ Two-pane on tablet landscape (stacked portrait):
   - **Needs attention (n)** — only detections with a `review_reason`, worst first. Card: label → matched item + ft³ (from catalogue), candidate picker (the ≤3 candidates + catalogue search + "custom item"), qty stepper, Moving/Staying toggle, dismantle/fragile chips, reason line ("Low confidence" / "No catalogue match" / "'staying' heard at 01:12"). Buttons: **Accept / Reject**. 44px everything.
   - **By room** — every detection grouped; high-confidence ones pre-ticked; **"Accept room (12)"** bulk button per room.
   - **All items** — flat list with search.
-- **Sticky bottom bar:** `Raw 850 ft³ · +10% contingency · Planning 935 ft³ · 2 Lutons` (updates live as detections resolve) + **"Confirm room"** → merge (§5.7) → next unconfirmed room, or back to the builder when none remain. Unresolved exceptions in the room → button disabled with count ("Resolve 3 items first") — the fail-closed gate made visible.
+- **Sticky bottom bar:** raw/planning totals update live. While incomplete it reads `Provisional raw 850 ft³ · Complete all rooms for vehicle guidance` and shows no van. Only when `planning_ready` is true does it show `Raw 850 ft³ · +10% contingency · Planning 935 ft³ · 2 Lutons`. **"Confirm room"** → atomic merge (§5.7) → next unconfirmed room, or back to the builder when none remain. Unresolved exceptions in the room → button disabled with count ("Resolve 3 items first") — the fail-closed gate made visible.
 
 ### 6.5 Progress & freshness
 
@@ -452,7 +545,7 @@ No websockets. The builder/review pages poll a light `getAiSurveyStateAction(sur
 
 ### 6.6 Settings → new "AI Survey" card (`is_office`)
 
-Enable switch (kill switch), model default + escalation (text inputs), per-survey & monthly caps (£), this-month spend + last-6-months mini-table (from `ai_spend_months` + run ledger), failed/dead jobs count with retry buttons, retention stats (media count/GB live, next sweep), vps1 storage disk note. Integration health page gains an **AI (Gemini)** row: models-endpoint ping + month spend + dead-job count.
+Enable switch (kill switch), model default + escalation (server-validated selects restricted to the two approved model IDs), per-survey & monthly caps (£), this-month spent/reserved + last-6-months mini-table, failed/dead/blocked jobs with retry/requeue controls, retention stats (media count/GB live, next sweep), and vps1 storage disk note. Integration health gains an **AI (Gemini)** row: models-endpoint ping + month spend/reservations + dead-job count.
 
 ### 6.7 Explicitly unchanged
 
@@ -466,25 +559,31 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 
 | Action | Signature (input → ok payload) | Notes |
 |---|---|---|
-| `saveAiConsentAction` | `(surveyId, acks: string[])` → `{}` | writes `ai_consent` once |
+| `saveAiConsentAction` | `(surveyId, { textVersion, customerAgreed, agreementMethod, acks })` → `{}` | requires explicit agreement; server writes witness profile + timestamp once |
 | `createRoomAction` | `(surveyId, { name, roomType?, floor?, hiddenStorageChecked })` → `{ roomId }` | |
 | `updateRoomAction` | `(roomId, patch)` → `{}` | rename / hidden-storage / sort |
 | `deleteRoomAction` | `(roomId)` → `{}` | blocked if room has `merged` detections |
+| `setRoomManifestCompleteAction` | `(surveyId, complete: boolean)` → `{}` | estimator attests all relevant rooms are declared; room structure changes reset it |
+| `assignSegmentAction` | `(segmentId, { roomId?, newRoom?, action: 'assign'\|'merge'\|'reject' })` → `{ roomId? }` | whole-property proposed-room review; service transaction |
 | `registerMediaAction` | `(surveyId, { roomId?, kind, mime, bytes, durationS? })` → `{ mediaId, storagePath }` | validates caps (§5.1) + mime allow-list; path is server-generated |
-| `finalizeMediaUploadAction` | `(mediaId, { frames: {t,path}[] })` → `{}` | verifies object exists (admin `list`), validates frame paths against the media's folder, media → `uploaded`, enqueues `process_media`, **kicks the drainer** via `after(() => fetch(APP_URL + '/api/cron/ai-jobs', { headers: { Authorization: Bearer SYNC_CRON_SECRET } }))` — fire-and-forget; the cron is the safety net |
-| `resolveDetectionAction` | `(detectionId, { state: 'accepted'\|'edited'\|'rejected', resolution? })` → `{}` | `edited` requires resolution |
+| `finalizeMediaUploadAction` | `(mediaId, { frames: {t,path}[] })` → `{}` | reads exact source/frame metadata via Storage `info()`, validates duration/media signatures and aggregate caps, then calls idempotent `finalize_ai_media` to set uploaded+enqueue exactly one job; **kicks the drainer** via `after(() => fetch(APP_URL + '/api/cron/ai-jobs', { headers: { Authorization: Bearer SYNC_CRON_SECRET } }))`; cron is the safety net |
+| `resolveDetectionAction` | `(detectionId, { state: 'accepted'\|'edited'\|'rejected', resolution? })` → `{}` | edited catalogue: `{catalogueKey,qty,moving,flags}`; custom: `{title,category,unitFt3,qty,moving,flags}`; all fields server-clamped and `moving:'staying'` maps to `flags.notMoving=true` |
 | `acceptRoomDetectionsAction` | `(roomId)` → `{ accepted: n }` | promotes all no-reason `proposed` |
 | `confirmAiItemsAction` | `(surveyId, roomId, baseUpdatedAt, conflicts?: {detectionId, choice}[])` → `{ totalFt3, contingencyPct, updatedAt } \| { conflict: true } \| { needsChoices: […] }` | §5.7 |
-| `retryAiJobAction` | `(jobId)` → `{}` | `failed`/`dead` → `queued`, attempts reset |
+| `abandonAiSurveyAction` | `(surveyId)` → `{}` | blocks/cancels unstarted AI jobs, marks AI abandoned, keeps any confirmed canonical lines, restores manual raw-planning behaviour |
+| `ignoreFailedMediaAction` | `(mediaId)` → `{}` | only failed/dead media with no live worker; media → ignored, room assessment recomputed, activity logged |
+| `completeRoomManuallyAction` | `(surveyId, roomId, baseUpdatedAt)` → `{ updatedAt } \| { conflict: true }` | requires failed media acknowledged + no unresolved detections; confirms room manually and recomputes readiness/contingency atomically |
+| `withdrawAiConsentAction` | `(surveyId)` → `{}` | writes withdrawal actor/time, cancels queued jobs, makes running attempts discard-only, schedules media/provider-file deletion |
+| `retryAiJobAction` | `(jobId)` → `{}` | authorised office user: `failed`/`dead` → queued with attempts reset; `blocked` → queued only after its blocking condition clears |
 | `getAiSurveyStateAction` | `(surveyId)` → rooms + media statuses + counts | the 5 s poll; read-only |
 
 **Routes:**
-- `app/api/cron/ai-jobs/route.ts` — `export const maxDuration = 800`; auth `requireUserOrCronSecret(req)` (house helper — Vercel cron, SYNC_CRON_SECRET kick, or a signed-in office user hitting it in the browser); claims ≤3 jobs via `claim_ai_jobs`, processes sequentially, returns `{ claimed, done, failed }`.
+- `app/api/cron/ai-jobs/route.ts` — `export const maxDuration = 800`; auth `requireUserOrCronSecret(req)` plus an office-role check for interactive callers; claims one job, heartbeats its lease, and claims another only with ≥120 s remaining. Returns `{ claimed, done, failed, blocked }`.
 - `app/api/cron/ai-retention/route.ts` — daily (§9).
 - `vercel.json` — add `{"path": "/api/cron/ai-jobs", "schedule": "*/2 * * * *"}` and `{"path": "/api/cron/ai-retention", "schedule": "30 2 * * *"}`. The 2-min sweep is retry latency only; the kick gives ~instant starts.
 
 **`lib/ai/`** (new — the repo's first LLM code, keep it exemplary):
-`gemini.ts` (AI SDK provider from `GEMINI_API_KEY`, model ids from settings) · `files.ts` (Supabase→Files-API streaming, whole/chunked + ACTIVE poll) · `prompts.ts` (`PROMPT_VERSION`, itemise + segmentation prompts, catalogue allow-list block) · `survey-schema.ts` (zod contracts) · `validate.ts` (§5.4, pure) · `dedup.ts` (§5.5, pure) · `contingency.ts` (§5.6, pure) · `merge.ts` (detections→CubicLine[], pure) · `budget.ts` (estimates, GBP↔USD, reservation calls) · `jobs.ts` (drainer step logic; thin I/O shell around the pure parts).
+`gemini.ts` (AI SDK provider from `GEMINI_API_KEY`, allow-listed model ids from settings) · `files.ts` (Supabase→Files-API streaming, whole/chunked + ACTIVE poll + best-effort explicit delete) · `prompts.ts` (`PROMPT_VERSION`, room-video, whole-property, photo prompts, catalogue allow-list block) · `survey-schema.ts` (separate video/photo contracts) · `validate.ts` (§5.4, pure) · `dedup.ts` (§5.5, pure grouping only) · `contingency.ts` (§5.6, pure) · `merge.ts` (detections→CubicLine[], pure) · `budget.ts` (estimates + atomic reservation calls) · `jobs.ts` (lease/idempotency-aware drainer; thin I/O shell around pure parts).
 
 **Env:** `GEMINI_API_KEY` (server-only; `.env.local` + both Vercel envs from `credentials.env` — never `NEXT_PUBLIC_`).
 
@@ -495,23 +594,23 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 Real cost is ~$0.06/survey (default model) to ~$0.35 (all-escalated) — the caps are **circuit breakers against bugs and abuse**, not budget management:
 
 - Per-survey cap £2 (`ai_survey_cap_gbp`) — checked before every model call against the survey's run ledger. Trip → room "AI paused (survey cap)"; manual always available.
-- Monthly cap £50 (`ai_monthly_cap_gbp`) — atomic `reserve_ai_spend()`; alert at £40 via `sendOpsAlert` (once per month — guard with a `spent≥alert && (spent−actual)<alert` crossing check, no idempotency table needed).
-- Every run records model, tokens, actual USD; ledger reconciles estimate→actual after each call.
+- Monthly cap £50 (`ai_monthly_cap_gbp`) — atomic `reserve_ai_call()` includes spent + live reservations; alert at £40 via `sendOpsAlert` once per month using a persisted alert timestamp/flag on the month row.
+- Every provider call creates one reservation/run attempt before dispatch and records model, tokens and actual USD. Idempotent finalise/release RPCs reconcile each attempt exactly once; a stale-reservation sweep handles crashed workers.
 - Retries, escalation and segmentation all draw from the same reservations — nothing is exempt.
 - Kill switch: `ai_survey_enabled = false` hides all AI UI and makes the drainer park jobs untouched (checked at claim time).
 - Gemini side: key is on paid Tier 1 (Phase 0 confirms billing); Tier-1 $10-per-10-min rolling spend cap is 2 orders of magnitude above our worst case — irrelevant but noted.
 
 ## 9. Privacy, consent, retention (UK GDPR)
 
-- **Consent sheet** before first capture per survey (stored `ai_consent`): customer consents to filming + AI processing · audio explained (mute available) · avoid paperwork/photos/people where practical · manual survey offered as alternative. Estimator confirms on the customer's behalf in person — V1 is estimator-operated by design.
+- **Consent/witness sheet** before first capture per survey (stored `ai_consent`): display the versioned notice; customer explicitly agrees verbally or digitally to filming + AI processing; audio is explained (mute available); avoid paperwork/photos/people where practical; manual survey offered as alternative. The estimator records `customerAgreed=true`, agreement method, text version, timestamp and their own profile ID as witness. The estimator does not manufacture consent on the customer's behalf. The DPIA confirms the final lawful basis before field rollout. A pre-confirmation withdrawal cancels/blocks new processing and schedules uploaded media for deletion; later rights requests follow Marley's documented privacy process.
 - **Processor chain:** footage → Supabase (RBS-controlled, vps1, Germany) → Google Gemini API (paid tier: no training on prompts; UK/EEA no-training treatment contractually; **no residency commitment** — if a future client contract demands EU-resident inference, that's the Vertex AI migration, out of V1 scope). Gemini Files API copies auto-delete at 48 h; we do not rely on that — retention is ours.
 - **DPIA:** complete a short UK GDPR DPIA before field rollout (Phase 6 gate). Privacy-policy line for Marley's site noting AI-assisted video surveys + retention period → flag to Peter at Phase 6 (site change, separate repo).
-- **Retention cron** (daily 02:30): delete `survey-media` objects + rows for surveys whose **lead** hit terminal status (`completed`/`declined`) >30 days ago; drafts untouched >90 days; `legal_hold = true` skips + logs. Deletes via **Storage API admin client** (never SQL — house lesson). Detections/runs/rooms rows are kept (they're the audit trail; tiny); only media + frames are purged. Failures alert ops; the Settings card shows live media GB so the 36 GB vps1 headroom is visible, not hoped-for.
+- **Retention cron** (daily 02:30): delete `survey-media` objects + rows when `media_retention_anchor_at` is >30 days old. An incomplete AI survey is an abandoned draft when `ai_status in ('active','ready','failed','abandoned')` and `last_ai_user_activity_at < now() - 90 days`. `last_ai_user_activity_at` is updated only by authenticated estimator actions that change rooms, consent, media registration/finalisation, resolutions, manifest, confirmation, retry/ignore/manual finish or abandonment; polling and worker retries do not extend it. Consent-withdrawn media is deletion-due immediately. `legal_hold = true` skips + logs. Deletes via **Storage API admin client** (never SQL — house lesson). Detections/runs/rooms rows are kept as the small audit trail; only source media + frames are purged. Failures alert ops; Settings shows live media GB and disk free. Mutable `leads.updated_at` is never used as the terminal clock.
 - **Dedicated-VPS triggers** (Peter has offered an 8 GB box — deliberately deferred): live media >25 GB sustained, or server-side transcode need (odd-codec imports become common). Either trips → move the storage volume / add the box as a media worker. Not V1.
 
 ## 10. Feature flags & rollout
 
-Settings-driven (no deploys to toggle): `ai_survey_enabled` (master, default **false**) · `ai_grounded_replay_enabled` (V1 ships OFF; enable after real-footage frame-alignment checks) · customer AI capture has **no flag** — it does not exist until V2.
+Settings-driven (no deploys to toggle): `ai_survey_enabled` (master, default **false**) · `ai_grounded_replay_enabled` (V1 ships OFF; enable after real-footage frame-alignment checks) · customer AI capture has **no flag** — it does not exist until V2. The grounded image pass, when enabled later, adds `grounding` to run purposes and uses the same reservation/idempotency contract.
 
 Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonline.net contacts only); (2) shadow — Connor/Luke record real surveys AND keep their manual count; we compare, nothing customer-visible changes; (3) gates from §1 hold over 30 field surveys → AI-first becomes the default working style. Rollback at any point = flip `ai_survey_enabled` off; manual survey is untouched throughout; confirmed inventory is never deleted by anything.
 
@@ -520,14 +619,14 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 ## 11. Implementation phases (each ends green: `npx tsc --noEmit` + `npm test` + `npm run build`)
 
 **Phase 0 — Preflight (gates everything; ~half a day)**
-1. Wire `GEMINI_API_KEY` into `.env.local` + Vercel (prod+dev); confirm billing tier in AI Studio.
-2. **Spike** `scripts/ai-spike.mjs`: record 2 real room clips on an actual iPad → Files API upload → `Output.object(detectionSchema)` on both models → confirm: schema honoured with video input, timestamps sane, catalogue matching plausible, cost per run logged. **Fixtures from this spike become test fixtures.** If schema-with-video misbehaves → fall back to JSON-in-prompt + zod salvage (decision recorded in the PRD before Phase 1).
-3. vps1 ops: `FILE_SIZE_LIMIT=524288000` + recreate storage container; verify with a >50 MB TUS upload from a browser session (session JWT, 6 MB chunks).
-4. Worktree + feature branch off latest `master` (house worktree-first rule).
+1. **Before touching any project file:** fetch latest `master`, verify lineage/clean state, create the dedicated worktree + `codex/ai-surveyor-v1` feature branch, and establish the 200-test/typecheck/build/lint baseline inside it.
+2. Link that worktree to the existing Red Banana `marley-ops` Vercel project. `GEMINI_API_KEY` is already in local `.env.local`; add/verify it in Vercel development + production and confirm paid billing tier in AI Studio.
+3. Marley records two representative 30–90 second clips on the actual estimator iPad and places them in worktree-local `.private/ai-survey-spike/` (git-ignored; never committed). **Spike** `scripts/ai-spike.mjs`: Files API upload → `Output.object(videoDetectionSchema)` on both models → confirm schema honoured with video+audio, timestamps sane, catalogue matching plausible and cost logged. Sanitised JSON responses become committed fixtures; raw home video does not. If schema-with-video misbehaves → fall back to JSON-in-prompt + zod salvage and update this PRD before Phase 1.
+4. Only after the AI spike passes: vps1 ops `FILE_SIZE_LIMIT=524288000` + recreate storage container; verify with a >50 MB TUS upload from a browser session (session JWT, 6 MB chunks). Capture before/after service health and rollback instructions.
 
-**Phase 1 — Domain & persistence:** migration 0031 (tables, RPCs, bucket, settings columns, survey columns); `CubicLine.room/source` + `sanitizeCubicLines`; pure engines TDD (`validate`, `dedup`, `contingency`, `merge`, `budget`) with spike fixtures.
+**Phase 1 — Domain & persistence:** migration 0031 (tables, secure transactional RPCs, bucket/path-bound office RLS, settings/survey/retention columns); stable `CubicLine.id` + room/source/provenance + legacy backfill; separate video/photo/segment contracts; pure engines TDD (`validate`, duplicate grouping, contingency, merge, budget) with spike fixtures.
 **Phase 2 — Capture & upload:** `/scan` route (MediaRecorder + frames + tus), import dialog, consent sheet, rooms strip, `registerMedia`/`finalizeMedia` actions.
-**Phase 3 — Pipeline:** `lib/ai/*` I/O halves, drainer + kick, escalation, spend reservation, run ledger, ops alerts.
+**Phase 3 — Pipeline:** `lib/ai/*` I/O halves, one-at-a-time lease/heartbeat drainer + kick, attempt idempotency, escalation, atomic spend reservations, run ledger, ops alerts.
 **Phase 4 — Review & merge:** review workspace, exceptions flow, confirm-merge, planning volume through quote page / Step-3 hint / survey card.
 **Phase 5 — Ops:** Settings AI card, integration-health row, retention cron, retry buttons, disk gauge.
 **Phase 6 — Verification:** full test sweep; prod E2E at tablet viewport (house pattern: real flow end-to-end on prod with Peter's test contacts, then delete all test state); device matrix below; DPIA; shadow rollout starts.
@@ -536,7 +635,9 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 ## 12. Test plan
 
-**Unit (house pattern — pure libs in `tests/lib/ai/`):** validate.test (unknown keys dropped, volume smuggling discarded, auto-accept boundaries incl. big-item ≥80 ft³, qty clamps) · dedup.test (max-not-sum, cross-room never merges, against-manual conflicts) · contingency.test (every band trigger + fail-closed states) · merge.test (CubicLine identity, room/source/note carry, idempotent re-merge excluded `merged`, custom-item path) · budget.test (estimates, GBP→USD, per-survey sum, month-boundary) · schema.test (spike fixtures parse; malformed fixtures fail then salvage where legal) · jobs.test (backoff schedule, stale-lock reclaim boundary, dead-at-max) · frames.test (timestamp→nearest-frame matching). Existing 200 tests untouched and green; `cubic-survey.test.ts` extended for the new optional fields.
+**Unit (house pattern — pure libs in `tests/lib/ai/`):** validate.test (unknown keys dropped, volume smuggling discarded, auto-accept boundaries incl. big-item ≥80 ft³, qty clamps, segment/photo evidence) · dedup.test (cross-media groups require choice, cross-room never merges, against-manual conflicts) · contingency.test (persisted coverage aggregation, moderate/heavy clutter, manual-room floor, manifest/readiness + every fail-closed state) · merge.test (stable line identity, same key in two rooms, provenance, atomic idempotency inputs, custom-item path) · budget.test (estimate, atomic reservation/finalise/release, concurrent survey/month caps, crash recovery) · schema.test (video/photo/segmentation fixtures parse; malformed fixtures fail then salvage where legal) · jobs.test (unique enqueue, lease heartbeat, overlapping stale worker, route time budget, partial/dead media room aggregation, backoff, dead-at-max) · retention.test (terminal anchor, exact user-activity clock, consent withdrawal, legal hold) · frames.test (full-clip sampling + timestamp→nearest-frame matching). Existing 200 tests stay green; `cubic-survey.test.ts` is extended for IDs and optional fields.
+
+**Database/security integration:** execute migration tests against an isolated Supabase database: crew denied all AI tables/media; estimator/admin allowed only intended operations; preregistered-path upload policy; `PUBLIC/anon/authenticated` cannot execute service RPCs; duplicate finalise/enqueue and confirm calls are no-ops; two concurrent confirmations produce one winner/one conflict; concurrent reservations cannot exceed either cap; retention uses the anchored timestamp and respects legal hold.
 
 **E2E (prod, tablet viewport, test data only, then cleaned):**
 1. Record 3 rooms with narration ("sofa stays") → analysed → "stays" item arrives `moving: staying`.
@@ -545,12 +646,19 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 4. Resolve exceptions incl. one unmatched → custom item; confirm room → lines in builder with AI badge + room label; quote Step-3 shows planning-volume van rec.
 5. Bulk "Accept room"; verify big-item was NOT bulk-accepted.
 6. Whole-property import → segmentation proposals → rename/merge → confirm.
-7. Record the same room twice → single merged detections, qty = max.
+7. Record two clips of the same room → same-key detections form a blocking duplicate group; estimator chooses same items (`max`), distinct items (`sum`) or corrected quantity; no silent merge/undercount.
 8. Two tabs: confirm in A, then confirm in B with stale token → conflict banner, no double lines.
 9. Poor footage (dark 10 s clip) → warnings → fail-closed (no van rec) until resolved.
 10. Trip the per-survey cap (temporarily set to £0.01) → "AI paused", manual unaffected; reset.
 11. Kill switch off mid-queue → drainer parks jobs; on → resumes.
 12. Retention dry-run against a synthetic old survey.
+
+13. Try to close during a newly recorded upload → explicit retake warning; close during analysis → return safely to ready state.
+14. Whole-property import → every item references a persisted segment; assign/merge/reject proposals; no unassigned item can confirm.
+15. Photo-only import → evidence uses photo index/optional image box, never a fabricated timestamp.
+16. Crew-role session → all AI routes, tables and footage denied.
+17. One room has one processed clip and one dead clip → `needs_attention`; discard/retry/manual-finish paths all terminate without duplicate inventory.
+18. Withdraw agreement with queued and running work → queued jobs cancel, late output is discarded, media/provider deletion is attempted, legal hold remains authoritative.
 
 **Device matrix (manual):** iPad Safari (the real estimator device) · iPhone Safari · Android Chrome · portrait+landscape · camera/mic permission denied · muted recording · backgrounding mid-record (clip up to that point survives via `dataavailable` fallback).
 
@@ -558,8 +666,8 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 - Server actions: `requireActiveProfile()` gate → zod-parse input → mutate via `createAdminClient()` → return `{ ok: true, … } | { ok: false, error }`. Never trust client-computed totals/paths — recompute/validate server-side (see `saveCubicSurveyAction`).
 - Optimistic concurrency: `.eq("updated_at", baseUpdatedAt)` + `.select().maybeSingle()`; empty result = conflict, surface the reload banner.
-- RLS: new tables get `is_staff()` r/w + `is_admin()` delete; SECURITY DEFINER RPCs revoked from anon/authenticated. Settings behind `is_office()`.
-- Storage: browser uploads direct (anon client + RLS); server validates reported paths against the record's folder; storage deletes via admin Storage API, never SQL; display via `createSignedUrl(path, 3600)`.
+- RLS: AI tables get `is_office()` r/w + `is_admin()` delete. Every SECURITY DEFINER RPC uses a fixed empty `search_path`, fully qualified identifiers, revokes `PUBLIC/anon/authenticated`, and grants only `service_role`. Settings remain behind `is_office()`.
+- Storage: browser uploads direct (session client + RLS) only to a pre-registered `<surveyId>/<mediaId>/…` prefix owned by that office profile; server verifies exact object metadata/paths; storage deletes via admin Storage API, never SQL; display via `createSignedUrl(path, 3600)`.
 - Migrations: numbered `00NN_name.sql`, applied to prod via psql-over-SSH + `notify pgrst, 'reload schema'`.
 - UI: Marley tokens (`mm-red` accents, one per surface), `INPUT_H = h-11`, 44 px touch targets, 16 px inputs, `focus-ring`, pills/chips per existing status badges; user-meaningful mutations insert `activities` rows; `revalidatePath` the affected lead/quote pages.
 - Timestamps in user-facing UK copy; no em-dashes in customer-facing strings; UK English.
