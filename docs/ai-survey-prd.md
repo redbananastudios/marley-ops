@@ -9,7 +9,7 @@
 1. **Gemini only in V1.** Z.AI dropped (its ASR has no timestamps + 30s cap; video token pricing undocumented; JSON mode unofficial on VLMs). Provider stays swappable via the AI SDK abstraction — do not hard-code Gemini types outside `lib/ai/`.
 2. **Import cap 500 MB/file** (not 1 GB). Guided clips cap at 2 minutes / ~50 MB.
 3. **Retention: 30 days after the lead reaches a terminal state** (completed/declined); 90 days for abandoned drafts. Enforced by a daily cron. `legal_hold` blocks deletion.
-4. **Models: default `gemini-3.1-flash-lite`, auto-escalation to `gemini-3.5-flash`** for low-confidence rooms. Both configurable in Settings without deploy.
+4. **Models: default `gemini-3.5-flash`; `gemini-3.1-flash-lite` remains an admin-selectable economy model.** The non-gating transport smoke found that Flash-Lite twice omitted a clearly visible and narrated television while 3.5 Flash found it. Accuracy is worth the ≈$0.29/≈£0.21 per-survey premium. If an admin deliberately selects Flash-Lite, low-confidence/problem rooms auto-escalate to 3.5 Flash. Both IDs remain configurable in Settings without deploy.
 5. **V1 is estimator-only.** The existing manual customer survey at `/cv/[token]` is untouched. Customer AI capture is V2, gated on V1 acceptance criteria.
 6. **Newly recorded clips are not promised to survive tab closure before upload completes.** TUS resumes network interruptions while the source `Blob` still exists, but its URL store does not persist the video bytes. The estimator is warned to keep the page open; closing early may require a retake. IndexedDB blob persistence is deliberately out of V1.
 7. **The Phase 0 spike uses two representative 30–90 second room clips recorded on the real estimator iPad.** Marley supplies them to a private, git-ignored local fixture folder; generic stock footage cannot pass the catalogue-quality gate.
@@ -49,7 +49,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 | `GEMINI_API_KEY` | EXISTS in `credentials.env` and the primary checkout `.env.local` (`AIzaS…`); both required stable models are exposed; Vercel Production configured 2026-07-11; feature Preview awaits a remote branch | Worktree-local spike injects the central credential without committing it; after the feature branch is pushed, add the key only to that branch's Preview environment; confirm paid billing |
 | Gemini video ingestion | Files API: 2 GB/file, 20 GB/project, 48 h retention, resumable upload, **free**; signed HTTPS URLs ≤100 MB also accepted | **Always use Files API** (single code path, no URL leak to third parties); signed-URL direct ingest is an optimisation, not the design |
 | Gemini video tokens | ~300 tok/s default res (258 frame + 32 audio), ~100 tok/s low res; 1 fps sampling | 12-min survey ≈ 216k input tokens |
-| Gemini cost | 3.1 Flash-Lite $0.25/$1.50 per 1M (stable); 3.5 Flash $1.50/$9.00 (stable) | Full survey ≈ **$0.06** default / ≈ $0.35 all-escalated. £2/survey cap = 10–30× margin, keep as circuit breaker |
+| Gemini cost | 3.1 Flash-Lite $0.25/$1.50 per 1M (stable); 3.5 Flash $1.50/$9.00 (stable) | Full survey ≈ **$0.35 default** / ≈ $0.06 economy. £2/survey cap = ≈8× margin at the default model, keep as circuit breaker |
 | Gemini audio | Native audio understanding inside video — narration understood in context | **No ASR stage exists in this design** |
 | Gemini timestamps | MM:SS references documented, ±1 s (1 fps) | Evidence = timestamps; frames matched client-side |
 | Gemini structured output | `responseSchema` supported; non-gating mock-room transport smoke passed 2026-07-11 on both models (video + narration attribution, structured output, sane timestamps, explicit deletion) | Phase 0 MUST still validate catalogue accuracy on the two real estimator iPad clips before any UI work |
@@ -90,7 +90,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
   │    per job: stream clip Supabase→Gemini Files API (chunked, bounded memory)
   │             → poll ACTIVE → generateText(Output.object(schema), fileUri)
   │             → zod-validate → catalogue-validate → write cubic_ai_detections
-  │             → escalation re-run if low confidence → mark room ready
+  │             → escalation re-run only if configured model differs → mark room ready
   ├─ /api/cron/ai-retention (daily media cleanup)
   └─ server actions: rooms, media registration, review resolutions, confirm-merge
                                     │
@@ -203,7 +203,7 @@ create table cubic_analysis_runs (
   id uuid primary key default gen_random_uuid(),
   survey_id uuid not null references cubic_surveys(id) on delete cascade,
   media_id uuid references cubic_survey_media(id) on delete set null,
-  model text not null,                       -- "gemini-3.1-flash-lite"
+  model text not null,                       -- "gemini-3.5-flash"
   prompt_version text not null,              -- from lib/ai/prompts.ts PROMPT_VERSION
   purpose text not null check (purpose in ('itemise','escalation','segmentation','grounding')),
   status text not null default 'running'
@@ -365,7 +365,7 @@ Migration 0031 backfills IDs into every existing canonical line. `sanitizeCubicL
 ```sql
 alter table business_settings
   add column ai_survey_enabled boolean not null default false,        -- master kill switch
-  add column ai_model_default text not null default 'gemini-3.1-flash-lite',
+  add column ai_model_default text not null default 'gemini-3.5-flash',
   add column ai_model_escalation text not null default 'gemini-3.5-flash',
   add column ai_survey_cap_gbp numeric(6,2) not null default 2,
   add column ai_monthly_cap_gbp numeric(8,2) not null default 50,
@@ -411,7 +411,7 @@ Enqueued by `finalizeMediaUploadAction`; drained by `/api/cron/ai-jobs`.
 2. **Ship to Gemini.** Stream the object from Supabase Storage (admin client) to the **Files API** via resumable upload — whole-file for ≤100 MB, 16 MB ranged chunks above. Poll until file state `ACTIVE` (timeout 120 s). Store the `files/…` URI in the job payload (48 h validity ≫ job lifetime).
 3. **Analyse.** `generateText({ model, output: Output.object({ schema: detectionSchema }), messages: [system: PROMPT vN, user: [filePart(fileUri), text(roomContext)]] })`. Room context includes: room name/type, the estimator's hidden-storage answer, and — critically — the **catalogue allow-list** (all 218 keys+titles, ~5k tokens; cache-friendly static prefix).
 4. **Validate (server-owned, `lib/ai/validate.ts` — pure, tested).** Reject/repair per §5.4. The run row is created before the provider call with the same attempt key. A transactional completion RPC inserts the surviving detections, persists media coverage/quality, aggregates room assessment, finalises actual spend once, advances media/job/room state and records provider-file cleanup. It first rechecks consent: after withdrawal, output is discarded and media/provider copies move to deletion. Retrying the same attempt is a no-op.
-5. **Escalate if warranted (once).** If mean confidence <0.55, or zod salvage was required, or 0 detections on a clip >20 s: re-run with `ai_model_escalation` (new run row, purpose `escalation`); keep whichever run yields more validated detections (ties → higher mean confidence); mark the loser's detections `rejected` with `review_reason: 'superseded-by-escalation'`.
+5. **Escalate if warranted and possible (once).** If mean confidence <0.55, zod salvage was required, or there are 0 detections on a clip >20 s, compare the current model with `ai_model_escalation`. Re-run only when the IDs differ (normally an admin-selected Flash-Lite run escalating to 3.5 Flash); otherwise continue to estimator review without a duplicate provider call. An escalation creates a new run row with purpose `escalation`; keep whichever run yields more validated detections (ties → higher mean confidence), and mark the loser's detections `rejected` with `review_reason: 'superseded-by-escalation'`.
 6. **Room status.** When all the room's media are `processed` → room `ready`; notify nothing (the builder UI polls/refreshes — see §6.5).
 
 `reconcile_survey` (enqueued once, by unique idempotency key, when the last outstanding media job of a survey finishes): groups possible cross-clip duplicates (§5.5), computes normalised quality flags and updates readiness. No model call in V1.
@@ -591,7 +591,7 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 
 ## 8. Spend controls
 
-Real cost is ~$0.06/survey (default model) to ~$0.35 (all-escalated) — the caps are **circuit breakers against bugs and abuse**, not budget management:
+Real cost is approximately $0.35/survey on the accuracy-first default model or approximately $0.06 when an admin deliberately selects the economy model. The caps are **circuit breakers against bugs and abuse**, not budget management:
 
 - Per-survey cap £2 (`ai_survey_cap_gbp`) — checked before every model call against the survey's run ledger. Trip → room "AI paused (survey cap)"; manual always available.
 - Monthly cap £50 (`ai_monthly_cap_gbp`) — atomic `reserve_ai_call()` includes spent + live reservations; alert at £40 via `sendOpsAlert` once per month using a persisted alert timestamp/flag on the month row.
