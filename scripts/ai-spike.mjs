@@ -113,7 +113,8 @@ With no paths, the script discovers exactly two video files in:
 Requirements:
   - GEMINI_API_KEY in .env.local or the process environment
   - ffprobe on PATH (used only to validate timestamps)
-  - two representative 30-90 second clips from the real estimator iPad
+  - two real estimator iPad clips; at least one must be 30-90 seconds
+  - an approved small/low-inventory room may be 10-29 seconds
 
 Privacy:
   Raw videos and full responses remain in .private/. Uploaded Gemini Files are
@@ -437,18 +438,30 @@ async function main() {
   if (!apiKey) throw new Error("GEMINI_API_KEY is missing. Add it to .env.local or the process environment.");
 
   const clipPaths = await discoverClips(requestedPaths);
+  const clips = clipPaths.map((clipPath) => ({
+    clipPath,
+    durationMs: readDurationMs(clipPath),
+  }));
+  for (const [clipIndex, clip] of clips.entries()) {
+    if (clip.durationMs < 10_000 || clip.durationMs > 90_000) {
+      throw new Error(
+        `clip-${clipIndex + 1} is ${Math.round(clip.durationMs / 1_000)}s; ` +
+        "Phase 0 clips must be 10-90 seconds.",
+      );
+    }
+  }
+  if (!clips.some((clip) => clip.durationMs >= 30_000)) {
+    throw new Error("At least one Phase 0 clip must be a representative 30-90 second walkthrough.");
+  }
   await mkdir(PRIVATE_RESULTS_DIR, { recursive: true });
   await mkdir(FIXTURE_DIR, { recursive: true });
   console.log(`Gemini credential loaded (${apiKey.slice(0, 5)}...).`);
   console.log(`Catalogue loaded: ${catalogueItems.length} items.`);
 
   const summary = [];
-  for (const [clipIndex, clipPath] of clipPaths.entries()) {
-    const durationMs = readDurationMs(clipPath);
+  for (const [clipIndex, { clipPath, durationMs }] of clips.entries()) {
     const clipId = `clip-${clipIndex + 1}`;
-    if (durationMs < 30_000 || durationMs > 90_000) {
-      throw new Error(`${clipId} is ${Math.round(durationMs / 1_000)}s; Phase 0 clips must be 30-90 seconds.`);
-    }
+    if (durationMs < 30_000) console.log(`${clipId}: approved small-room exception.`);
     console.log(`${clipId}: ${Math.round(durationMs / 1_000)}s; uploading privately...`);
     let file;
     try {

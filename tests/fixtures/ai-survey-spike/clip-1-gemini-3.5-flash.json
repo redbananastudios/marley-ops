@@ -1,0 +1,110 @@
+{
+  "fixtureVersion": 1,
+  "promptVersion": "spike-v1",
+  "source": {
+    "clipId": "clip-1",
+    "durationMs": 13467,
+    "sha256Prefix": "redacted"
+  },
+  "model": "gemini-3.5-flash",
+  "elapsedMs": 6047,
+  "usage": {
+    "inputTokens": 4420,
+    "outputTokens": 1284,
+    "estimatedCostUsd": 0.018186
+  },
+  "checks": {
+    "schemaHonoured": true,
+    "detectionCount": 3,
+    "matchedCount": 3,
+    "catalogueMatchRate": 1,
+    "invalidCandidateCount": 0,
+    "outOfRangeTimestampCount": 0,
+    "timestampsSane": true,
+    "visualEvidenceDetected": true,
+    "audioEvidenceDetected": true,
+    "humanCatalogueReviewRequired": true
+  },
+  "result": {
+    "roomType": "kitchen",
+    "roomConfidence": 1,
+    "audio": {
+      "narrationHeard": true,
+      "movingInstructionsHeard": true,
+      "summaryRedacted": true
+    },
+    "coverage": {
+      "level": "complete",
+      "issues": [
+        "none"
+      ]
+    },
+    "detections": [
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": true,
+        "timestampMs": 2000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "living-space:dining-table-medium",
+            "confidence": 0.9
+          },
+          {
+            "key": "living-space:dining-table-small",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 4,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 2000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "living-space:dining-chairs",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 7000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "kitchen-and-utility:fridge-freezer-american",
+            "confidence": 0.95
+          },
+          {
+            "key": "kitchen-and-utility:fridge-freezer",
+            "confidence": 0.8
+          }
+        ],
+        "evidence": "[redacted]"
+      }
+    ]
+  }
+}

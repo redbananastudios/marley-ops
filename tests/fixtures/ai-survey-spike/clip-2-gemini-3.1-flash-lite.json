@@ -1,0 +1,106 @@
+{
+  "fixtureVersion": 1,
+  "promptVersion": "spike-v1",
+  "source": {
+    "clipId": "clip-2",
+    "durationMs": 45568,
+    "sha256Prefix": "redacted"
+  },
+  "model": "gemini-3.1-flash-lite",
+  "elapsedMs": 3352,
+  "usage": {
+    "inputTokens": 7401,
+    "outputTokens": 564,
+    "estimatedCostUsd": 0.00269625
+  },
+  "checks": {
+    "schemaHonoured": true,
+    "detectionCount": 3,
+    "matchedCount": 3,
+    "catalogueMatchRate": 1,
+    "invalidCandidateCount": 0,
+    "outOfRangeTimestampCount": 0,
+    "timestampsSane": true,
+    "visualEvidenceDetected": true,
+    "audioEvidenceDetected": true,
+    "humanCatalogueReviewRequired": true
+  },
+  "result": {
+    "roomType": "office",
+    "roomConfidence": 1,
+    "audio": {
+      "narrationHeard": true,
+      "movingInstructionsHeard": false,
+      "summaryRedacted": true
+    },
+    "coverage": {
+      "level": "complete",
+      "issues": [
+        "none"
+      ]
+    },
+    "detections": [
+      {
+        "quantity": 1,
+        "moving": "uncertain",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 5000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:storage-unit",
+            "confidence": 0.8
+          },
+          {
+            "key": "living-space:cabinet-small",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "uncertain",
+        "fragile": false,
+        "dismantle": true,
+        "timestampMs": 7000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:office-desk",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "uncertain",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 37000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:filing-cabinet-2-drawers",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      }
+    ]
+  }
+}

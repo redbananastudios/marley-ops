@@ -1,0 +1,102 @@
+{
+  "fixtureVersion": 1,
+  "promptVersion": "spike-v1",
+  "source": {
+    "clipId": "clip-1",
+    "durationMs": 13467,
+    "sha256Prefix": "redacted"
+  },
+  "model": "gemini-3.1-flash-lite",
+  "elapsedMs": 2636,
+  "usage": {
+    "inputTokens": 4420,
+    "outputTokens": 532,
+    "estimatedCostUsd": 0.001903
+  },
+  "checks": {
+    "schemaHonoured": true,
+    "detectionCount": 3,
+    "matchedCount": 3,
+    "catalogueMatchRate": 1,
+    "invalidCandidateCount": 0,
+    "outOfRangeTimestampCount": 0,
+    "timestampsSane": true,
+    "visualEvidenceDetected": true,
+    "audioEvidenceDetected": true,
+    "humanCatalogueReviewRequired": true
+  },
+  "result": {
+    "roomType": "kitchen",
+    "roomConfidence": 1,
+    "audio": {
+      "narrationHeard": true,
+      "movingInstructionsHeard": false,
+      "summaryRedacted": true
+    },
+    "coverage": {
+      "level": "complete",
+      "issues": [
+        "none"
+      ]
+    },
+    "detections": [
+      {
+        "quantity": 1,
+        "moving": "uncertain",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 3000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "living-space:dining-table-medium",
+            "confidence": 0.8
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 2,
+        "moving": "uncertain",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 1000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "living-space:dining-chairs",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "uncertain",
+        "fragile": true,
+        "dismantle": false,
+        "timestampMs": 7000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "kitchen-and-utility:fridge-freezer",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      }
+    ]
+  }
+}
