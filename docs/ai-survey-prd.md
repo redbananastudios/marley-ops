@@ -13,6 +13,7 @@
 5. **V1 is estimator-only.** The existing manual customer survey at `/cv/[token]` is untouched. Customer AI capture is V2, gated on V1 acceptance criteria.
 6. **Newly recorded clips are not promised to survive tab closure before upload completes.** TUS resumes network interruptions while the source `Blob` still exists, but its URL store does not persist the video bytes. The estimator is warned to keep the page open; closing early may require a retake. IndexedDB blob persistence is deliberately out of V1.
 7. **The Phase 0 spike uses two real room clips recorded on the estimator iPad.** At least one must be a representative 30–90 second walkthrough; an owner-approved, genuinely small/low-inventory room may be 10–29 seconds. Marley supplies both to a private, git-ignored local fixture folder; generic stock footage cannot pass the catalogue-quality gate.
+8. **The AI stack is environment-portable.** AI video and frame access goes exclusively through `lib/storage/media-store.ts`; V1 ships the `supabase` driver, and a future `s3` driver targets Cloudflare R2. `AI_MEDIA_STORAGE_DRIVER=supabase|s3` selects the driver. Job processing lives in trigger-agnostic `lib/ai/jobs.ts`; hosting routes only invoke it. Migration 0031 is standard PostgreSQL, while provider-specific storage provisioning is isolated in migration 0032.
 
 ---
 
@@ -68,7 +69,7 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 
 | Concern | Pick | Why / critical detail |
 |---|---|---|
-| Resumable upload | **`tus-js-client`** (bare, no Uppy) | Framework-agnostic, no React peer-dep. **`chunkSize` MUST be 6 MB** (Supabase hard requirement). Endpoint `https://supabase.redbananastudios.com/storage/v1/upload/resumable`, `Authorization: Bearer <session access_token>` (RLS applies), metadata `{bucketName, objectName, contentType}`. The localStorage fingerprint preserves the upload URL, not an in-memory recorded `Blob`: same-tab network resume works; an imported file can resume after the estimator reselects it; a recorded clip may need retaking after tab closure. One tus client per upload URL (concurrent → 409) |
+| Resumable upload | **`tus-js-client`** (bare, no Uppy) behind `MediaStore` | Framework-agnostic, no React peer-dep. The Supabase driver derives its TUS endpoint from `SUPABASE_URL` and uses **6 MB chunks** (Supabase requirement), `Authorization: Bearer <session access_token>` (RLS applies), and metadata `{bucketName, objectName, contentType}`. Components and actions never construct storage endpoints. The localStorage fingerprint preserves the upload URL, not an in-memory recorded `Blob`: same-tab network resume works; an imported file can resume after the estimator reselects it; a recorded clip may need retaking after tab closure. One tus client per upload URL (concurrent → 409) |
 | Camera recording | **Native `MediaRecorder`** — no wrapper libs (RecordRTC is dead) | iOS Safari ≥14.5 records `video/mp4` H.264+AAC (Gemini-perfect). Detect in order: `video/mp4;codecs=avc1` → `video/mp4` → `video/webm;codecs=vp9` → `video/webm`; persist actual `recorder.mimeType` on the media row. `getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } } })` — `ideal` not `exact`. `videoBitsPerSecond: 3_000_000` → 2-min clip ≈ 45 MB. Deliver-on-stop (no `timeslice` reliance on iOS); belt-and-braces `dataavailable` timeout for the known iPad missing-`stop` bug; recording dies on tab background/lock → keep record→review→upload on ONE route |
 | Frame extraction | **`<video>` + canvas seek-and-draw** primary; **Mediabunny** for imports the video element won't seek | Just-recorded blobs are always decodable on the device that encoded them. Use `requestVideoFrameCallback` before drawing (Safari seek-paint gotcha). **ffmpeg.wasm is banned** — OOM-kills iPads |
 | AI calls | **AI SDK v7** (`ai@7`, `@ai-sdk/google`) | `generateObject` is deprecated — use `generateText({ output: Output.object({ schema }) })`. Files-API URIs (`generativelanguage.googleapis.com/…/files/…`) pass through untouched; any other URL gets auto-downloaded by the SDK (another reason Files API is the only media path) |
@@ -111,6 +112,8 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 - **Atomic at every irreversible boundary.** Finalise+enqueue, reserve+reconcile spend, complete a worker attempt, and confirm+merge run in transactional RPCs with row locks and idempotency keys. A network retry or worker crash cannot duplicate inventory, jobs, detections or spend.
 - **Explicit readiness.** `planning_ready` is true only after the estimator has declared the room manifest complete, confirmed every room, and resolved every blocking exception. Until then, AI surveys show provisional totals but no vehicle recommendation. Manual-only or explicitly abandoned AI surveys retain today's raw-volume recommendation.
 - **Estimator/office access only.** AI tables and `survey-media` use `is_office()`, not the broader `is_staff()` role that includes crew. Authenticated office sessions get SELECT only on AI domain tables; all database mutations go through validated server actions using the service role or atomic service-only RPCs. The sole browser write is Storage upload to a pre-registered path owned by the authenticated uploader. Migration 0031 also replaces the existing crew-readable `cubic_surveys` policies with office-only SELECT; its writes already use service actions, and crew job-sheet volume continues through the price-free service loader.
+- **One storage seam.** Components, server actions, workers and retention code use `lib/storage/media-store.ts` for resumable/multipart upload initialisation, object writes, signed reads, metadata and deletes. Only a storage driver may call a provider SDK. V1 selects the Supabase driver; Cloudflare R2 is the named S3-compatible scale target.
+- **Swappable worker trigger.** `lib/ai/jobs.ts` owns claim/process/heartbeat/complete logic as a plain module. The scheduled HTTP route is a thin authenticated adapter; a future always-on Node process invokes the same exported function without changing processing logic.
 
 ---
 
@@ -277,23 +280,23 @@ create index on ai_jobs (status, next_run_at);
 **Claim RPC** (PostgREST can't `FOR UPDATE SKIP LOCKED`; the drainer calls this via admin client `.rpc()`):
 
 ```sql
-create or replace function claim_ai_jobs(worker text, batch int default 1)
-returns setof public.ai_jobs language sql security definer set search_path = '' as $$
-   update public.ai_jobs j
-     set status = 'running', locked_at = now(), locked_by = worker, updated_at = now()
-   where j.id in (
-     select id from public.ai_jobs
-      where status = 'queued' and next_run_at <= now()
-      order by created_at
-      limit batch
-      for update skip locked)
-  returning j.*;
+create or replace function claim_ai_jobs(
+  worker text,
+  batch int default 1,
+  lease_seconds int default 300
+)
+returns setof public.ai_jobs language plpgsql security definer set search_path = '' as $$
+begin
+  -- Validate worker; park unchanged when disabled; reap expired final attempts;
+  -- then claim due/expired work with FOR UPDATE SKIP LOCKED and a bounded lease.
+  return query update public.ai_jobs ... returning *;
+end;
 $$;
-revoke all on function public.claim_ai_jobs(text, int) from public, anon, authenticated;
-grant execute on function public.claim_ai_jobs(text, int) to service_role;
+revoke all on function public.claim_ai_jobs(text, int, int) from public, anon, authenticated;
+grant execute on function public.claim_ai_jobs(text, int, int) to service_role;
 ```
 
-The real migration fully qualifies every identifier; the excerpt is illustrative. The claim checks `business_settings.ai_survey_enabled` before changing any row. V1 claims one job at a time; after completion the route may claim another only when at least 120 seconds of its 800-second budget remains. Each running worker heartbeats its lease. An expired lease is reclaimable, but the attempt key and transactional completion RPC make overlapping late completion harmless.
+The real migration fully qualifies every identifier; the excerpt is illustrative. The claim checks `business_settings.ai_survey_enabled` before changing any row. V1 claims one job at a time; after completion the route may claim another only when at least 120 seconds of its 800-second budget remains. Each running worker heartbeats its lease. An expired lease is reclaimable; an expired final attempt is atomically marked dead and its room state recomputed. Attempt keys and the transactional completion RPC make overlapping late completion harmless.
 
 Retry semantics (drainer code): on failure increment attempts atomically; when the new count reaches `max_attempts`, set `dead` + one ops alert (`sendOpsAlert` from `lib/comms/dispatch`); otherwise queue with `next_run_at = now() + interval '30s' * 4^(attempts-1)` (30s/2m/8m). Budget/kill-switch blocks use `blocked`, not retry attempts; they can be requeued after a cap raise or re-enable.
 
@@ -375,7 +378,7 @@ alter table business_settings
 
 Wire through `lib/settings.ts` (interface + `DEFAULT_SETTINGS` + select string + mapper) per the existing pattern. Model settings render as a server-validated allow-list containing only the two approved IDs, not arbitrary text inputs. GBP→USD for the ledger uses a conservative code constant `USD_PER_GBP = 1.40` in `lib/ai/budget.ts` (caps are circuit breakers, not accounting — precision is not the point).
 
-### 4.10 Storage bucket
+### 4.10 Provider-specific storage provisioning — migration `0032_supabase_ai_media_storage.sql`
 
 ```sql
 insert into storage.buckets (id, name, public, file_size_limit)
@@ -385,7 +388,9 @@ values ('survey-media', 'survey-media', false, 524288000);  -- 500 MB
 -- source path owned by auth.uid(), or its strict frames/*.jpg prefix
 ```
 
-Bucket-relative paths: source `<surveyId>/<mediaId>/source.<ext>`; frames `<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Storage policy comparisons treat path components as text (never cast attacker-controlled names to UUID), require the registered uploader and `uploading` media state, and allow only the exact source path or strict frames-JPEG prefix. Server actions validate exact paths against the registered media record; the finaliser uses Storage `info()` for exact object metadata, not a folder `list()`. AI tables expose `is_office()` SELECT only; authenticated users receive no table INSERT/UPDATE/DELETE grants. All mutations use service-role server actions or transactional RPCs. All new SECURITY DEFINER routines fix `search_path`, fully qualify identifiers, revoke `PUBLIC/anon/authenticated`, and grant only `service_role`.
+Migration 0031 contains only standard PostgreSQL application schema and routines. Supabase Storage bucket and `storage.objects` policies live in migration 0032 because they belong to the `supabase` media-store driver and must not make a future PostgreSQL restore provider-dependent.
+
+Bucket-relative paths: source `<surveyId>/<mediaId>/source.<ext>`; frames `<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Storage policy comparisons treat path components as text (never cast attacker-controlled names to UUID), require the registered uploader and `uploading` media state, and allow only the exact source path or strict frames-JPEG prefix. Server actions validate exact paths against the registered media record; the finaliser calls the `MediaStore` metadata method, not a provider SDK or folder `list()`. AI tables expose `is_office()` SELECT only; authenticated users receive no table INSERT/UPDATE/DELETE grants. All mutations use service-role server actions or transactional RPCs. All new SECURITY DEFINER routines fix `search_path`, fully qualify identifiers, revoke `PUBLIC/anon/authenticated`, and grant only `service_role`.
 
 **Ops prerequisite (Phase 0, before the bucket is usable for >50 MB):** raise the global cap on vps1 — `/opt/rbs/supabase/.env` → `FILE_SIZE_LIMIT=524288000`, recreate the `supabase-storage` container. Verified: TUS endpoint already live through Caddy→Kong with no proxy body limits; this env var is the only blocker.
 
@@ -579,14 +584,16 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 | `retryAiJobAction` | `(jobId)` → `{}` | authorised office user: `failed`/`dead` → queued with attempts reset; `blocked` → queued only after its blocking condition clears |
 **Routes:**
 - `app/api/ai-surveys/state/route.ts` — authenticated office-only `GET ?surveyId=…`; `Cache-Control: no-store`; returns only room/media status projection for the React Query poll.
-- `app/api/cron/ai-jobs/route.ts` — `export const maxDuration = 800`; auth `requireUserOrCronSecret(req)` plus an office-role check for interactive callers; claims one job, heartbeats its lease, and claims another only with ≥120 s remaining. Returns `{ claimed, done, failed, blocked }`.
+- `app/api/cron/ai-jobs/route.ts` — thin hosting adapter only: `export const maxDuration = 800`; auth `requireUserOrCronSecret(req)` plus an office-role check for interactive callers; invokes the exported drainer in `lib/ai/jobs.ts` with a deadline. It contains no claim, processing or provider logic. Returns `{ claimed, done, failed, blocked }`.
 - `app/api/cron/ai-retention/route.ts` — daily (§9).
 - `vercel.json` — add `{"path": "/api/cron/ai-jobs", "schedule": "*/2 * * * *"}` and `{"path": "/api/cron/ai-retention", "schedule": "30 2 * * *"}`. The 2-min sweep is retry latency only; the kick gives ~instant starts.
 
 **`lib/ai/`** (new — the repo's first LLM code, keep it exemplary):
-`gemini.ts` (AI SDK provider from `GEMINI_API_KEY`, allow-listed model ids from settings) · `files.ts` (Supabase→Files-API streaming, whole/chunked + ACTIVE poll + best-effort explicit delete) · `prompts.ts` (`PROMPT_VERSION`, room-video, whole-property, photo prompts, catalogue allow-list block) · `survey-schema.ts` (separate video/photo contracts) · `validate.ts` (§5.4, pure) · `dedup.ts` (§5.5, pure grouping only) · `contingency.ts` (§5.6, pure) · `merge.ts` (detections→CubicLine[], pure) · `budget.ts` (estimates + atomic reservation calls) · `jobs.ts` (lease/idempotency-aware drainer; thin I/O shell around pure parts).
+`gemini.ts` (AI SDK provider from `GEMINI_API_KEY`, allow-listed model ids from settings) · `files.ts` (`MediaStore`→Files-API streaming, whole/chunked + ACTIVE poll + best-effort explicit delete) · `prompts.ts` (`PROMPT_VERSION`, room-video, whole-property, photo prompts, catalogue allow-list block) · `survey-schema.ts` (separate video/photo contracts) · `validate.ts` (§5.4, pure) · `dedup.ts` (§5.5, pure grouping only) · `contingency.ts` (§5.6, pure) · `merge.ts` (detections→CubicLine[], pure) · `budget.ts` (estimates + atomic reservation calls) · `jobs.ts` (plain trigger-agnostic claim/process/heartbeat/complete drainer around the pure parts; callable from an HTTP route or an always-on Node loop).
 
-**Env:** `GEMINI_API_KEY` (server-only; `.env.local` + both Vercel envs from `credentials.env` — never `NEXT_PUBLIC_`).
+**`lib/storage/`**: `media-store.ts` is the only public AI-media API and defines the driver contract for upload initialisation, object put/read/metadata, signed GET and delete. `supabase-media-store.ts` is the V1 implementation and the only new AI module allowed to call `supabase.storage.from()`. A future `s3-media-store.ts` implements the same contract for Cloudflare R2 or another S3-compatible service.
+
+**Env:** `GEMINI_API_KEY` (server-only), `AI_MEDIA_STORAGE_DRIVER=supabase|s3`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `NEXT_PUBLIC_APP_URL`. Future S3/R2 endpoints and credentials are environment-only. No storage, app, deployment-platform or provider host is embedded in application code.
 
 ---
 
@@ -627,8 +634,8 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 **Phase 0 AI spike gate: PASSED 2026-07-11.** Two real estimator-device clips were used: an owner-approved 13.5-second low-inventory kitchen and a 45.6-second office walkthrough. All four clip/model calls honoured the structured audiovisual schema, returned only valid catalogue keys with sane timestamps, and explicitly deleted their Gemini File resources. 3.5 Flash matched the visible/narrated kitchen inventory (table, four chairs, American-style fridge-freezer) and identified 13 plausible office items; Flash-Lite materially undercounted both rooms (90 vs 130 ft³ and 105 vs 237 ft³), confirming the accuracy-first 3.5 default. Total measured spike cost was $0.0679. Raw footage and full responses remain git-ignored; only redacted fixtures are committed.
 
-**Phase 1 — Domain & persistence:** migration 0031 (tables, secure transactional RPCs, bucket/path-bound office RLS, settings/survey/retention columns); stable `CubicLine.id` + room/source/provenance + legacy backfill; separate video/photo/segment contracts; pure engines TDD (`validate`, duplicate grouping, contingency, merge, budget) with spike fixtures.
-**Phase 2 — Capture & upload:** `/scan` route (MediaRecorder + frames + tus), import dialog, consent sheet, rooms strip, `registerMedia`/`finalizeMedia` actions.
+**Phase 1 — Domain & persistence:** standard-PostgreSQL migration 0031 (tables, secure transactional RPCs, settings/survey/retention columns); stable `CubicLine.id` + room/source/provenance + legacy backfill; separate video/photo/segment contracts; pure engines TDD (`validate`, duplicate grouping, contingency, merge, budget) with spike fixtures; `MediaStore` contract/factory and trigger-agnostic jobs boundary.
+**Phase 2 — Capture & upload:** provider-specific migration 0032 (Supabase bucket/path-bound office RLS); `/scan` route (MediaRecorder + frames + tus), import dialog, consent sheet, rooms strip, `registerMedia`/`finalizeMedia` actions. Every media operation goes through `MediaStore`.
 **Phase 3 — Pipeline:** `lib/ai/*` I/O halves, one-at-a-time lease/heartbeat drainer + kick, attempt idempotency, escalation, atomic spend reservations, run ledger, ops alerts.
 **Phase 4 — Review & merge:** review workspace, exceptions flow, confirm-merge, planning volume through quote page / Step-3 hint / survey card.
 **Phase 5 — Ops:** Settings AI card, integration-health row, retention cron, retry buttons, disk gauge.
@@ -636,9 +643,15 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 **Deliberately NOT built (V1):** offline capture/background upload (interface warns before leaving with unsent media — that's it) · real-time on-device detection · mixed-fleet optimiser · LLM-based dedup/reconciliation (deterministic rules only) · separate office approval step (estimator confirmation + validation rules are the gate; office can edit the survey afterwards like any other).
 
+### Portability & future migration
+
+The AI survey subsystem must lift from the current hosting to a dedicated environment without rewriting application data or processing logic. All video and frame operations — resumable or multipart upload initialisation, object put/read/metadata, signed GET and delete — cross the single `MediaStore` interface in `lib/storage/media-store.ts`. V1 uses the Supabase Storage/TUS driver selected by `AI_MEDIA_STORAGE_DRIVER=supabase`; Cloudflare R2 is the named future scale target and will be an `s3` driver selected by configuration. Object keys are provider-neutral and stored unchanged in PostgreSQL. All app, database, storage and AI endpoints come from environment variables. `lib/ai/jobs.ts` owns the full drainer and accepts injected dependencies/deadlines; the scheduled route only authenticates and invokes it, while a future always-on Node worker can call the same function. Migration 0031 is standard PostgreSQL only; provider-specific Supabase Storage provisioning is isolated in migration 0032.
+
+**Migration runbook:** pause new captures and let active jobs drain; take and verify a `pg_dump`, restore it into the target standard PostgreSQL service, and synchronise the `survey-media` objects to Cloudflare R2 while preserving every bucket-relative object key. Configure the target environment (`AI_MEDIA_STORAGE_DRIVER=s3`, database, app URL, storage endpoint/credentials and Gemini variables), deploy the unchanged app plus always-on worker through Coolify, then verify database health, job claiming, signed reads, upload/finalise and deletion against test media. Cut DNS only after those checks pass. Rollback is to restore the previous environment variables/DNS while the source database and bucket remain read-only and intact.
+
 ## 12. Test plan
 
-**Unit (house pattern — pure libs in `tests/lib/ai/`):** validate.test (unknown keys dropped, volume smuggling discarded, auto-accept boundaries incl. big-item ≥80 ft³, qty clamps, segment/photo evidence) · dedup.test (cross-media groups require choice, cross-room never merges, against-manual conflicts) · contingency.test (persisted coverage aggregation, moderate/heavy clutter, manual-room floor, manifest/readiness + every fail-closed state) · merge.test (stable line identity, same key in two rooms, provenance, atomic idempotency inputs, custom-item path) · budget.test (estimate, atomic reservation/finalise/release, concurrent survey/month caps, crash recovery) · schema.test (video/photo/segmentation fixtures parse; malformed fixtures fail then salvage where legal) · jobs.test (unique enqueue, lease heartbeat, overlapping stale worker, route time budget, partial/dead media room aggregation, backoff, dead-at-max) · retention.test (terminal anchor, exact user-activity clock, consent withdrawal, legal hold) · frames.test (full-clip sampling + timestamp→nearest-frame matching). Existing 200 tests stay green; `cubic-survey.test.ts` is extended for IDs and optional fields.
+**Unit (house pattern — pure libs in `tests/lib/ai/`):** validate.test (unknown keys dropped, volume smuggling discarded, auto-accept boundaries incl. big-item ≥80 ft³, qty clamps, segment/photo evidence) · dedup.test (cross-media groups require choice, cross-room never merges, against-manual conflicts) · contingency.test (persisted coverage aggregation, moderate/heavy clutter, manual-room floor, manifest/readiness + every fail-closed state) · merge.test (stable line identity, same key in two rooms, provenance, atomic idempotency inputs, custom-item path) · budget.test (estimate, atomic reservation/finalise/release, concurrent survey/month caps, crash recovery) · schema.test (video/photo/segmentation fixtures parse; malformed fixtures fail then salvage where legal) · jobs.test (unique enqueue, lease heartbeat, overlapping stale worker, route time budget, partial/dead media room aggregation, backoff, dead-at-max) · retention.test (terminal anchor, exact user-activity clock, consent withdrawal, legal hold) · frames.test (full-clip sampling + timestamp→nearest-frame matching) · media-store.test (driver selection, provider-neutral keys, Supabase endpoint derivation and mocked put/signed-get/delete) · portability.test (banned host literals absent; direct storage SDK calls confined to the Supabase driver; cron route remains thin). Existing 200 tests stay green; `cubic-survey.test.ts` is extended for IDs and optional fields.
 
 **Database/security integration:** execute migration tests against an isolated Supabase database: crew denied all AI tables/media; estimator/admin allowed only intended operations; preregistered-path upload policy; `PUBLIC/anon/authenticated` cannot execute service RPCs; duplicate finalise/enqueue and confirm calls are no-ops; two concurrent confirmations produce one winner/one conflict; concurrent reservations cannot exceed either cap; retention uses the anchored timestamp and respects legal hold.
 
@@ -670,8 +683,8 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 - Server actions: AI actions use a dedicated `requireOfficeProfile()` gate that verifies active `admin|estimator` role on every directly POST-reachable action → zod-parse input → resource-ownership check → mutate via `createAdminClient()` → return `{ ok: true, … } | { ok: false, error }`. Never copy the broader active-profile helper that admits crew, and never trust client-computed totals/paths — recompute/validate server-side (see `saveCubicSurveyAction`).
 - Optimistic concurrency: `.eq("updated_at", baseUpdatedAt)` + `.select().maybeSingle()`; empty result = conflict, surface the reload banner.
 - RLS: AI tables get `is_office()` SELECT only; all table mutations use the service role, and no authenticated job/detection/spend write can bypass transactional boundaries. `cubic_surveys` becomes office-only; crew consumes raw volume only through the existing price-free service loader. Every SECURITY DEFINER RPC uses a fixed empty `search_path`, fully qualified identifiers, revokes `PUBLIC/anon/authenticated`, and grants only `service_role`. Settings remain behind `is_office()`.
-- Storage: browser uploads direct (session client + RLS) only to a pre-registered `<surveyId>/<mediaId>/…` prefix owned by that office profile; server verifies exact object metadata/paths; storage deletes via admin Storage API, never SQL; display via `createSignedUrl(path, 3600)`.
-- Migrations: numbered `00NN_name.sql`, applied to prod via psql-over-SSH + `notify pgrst, 'reload schema'`.
+- Storage: every AI-media call uses `lib/storage/media-store.ts`; only the selected driver may call a provider SDK. Browser uploads direct (session identity + provider policy) only to a pre-registered `<surveyId>/<mediaId>/…` prefix owned by that office profile; server verifies exact object metadata/paths; deletes use the driver API, never SQL; display uses the driver's signed GET. Cloudflare R2 is the future S3 scale target.
+- Migrations: numbered `00NN_name.sql`; 0031 must remain standard PostgreSQL, and provider-specific storage setup stays in 0032. Apply to production only after local sign-off via psql-over-SSH + `notify pgrst, 'reload schema'`.
 - UI: Marley tokens (`mm-red` accents, one per surface), `INPUT_H = h-11`, 44 px touch targets, 16 px inputs, `focus-ring`, pills/chips per existing status badges; user-meaningful mutations insert `activities` rows; `revalidatePath` the affected lead/quote pages.
 - Timestamps in user-facing UK copy; no em-dashes in customer-facing strings; UK English.
 - Commits: small, per-phase, `--author="Peter Farrell <peter@redbananastudios.com>"`; explicit-path staging only; deploy = push → Vercel API → verify prod sha; test on prod with Peter's own contacts only (07572382366 / peter@abacusonline.net), never real customers, and remove all test state after.
