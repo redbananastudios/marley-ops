@@ -110,13 +110,13 @@ Add an AI-assisted mode to the existing cubic survey (`/leads/[id]/cubic`). The 
 - **Fail open to manual.** Every failure state leaves the survey exactly as usable as it is today. The AI mode is a layer, not a gate.
 - **Atomic at every irreversible boundary.** Finalise+enqueue, reserve+reconcile spend, complete a worker attempt, and confirm+merge run in transactional RPCs with row locks and idempotency keys. A network retry or worker crash cannot duplicate inventory, jobs, detections or spend.
 - **Explicit readiness.** `planning_ready` is true only after the estimator has declared the room manifest complete, confirmed every room, and resolved every blocking exception. Until then, AI surveys show provisional totals but no vehicle recommendation. Manual-only or explicitly abandoned AI surveys retain today's raw-volume recommendation.
-- **Estimator/office access only.** AI tables and `survey-media` use `is_office()`, not the broader `is_staff()` role that includes crew. Upload RLS permits only pre-registered paths owned by the authenticated uploader.
+- **Estimator/office access only.** AI tables and `survey-media` use `is_office()`, not the broader `is_staff()` role that includes crew. Authenticated office sessions get SELECT only on AI domain tables; all database mutations go through validated server actions using the service role or atomic service-only RPCs. The sole browser write is Storage upload to a pre-registered path owned by the authenticated uploader. Migration 0031 also replaces the existing crew-readable `cubic_surveys` policies with office-only SELECT; its writes already use service actions, and crew job-sheet volume continues through the price-free service loader.
 
 ---
 
 ## 4. Data model — migration `0031_ai_cubic_survey.sql`
 
-Follow house conventions exactly: uuid PKs `gen_random_uuid()`, `created_at/updated_at timestamptz default now()` + the existing `set_updated_at()` trigger, RLS on every AI table (`is_office()` select/insert/update, `is_admin()` delete unless stated), text status columns with CHECK constraints (not enums — matches `cubic_surveys`).
+Follow house conventions exactly: uuid PKs `gen_random_uuid()`, `created_at/updated_at timestamptz default now()` + the existing `set_updated_at()` trigger, RLS on every AI table (`is_office()` SELECT only; no authenticated table mutations), text status columns with CHECK constraints (not enums — matches `cubic_surveys`). Service-role server actions handle ordinary writes; state/ledger transitions use the service-only transactional RPCs below. Composite constraints prevent room/media/segment/detection references crossing survey boundaries.
 
 ### 4.1 `cubic_survey_rooms` — capture-layer rooms (NOT canonical inventory structure)
 
@@ -135,7 +135,7 @@ create table cubic_survey_rooms (
   quality_flags jsonb not null default '[]',              -- validated enum values, aggregated across active media
   quality_warnings jsonb not null default '[]',           -- display-only model notes
   completion_method text check (completion_method in ('ai','manual')),
-  created_by uuid references profiles(id),
+  created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -163,7 +163,7 @@ create table cubic_survey_media (
   quality_flags jsonb not null default '[]',
   error text,
   finalized_at timestamptz,
-  created_by uuid references profiles(id),
+  created_by uuid references profiles(id) on delete set null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -344,7 +344,7 @@ alter table cubic_surveys
   add column media_retention_anchor_at timestamptz;
 ```
 
-An `AFTER UPDATE OF status` lead trigger snapshots `media_retention_anchor_at = now()` on the related survey when a lead enters `completed` or `declined`, and clears it if the lead is explicitly reopened before deletion. This is the retention clock; mutable lead `updated_at` is never used.
+An `AFTER UPDATE OF status` lead trigger snapshots `media_retention_anchor_at = now()` on the related survey when a lead enters `completed` or `declined`, and clears it if the lead is explicitly reopened before deletion. Migration 0031 also backfills existing terminal leads, and survey creation/linking initialises the anchor when its lead is already terminal. This is the retention clock; mutable lead `updated_at` is never used.
 
 ### 4.8 `CubicLine` — additive fields (in `lib/cubic-survey.ts`, not SQL)
 
@@ -365,6 +365,7 @@ Migration 0031 backfills IDs into every existing canonical line. `sanitizeCubicL
 ```sql
 alter table business_settings
   add column ai_survey_enabled boolean not null default false,        -- master kill switch
+  add column ai_grounded_replay_enabled boolean not null default false,
   add column ai_model_default text not null default 'gemini-3.5-flash',
   add column ai_model_escalation text not null default 'gemini-3.5-flash',
   add column ai_survey_cap_gbp numeric(6,2) not null default 2,
@@ -380,10 +381,11 @@ Wire through `lib/settings.ts` (interface + `DEFAULT_SETTINGS` + select string +
 insert into storage.buckets (id, name, public, file_size_limit)
 values ('survey-media', 'survey-media', false, 524288000);  -- 500 MB
 -- RLS on storage.objects for this bucket: select is_office(); insert is_office()
--- AND exact path belongs to a pre-registered uploading media row owned by auth.uid(); delete is_admin()
+-- only when the object name exactly matches a pre-registered uploading media
+-- source path owned by auth.uid(), or its strict frames/*.jpg prefix
 ```
 
-Bucket-relative paths: source `<surveyId>/<mediaId>/source.<ext>`; frames `<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Server actions validate exact paths against the registered media record; the finaliser uses Storage `info()` for exact object metadata, not a folder `list()`. AI tables use `is_office()` read/write and `is_admin()` delete. All new SECURITY DEFINER routines fix `search_path`, fully qualify identifiers, revoke `PUBLIC/anon/authenticated`, and grant only `service_role`.
+Bucket-relative paths: source `<surveyId>/<mediaId>/source.<ext>`; frames `<surveyId>/<mediaId>/frames/<t-padded>.jpg`. Storage policy comparisons treat path components as text (never cast attacker-controlled names to UUID), require the registered uploader and `uploading` media state, and allow only the exact source path or strict frames-JPEG prefix. Server actions validate exact paths against the registered media record; the finaliser uses Storage `info()` for exact object metadata, not a folder `list()`. AI tables expose `is_office()` SELECT only; authenticated users receive no table INSERT/UPDATE/DELETE grants. All mutations use service-role server actions or transactional RPCs. All new SECURITY DEFINER routines fix `search_path`, fully qualify identifiers, revoke `PUBLIC/anon/authenticated`, and grant only `service_role`.
 
 **Ops prerequisite (Phase 0, before the bucket is usable for >50 MB):** raise the global cap on vps1 — `/opt/rbs/supabase/.env` → `FILE_SIZE_LIMIT=524288000`, recreate the `supabase-storage` container. Verified: TUS endpoint already live through Caddy→Kong with no proxy body limits; this env var is the only blocker.
 
@@ -541,7 +543,7 @@ Two-pane on tablet landscape (stacked portrait):
 
 ### 6.5 Progress & freshness
 
-No websockets. The builder/review pages poll a light `getAiSurveyStateAction(surveyId)` every 5 s **only while** any room is `processing` (typical clip: analysis lands in 20–60 s). Processing stages shown are real states from the DB, not theatre: Uploading → Queued → Analysing → Ready.
+No websockets. The builder/review pages use React Query to poll an authenticated, uncached `GET /api/ai-surveys/state?surveyId=…` Route Handler every 5 s **only while** any room is `processing` (typical clip: analysis lands in 20–60 s). Next 16 Server Actions are mutation endpoints and are not used for queued polling reads. Processing stages shown are real states from the DB, not theatre: Uploading → Queued → Analysing → Ready.
 
 ### 6.6 Settings → new "AI Survey" card (`is_office`)
 
@@ -555,7 +557,7 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 
 ## 7. Server surface (exact names)
 
-**`app/actions/ai-survey.ts`** — all behind `requireActiveProfile()`, writes via `createAdminClient()`, every mutation inserts an `activities` row where user-meaningful, all return the house `{ ok: true, … } | { ok: false, error }` shape:
+**`app/actions/ai-survey.ts`** — all behind `requireOfficeProfile()` (active admin/estimator only), writes via `createAdminClient()`, every mutation inserts an `activities` row where user-meaningful, all return the house `{ ok: true, … } | { ok: false, error }` shape:
 
 | Action | Signature (input → ok payload) | Notes |
 |---|---|---|
@@ -575,9 +577,8 @@ Manual builder mechanics · `/cv/[token]` customer survey (V2 only) · quote Ste
 | `completeRoomManuallyAction` | `(surveyId, roomId, baseUpdatedAt)` → `{ updatedAt } \| { conflict: true }` | requires failed media acknowledged + no unresolved detections; confirms room manually and recomputes readiness/contingency atomically |
 | `withdrawAiConsentAction` | `(surveyId)` → `{}` | writes withdrawal actor/time, cancels queued jobs, makes running attempts discard-only, schedules media/provider-file deletion |
 | `retryAiJobAction` | `(jobId)` → `{}` | authorised office user: `failed`/`dead` → queued with attempts reset; `blocked` → queued only after its blocking condition clears |
-| `getAiSurveyStateAction` | `(surveyId)` → rooms + media statuses + counts | the 5 s poll; read-only |
-
 **Routes:**
+- `app/api/ai-surveys/state/route.ts` — authenticated office-only `GET ?surveyId=…`; `Cache-Control: no-store`; returns only room/media status projection for the React Query poll.
 - `app/api/cron/ai-jobs/route.ts` — `export const maxDuration = 800`; auth `requireUserOrCronSecret(req)` plus an office-role check for interactive callers; claims one job, heartbeats its lease, and claims another only with ≥120 s remaining. Returns `{ claimed, done, failed, blocked }`.
 - `app/api/cron/ai-retention/route.ts` — daily (§9).
 - `vercel.json` — add `{"path": "/api/cron/ai-jobs", "schedule": "*/2 * * * *"}` and `{"path": "/api/cron/ai-retention", "schedule": "30 2 * * *"}`. The 2-min sweep is retry latency only; the kick gives ~instant starts.
@@ -666,9 +667,9 @@ Rollout: (1) internal — Peter's own test leads (07572382366 / peter@abacusonli
 
 ## 13. House conventions the implementer MUST follow (from the live codebase)
 
-- Server actions: `requireActiveProfile()` gate → zod-parse input → mutate via `createAdminClient()` → return `{ ok: true, … } | { ok: false, error }`. Never trust client-computed totals/paths — recompute/validate server-side (see `saveCubicSurveyAction`).
+- Server actions: AI actions use a dedicated `requireOfficeProfile()` gate that verifies active `admin|estimator` role on every directly POST-reachable action → zod-parse input → resource-ownership check → mutate via `createAdminClient()` → return `{ ok: true, … } | { ok: false, error }`. Never copy the broader active-profile helper that admits crew, and never trust client-computed totals/paths — recompute/validate server-side (see `saveCubicSurveyAction`).
 - Optimistic concurrency: `.eq("updated_at", baseUpdatedAt)` + `.select().maybeSingle()`; empty result = conflict, surface the reload banner.
-- RLS: AI tables get `is_office()` r/w + `is_admin()` delete. Every SECURITY DEFINER RPC uses a fixed empty `search_path`, fully qualified identifiers, revokes `PUBLIC/anon/authenticated`, and grants only `service_role`. Settings remain behind `is_office()`.
+- RLS: AI tables get `is_office()` SELECT only; all table mutations use the service role, and no authenticated job/detection/spend write can bypass transactional boundaries. `cubic_surveys` becomes office-only; crew consumes raw volume only through the existing price-free service loader. Every SECURITY DEFINER RPC uses a fixed empty `search_path`, fully qualified identifiers, revokes `PUBLIC/anon/authenticated`, and grants only `service_role`. Settings remain behind `is_office()`.
 - Storage: browser uploads direct (session client + RLS) only to a pre-registered `<surveyId>/<mediaId>/…` prefix owned by that office profile; server verifies exact object metadata/paths; storage deletes via admin Storage API, never SQL; display via `createSignedUrl(path, 3600)`.
 - Migrations: numbered `00NN_name.sql`, applied to prod via psql-over-SSH + `notify pgrst, 'reload schema'`.
 - UI: Marley tokens (`mm-red` accents, one per surface), `INPUT_H = h-11`, 44 px touch targets, 16 px inputs, `focus-ring`, pills/chips per existing status badges; user-meaningful mutations insert `activities` rows; `revalidatePath` the affected lead/quote pages.
