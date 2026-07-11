@@ -47,12 +47,13 @@ export async function extractEvidenceFrames(
     await waitForEvent(video, "loadedmetadata");
     const duration = Number.isFinite(video.duration) ? video.duration : 0;
     if (duration <= 0) return [];
-    const every = Math.max(1, options.everySeconds ?? 2);
+    const every = Math.max(2, options.everySeconds ?? duration / 40);
     const maxFrames = Math.max(1, options.maxFrames ?? 40);
     const timestamps = Array.from(
       { length: Math.min(maxFrames, Math.max(1, Math.ceil(duration / every))) },
       (_, index) => Math.min(duration - 0.05, index * every + 0.1),
     );
+    timestamps[timestamps.length - 1] = Math.max(0.1, duration - 0.1);
     const width = Math.min(options.maxWidth ?? 960, video.videoWidth || 960);
     const height = Math.max(1, Math.round(width * ((video.videoHeight || 720) / (video.videoWidth || 1280))));
     const canvas = document.createElement("canvas");

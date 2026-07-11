@@ -3,7 +3,7 @@ begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(28);
+select plan(30);
 
 select has_table('public', 'cubic_survey_rooms', 'rooms table exists');
 select has_table('public', 'cubic_survey_media', 'media table exists');
@@ -176,6 +176,32 @@ insert into public.ai_jobs (
   '40000000-0000-4000-8000-000000000001',
   'test:process-media'
 );
+
+update public.cubic_survey_media set status = 'uploading'
+where id = '40000000-0000-4000-8000-000000000001';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000002', true);
+select lives_ok(
+  $$insert into storage.objects(bucket_id, name, owner)
+    values (
+      'survey-media',
+      '20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000001/source.mp4',
+      '10000000-0000-4000-8000-000000000002'
+    )$$,
+  'estimator can insert the exact preregistered source path'
+);
+select lives_ok(
+  $$insert into storage.objects(bucket_id, name, owner)
+    values (
+      'survey-media',
+      '20000000-0000-4000-8000-000000000001/40000000-0000-4000-8000-000000000001/frames/00010001.jpg',
+      '10000000-0000-4000-8000-000000000002'
+    )$$,
+  'estimator can insert a valid evidence-frame path'
+);
+reset role;
+update public.cubic_survey_media set status = 'uploaded'
+where id = '40000000-0000-4000-8000-000000000001';
 
 update public.business_settings set ai_survey_enabled = false where id = true;
 select is(

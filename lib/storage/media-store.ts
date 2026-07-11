@@ -9,14 +9,24 @@ export const AI_MEDIA_BUCKET_DEFAULT = "survey-media";
 
 export type MediaObjectBody = ArrayBuffer | Blob;
 
-export interface MediaUploadTarget {
-  protocol: "tus" | "multipart";
+export interface TusMediaUploadTarget {
+  protocol: "tus";
   objectKey: string;
   endpoint: string;
   headers: Record<string, string>;
   metadata: Record<string, string>;
   chunkSizeBytes?: number;
 }
+
+export interface MultipartMediaUploadTarget {
+  protocol: "multipart";
+  objectKey: string;
+  partSizeBytes: number;
+  parts: { partNumber: number; url: string; headers: Record<string, string> }[];
+  complete: { url: string; headers: Record<string, string> };
+}
+
+export type MediaUploadTarget = TusMediaUploadTarget | MultipartMediaUploadTarget;
 
 export interface MediaObjectMetadata {
   bytes: number;
@@ -33,7 +43,7 @@ export interface MediaStore {
     objectKey: string;
     contentType: string;
     accessToken: string;
-  }): MediaUploadTarget;
+  }): Promise<MediaUploadTarget>;
 
   putObject(input: {
     objectKey: string;

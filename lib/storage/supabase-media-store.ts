@@ -62,7 +62,7 @@ export function createSupabaseMediaStore({
     driver: "supabase",
     bucket,
 
-    createUploadTarget({ objectKey, contentType, accessToken }) {
+    async createUploadTarget({ objectKey, contentType, accessToken }) {
       const key = assertMediaObjectKey(objectKey);
       const token = requireEnvironmentValue(accessToken, "accessToken");
       return {
@@ -71,6 +71,7 @@ export function createSupabaseMediaStore({
         endpoint: `${endpoint}/upload/resumable`,
         headers: {
           Authorization: `Bearer ${token}`,
+          "x-upsert": "true",
         },
         metadata: {
           bucketName: bucket,

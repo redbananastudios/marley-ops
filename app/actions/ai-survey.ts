@@ -71,6 +71,15 @@ async function surveyContext(surveyId: string) {
     .maybeSingle();
 }
 
+async function aiCaptureEnabled(): Promise<boolean> {
+  const { data } = await createAdminClient()
+    .from("business_settings")
+    .select("ai_survey_enabled")
+    .eq("id", true)
+    .maybeSingle();
+  return data?.ai_survey_enabled === true;
+}
+
 async function recordActivity(input: {
   leadId: string | null;
   clientId: string | null;
@@ -98,6 +107,7 @@ export async function saveAiConsentAction(
   const id = uuid.safeParse(surveyId);
   const input = consentInput.safeParse(raw);
   if (!id.success || !input.success) return { ok: false, error: "Check the agreement details." };
+  if (!(await aiCaptureEnabled())) return { ok: false, error: "AI surveys are currently paused." };
 
   const { data: survey } = await surveyContext(id.data);
   if (!survey) return { ok: false, error: "Survey not found." };
@@ -141,8 +151,9 @@ export async function createRoomAction(
   const id = uuid.safeParse(surveyId);
   const input = roomInput.safeParse(raw);
   if (!id.success || !input.success) return { ok: false, error: "Enter a room name." };
+  if (!(await aiCaptureEnabled())) return { ok: false, error: "AI surveys are currently paused." };
   const { data: survey } = await surveyContext(id.data);
-  if (!survey) return { ok: false, error: "Survey not found." };
+  if (!survey || survey.ai_consent_withdrawn_at || survey.ai_status === "abandoned") return { ok: false, error: "AI capture is not permitted for this survey." };
   if (!survey.ai_consent) return { ok: false, error: "Record the customer agreement first." };
 
   const admin = createAdminClient();
@@ -185,6 +196,7 @@ export async function registerMediaAction(
   const id = uuid.safeParse(surveyId);
   const input = mediaInput.safeParse(raw);
   if (!id.success || !input.success) return { ok: false, error: "This file cannot be uploaded." };
+  if (!(await aiCaptureEnabled())) return { ok: false, error: "AI surveys are currently paused." };
   if (input.data.kind === "room_video" && (!input.data.roomId || (input.data.durationS ?? 0) > 120 || input.data.bytes > 52_428_800)) {
     return { ok: false, error: "Room clips must be under 2 minutes and 50 MB." };
   }
@@ -223,7 +235,7 @@ export async function registerMediaAction(
   if (error) return { ok: false, error: "Could not prepare the upload." };
 
   try {
-    const upload = createMediaStore().createUploadTarget({
+    const upload = await createMediaStore().createUploadTarget({
       objectKey: storagePath,
       contentType: input.data.mime,
       accessToken: actor.accessToken,
@@ -244,14 +256,15 @@ export async function finalizeMediaUploadAction(
   const id = uuid.safeParse(mediaId);
   const frames = z.array(frameInput).max(40).safeParse(rawFrames);
   if (!id.success || !frames.success) return { ok: false, error: "Frame evidence is invalid." };
+  if (!(await aiCaptureEnabled())) return { ok: false, error: "AI surveys are currently paused." };
 
   const admin = createAdminClient();
   const { data: media } = await admin
     .from("cubic_survey_media")
-    .select("id, survey_id, storage_path, status, created_by, duration_s")
+    .select("id, survey_id, storage_path, status, created_by, duration_s, kind, mime, survey:cubic_surveys(ai_consent_withdrawn_at, ai_status)")
     .eq("id", id.data)
     .maybeSingle();
-  if (!media || media.created_by !== actor.id || media.status !== "uploading") {
+  if (!media || media.created_by !== actor.id || media.status !== "uploading" || media.survey?.ai_consent_withdrawn_at || media.survey?.ai_status === "abandoned") {
     return { ok: false, error: "Upload is not ready to finalise." };
   }
   const framePrefix = `${media.survey_id}/${media.id}/frames/`;
@@ -262,9 +275,13 @@ export async function finalizeMediaUploadAction(
   try {
     const store = createMediaStore();
     const source = await store.getObjectMetadata(media.storage_path);
+    const actualLimit = media.kind === "room_video" ? 52_428_800 : media.kind === "photo" ? 15_728_640 : 524_288_000;
+    if (source.bytes < 1 || source.bytes > actualLimit || source.contentType !== media.mime) {
+      throw new Error("source metadata mismatch");
+    }
     for (const frame of frames.data) {
       const metadata = await store.getObjectMetadata(frame.path);
-      if (metadata.bytes > 307_200) throw new Error("frame too large");
+      if (metadata.bytes < 1 || metadata.bytes > 307_200 || metadata.contentType !== "image/jpeg") throw new Error("invalid frame metadata");
     }
     const { error } = await admin.rpc("finalize_ai_media", {
       p_media_id: media.id,
@@ -300,6 +317,7 @@ export async function createFrameUploadTargetsAction(
   const id = uuid.safeParse(mediaId);
   const frames = z.array(frameRequest).max(40).safeParse(rawFrames);
   if (!id.success || !frames.success) return { ok: false, error: "Frame evidence is invalid." };
+  if (!(await aiCaptureEnabled())) return { ok: false, error: "AI surveys are currently paused." };
   const { data: media } = await createAdminClient()
     .from("cubic_survey_media")
     .select("id, survey_id, status, created_by")
@@ -313,19 +331,19 @@ export async function createFrameUploadTargetsAction(
     const store = createMediaStore();
     return {
       ok: true,
-      frames: frames.data.map((frame, index) => {
+      frames: await Promise.all(frames.data.map(async (frame, index) => {
         const timestamp = String(Math.round(frame.t * 10)).padStart(6, "0");
         const path = `${media.survey_id}/${media.id}/frames/${timestamp}${String(index).padStart(2, "0")}.jpg`;
         return {
           t: frame.t,
           path,
-          upload: store.createUploadTarget({
+          upload: await store.createUploadTarget({
             objectKey: path,
             contentType: "image/jpeg",
             accessToken: actor.accessToken,
           }),
         };
-      }),
+      })),
     };
   } catch {
     return { ok: false, error: "Media storage is not configured." };

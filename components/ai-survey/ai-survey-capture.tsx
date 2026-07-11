@@ -39,7 +39,10 @@ interface PendingMedia {
   kind: "room_video" | "import_video" | "photo";
   durationS?: number;
   previewUrl: string;
+  roomId?: string;
 }
+
+type RegisteredUpload = Extract<Awaited<ReturnType<typeof registerMediaAction>>, { ok: true }>;
 
 const CONSENT_ACKS = [
   ["filming", "The customer agrees to the room being filmed."],
@@ -92,6 +95,7 @@ export function AiSurveyCapture({
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const secondsRef = useRef(0);
+  const registrationRef = useRef<RegisteredUpload | null>(null);
   const [consented, setConsented] = useState(initialConsent);
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [method, setMethod] = useState<"verbal" | "digital">("verbal");
@@ -99,6 +103,7 @@ export function AiSurveyCapture({
   const [roomName, setRoomName] = useState("");
   const [selectedRoom, setSelectedRoom] = useState(initialRooms[0]?.id ?? "");
   const [recording, setRecording] = useState(false);
+  const [audioEnabled, setAudioEnabled] = useState(true);
   const [seconds, setSeconds] = useState(0);
   const [pending, setPending] = useState<PendingMedia | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -113,12 +118,24 @@ export function AiSurveyCapture({
 
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => {
-      if (!recording && !uploading) return;
+      if (!recording && !uploading && !pending) return;
       event.preventDefault();
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
-  }, [recording, uploading]);
+  }, [recording, uploading, pending]);
+
+  useEffect(() => {
+    const stopWhenHidden = () => {
+      if (document.visibilityState === "hidden" && recorderRef.current?.state === "recording") stopRecording();
+    };
+    document.addEventListener("visibilitychange", stopWhenHidden);
+    window.addEventListener("pagehide", stopWhenHidden);
+    return () => {
+      document.removeEventListener("visibilitychange", stopWhenHidden);
+      window.removeEventListener("pagehide", stopWhenHidden);
+    };
+  });
 
   useEffect(() => () => {
     if (timerRef.current) clearInterval(timerRef.current);
@@ -176,7 +193,7 @@ export function AiSurveyCapture({
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: true,
+        audio: audioEnabled,
       });
       streamRef.current = stream;
       if (previewRef.current) {
@@ -189,14 +206,22 @@ export function AiSurveyCapture({
       recorder.ondataavailable = (event) => {
         if (event.data.size) chunksRef.current.push(event.data);
       };
-      recorder.onstop = () => {
+      let finished = false;
+      const finish = () => {
+        if (finished || chunksRef.current.length === 0) return;
+        finished = true;
         const actualMime = recorder.mimeType.startsWith("video/mp4") ? "video/mp4" : "video/webm";
         const blob = new Blob(chunksRef.current, { type: actualMime });
         stream.getTracks().forEach((track) => track.stop());
         if (previewRef.current) previewRef.current.srcObject = null;
-        setPending({ blob, mime: actualMime, kind: "room_video", durationS: secondsRef.current, previewUrl: URL.createObjectURL(blob) });
+        registrationRef.current = null;
+        setPending({ blob, mime: actualMime, kind: "room_video", durationS: secondsRef.current, previewUrl: URL.createObjectURL(blob), roomId: selectedRoom });
         setRecording(false);
       };
+      recorder.onstop = finish;
+      recorder.onerror = () => { stream.getTracks().forEach((track) => track.stop()); setRecording(false); toast.error("Recording stopped unexpectedly. Please check the preview."); };
+      stream.getTracks().forEach((track) => track.addEventListener("ended", () => { if (recorder.state === "recording") recorder.stop(); }, { once: true }));
+      recorder.addEventListener("stop", () => setTimeout(finish, 500), { once: true });
       setSeconds(0);
       secondsRef.current = 0;
       setRecording(true);
@@ -214,6 +239,7 @@ export function AiSurveyCapture({
         });
       }, 1_000);
     } catch {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
       toast.error("Camera or microphone permission was denied.");
     }
   }
@@ -226,6 +252,7 @@ export function AiSurveyCapture({
 
   async function chooseFile(file: File) {
     if (pending) URL.revokeObjectURL(pending.previewUrl);
+    registrationRef.current = null;
     const mime = file.type as PendingMedia["mime"];
     if (!["video/mp4", "video/quicktime", "video/webm", "image/jpeg", "image/png"].includes(mime)) {
       return toast.error("Choose an MP4, MOV, WebM, JPEG or PNG file.");
@@ -238,6 +265,7 @@ export function AiSurveyCapture({
         kind: isVideo ? "import_video" : "photo",
         durationS: isVideo ? await videoDuration(file) : undefined,
         previewUrl: URL.createObjectURL(file),
+        roomId: selectedRoom || undefined,
       });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not read that file.");
@@ -249,21 +277,23 @@ export function AiSurveyCapture({
     setUploading(true);
     setProgress(0);
     try {
-      const registration = await registerMediaAction(surveyId, {
-        roomId: selectedRoom || undefined,
+      const evidence = pending.kind === "photo" ? [] : await extractEvidenceFrames(pending.blob);
+      const existing = registrationRef.current;
+      const registration = existing ?? await registerMediaAction(surveyId, {
+        roomId: pending.roomId,
         kind: pending.kind,
         mime: pending.mime,
         bytes: pending.blob.size,
         durationS: pending.durationS,
       });
       if (!registration.ok) throw new Error(registration.error);
+      registrationRef.current = registration;
       await uploadToMediaTarget({
         target: registration.upload,
         file: pending.blob,
         onProgress: (value) => setProgress(value * 0.75),
       });
 
-      const evidence = pending.kind === "photo" ? [] : await extractEvidenceFrames(pending.blob);
       const targets = await createFrameUploadTargetsAction(
         registration.mediaId,
         evidence.map((frame) => ({ t: frame.t, bytes: frame.blob.size })),
@@ -282,6 +312,7 @@ export function AiSurveyCapture({
       toast.success(`${selectedName ?? "Media"} is queued for analysis.`);
       URL.revokeObjectURL(pending.previewUrl);
       setPending(null);
+      registrationRef.current = null;
       router.refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Upload failed. Keep this page open and retry.");
@@ -322,7 +353,7 @@ export function AiSurveyCapture({
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-mist-400">Rooms</p>
         <div className="mt-3 space-y-2">
           {rooms.map((room, index) => (
-            <button key={room.id} type="button" onClick={() => setSelectedRoom(room.id)} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold", selectedRoom === room.id ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-background")}>
+            <button key={room.id} type="button" disabled={recording || uploading} onClick={() => setSelectedRoom(room.id)} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold disabled:opacity-50", selectedRoom === room.id ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-background")}>
               <span>{index + 1}. {room.name}</span><span className="text-[10px] uppercase tracking-wide opacity-70">{room.status.replace("_", " ")}</span>
             </button>
           ))}
@@ -350,6 +381,7 @@ export function AiSurveyCapture({
           <label className="focus-ring flex min-h-12 cursor-pointer items-center justify-center gap-2 rounded-xl border border-white/20 bg-white/5 font-semibold hover:bg-white/10"><FileVideo className="size-5" /> Import media<input type="file" accept="video/mp4,video/quicktime,video/webm,image/jpeg,image/png" className="sr-only" disabled={recording || uploading} onChange={(event) => { const file = event.target.files?.[0]; if (file) void chooseFile(file); event.target.value = ""; }} /></label>
           <button type="button" disabled={!pending || uploading} onClick={uploadPending} className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl bg-cyan-300 font-semibold text-slate-950 disabled:opacity-35">{uploading ? <Loader2 className="size-5 animate-spin" /> : <UploadCloud className="size-5" />} Upload & analyse</button>
         </div>
+        <label className="mx-4 mb-3 flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm text-white/70"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} disabled={recording} className="size-5 accent-mm-red" /> Record narration</label>
         <p className="px-4 pb-4 text-xs leading-5 text-white/45">Keep this page open until upload reaches 100%. AI suggestions never replace your review.</p>
       </section>
     </div>

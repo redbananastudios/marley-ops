@@ -48,7 +48,7 @@ describe("AI media storage seam", () => {
     }
   });
 
-  it("builds a Supabase TUS target only from environment configuration", () => {
+  it("builds a Supabase TUS target only from environment configuration", async () => {
     const provider = providerClient();
     const store = createSupabaseMediaStore({
       environment: {
@@ -58,17 +58,17 @@ describe("AI media storage seam", () => {
       client: provider.client,
     });
 
-    expect(
+    await expect(
       store.createUploadTarget({
         objectKey: "survey/media/source.mp4",
         contentType: "video/mp4",
         accessToken: "session-token",
       }),
-    ).toEqual({
+    ).resolves.toEqual({
       protocol: "tus",
       objectKey: "survey/media/source.mp4",
       endpoint: "https://database.example.test/storage/v1/upload/resumable",
-      headers: { Authorization: "Bearer session-token" },
+      headers: { Authorization: "Bearer session-token", "x-upsert": "true" },
       metadata: {
         bucketName: "private-media",
         objectName: "survey/media/source.mp4",
@@ -78,7 +78,7 @@ describe("AI media storage seam", () => {
     });
   });
 
-  it("uses an explicitly configured storage endpoint", () => {
+  it("uses an explicitly configured storage endpoint", async () => {
     const provider = providerClient();
     const store = createSupabaseMediaStore({
       environment: {
@@ -87,13 +87,14 @@ describe("AI media storage seam", () => {
       client: provider.client,
     });
 
-    expect(
-      store.createUploadTarget({
+    const target = await store.createUploadTarget({
         objectKey: "survey/media/source.mp4",
         contentType: "video/mp4",
         accessToken: "token",
-      }).endpoint,
-    ).toBe("https://storage.example.test/custom/upload/resumable");
+      });
+    expect(target.protocol).toBe("tus");
+    if (target.protocol !== "tus") throw new Error("Expected TUS target");
+    expect(target.endpoint).toBe("https://storage.example.test/custom/upload/resumable");
   });
 
   it("centralises put, metadata, signed-get and delete calls", async () => {

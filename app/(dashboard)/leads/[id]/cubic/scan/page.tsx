@@ -15,12 +15,12 @@ export default async function AiSurveyScanPage({ params }: { params: Promise<{ i
   if (!(await requireOfficeProfile())) notFound();
 
   const admin = createAdminClient();
-  const { data: survey } = await admin
+  const [{ data: survey }, { data: settings }] = await Promise.all([admin
     .from("cubic_surveys")
-    .select("id, ai_consent, lead:leads(name)")
+    .select("id, ai_consent, ai_consent_withdrawn_at, ai_status, lead:leads(name)")
     .eq("lead_id", leadId)
-    .maybeSingle();
-  if (!survey) notFound();
+    .maybeSingle(), admin.from("business_settings").select("ai_survey_enabled").eq("id", true).maybeSingle()]);
+  if (!survey || !settings?.ai_survey_enabled || survey.ai_consent_withdrawn_at || survey.ai_status === "abandoned") notFound();
   const { data: rooms } = await admin
     .from("cubic_survey_rooms")
     .select("id, name, status")

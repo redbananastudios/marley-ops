@@ -36,7 +36,7 @@ create policy survey_media_insert on storage.objects
             array_length(storage.foldername(name), 1) = 3
             and (storage.foldername(name))[3] = 'frames'
             and lower(storage.extension(name)) in ('jpg', 'jpeg')
-            and name ~ '^[0-9a-f-]+/[0-9a-f-]+/frames/[0-9]{4,8}\\.(jpg|jpeg)$'
+            and name ~ '^[0-9a-f-]+/[0-9a-f-]+/frames/[0-9]{4,8}[.](jpg|jpeg)$'
           )
         )
     )
