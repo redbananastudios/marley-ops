@@ -15,6 +15,7 @@ import {
   Truck,
   UserRound,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
@@ -105,7 +106,9 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         <div className="mt-2 rounded-xl border border-border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-5">
           <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="eyebrow">{isRemoval ? "Move" : apptType}{d.quoteRef ? ` · ${d.quoteRef}` : ""}</p>
+            {/* The pill on the right already says Move/Survey — the eyebrow names
+                the surface (this page is the digital job sheet) + the quote ref. */}
+            <p className="eyebrow">Job sheet{d.quoteRef ? ` · ${d.quoteRef}` : ""}</p>
             <h1 className="mt-1 font-display text-3xl font-bold text-foreground">{d.customerName}</h1>
             <p className="mt-1 text-sm text-mist-500">
               {fmtDate(d.moveDate)} · {d.timeWindow}
@@ -194,8 +197,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
             return (
               <div key={title} className="rounded-lg border border-border bg-card p-4">
                 {eyebrow(<MapPin className="size-3.5" strokeWidth={1.75} />, title)}
-                <p className="mt-1.5 text-sm font-medium text-foreground">{side.address || "—"}</p>
-                {side.postcode ? <p className="tabular text-sm font-semibold text-foreground">{side.postcode}</p> : null}
+                {/* no street on file → lead with the postcode rather than a "—" line */}
+                {side.address ? <p className="mt-1.5 text-sm font-medium text-foreground">{side.address}</p> : null}
+                {side.postcode ? (
+                  <p className={cn("tabular text-sm font-semibold text-foreground", !side.address && "mt-1.5")}>{side.postcode}</p>
+                ) : null}
+                {!side.address && !side.postcode ? <p className="mt-1.5 text-sm text-mist-400">No address on file</p> : null}
                 {accessLine(side) ? <p className="mt-1 text-xs capitalize text-mist-400">{accessLine(side)}</p> : null}
                 {dest ? (
                   <a

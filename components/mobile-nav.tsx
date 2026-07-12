@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { Menu, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { QuickCreate } from "@/components/quick-create";
-import { NavFooter, SidebarNavList } from "@/components/app-sidebar";
+import { BrandMark, NavFooter, SidebarNavList } from "@/components/app-sidebar";
 
 export function MobileNav({ profile }: { profile: { full_name: string; role: string } }) {
   const pathname = usePathname();
@@ -14,9 +14,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
   return (
     <>
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 xl:hidden">
-        <span className="font-display text-lg font-medium tracking-[-0.03em] text-white">
-          Marley <span className="text-mm-red-bright">Ops</span>
-        </span>
+        <BrandMark compact />
         <div className="flex items-center gap-1">
           <QuickCreate compact />
           <button
@@ -39,9 +37,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
           >
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
             <div className="flex h-16 items-center justify-between border-b border-white/8 px-4">
-              <span className="font-display text-lg font-medium tracking-[-0.03em] text-white">
-                Marley <span className="text-mm-red-bright">Ops</span>
-              </span>
+              <BrandMark compact />
               <DialogPrimitive.Close
                 aria-label="Close menu"
                 className="focus-ring flex size-11 items-center justify-center rounded-md text-white/55 hover:bg-white/[0.06] hover:text-white"
@@ -53,7 +49,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
             <div className="px-3 pt-4">
               <QuickCreate className="w-full" />
             </div>
-            <nav className="flex-1 overflow-y-auto px-3 py-5">
+            <nav className="nav-scroll flex-1 overflow-y-auto px-3 py-5">
               <SidebarNavList pathname={pathname} role={profile.role} onNavigate={() => setOpen(false)} />
             </nav>
             <NavFooter profile={profile} />

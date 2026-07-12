@@ -89,6 +89,29 @@ export function navForRole(role: string): NavGroup[] {
   return role === "estimator" ? ESTIMATOR_NAV : OFFICE_NAV;
 }
 
+/** Brand lockup for the black rails: the Marley symbol in a white tile + the
+ *  product wordmark. Shared by the desktop sidebar, mobile header and drawer. */
+export function BrandMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-white", compact ? "size-8" : "size-9")}>
+        {/* the source mark carries generous padding — oversize it inside the
+            tile so the house + van fill the square */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand-mark.png" alt="Marley Moves" className={compact ? "size-10 max-w-none" : "size-12 max-w-none"} />
+      </span>
+      <span
+        className={cn(
+          "truncate font-display font-medium tracking-[-0.03em] text-white",
+          compact ? "text-lg" : "text-xl",
+        )}
+      >
+        Marley <span className="text-mm-red-bright">Ops</span>
+      </span>
+    </span>
+  );
+}
+
 export function SidebarNavList({
   pathname,
   role,
@@ -122,15 +145,18 @@ export function SidebarNavList({
                         : "text-white/62 hover:bg-white/[0.055] hover:text-white",
                     )}
                   >
+                    {/* Borderless plates + 16px stroke-2 icons: translucent 1px
+                        borders and odd icon sizes anti-alias into mush on the
+                        black rail — solid fills and pixel-grid sizes stay sharp. */}
                     <span
                       className={cn(
-                        "relative grid size-7 shrink-0 place-items-center rounded-md border transition-colors",
+                        "relative grid size-7 shrink-0 place-items-center rounded-md transition-colors",
                         active
-                          ? "border-mm-red-bright/35 bg-mm-red-bright/12 text-mm-red-bright"
-                          : "border-white/8 bg-white/[0.035] text-white/48 group-hover:text-white",
+                          ? "bg-mm-red-bright/15 text-mm-red-bright"
+                          : "bg-white/[0.06] text-white/60 group-hover:text-white",
                       )}
                     >
-                      <Icon className="size-[17px]" strokeWidth={1.65} />
+                      <Icon className="size-4" strokeWidth={2} />
                     </span>
                     {item.label}
                   </Link>
@@ -180,17 +206,15 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
 
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex">
-      <div className="flex h-16 shrink-0 items-center border-b border-white/8 px-5">
-        <span className="truncate font-display text-xl font-medium tracking-[-0.03em] text-white">
-          Marley <span className="text-mm-red-bright">Ops</span>
-        </span>
+      <div className="flex h-16 shrink-0 items-center border-b border-white/8 px-4">
+        <BrandMark />
       </div>
 
       <div className="px-3 pt-4">
         <QuickCreate className="w-full" />
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-3 py-5">
+      <nav className="nav-scroll flex-1 overflow-y-auto px-3 py-5">
         <SidebarNavList pathname={pathname} role={profile.role} />
       </nav>
 
