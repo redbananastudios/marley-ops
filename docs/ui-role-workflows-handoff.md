@@ -1,7 +1,15 @@
 # Premium role-based UI and workflow handoff
 
-Updated: 12 July 2026 (night — pass 4: bug fixes + customer routes + lint green)
-Status: browser-accepted at all three role viewports; passes 1–4 committed (`1fe1be4` … `35eabbb`); production `npm run build` green, 278 tests + tsc green, and **`npm run lint` now exits 0**. Everything on the original list plus the previously out-of-scope items (customer routes, lint) is done.
+Updated: 12 July 2026 (night — pass 5: automations log, icon unification, prod hardening)
+Status: browser-accepted at all three role viewports; passes 1–5 committed (`1fe1be4` … `30871b8`); production `npm run build` green, 278 tests + tsc green, `npm run lint` exit 0.
+
+## Rollout pass 5 (12 Jul, `be24443` … `30871b8`) — production readiness
+
+- **Automations log + structured logging** (`be24443`): new `/automations` page (SYSTEM nav) — a per-job health grid (last run, status, "overdue" if a job hasn't fired within its maxAge) + a chronological run log, refreshing on open and every 30 minutes. Backed by a new `cron_runs` table (migration **0033**, RLS is_office), a `runCron()` wrapper (`lib/cron/run-logger.ts`) that times + structured-logs + records every scheduled run, the central `lib/cron/jobs.ts` registry, and `lib/log.ts` (structured JSON logger). All 7 crons wired (chase, zoho-deposits, crew-reminders, storage-billing, ai-jobs, ai-retention, sanity-leads-sync). Verified live: a real ai-jobs run wrote an audit row unchanged.
+  **DEPLOY: apply migration 0033 to prod before deploy** (best-effort insert keeps crons safe if missing, but the page needs the table).
+- **Central contact-action style** (`47a935e`): `components/ui/contact-action.tsx` is the single source for call/WhatsApp/email/directions. The ad-hoc pink/blue/green icons (lead detail, pipeline board, follow-ups, appointment dialogs, client detail) are neutralised through it. Change the style once, everywhere updates.
+- **Structured logging on silent failures** (`30871b8`): the chase/storage-billing catches that only bumped a counter, and ad-hoc console.error in crew-reminders/fetch-all/ai-survey, now emit structured log lines with context.
+- **NOTE (local dev):** sample `cron_runs` rows are seeded so the /automations page shows populated for review — clear them before any real read matters.
 
 ## Rollout pass 4 (12 Jul, `4ce9b10` … `35eabbb`) — fixes, customer routes, lint
 
