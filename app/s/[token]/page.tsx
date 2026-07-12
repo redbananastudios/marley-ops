@@ -58,13 +58,13 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const rateLabel = let_.rate ? `${gbp(Number(let_.rate))} per ${let_.rate_period}` : "as agreed";
 
   return (
-    <main className="mx-auto min-h-screen max-w-xl bg-[#F6F5F3] px-5 py-10">
+    <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="https://quotes.marleymoves.co.uk/logo.png" alt="Marley Moves" width={170} className="mx-auto mb-6" />
+      <img src="/logo.png" alt="Marley Moves" width={170} className="mx-auto mb-6" />
 
-      <div className="rounded-lg border border-[#E8E4DD] bg-white p-6 sm:p-8">
+      <div className="rounded-lg border border-border bg-card p-6 sm:p-8">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-mm-red">Storage agreement</p>
-        <h1 className="mt-2 font-display text-3xl font-semibold text-ink">
+        <h1 className="mt-2 font-brand text-3xl font-semibold text-ink">
           {existing ? "All signed — thank you." : `Your storage with us, ${firstName}`}
         </h1>
 
@@ -79,7 +79,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
           </p>
         ) : (
           <>
-            <div className="mt-5 space-y-2 rounded-md border-l-4 border-mm-red bg-[#FBF8F4] p-4 text-sm text-ink">
+            <div className="mt-5 space-y-2 rounded-md border-l-4 border-mm-red bg-mm-red-tint/50 p-4 text-sm text-ink">
               <p>
                 <strong>{unitLabel}</strong>
               </p>

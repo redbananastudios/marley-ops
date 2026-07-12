@@ -37,12 +37,12 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
   const settings = await getBusinessSettings(admin);
 
   return (
-    <main className="min-h-screen bg-[#F6F5F3]">
+    <main className="min-h-screen bg-mist-50">
       <div className="mx-auto max-w-6xl px-5 pb-12 md:px-8">
         <div className="py-6 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="https://quotes.marleymoves.co.uk/logo.png" alt="Marley Moves" width={160} className="mx-auto" />
-          <h1 className="mt-4 font-display text-3xl font-semibold text-foreground">
+          <img src="/logo.png" alt="Marley Moves" width={160} className="mx-auto" />
+          <h1 className="mt-4 font-brand text-3xl font-semibold text-foreground">
             {survey.status === "complete" ? "All done — thank you." : `What's moving, ${firstName}?`}
           </h1>
           {survey.status !== "complete" ? (
@@ -62,7 +62,7 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
         </div>
 
         {survey.status !== "complete" ? (
-          <div className="rounded-lg border border-[#E8E4DD] bg-white px-5 pb-6 md:px-8">
+          <div className="rounded-lg border border-border bg-card px-5 pb-6 md:px-8">
             <CubicBuilder
               mode="customer"
               initialLines={lines}
