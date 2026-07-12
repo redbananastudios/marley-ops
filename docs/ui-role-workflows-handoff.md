@@ -1,7 +1,17 @@
 # Premium role-based UI and workflow handoff
 
-Updated: 12 July 2026 (late evening — rollout pass 3 complete)
-Status: checkpoint browser-accepted at all three role viewports; QA fixes + rollout passes 1–3 committed (`1fe1be4` … `83b88b0`); production `npm run build` green, 278 tests + tsc green. **The whole "Remaining" list is now done** — only explicitly out-of-scope items are left (customer-facing routes, a separate pre-existing-lint cleanup).
+Updated: 12 July 2026 (night — pass 4: bug fixes + customer routes + lint green)
+Status: browser-accepted at all three role viewports; passes 1–4 committed (`1fe1be4` … `35eabbb`); production `npm run build` green, 278 tests + tsc green, and **`npm run lint` now exits 0**. Everything on the original list plus the previously out-of-scope items (customer routes, lint) is done.
+
+## Rollout pass 4 (12 Jul, `4ce9b10` … `35eabbb`) — fixes, customer routes, lint
+
+- **Brand mark centred** (`4ce9b10`): the oversized mark was anchored bottom-right (CSS grid `place-items` anchors an oversized child top-left) → absolute-centred in the tile.
+- **Sidebar reachability + hairline** (`58de37d`): Settings (last nav group) was unreachable on short viewports — the scroll nav is a flex child and needed `min-h-0` to actually scroll; also removed the header `border-b` hairline ("white line below the logo before Create") on sidebar + drawer.
+- **Cubic category chips wrap** (`0d9a087`): the category row was an `overflow-x-auto` + `scrollbar-none` carousel, so categories past the fold (Kitchen onward) were unreachable on desktop → `flex-wrap`. Fixes /cv **and** the office cubic builder.
+- **Customer routes into the design system** (`a572e27`): `/q` `/cv` `/s` now serve the logo locally (was the external `quotes.marleymoves.co.uk` URL), use the cool zinc tokens (`/cv` + `/s` were on the old hardcoded warm palette), and the hero headlines use Cormorant Garamond. No change to the accept→deposit flow.
+- **Lint green** (`35eabbb`): cleared all 22 pre-existing errors. Real fixes (static-components hoist, Date.now purity via stable useState, unused imports, typed a test helper) + a documented config call to run `react-hooks/set-state-in-effect` as a warning (14 intentional reset-on-open/fetch effects; refactoring them on a live tool is disproportionate risk). 15 advisory warnings remain (14 those effects + 1 react-hook-form/compiler incompat).
+
+## Rollout pass 3 (12 Jul, committed 83b88b0) — tab/filter vocabulary
 
 ## Rollout pass 3 (12 Jul, committed 83b88b0) — tab/filter vocabulary
 
