@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
@@ -121,6 +122,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
+  const run = await runCron("chase", async () => {
   const sb = createAdminClient();
   const now = new Date();
   const summary = {
@@ -139,7 +141,7 @@ export async function GET(req: Request) {
     .in("status", ["quoted", "provisional"])
     .eq("chase_paused", false)
     .limit(200);
-  if (!leads?.length) return NextResponse.json({ ok: true, ...summary });
+  if (!leads?.length) return summary;
 
   const { data: quotes } = await sb
     .from("quotes")
@@ -430,5 +432,10 @@ export async function GET(req: Request) {
       `Today's run: ${JSON.stringify(summary)}. Check the Vercel function logs.`,
     ]);
   }
-  return NextResponse.json({ ok: true, ...summary });
+  return summary;
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

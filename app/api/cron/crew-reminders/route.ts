@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import { apptDays, apptWindow } from "@/lib/job-board";
@@ -69,7 +70,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
+  const run = await runCron("crew-reminders", async () => {
   const admin = createAdminClient();
   const tomorrow = ukDayPlus(1);
 
@@ -81,7 +82,7 @@ export async function GET(req: Request) {
     .not("staff_id", "is", null)
     .is("reminded_at", null);
   const apptIds = [...new Set((assigns ?? []).map((a) => a.appointment_id))];
-  if (!apptIds.length) return NextResponse.json({ ok: true, sent: 0, reason: "no unreminded assignments" });
+  if (!apptIds.length) return { sent: 0, reason: "no unreminded assignments" };
 
   const { data: appts } = await admin
     .from("appointments")
@@ -91,7 +92,7 @@ export async function GET(req: Request) {
   const tomorrowAppts = new Map(
     (appts ?? []).filter((a) => a.starts_at && apptDays(a).includes(tomorrow)).map((a) => [a.id, a]),
   );
-  if (!tomorrowAppts.size) return NextResponse.json({ ok: true, sent: 0, reason: "nothing on tomorrow" });
+  if (!tomorrowAppts.size) return { sent: 0, reason: "nothing on tomorrow" };
 
   const due = (assigns ?? []).filter((a) => tomorrowAppts.has(a.appointment_id));
   const staffIds = [...new Set(due.map((a) => a.staff_id))] as string[];
@@ -146,5 +147,10 @@ export async function GET(req: Request) {
       .in("id", remindedIds);
   }
 
-  return NextResponse.json({ ok: true, tomorrow, sent, failed, assignmentsMarked: remindedIds.length });
+  return { tomorrow, sent, failed, assignmentsMarked: remindedIds.length };
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

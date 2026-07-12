@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import {
@@ -43,6 +44,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ ok: false, error: "unauthorised" }, { status: 401 });
   }
+  const run = await runCron("storage-billing", async () => {
   const admin = createAdminClient();
   const today = new Date().toLocaleDateString("en-CA", { timeZone: UK });
   const summary = { raised: 0, emailed: 0, statusUpdated: 0, errors: [] as string[] };
@@ -209,5 +211,10 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, today, ...summary });
+  return { today, ...summary };
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

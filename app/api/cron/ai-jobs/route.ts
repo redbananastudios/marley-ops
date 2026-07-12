@@ -4,6 +4,7 @@ import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createAiJobRuntime } from "@/lib/ai/job-runtime";
 import { drainAiJobs } from "@/lib/ai/jobs";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
 
 export const maxDuration = 800;
 
@@ -22,10 +23,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Office access required" }, { status: 403 });
   }
 
-  const workerId = `http-${crypto.randomUUID()}`;
-  const result = await drainAiJobs(createAiJobRuntime(), {
-    workerId,
-    deadlineAtMs: Date.now() + 780_000,
+  const run = await runCron("ai-jobs", async () => {
+    const workerId = `http-${crypto.randomUUID()}`;
+    const result = await drainAiJobs(createAiJobRuntime(), {
+      workerId,
+      deadlineAtMs: Date.now() + 780_000,
+    });
+    return result as unknown as Record<string, unknown>;
   });
-  return NextResponse.json(result);
+  return NextResponse.json(run.summary ?? { ok: false, error: run.error }, { status: run.status });
 }

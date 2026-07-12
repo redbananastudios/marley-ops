@@ -1459,6 +1459,42 @@ export type Database = {
           },
         ]
       }
+      cron_runs: {
+        Row: {
+          created_at: string
+          duration_ms: number | null
+          error: string | null
+          finished_at: string
+          id: string
+          job: string
+          started_at: string
+          status: string
+          summary: Json
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string
+          id?: string
+          job: string
+          started_at: string
+          status: string
+          summary?: Json
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string
+          id?: string
+          job?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+        }
+        Relationships: []
+      }
       job_notes: {
         Row: {
           appointment_id: string | null

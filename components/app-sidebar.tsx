@@ -14,6 +14,7 @@ import {
   KanbanSquare,
   LayoutDashboard,
   LogOut,
+  Radio,
   Settings,
   Sparkles,
   Truck,
@@ -64,7 +65,13 @@ const OFFICE_NAV: NavGroup[] = [
     ],
   },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
-  { group: "System", items: [{ href: "/settings", label: "Settings", icon: Settings }] },
+  {
+    group: "System",
+    items: [
+      { href: "/automations", label: "Automations", icon: Radio },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
 const ESTIMATOR_NAV: NavGroup[] = [
