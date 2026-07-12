@@ -19,8 +19,6 @@ import { useTransition } from "react";
 import {
   Phone,
   PhoneMissed,
-  MessageCircle,
-  Mail,
   Check,
   FileText,
   CalendarPlus,
@@ -29,6 +27,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { ContactAction } from "@/components/ui/contact-action";
 import {
   markLeadContactedAction,
   updateLeadStatusAction,
@@ -114,25 +113,21 @@ export function LeadActionBar({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 px-5 py-4">
-      {/* contact — always available */}
+      {/* contact — always available. When the lead is still uncontacted the call
+          is the primary CTA (deliberate red); otherwise the neutral central
+          contact style keeps every contact action uniform across the app. */}
       {phone ? (
-        <a href={`tel:${phone}`} className={uncontacted ? primaryBtn : btn} aria-label="Call">
-          <Phone className="size-4 text-[#db2777]" strokeWidth={1.75} />
-          {uncontacted ? "Call customer" : "Call"}
-        </a>
+        uncontacted ? (
+          <a href={`tel:${phone}`} className={primaryBtn} aria-label="Call">
+            <Phone className="size-4" strokeWidth={1.75} />
+            Call customer
+          </a>
+        ) : (
+          <ContactAction kind="call" href={`tel:${phone}`} variant="button" />
+        )
       ) : null}
-      {wa ? (
-        <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={btn} aria-label="WhatsApp">
-          <MessageCircle className="size-4 text-[#16a34a]" strokeWidth={1.75} />
-          WhatsApp
-        </a>
-      ) : null}
-      {email ? (
-        <a href={`mailto:${email}`} className={btn} aria-label="Email">
-          <Mail className="size-4" strokeWidth={1.75} />
-          Email
-        </a>
-      ) : null}
+      {wa ? <ContactAction kind="whatsapp" href={`https://wa.me/${wa}`} variant="button" /> : null}
+      {email ? <ContactAction kind="email" href={`mailto:${email}`} variant="button" /> : null}
       {uncontacted ? (
         <button
           type="button"

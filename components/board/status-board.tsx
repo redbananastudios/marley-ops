@@ -12,7 +12,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MoveHorizontal, Phone, MessageCircle, FileText, Search, Calendar, Home, ChevronLeft, ChevronRight } from "lucide-react";
+import { MoveHorizontal, FileText, Search, Calendar, Home, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { updateLeadStatusAction } from "@/app/(dashboard)/leads/actions";
@@ -26,6 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { ContactAction } from "@/components/ui/contact-action";
 import {
   Select,
   SelectContent,
@@ -478,17 +479,9 @@ function Card({
 
       {/* quick actions */}
       <div className="mt-2 flex items-center gap-0.5 border-t pt-1.5">
-        {lead.phone ? (
-          <a href={`tel:${lead.phone}`} title="Call" aria-label="Call" className="focus-ring flex size-8 items-center justify-center rounded-md text-[#2563eb] hover:bg-muted">
-            <Phone className="size-4" strokeWidth={1.75} />
-          </a>
-        ) : null}
-        {wa ? (
-          <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" title="WhatsApp" aria-label="WhatsApp" className="focus-ring flex size-8 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted">
-            <MessageCircle className="size-4" strokeWidth={1.75} />
-          </a>
-        ) : null}
-        <Link href={`/quotes/new?leadId=${lead.id}`} prefetch={false} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mm-red hover:bg-muted">
+        {lead.phone ? <ContactAction kind="call" href={`tel:${lead.phone}`} className="size-8" /> : null}
+        {wa ? <ContactAction kind="whatsapp" href={`https://wa.me/${wa}`} className="size-8" /> : null}
+        <Link href={`/quotes/new?leadId=${lead.id}`} prefetch={false} title="New quote" aria-label="New quote" className="focus-ring flex size-8 items-center justify-center rounded-md text-mist-500 transition-colors hover:bg-muted hover:text-foreground">
           <FileText className="size-4" strokeWidth={1.75} />
         </Link>
         <DropdownMenu>

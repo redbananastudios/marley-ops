@@ -177,7 +177,7 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
               href={`tel:${lead.phone}`}
               className="focus-ring -ml-2 inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-foreground hover:bg-muted"
             >
-              <Phone className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
+              <Phone className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
               {lead.phone}
             </a>
           ) : null}

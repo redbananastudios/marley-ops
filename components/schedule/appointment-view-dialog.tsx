@@ -222,13 +222,13 @@ export function AppointmentViewDialog({
             <div className="flex gap-2">
               {lead.phone ? (
                 <a href={`tel:${lead.phone}`} className={cn(actionBtn, "min-w-0 flex-1")}>
-                  <Phone className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
+                  <Phone className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
                   Call
                 </a>
               ) : null}
               {wa ? (
                 <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className={cn(actionBtn, "min-w-0 flex-1")}>
-                  <MessageCircle className="size-4 shrink-0 text-[#16a34a]" strokeWidth={1.75} />
+                  <MessageCircle className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
                   WhatsApp
                 </a>
               ) : null}
@@ -238,7 +238,7 @@ export function AppointmentViewDialog({
                 defaultPhone={lead.phone ?? undefined}
                 trigger={
                   <button type="button" className={cn(actionBtn, "min-w-0 flex-1")}>
-                    <MessageSquare className="size-4 shrink-0 text-[#2563eb]" strokeWidth={1.75} />
+                    <MessageSquare className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
                     Message
                   </button>
                 }
