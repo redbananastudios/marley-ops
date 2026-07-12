@@ -197,7 +197,7 @@ export default async function BookingsPage() {
     .reduce((s, r) => s + r.balanceAmount, 0);
 
   return (
-    <main className="mx-auto w-full max-w-5xl space-y-5 p-6 md:p-8">
+    <main className="flex-1 space-y-5 p-6 md:p-8">
       <PageHeader
         eyebrow="Sales"
         title="Bookings"
