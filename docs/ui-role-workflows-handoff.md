@@ -11,6 +11,17 @@ Status: browser-accepted at all three role viewports; passes 1–5 committed (`1
 - **Structured logging on silent failures** (`30871b8`): the chase/storage-billing catches that only bumped a counter, and ad-hoc console.error in crew-reminders/fetch-all/ai-survey, now emit structured log lines with context.
 - **NOTE (local dev):** sample `cron_runs` rows are seeded so the /automations page shows populated for review — clear them before any real read matters.
 
+### Hardening sweep (adversarial review of money + comms paths)
+
+Fixed (`e3b0350`): **email_sent_at reset by every chase** (HIGH — silently stretched the chase cadence + re-extended the 30-day price validity; now set-once); the **swallowed duplicate-guard insert error** (now logged); the **auto-lapse cancelling a follow-up for a lead accepted in the race window** (now guarded on the conditional update winning).
+
+Reviewed and confirmed **safe** (no fix needed): the never-create-twice invoice guarantee (claim + reference-adoption + stale-sweep are sound), the deposit/balance money math + VAT single-line, and the atomic `deposit_paid_at`/`balance_paid_at` idempotency gates.
+
+**Deferred — deploy/config or future-gateway items (not code-fixed):**
+1. **CRON_SECRET must be set in prod.** If neither `CRON_SECRET` nor `SYNC_CRON_SECRET` is set, every Vercel-cron call 401s before `runCron` — a silent total stall of all automations with no audit row. Ensure `CRON_SECRET` is set in the Vercel project before/at deploy. (Add to the go-live checklist.)
+2. **Card-gateway payment TOCTOU.** `markDepositPaid`/`markBalancePaid` read invoice status then record a payment; once a *card* gateway is live for the balance, a card payment landing in that window could double-record. Only relevant when the card gateway is enabled — revisit then (record-payment should be made idempotent on the Zoho side).
+3. **Total cron-run failures** are visible on /automations (health grid + overdue) and in the structured logs, but there's no email alert (deliberately — a per-failure email on the 2-minute ai-jobs cron would spam). A rate-limited ops alert could be added if you want push notification of a stalled job.
+
 ## Rollout pass 4 (12 Jul, `4ce9b10` … `35eabbb`) — fixes, customer routes, lint
 
 - **Brand mark centred** (`4ce9b10`): the oversized mark was anchored bottom-right (CSS grid `place-items` anchors an oversized child top-left) → absolute-centred in the tile.
