@@ -420,8 +420,16 @@ export function CubicBuilder({
           <div className="ml-auto flex items-center gap-2">
             {office ? (
               <>
-                <span className="text-xs text-mist-400">
-                  {saveState === "saving" ? "Saving…" : saveState === "saved" ? "Saved" : ""}
+                <span className="flex items-center gap-1 text-xs text-mist-400" aria-live="polite">
+                  {saveState === "saving" ? (
+                    <>
+                      <Loader2 className="size-3 animate-spin" strokeWidth={1.75} /> Saving…
+                    </>
+                  ) : saveState === "saved" ? (
+                    <>
+                      <Check className="size-3 text-success" strokeWidth={2} /> Saved
+                    </>
+                  ) : null}
                 </span>
                 {status === "complete" ? (
                   <span className="inline-flex items-center gap-1.5 rounded-pill bg-success-bg px-3 py-1 text-xs font-semibold uppercase tracking-wide text-success">
