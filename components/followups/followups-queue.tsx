@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Select,
   SelectContent,
@@ -138,9 +139,12 @@ export function FollowUpsQueue({ rows }: { rows: FollowUpRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <Card className="px-5 py-14 text-center text-sm text-mist-400">
-        Nothing outstanding. New follow-ups appear here from a lead&apos;s No-reply button, deposit/balance
-        chases, or Add follow-up on the lead.
+      <Card>
+        <EmptyState
+          icon={AlarmClock}
+          title="Nothing outstanding"
+          hint="New follow-ups appear here from a lead's No-reply button, deposit/balance chases, or Add follow-up on the lead."
+        />
       </Card>
     );
   }

@@ -16,6 +16,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BrandMark } from "@/components/app-sidebar";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
@@ -87,9 +88,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
-        <span className="font-display text-xl font-medium tracking-[-0.03em] text-white">
-          Marley <span className="text-mm-red-bright">Ops</span>
-        </span>
+        <BrandMark compact />
         <SignOutButton />
       </header>
 

@@ -81,7 +81,8 @@ export default async function BoardPage() {
 
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
-      <PageHeader eyebrow="Pipeline" title="Board" />
+      {/* Same name as the sidebar item — "Board" alone collides with Job Board. */}
+      <PageHeader eyebrow="Pipeline" title="Pipeline Board" />
       <StatusBoard leads={cards} meId={user?.id ?? null} thisWeekStart={thisWeekStart} />
     </main>
   );

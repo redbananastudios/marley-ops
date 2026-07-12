@@ -4,6 +4,7 @@ import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
+import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 
@@ -161,9 +162,7 @@ export default async function MyJobsPage() {
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
-        <span className="font-display text-xl font-medium tracking-[-0.03em] text-white">
-          Marley <span className="text-mm-red-bright">Ops</span>
-        </span>
+        <BrandMark compact />
         <div className="flex items-center gap-2">
           <span className="hidden text-sm text-white/55 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
           <SignOutButton />
