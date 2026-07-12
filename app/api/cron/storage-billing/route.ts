@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
+import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import {
@@ -158,8 +159,9 @@ export async function GET(req: Request) {
           let pdf: string | undefined;
           try {
             pdf = await getInvoicePdfBase64(ref.invoiceId);
-          } catch {
-            pdf = undefined;
+          } catch (e) {
+            pdf = undefined; // email still sends, just without the VAT PDF
+            log.warn("cron.storage-billing.pdf_failed", { invoiceId: ref.invoiceId, ...errorContext(e) });
           }
           const sent = await sendEmail({
             to: client.email,
@@ -206,8 +208,9 @@ export async function GET(req: Request) {
         await admin.from("storage_invoices").update({ status: "void" } as never).eq("id", row.id);
         summary.statusUpdated++;
       }
-    } catch {
-      // transient Zoho error — next run retries
+    } catch (e) {
+      // transient Zoho error — next run retries; log so a persistent one is visible
+      log.warn("cron.storage-billing.status_refresh_failed", { invoiceId: row.zoho_invoice_id, ...errorContext(e) });
     }
   }
 

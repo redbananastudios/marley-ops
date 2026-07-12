@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
+import { log } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import { apptDays, apptWindow } from "@/lib/job-board";
@@ -136,7 +137,7 @@ export async function GET(req: Request) {
       remindedIds.push(...mine.map((a) => a.id));
     } else {
       failed++;
-      console.error(`[crew-reminders] send failed for ${s.full_name}: ${res.error}`);
+      log.error("cron.crew-reminders.send_failed", { staffId: s.id, error: res.error });
     }
   }
 

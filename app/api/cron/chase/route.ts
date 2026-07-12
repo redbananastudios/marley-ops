@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
+import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
@@ -334,8 +335,9 @@ export async function GET(req: Request) {
           summary.depositChases++;
         }
       }
-    } catch {
+    } catch (e) {
       summary.errors++;
+      log.error("cron.chase.lead_failed", { leadId: lead.id, status: lead.status, ...errorContext(e) });
     }
   }
 
@@ -422,8 +424,9 @@ export async function GET(req: Request) {
       });
       await sendReviewRequest(sb, leadId, null).catch(() => null);
       summary.autoCompleted++;
-    } catch {
+    } catch (e) {
       summary.errors++;
+      log.error("cron.chase.postmove_failed", { appointmentId: appt.id, leadId: appt.lead_id, ...errorContext(e) });
     }
   }
 
