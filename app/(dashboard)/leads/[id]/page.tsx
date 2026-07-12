@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Plus } from "lucide-react";
+import { ChevronLeft, Plus, ScanLine } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { CHANNEL_LABELS } from "@/lib/leads/schema";
@@ -439,6 +439,33 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         {/* Survey */}
         <TabsContent value="survey" className="mt-5">
+          {settings.aiSurveyEnabled ? (
+            <Card className="mb-5 overflow-hidden border-mm-red/25 bg-[#111719] p-0 text-white shadow-lg">
+              <div className="grid gap-5 p-5 sm:grid-cols-[1fr_auto] sm:items-center md:p-6">
+                <div className="flex min-w-0 items-start gap-4">
+                  <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-mm-red text-white shadow-[0_0_24px_rgba(192,56,56,.3)]">
+                    <ScanLine className="size-6" strokeWidth={1.8} />
+                  </div>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="font-display text-xl font-semibold">AI video survey</h2>
+                      <span className="rounded-pill bg-cyan-300/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-cyan-200">Estimator tool</span>
+                    </div>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-white/65">
+                      Record each room, let AI prepare the moving inventory, then verify every item before calculating volume and vehicle requirements.
+                    </p>
+                  </div>
+                </div>
+                <Button asChild className="min-h-12 bg-mm-red px-5 text-white hover:bg-mm-red-deep">
+                  <Link href={`/leads/${lead.id}/cubic`}>
+                    <ScanLine strokeWidth={1.75} />
+                    Open AI survey
+                  </Link>
+                </Button>
+              </div>
+            </Card>
+          ) : null}
+
           <Card className="mb-5 p-0">
             <div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-3.5">
               <h2 className="font-display text-lg text-foreground">Survey visit</h2>
