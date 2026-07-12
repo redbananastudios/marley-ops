@@ -1,7 +1,16 @@
 # Premium role-based UI and workflow handoff
 
-Updated: 12 July 2026 (late evening — rollout pass 2 complete)
-Status: checkpoint browser-accepted at all three role viewports; QA fixes + rollout passes 1 & 2 committed (`1fe1be4` … `ec9e891`); production `npm run build` green. Only the tab-component unification + optional deeper polish remain (see "Remaining after pass 2").
+Updated: 12 July 2026 (late evening — rollout pass 3 complete)
+Status: checkpoint browser-accepted at all three role viewports; QA fixes + rollout passes 1–3 committed (`1fe1be4` … `83b88b0`); production `npm run build` green, 278 tests + tsc green. **The whole "Remaining" list is now done** — only explicitly out-of-scope items are left (customer-facing routes, a separate pre-existing-lint cleanup).
+
+## Rollout pass 3 (12 Jul, committed 83b88b0) — tab/filter vocabulary
+
+The last substantive item. Four switcher idioms (Radix underline, red-tint segmented, solid-red pill tabs, red-tint chips) with **red on every active state** were consolidated into one calm vocabulary in `components/ui/segmented.tsx`:
+- `segmentedTrackClass` + `segmentedItemClass` (iOS/Vercel muted-rail + white active pill) → Dashboard period, Performance tabs + Sales range, Documents tabs, Clients Grid/List, Resources Staff/Vehicles.
+- `filterChipClass` + count badge (calm grey active fill) → Quotes + Leads presets.
+- Lead-detail keeps the shared Radix underline `Tabs` (the distinct "sub-nav within a record" affordance).
+
+Red is now removed from every tab/filter and reserved for primary CTAs + the sidebar's active marker (the stated design rule). All six surfaces browser-verified.
 
 ## Rollout pass 2 (12 Jul, committed f348fd2 → ec9e891)
 
@@ -28,12 +37,13 @@ Environment notes for the next session:
 - `SANITY_SYNC_DISABLED=true` is set in the worktree `.env.local` and a real website lead (real PII, auto-synced from prod Sanity on dashboard load) was deleted from the local DB. **Keep the flag set** — QA against real customers is the failure mode.
 - Turbopack served stale `globals.css` / imports after an edit a couple of times — if a CSS/import change doesn't appear (or you see a transient `X is not defined`), restart the dev server; it clears.
 
-## Remaining after pass 2
+## Remaining (all out-of-scope by design)
 
-- **Tab-component unification** (the one substantive item left): three tab idioms coexist — the shared `components/ui/tabs.tsx` (underline/red-active, used by Performance/dashboard), the quotes/documents preset **chips**, and the board **filter pills**. Consolidating to one vocabulary is a deliberate design-token decision (which idiom wins?) and a broad touch; left for a focused pass rather than risked mid-rollout.
-- Optional polish: apply the shared `EmptyState` to the remaining bespoke empty states (storage, documents, board columns) for full consistency.
-- Customer-facing routes (`/q`, `/cv`, `/s`) deliberately untouched — separate decision before restyling live customer surfaces.
-- Repo-wide lint remains red from **pre-existing** React-Compiler debt (set-state-in-effect, a couple of `Date.now()`-in-render); this branch introduced none and cleared the two it touched. A separate lint-cleanup pass is warranted but out of scope here.
+- **Customer-facing routes** (`/q`, `/cv`, `/s`) deliberately untouched — these are live customer surfaces; restyling them needs a separate decision from Peter before touching.
+- **Pre-existing lint cleanup**: repo-wide lint is red from React-Compiler debt that predates this branch (set-state-in-effect hydration patterns in a few views, a couple of `Date.now()`-in-render). This branch introduced **zero** new lint failures and cleared the two it touched incidentally; a dedicated lint-cleanup pass is warranted but is its own piece of work.
+- **Optional nicety**: a handful of bespoke inline empty states (board columns, bookings sections) could adopt the shared `EmptyState`, but they read fine in context — diminishing returns.
+
+Everything else on the original "Remaining" list — crew cab bar, autosave feedback, colour calm, Bookings shell, tab/filter vocabulary — is **done** (passes 1–3).
 
 ## Outcome being built
 
