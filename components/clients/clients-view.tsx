@@ -406,8 +406,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
 
       <div className="space-y-1 text-xs text-mist-500">
         {c.phone ? (
-          <a href={`tel:${c.phone}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#db2777]")} title="Call">
-            <Phone className="size-3.5 shrink-0 text-[#db2777]" strokeWidth={1.75} />
+          <a href={`tel:${c.phone}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Call">
+            <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.phone}</span>
           </a>
         ) : (
@@ -417,8 +417,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           </p>
         )}
         {c.email ? (
-          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#2563eb]")} title="Email">
-            <Mail className="size-3.5 shrink-0 text-[#2563eb]" strokeWidth={1.75} />
+          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Email">
+            <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.email}</span>
           </a>
         ) : (
@@ -431,10 +431,10 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           <button
             type="button"
             onClick={() => setMapOpen(true)}
-            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-mm-red")}
+            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-foreground")}
             title="Show route from base"
           >
-            <MapPin className="size-3.5 shrink-0 text-mm-red" strokeWidth={1.75} />
+            <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.address || c.postcode}</span>
           </button>
         ) : (

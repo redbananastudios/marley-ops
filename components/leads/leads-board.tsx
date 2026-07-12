@@ -143,7 +143,8 @@ export function LeadsBoard({
     [leads, tab],
   );
 
-  const now = Date.now();
+  // Stable clock for the "this week" / age filters — lazy init keeps render pure.
+  const [now] = useState(() => Date.now());
   const matchesPreset = (l: LeadCard, p: PresetKey): boolean => {
     switch (p) {
       case "new":
@@ -499,7 +500,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             href={`tel:${lead.phone}`}
             title="Call"
             aria-label="Call"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#db2777] hover:bg-muted"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <Phone className="size-4" strokeWidth={1.75} />
             Call
@@ -512,7 +513,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             rel="noopener noreferrer"
             title="WhatsApp"
             aria-label="WhatsApp"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <MessageCircle className="size-4" strokeWidth={1.75} />
           </a>
@@ -548,7 +549,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             disabled={pending}
             title="No reply — retry tomorrow"
             aria-label="No reply"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted disabled:opacity-50"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-danger disabled:opacity-50"
           >
             <PhoneMissed className="size-4" strokeWidth={1.75} />
           </button>
@@ -558,7 +559,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             href={`/schedule/surveys?leadId=${lead.id}`}
             title="Book survey"
             aria-label="Book survey"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#2563eb] hover:bg-muted"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <CalendarPlus className="size-4" strokeWidth={1.75} />
             Survey
@@ -569,7 +570,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
           prefetch={false}
           title="New quote"
           aria-label="New quote"
-          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mm-red hover:bg-muted"
+          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
         >
           <FileText className="size-4" strokeWidth={1.75} />
           Quote
