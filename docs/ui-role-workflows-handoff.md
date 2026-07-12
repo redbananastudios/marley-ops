@@ -1,7 +1,18 @@
 # Premium role-based UI and workflow handoff
 
-Updated: 12 July 2026 (evening — browser QA + rollout pass 1 complete)
-Status: checkpoint browser-accepted at all three role viewports; fixes and rollout pass 1 committed (`1fe1be4`, `b196497`); deeper per-route refinements remain open (see "Remaining after pass 1")
+Updated: 12 July 2026 (late evening — rollout pass 2 complete)
+Status: checkpoint browser-accepted at all three role viewports; QA fixes + rollout passes 1 & 2 committed (`1fe1be4` … `ec9e891`); production `npm run build` green. Only the tab-component unification + optional deeper polish remain (see "Remaining after pass 2").
+
+## Rollout pass 2 (12 Jul, committed f348fd2 → ec9e891)
+
+- **Brand lockup redone** (`f348fd2`): the menu logo (Peter: "looks poor") is now the **official full-colour Marley brandmark** (`logos/…/Brandmark - Full-Colour`, 500×500 transparent) in a clean white rounded app-tile (hairline ring + soft shadow), with the **"MARLEY OPS" wordmark in Cormorant Garamond** — the Marley Moves website heading face, loaded via `next/font` (`--font-cormorant` / `--font-brand` token + `.font-brand`). Geist stays the UI face everywhere else. Shared `BrandMark` covers sidebar, mobile header, drawer and both crew headers.
+- **Crew sticky cab bar** (`3dc6efe`): fixed bottom bar on the crew job sheet — Directions (to pickup), Call <customer>, and the next state action (Complete job) as the dominant slot; safe-area padded; Job sheet PDF stays in the header row. `CompleteJobButton` gained `triggerClassName`.
+- **Persistent autosave feedback** (`19978cc`): quote + cubic builders now show spinner→green-check "All changes saved" (aria-live) in the always-on-screen sticky bar. Also fixed the quote bottom-bar offset (`md:left-60` → `xl:left-64`, matching the redesigned sidebar).
+- **Colour vocabulary calmed** (`8816a36`): lead-card action tray (5-colour rainbow) and client contact icons neutralised to grey with hover-to-foreground; semantic intent survives on hover only. Labels/tooltips were already present. Status chips keep their semantic tint (information, not decoration).
+- **Bookings shell aligned** (`ec9e891`): dropped the lone `mx-auto max-w-5xl` container for the shared `flex-1 p-6 md:p-8`.
+- **Interaction QA pass:** focus rings visible on keyboard focus (2px), no horizontal overflow at 768, dialogs open/close cleanly (survey, complete-job, cubic add all verified), zero runtime console errors on fresh loads. No defects found.
+
+## Browser QA result (12 Jul, local Supabase stack)
 
 ## Browser QA result (12 Jul, local Supabase stack)
 
@@ -12,19 +23,17 @@ Fixed during QA (commit `1fe1be4`): thin dark nav scrollbar; `?new=1`/`?leadId` 
 Rollout pass 1 (commit `b196497`): crew headers share BrandMark; shared `components/ui/empty-state.tsx` applied to Follow-ups + Quotes; "Pipeline Board" title matches nav; one pre-existing purity lint error fixed in quotes-view.
 
 Environment notes for the next session:
-- Local Supabase stack (`supabase_*_marley-ops` Docker) with seeded users `*@marleymoves.test` / password in `scripts/seed-dev.mjs`; run `scripts/seed-dev-crew.mjs` for the crew login + an assigned job + a Connor survey.
-- `SANITY_SYNC_DISABLED=true` was added to the worktree `.env.local` and a real website lead (real PII, auto-synced from prod Sanity on dashboard load) was deleted from the local DB. Keep the flag set — QA against real customers is the failure mode.
-- A draft quote (MM-260712-001, Priya Patel) was created in the local dev DB while testing the builder; it is dev fixture data.
-- Turbopack served stale `globals.css` after an edit once — if a CSS change doesn't appear, restart the dev server.
+- Local Supabase stack (`supabase_*_marley-ops` Docker) with seeded users `*@marleymoves.test` / password `MarleyOps!2026` (see `scripts/seed-dev.mjs`).
+- **Dev fixtures left in place** (script-backed via `scripts/seed-dev-crew.mjs`, so the crew + estimator surfaces are immediately reviewable): crew login `crew@marleymoves.test`, staff "Jack Reed (Dev)", vehicle "Luton 1 (Dev)", a removal today assigned to that crew ("Removal — Jane Hooper"), and a Connor survey today ("Survey — Priya Patel"). The incidental QA artifacts (a draft quote + a cubic survey from click-testing) were removed, so quotes/cubic tables are back to empty.
+- `SANITY_SYNC_DISABLED=true` is set in the worktree `.env.local` and a real website lead (real PII, auto-synced from prod Sanity on dashboard load) was deleted from the local DB. **Keep the flag set** — QA against real customers is the failure mode.
+- Turbopack served stale `globals.css` / imports after an edit a couple of times — if a CSS/import change doesn't appear (or you see a transient `X is not defined`), restart the dev server; it clears.
 
-## Remaining after pass 1
+## Remaining after pass 2
 
-- Sticky bottom action bar on crew job detail (next state action, call, directions).
-- Visible autosave feedback on the quote builder and AI survey review.
-- Vocabulary unification: three tab styles exist (underline, chip, solid-red pills); clients grid uses red contact icons (red should stay rare); lead-card icon-only quick actions need labels/tooltips + a11y audit.
-- Bookings page uses its own centred container — align to the shared page shell.
-- Deeper interaction QA on Storage, Documents, Resources dialogs and the Settings forms; keyboard-focus walk; destructive-action confirmations.
-- Customer-facing routes (/q, /cv, /s) deliberately untouched — separate decision before restyling live customer surfaces.
+- **Tab-component unification** (the one substantive item left): three tab idioms coexist — the shared `components/ui/tabs.tsx` (underline/red-active, used by Performance/dashboard), the quotes/documents preset **chips**, and the board **filter pills**. Consolidating to one vocabulary is a deliberate design-token decision (which idiom wins?) and a broad touch; left for a focused pass rather than risked mid-rollout.
+- Optional polish: apply the shared `EmptyState` to the remaining bespoke empty states (storage, documents, board columns) for full consistency.
+- Customer-facing routes (`/q`, `/cv`, `/s`) deliberately untouched — separate decision before restyling live customer surfaces.
+- Repo-wide lint remains red from **pre-existing** React-Compiler debt (set-state-in-effect, a couple of `Date.now()`-in-render); this branch introduced none and cleared the two it touched. A separate lint-cleanup pass is warranted but out of scope here.
 
 ## Outcome being built
 
