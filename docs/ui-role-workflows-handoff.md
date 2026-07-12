@@ -1,7 +1,30 @@
 # Premium role-based UI and workflow handoff
 
-Updated: 12 July 2026
-Status: implementation checkpoint complete; browser QA and the full-system rollout remain open
+Updated: 12 July 2026 (evening — browser QA + rollout pass 1 complete)
+Status: checkpoint browser-accepted at all three role viewports; fixes and rollout pass 1 committed (`1fe1be4`, `b196497`); deeper per-route refinements remain open (see "Remaining after pass 1")
+
+## Browser QA result (12 Jul, local Supabase stack)
+
+All acceptance checks below passed at desktop 1440×1000 (office), iPad 768×1024 + 1024×1366 (estimator) and phone 390×844 (crew): single black nav state everywhere, Geist rendered including menu labels, drawer (no gutter) on tablet, Create → all three workflows, `?new=1` opens/closes the survey dialog cleanly, estimator lands on My day with survey cards (Call / Open lead / Start survey), lead guidance flips Call → Book survey after contact, crew list/detail one-handed with no horizontal overflow, zero app console errors.
+
+Fixed during QA (commit `1fe1be4`): thin dark nav scrollbar; `?new=1`/`?leadId` stripped on dialog close (refresh no longer reopens); crew job-sheet header duplication + dash-placeholder addresses; **Peter (live feedback): sharper menu icons (16px stroke-2, borderless plates) + Marley brand mark in a white tile beside "Marley Ops" on every black rail**.
+
+Rollout pass 1 (commit `b196497`): crew headers share BrandMark; shared `components/ui/empty-state.tsx` applied to Follow-ups + Quotes; "Pipeline Board" title matches nav; one pre-existing purity lint error fixed in quotes-view.
+
+Environment notes for the next session:
+- Local Supabase stack (`supabase_*_marley-ops` Docker) with seeded users `*@marleymoves.test` / password in `scripts/seed-dev.mjs`; run `scripts/seed-dev-crew.mjs` for the crew login + an assigned job + a Connor survey.
+- `SANITY_SYNC_DISABLED=true` was added to the worktree `.env.local` and a real website lead (real PII, auto-synced from prod Sanity on dashboard load) was deleted from the local DB. Keep the flag set — QA against real customers is the failure mode.
+- A draft quote (MM-260712-001, Priya Patel) was created in the local dev DB while testing the builder; it is dev fixture data.
+- Turbopack served stale `globals.css` after an edit once — if a CSS change doesn't appear, restart the dev server.
+
+## Remaining after pass 1
+
+- Sticky bottom action bar on crew job detail (next state action, call, directions).
+- Visible autosave feedback on the quote builder and AI survey review.
+- Vocabulary unification: three tab styles exist (underline, chip, solid-red pills); clients grid uses red contact icons (red should stay rare); lead-card icon-only quick actions need labels/tooltips + a11y audit.
+- Bookings page uses its own centred container — align to the shared page shell.
+- Deeper interaction QA on Storage, Documents, Resources dialogs and the Settings forms; keyboard-focus walk; destructive-action confirmations.
+- Customer-facing routes (/q, /cv, /s) deliberately untouched — separate decision before restyling live customer surfaces.
 
 ## Outcome being built
 
