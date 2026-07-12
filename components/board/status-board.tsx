@@ -411,12 +411,14 @@ function Card({
   columns: string[];
   move: (id: string, to: string) => void;
 }) {
+  // Stable clock for the "not contacted" age chip — lazy init keeps render pure.
+  const [now] = useState(() => Date.now());
   const wa = waNumber(lead.phone);
   const md = dateShort(lead.preferred_date);
   const uncontacted = !CLOSED.has(lead.status) && !lead.first_contacted_at;
   const urgency = uncontacted
     ? (() => {
-        const mins = Math.floor((Date.now() - new Date(lead.submitted_at || lead.created_at || 0).getTime()) / 60000);
+        const mins = Math.floor((now - new Date(lead.submitted_at || lead.created_at || 0).getTime()) / 60000);
         const tone = mins > 240 ? "bg-danger-bg text-danger" : mins > 60 ? "bg-warn-bg text-warn" : "bg-mm-red-tint text-mm-red-deep";
         return { tone, text: `${ago(lead.submitted_at || lead.created_at)} · not contacted` };
       })()

@@ -121,6 +121,21 @@ function defaultDuration(type: ApptType): number {
   return type === "removal" ? 3 : 1;
 }
 
+/** One line per address part (street / town / postcode stacked). Module-scope
+ *  so it isn't re-created on every render of the panels. */
+function AddrBlock({ lines }: { lines: string[] }) {
+  if (lines.length === 0) return <span className="text-mist-400">—</span>;
+  return (
+    <span className="min-w-0">
+      {lines.map((l, i) => (
+        <span key={i} className="block truncate">
+          {l}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 /** Read-only context panels for the selected lead: who the customer is + what the
  *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets).
  *  Shared with the view-first appointment modal. */
@@ -139,18 +154,6 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
   const from = addrLines(lead.from_address, lead.from_postcode);
   const to = addrLines(lead.to_address, lead.to_postcode);
   const srcMeta = lead.source ? SOURCES.find((s) => s.key === lead.source) ?? null : null;
-  const AddrBlock = ({ lines }: { lines: string[] }) =>
-    lines.length === 0 ? (
-      <span className="text-mist-400">—</span>
-    ) : (
-      <span className="min-w-0">
-        {lines.map((l, i) => (
-          <span key={i} className="block truncate">
-            {l}
-          </span>
-        ))}
-      </span>
-    );
   return (
     <div className="grid gap-3 sm:grid-cols-[3fr_4fr_3fr]">
       {/* Customer */}
@@ -241,7 +244,8 @@ export function AppointmentDialog({
   presetEnd,
   presetAllDay,
   presetLeadId,
-  presetLocation,
+  // presetLocation is part of the public prop type (callers pass it) but the
+  // location is derived from the selected lead here, so it isn't read.
   edit,
 }: {
   open: boolean;

@@ -339,7 +339,7 @@ function fmtWhen(d: string | null): string {
   return `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}, ${time}`;
 }
 
-function ResponseChip({ lead }: { lead: LeadCard }) {
+function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
   if (CLOSED.has(lead.status)) return null;
   if (lead.retry && !lead.first_contacted_at) {
     return (
@@ -364,7 +364,7 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
       </span>
     );
   }
-  const mins = Math.floor((Date.now() - tsOf(lead)) / 60000);
+  const mins = Math.floor((now - tsOf(lead)) / 60000);
   const tone = mins > 240 ? "danger" : mins > 60 ? "warn" : "neutral";
   const cls =
     tone === "danger"
@@ -382,6 +382,8 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
 function LeadCardItem({ lead }: { lead: LeadCard }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  // Stable clock for the response-age chip — lazy init keeps render pure.
+  const [now] = useState(() => Date.now());
   const route =
     lead.from_postcode || lead.to_postcode
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
@@ -478,7 +480,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
 
         {/* response / urgency chip */}
         <div className="mt-auto pt-1">
-          <ResponseChip lead={lead} />
+          <ResponseChip lead={lead} now={now} />
         </div>
       </Link>
 

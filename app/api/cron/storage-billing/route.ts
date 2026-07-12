@@ -13,7 +13,6 @@ import { periodsDue, storageInvoiceReference, type BillableLet } from "@/lib/sto
 import {
   buildStorageInvoiceEmailHtml,
   storageInvoiceSubject,
-  storageInvoiceText,
   type StorageInvoiceEmailInput,
 } from "@/lib/comms/storage-invoice-email";
 import { UNIT_TYPES } from "@/lib/storage-units";

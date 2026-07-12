@@ -352,7 +352,6 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapOpen, dest]);
   // Classic keyless embed (no API key needed) — directions base → client.
   // Origin anchored to the base POSTCODE: the embed fuzzy-matches house names

@@ -19,7 +19,7 @@ export interface CompletionEmailInput {
   customerAbsent: boolean;
 }
 
-export function completionEmailSubject(i: CompletionEmailInput): string {
+export function completionEmailSubject(_i: CompletionEmailInput): string {
   return `Your move is complete — certificate attached`;
 }
 

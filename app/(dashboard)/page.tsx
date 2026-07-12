@@ -87,6 +87,9 @@ export default async function DashboardPage() {
   const appts = apptData ?? [];
   const quotes = quoteData ?? [];
 
+  // Server component: a per-request timestamp is correct here (this is not a
+  // client render that must stay idempotent across re-renders).
+  // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
   const startToday = startOfUkDay().getTime();
 
