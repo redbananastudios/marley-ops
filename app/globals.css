@@ -224,6 +224,11 @@ textarea {
   outline-offset: 2px;
 }
 
+@keyframes scan {
+  0%, 100% { top: 5%; opacity: 0.25; }
+  50% { top: 95%; opacity: 1; }
+}
+
 /* Tailwind v4 dropped the default button cursor; restore it for desktop so every
    control reads as clickable (disabled buttons keep the default/not-allowed cursor). */
 button:not(:disabled),

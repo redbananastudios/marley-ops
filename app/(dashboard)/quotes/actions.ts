@@ -15,6 +15,7 @@ import { markLeadLostAction, createLeadAction } from "@/app/(dashboard)/leads/ac
 import type { NewLeadInput } from "@/lib/leads/schema";
 import { getBusinessSettings } from "@/lib/settings";
 import { recommendVans } from "@/lib/cubic-survey";
+import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { ukParts } from "@/lib/uk-time";
 
@@ -68,16 +69,17 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     // (Peter, 2026-07-10). Existing quotes only ever get the suggestion chip.
     const { data: cubic } = await sb
       .from("cubic_surveys")
-      .select("total_ft3")
+      .select("total_ft3, ai_status, planning_ready, contingency_pct")
       .eq("lead_id", lead.id)
       .maybeSingle();
     if (cubic && Number(cubic.total_ft3) > 0) {
-      const rec = recommendVans(Number(cubic.total_ft3), {
+      const planning = getSurveyPlanningState({ rawFt3: Number(cubic.total_ft3), aiStatus: cubic.ai_status, planningReady: cubic.planning_ready, contingencyPct: cubic.contingency_pct });
+      const rec = planning.guidanceReady ? recommendVans(planning.planningFt3, {
         fillPct: settings.cubicFillPct,
         transitFt3: settings.cubicTransitFt3,
         lutonFt3: settings.cubicLutonFt3,
         sevenFiveTFt3: settings.cubic75tFt3,
-      });
+      }) : null;
       if (rec) seed.vehicle = rec.vehicleKey;
     }
   }

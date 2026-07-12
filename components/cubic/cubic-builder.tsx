@@ -38,7 +38,9 @@ import { cn } from "@/lib/utils";
 import { CUBIC_CATEGORIES, CUBIC_CATEGORY_TITLES, type CubicCatalogueItem } from "@/lib/cubic-catalogue";
 import {
   computeCubicTotals,
+  createCubicLineId,
   recommendVans,
+  sanitizeCubicLines,
   vehicleShortLabel,
   type CubicLine,
   type VanCapacities,
@@ -51,7 +53,6 @@ export type CubicSaveResult =
 
 export interface CubicBuilderProps {
   mode: "office" | "customer";
-  customerName: string;
   initialLines: CubicLine[];
   initialNotes: string;
   initialStatus: string;
@@ -71,13 +72,14 @@ export interface CubicBuilderProps {
   customerNotes?: string;
   /** Customer mode: localStorage key for the pre-submit draft. */
   draftKey?: string;
+  /** Server-owned AI readiness and contingency; omitted for manual/customer surveys. */
+  planning?: { planningFt3: number; contingencyPct: number; guidanceReady: boolean; aiInProgress: boolean };
 }
 
 const CUSTOM_CATEGORY = "custom";
 
 export function CubicBuilder({
   mode,
-  customerName,
   initialLines,
   initialNotes,
   initialStatus,
@@ -87,12 +89,14 @@ export function CubicBuilder({
   leadId,
   customerNotes,
   draftKey,
+  planning,
 }: CubicBuilderProps) {
   const office = mode === "office";
   const [lines, setLines] = useState<CubicLine[]>(initialLines);
   const [notes, setNotes] = useState(initialNotes);
   const [status, setStatus] = useState(initialStatus);
   const [search, setSearch] = useState("");
+  const [groupByRoom, setGroupByRoom] = useState(false);
   const [activeCat, setActiveCat] = useState(CUBIC_CATEGORIES[0].key);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
   const [conflict, setConflict] = useState(false);
@@ -100,46 +104,66 @@ export function CubicBuilder({
   const [submitted, setSubmitted] = useState(false);
 
   const totals = useMemo(() => computeCubicTotals(lines), [lines]);
-  const rec = useMemo(() => recommendVans(totals.totalFt3, capacities), [totals.totalFt3, capacities]);
-  const qtyByKey = useMemo(() => new Map(lines.map((l) => [l.key, l.qty])), [lines]);
+  const recommendationFt3 = planning?.guidanceReady ? planning.planningFt3 : planning ? 0 : totals.totalFt3;
+  const rec = useMemo(() => recommendVans(recommendationFt3, capacities), [recommendationFt3, capacities]);
+  const manualLineByCatalogueKey = useMemo(() => {
+    const map = new Map<string, CubicLine>();
+    for (const line of lines) {
+      if (!line.room && line.source !== "ai" && !map.has(line.key)) map.set(line.key, line);
+    }
+    return map;
+  }, [lines]);
 
   /* ---------------- mutations ---------------- */
 
   const addCatalogueItem = useCallback((item: CubicCatalogueItem, category: string) => {
     setLines((prev) => {
-      const hit = prev.find((l) => l.key === item.key);
-      if (hit) return prev.map((l) => (l.key === item.key ? { ...l, qty: Math.min(999, l.qty + 1) } : l));
-      return [...prev, { key: item.key, title: item.title, category, qty: 1, unitFt3: item.ft3, flags: {} }];
+      const hit = prev.find((line) => line.key === item.key && !line.room && line.source !== "ai");
+      if (hit) return prev.map((line) => (line.id === hit.id ? { ...line, qty: Math.min(999, line.qty + 1) } : line));
+      return [
+        ...prev,
+        { id: createCubicLineId(), key: item.key, title: item.title, category, qty: 1, unitFt3: item.ft3, flags: {} },
+      ];
     });
   }, []);
 
-  const bump = useCallback((key: string, delta: number) => {
+  const bump = useCallback((lineId: string, delta: number) => {
     setLines((prev) =>
       prev
-        .map((l) => (l.key === key ? { ...l, qty: Math.min(999, l.qty + delta) } : l))
+        .map((line) => (line.id === lineId ? { ...line, qty: Math.min(999, line.qty + delta) } : line))
         .filter((l) => l.qty > 0),
     );
   }, []);
 
-  const setUnit = useCallback((key: string, unitFt3: number) => {
+  const setUnit = useCallback((lineId: string, unitFt3: number) => {
     const rounded = Math.round(Math.max(0, Math.min(2000, unitFt3)) * 10) / 10;
-    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, unitFt3: rounded } : l)));
+    setLines((prev) => prev.map((line) => (line.id === lineId ? { ...line, unitFt3: rounded } : line)));
   }, []);
 
-  const toggleFlag = useCallback((key: string, flag: "dismantle" | "fragile" | "notMoving") => {
+  const toggleFlag = useCallback((lineId: string, flag: "dismantle" | "fragile" | "notMoving") => {
     setLines((prev) =>
-      prev.map((l) => (l.key === key ? { ...l, flags: { ...l.flags, [flag]: !l.flags?.[flag] } } : l)),
+      prev.map((line) =>
+        line.id === lineId ? { ...line, flags: { ...line.flags, [flag]: !line.flags?.[flag] } } : line,
+      ),
     );
   }, []);
 
-  const removeLine = useCallback((key: string) => {
-    setLines((prev) => prev.filter((l) => l.key !== key));
+  const removeLine = useCallback((lineId: string) => {
+    setLines((prev) => prev.filter((line) => line.id !== lineId));
   }, []);
 
   const addCustom = useCallback((title: string, ft3: number, qty: number, category: string) => {
     setLines((prev) => [
       ...prev,
-      { key: `custom:${crypto.randomUUID()}`, title, category, qty, unitFt3: ft3, flags: {} },
+      {
+        id: createCubicLineId(),
+        key: `custom:${crypto.randomUUID()}`,
+        title,
+        category,
+        qty,
+        unitFt3: ft3,
+        flags: {},
+      },
     ]);
   }, []);
 
@@ -150,11 +174,14 @@ export function CubicBuilder({
     try {
       const raw = localStorage.getItem(draftKey);
       if (!raw) return;
-      const d = JSON.parse(raw) as { lines?: CubicLine[]; notes?: string };
-      if (Array.isArray(d.lines) && d.lines.length) {
-        setLines(d.lines);
-        if (typeof d.notes === "string") setNotes(d.notes);
-        toast.info("Restored your unsent list from this device.");
+      const d = JSON.parse(raw) as { lines?: unknown; notes?: string };
+      const restored = sanitizeCubicLines(d.lines);
+      if (restored?.length) {
+        queueMicrotask(() => {
+          setLines(restored);
+          if (typeof d.notes === "string") setNotes(d.notes);
+          toast.info("Restored your unsent list from this device.");
+        });
       }
     } catch {
       /* corrupt draft — ignore */
@@ -175,7 +202,9 @@ export function CubicBuilder({
 
   const baseUpdatedAt = useRef(initialUpdatedAt);
   const latest = useRef({ lines, notes });
-  latest.current = { lines, notes };
+  useEffect(() => {
+    latest.current = { lines, notes };
+  }, [lines, notes]);
   const dirty = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -209,7 +238,7 @@ export function CubicBuilder({
     if (conflict) return; // stop writing over someone else — reload first
     dirty.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveState("saving");
+    queueMicrotask(() => setSaveState("saving"));
     saveTimer.current = setTimeout(async () => {
       const res = await runSave();
       setSaveState(res.ok ? "saved" : "idle");
@@ -295,6 +324,16 @@ export function CubicBuilder({
   /* ---------------- grouped added list ---------------- */
 
   const grouped = useMemo(() => {
+    if (groupByRoom) {
+      const byRoom = new Map<string, CubicLine[]>();
+      for (const line of lines) {
+        const key = line.room?.trim() || "Manual / unassigned";
+        const group = byRoom.get(key) ?? [];
+        group.push(line);
+        byRoom.set(key, group);
+      }
+      return [...byRoom.entries()].sort(([a], [b]) => a.localeCompare(b, "en-GB"));
+    }
     const order = [...CUBIC_CATEGORIES.map((c) => c.key), CUSTOM_CATEGORY];
     const map = new Map<string, CubicLine[]>();
     for (const l of lines) {
@@ -303,7 +342,7 @@ export function CubicBuilder({
       map.set(l.category, g);
     }
     return [...map.entries()].sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]));
-  }, [lines]);
+  }, [groupByRoom, lines]);
 
   if (submitted) {
     return (
@@ -350,6 +389,7 @@ export function CubicBuilder({
             <span className="tabular text-xs text-mist-400">
               {totals.totalM3} m³ · {totals.itemCount} item{totals.itemCount === 1 ? "" : "s"}
             </span>
+            {planning?.guidanceReady && planning.contingencyPct > 0 ? <span className="rounded-pill bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">+{planning.contingencyPct}% · planning {planning.planningFt3.toLocaleString("en-GB")} ft³</span> : null}
           </div>
 
           {rec ? (
@@ -374,7 +414,7 @@ export function CubicBuilder({
               </div>
             </div>
           ) : (
-            <span className="text-sm text-mist-400">Tap items to build the volume — the van maths appears here.</span>
+            <span className="text-sm text-mist-400">{planning?.aiInProgress ? `Provisional raw ${totals.totalFt3.toLocaleString("en-GB")} ft³ · complete all rooms for vehicle guidance` : "Tap items to build the volume — the van maths appears here."}</span>
           )}
 
           <div className="ml-auto flex items-center gap-2">
@@ -391,7 +431,7 @@ export function CubicBuilder({
                   <button
                     type="button"
                     onClick={markComplete}
-                    disabled={completing || conflict || lines.length === 0}
+                    disabled={completing || conflict || lines.length === 0 || planning?.aiInProgress}
                     className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-50"
                   >
                     {completing ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : null}
@@ -475,9 +515,10 @@ export function CubicBuilder({
               (a near-miss on − must never read as +1: review, 2026-07-10) */}
           <div className="mt-3 grid grid-cols-2 gap-2 md:grid-cols-3">
             {visible.map(({ category, item }) => {
-              const qty = qtyByKey.get(item.key) ?? 0;
+              const manualLine = manualLineByCatalogueKey.get(item.key);
+              const qty = manualLine?.qty ?? 0;
               const addFirst = () => {
-                if ((qtyByKey.get(item.key) ?? 0) === 0) addCatalogueItem(item, category);
+                if (!manualLine) addCatalogueItem(item, category);
               };
               return (
                 <div
@@ -514,12 +555,12 @@ export function CubicBuilder({
                     ) : (
                       <span />
                     )}
-                    {qty > 0 ? (
+                    {manualLine ? (
                       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                         <button
                           type="button"
                           aria-label={`Remove one ${item.title}`}
-                          onClick={() => bump(item.key, -1)}
+                          onClick={() => bump(manualLine.id, -1)}
                           className="focus-ring flex size-11 items-center justify-center rounded-md border border-input bg-card text-foreground hover:bg-muted"
                         >
                           <Minus className="size-4" strokeWidth={2} />
@@ -528,7 +569,7 @@ export function CubicBuilder({
                         <button
                           type="button"
                           aria-label={`Add one ${item.title}`}
-                          onClick={() => bump(item.key, 1)}
+                          onClick={() => bump(manualLine.id, 1)}
                           className="focus-ring flex size-11 items-center justify-center rounded-md bg-mm-red text-white hover:bg-mm-red-deep"
                         >
                           <Plus className="size-4" strokeWidth={2} />
@@ -560,6 +601,7 @@ export function CubicBuilder({
                 {totals.itemCount} item{totals.itemCount === 1 ? "" : "s"}
               </span>
             </div>
+            {lines.some((line) => !!line.room) && <div className="flex items-center justify-end border-b px-4 py-2"><label className="flex min-h-10 items-center gap-2 text-xs font-semibold text-mist-500"><input type="checkbox" checked={groupByRoom} onChange={(event) => setGroupByRoom(event.target.checked)} className="size-5 accent-mm-red" /> Group by room</label></div>}
 
             <div className="max-h-[60vh] overflow-y-auto">
               {grouped.length === 0 ? (
@@ -575,7 +617,7 @@ export function CubicBuilder({
                     <div key={cat} className="border-b last:border-b-0">
                       <div className="flex items-baseline justify-between bg-muted/60 px-4 py-1.5">
                         <span className="text-[11px] font-bold uppercase tracking-wide text-mist-500">
-                          {CUBIC_CATEGORY_TITLES[cat] ?? "Custom items"}
+                          {groupByRoom ? cat : CUBIC_CATEGORY_TITLES[cat] ?? "Custom items"}
                         </span>
                         <span className="tabular text-[11px] font-semibold text-mist-500">
                           {Math.round(catFt3 * 10) / 10} ft³
@@ -583,14 +625,14 @@ export function CubicBuilder({
                       </div>
                       <ul className="divide-y">
                         {catLines.map((l) => (
-                          <li key={l.key} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
+                          <li key={l.id} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}</span>
+                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}{l.source === "ai" ? <span className="ml-1.5 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-bold text-mm-red-deep">AI</span> : null}{l.room && !groupByRoom ? <span className="ml-1.5 text-[10px] font-normal text-mist-400">{l.room}</span> : null}</span>
                               <div className="flex shrink-0 items-center gap-1.5">
                                 <button
                                   type="button"
                                   aria-label={`Remove one ${l.title}`}
-                                  onClick={() => bump(l.key, -1)}
+                                  onClick={() => bump(l.id, -1)}
                                   className="focus-ring flex size-11 items-center justify-center rounded-md border border-input text-foreground hover:bg-muted"
                                 >
                                   <Minus className="size-4" strokeWidth={2} />
@@ -599,7 +641,7 @@ export function CubicBuilder({
                                 <button
                                   type="button"
                                   aria-label={`Add one ${l.title}`}
-                                  onClick={() => bump(l.key, 1)}
+                                  onClick={() => bump(l.id, 1)}
                                   className="focus-ring flex size-11 items-center justify-center rounded-md border border-input text-foreground hover:bg-muted"
                                 >
                                   <Plus className="size-4" strokeWidth={2} />
@@ -618,7 +660,7 @@ export function CubicBuilder({
                                     value={l.unitFt3 === 0 ? "" : l.unitFt3}
                                     placeholder="0"
                                     onChange={(e) =>
-                                      setUnit(l.key, e.target.value === "" ? 0 : Number(e.target.value) || 0)
+                                      setUnit(l.id, e.target.value === "" ? 0 : Number(e.target.value) || 0)
                                     }
                                     className="focus-ring tabular h-11 w-20 rounded-md border border-input bg-card px-1.5 text-center text-base text-foreground"
                                   />
@@ -643,7 +685,7 @@ export function CubicBuilder({
                                   <button
                                     key={flag}
                                     type="button"
-                                    onClick={() => toggleFlag(l.key, flag)}
+                                    onClick={() => toggleFlag(l.id, flag)}
                                     className={cn(
                                       "focus-ring min-h-11 rounded-pill border px-3 text-xs font-medium",
                                       l.flags?.[flag]
@@ -658,7 +700,7 @@ export function CubicBuilder({
                                 ))}
                                 <button
                                   type="button"
-                                  onClick={() => removeLine(l.key)}
+                                  onClick={() => removeLine(l.id)}
                                   className="focus-ring ml-auto min-h-11 rounded-pill px-2.5 text-xs text-mist-400 hover:text-mm-red"
                                 >
                                   Remove

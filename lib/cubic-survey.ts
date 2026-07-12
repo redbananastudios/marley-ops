@@ -19,6 +19,8 @@ export interface CubicLineFlags {
 }
 
 export interface CubicLine {
+  /** Immutable UI/persistence identity. Catalogue key is not line identity. */
+  id: string;
   /** Catalogue key ("bedrooms:wardrobe-double") or "custom:<uuid>". */
   key: string;
   title: string;
@@ -29,11 +31,22 @@ export interface CubicLine {
   unitFt3: number;
   flags?: CubicLineFlags;
   note?: string;
+  /** Display-only room grouping; canonical inventory deliberately has no room FK. */
+  room?: string;
+  /** Absent means legacy/manual. Only service-side AI merge may introduce `ai`. */
+  source?: "ai" | "manual";
+  /** Trusted merge provenance; client saves cannot introduce or replace these. */
+  aiDetectionIds?: string[];
 }
 
 export const MAX_LINES = 300;
 export const MAX_QTY = 999;
 export const MAX_UNIT_FT3 = 2000;
+export const MAX_AI_DETECTION_IDS = 120;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export const createCubicLineId = (): string => globalThis.crypto.randomUUID();
 
 export interface CubicTotals {
   /** Volume that moves (notMoving lines excluded). */
@@ -173,6 +186,7 @@ export function vehicleShortLabel(rec: VanRecommendation): string {
 export function sanitizeCubicLines(raw: unknown): CubicLine[] | null {
   if (!Array.isArray(raw) || raw.length > MAX_LINES) return null;
   const out: CubicLine[] = [];
+  const seenIds = new Set<string>();
   for (const l of raw) {
     if (typeof l !== "object" || l === null) return null;
     const o = l as Record<string, unknown>;
@@ -181,11 +195,17 @@ export function sanitizeCubicLines(raw: unknown): CubicLine[] | null {
     const category = String(o.category ?? "").slice(0, 60);
     const qty = Math.floor(Number(o.qty));
     const unitFt3 = Number(o.unitFt3);
+    const suppliedId = o.id;
+    if (suppliedId !== undefined && (typeof suppliedId !== "string" || !UUID_RE.test(suppliedId))) return null;
+    const id = typeof suppliedId === "string" ? suppliedId : createCubicLineId();
+    if (seenIds.has(id)) return null;
+    seenIds.add(id);
     if (!key || !title || !category) return null;
     if (!Number.isFinite(qty) || qty < 1 || qty > MAX_QTY) return null;
     if (!Number.isFinite(unitFt3) || unitFt3 < 0 || unitFt3 > MAX_UNIT_FT3) return null;
     const f = (o.flags ?? {}) as Record<string, unknown>;
-    out.push({
+    const line: CubicLine = {
+      id,
       key,
       title,
       category,
@@ -197,7 +217,53 @@ export function sanitizeCubicLines(raw: unknown): CubicLine[] | null {
         notMoving: f.notMoving === true,
       },
       note: typeof o.note === "string" ? o.note.trim().slice(0, 300) : undefined,
-    });
+    };
+    if (typeof o.room === "string") {
+      const room = o.room.trim();
+      if (room.length > 0 && room.length <= 60) line.room = room;
+    }
+    if (o.source === "ai" || o.source === "manual") line.source = o.source;
+    if (
+      Array.isArray(o.aiDetectionIds) &&
+      o.aiDetectionIds.length > 0 &&
+      o.aiDetectionIds.length <= MAX_AI_DETECTION_IDS &&
+      o.aiDetectionIds.every((value) => typeof value === "string" && UUID_RE.test(value)) &&
+      new Set(o.aiDetectionIds).size === o.aiDetectionIds.length
+    ) {
+      line.aiDetectionIds = [...o.aiDetectionIds] as string[];
+    }
+    out.push(line);
   }
   return out;
+}
+
+/**
+ * Client payloads may edit ordinary inventory fields, but only the service-side
+ * AI confirm transaction may create/change room and detection provenance.
+ */
+export function reconcileCubicLineProvenance(incoming: CubicLine[], trustedExisting: CubicLine[]): CubicLine[] {
+  const trustedById = new Map(trustedExisting.map((line) => [line.id, line]));
+  return incoming.map((line) => {
+    const trusted = trustedById.get(line.id);
+    const ordinary = { ...line };
+    delete ordinary.room;
+    delete ordinary.source;
+    delete ordinary.aiDetectionIds;
+    if (!trusted) return ordinary;
+
+    if (trusted.source === "ai") {
+      return {
+        ...ordinary,
+        ...(trusted.room ? { room: trusted.room } : {}),
+        source: "ai" as const,
+        ...(trusted.aiDetectionIds ? { aiDetectionIds: [...trusted.aiDetectionIds] } : {}),
+      };
+    }
+
+    return {
+      ...ordinary,
+      ...(trusted.room ? { room: trusted.room } : {}),
+      ...(trusted.source === "manual" ? { source: "manual" as const } : {}),
+    };
+  });
 }

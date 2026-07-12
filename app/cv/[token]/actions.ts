@@ -15,7 +15,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { computeCubicTotals, sanitizeCubicLines, type CubicLine } from "@/lib/cubic-survey";
+import {
+  computeCubicTotals,
+  reconcileCubicLineProvenance,
+  sanitizeCubicLines,
+  type CubicLine,
+} from "@/lib/cubic-survey";
 
 const TOKEN_RE = /^[\w-]{10,64}$/;
 
@@ -31,7 +36,7 @@ export async function submitCubicCustomerAction(
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("cubic_surveys")
-    .select("id, lead_id, client_id, status, total_ft3")
+    .select("id, lead_id, client_id, status, total_ft3, items")
     .eq("share_token", token)
     .maybeSingle();
   if (!row) return { ok: false, error: "This link isn't valid — call us on 01747 637070." };
@@ -39,8 +44,11 @@ export async function submitCubicCustomerAction(
     return { ok: false, error: "This survey has already been finalised — call us if anything changed." };
   }
 
-  const lines = sanitizeCubicLines(raw.items);
-  if (lines === null || lines.length === 0) return { ok: false, error: "Add at least one item first." };
+  const incomingLines = sanitizeCubicLines(raw.items);
+  if (incomingLines === null || incomingLines.length === 0) return { ok: false, error: "Add at least one item first." };
+  const trustedLines = sanitizeCubicLines(row.items);
+  if (trustedLines === null) return { ok: false, error: "This survey needs attention — call us on 01747 637070." };
+  const lines = reconcileCubicLineProvenance(incomingLines, trustedLines);
   const totals = computeCubicTotals(lines);
   const customerNotes = String(raw.notes ?? "").trim().slice(0, 4000);
 

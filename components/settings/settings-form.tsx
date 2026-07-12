@@ -17,11 +17,26 @@ import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/sett
 import type { BusinessSettings } from "@/lib/settings";
 
 interface FieldDef {
-  key: Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation" | "googleReviewUrl">;
+  key: RateSettingKey;
   label: string;
   hint: string;
   unit: "£" | "£/mile" | "£/hour" | "£/day";
 }
+
+type RateSettingKey = Exclude<
+  keyof BusinessSettings,
+  | "vatDefault"
+  | "vatNumber"
+  | "baseLocation"
+  | "googleReviewUrl"
+  | "aiSurveyEnabled"
+  | "aiGroundedReplayEnabled"
+  | "aiModelDefault"
+  | "aiModelEscalation"
+  | "aiSurveyCapGbp"
+  | "aiMonthlyCapGbp"
+  | "aiMonthlyAlertGbp"
+>;
 
 const FIELDS: FieldDef[] = [
   { key: "estimatorFee", label: "Estimator fee per visit", hint: "Paid per attended survey. Drives Performance + the dashboard.", unit: "£" },
@@ -81,7 +96,7 @@ export function SettingsForm({
   const [vatNumber, setVatNumber] = useState(initial.vatNumber);
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(initial.googleReviewUrl);
-  const [v, setV] = useState<Record<Exclude<keyof BusinessSettings, "vatDefault" | "vatNumber" | "baseLocation" | "googleReviewUrl">, string>>({
+  const [v, setV] = useState<Record<RateSettingKey, string>>({
     estimatorFee: String(initial.estimatorFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costFuel75PerMile: String(initial.costFuel75PerMile),

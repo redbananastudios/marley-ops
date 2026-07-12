@@ -13,7 +13,10 @@ import { CopyCubicLinkButton } from "@/components/cubic/copy-cubic-link-button";
  */
 
 export interface CubicCardData {
-  totalFt3: number;
+  rawFt3: number;
+  planningFt3: number;
+  contingencyPct: number;
+  guidanceReady: boolean;
   vanLabel: string | null;
   itemCount: number;
   status: string; // draft | complete | customer_submitted | (none)
@@ -27,7 +30,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export function CubicSurveyCard({ leadId, data }: { leadId: string; data: CubicCardData | null }) {
-  const has = data?.hasSurvey && data.totalFt3 > 0;
+  const has = data?.hasSurvey && data.rawFt3 > 0;
   return (
     <Card className="gap-3 p-5">
       <p className="eyebrow flex items-center gap-1.5">
@@ -37,8 +40,9 @@ export function CubicSurveyCard({ leadId, data }: { leadId: string; data: CubicC
       {has ? (
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="tabular font-display text-2xl font-bold text-foreground">
-            {data!.totalFt3.toLocaleString("en-GB")} ft³
+            {data!.rawFt3.toLocaleString("en-GB")} ft³ raw
           </span>
+          {data!.guidanceReady && data!.contingencyPct > 0 ? <span className="text-sm font-semibold text-amber-800">+{data!.contingencyPct}% · {data!.planningFt3.toLocaleString("en-GB")} ft³ planning</span> : null}
           {data!.vanLabel ? (
             <span className="rounded-pill bg-mm-red-tint px-2.5 py-0.5 text-xs font-semibold text-mm-red-deep">
               ≈ {data!.vanLabel}
@@ -48,6 +52,7 @@ export function CubicSurveyCard({ leadId, data }: { leadId: string; data: CubicC
             {data!.itemCount} item{data!.itemCount === 1 ? "" : "s"}
             {STATUS_LABEL[data!.status] ? ` · ${STATUS_LABEL[data!.status]}` : ""}
           </span>
+          {!data!.guidanceReady ? <span className="w-full text-xs font-semibold text-amber-800">Complete every AI room before using vehicle guidance.</span> : null}
         </div>
       ) : (
         <p className="text-sm text-mist-500">

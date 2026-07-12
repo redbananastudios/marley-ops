@@ -5,6 +5,7 @@ import {
   DEFAULT_CAPACITIES,
   ft3ToM3,
   MAX_LINES,
+  reconcileCubicLineProvenance,
   recommendVans,
   sanitizeCubicLines,
   vehicleShortLabel,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/cubic-survey";
 
 const line = (over: Partial<CubicLine> = {}): CubicLine => ({
+  id: "00000000-0000-4000-8000-000000000001",
   key: "living-space:sofa-2-seater",
   title: "Sofa 2 seater",
   category: "living-space",
@@ -139,5 +141,88 @@ describe("sanitizeCubicLines (the server gate)", () => {
     expect(sanitizeCubicLines([line({ unitFt3: Number.NaN })])).toBeNull();
     expect(sanitizeCubicLines(Array.from({ length: MAX_LINES + 1 }, () => line()))).toBeNull();
     expect(sanitizeCubicLines("nope")).toBeNull();
+  });
+
+  it("assigns a stable UUID to a legitimate legacy line without an id", () => {
+    const legacy: Partial<CubicLine> = { ...line() };
+    delete legacy.id;
+    const first = sanitizeCubicLines([legacy])!;
+    expect(first[0].id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    expect(sanitizeCubicLines(first)?.[0].id).toBe(first[0].id);
+  });
+
+  it("rejects malformed or duplicate supplied line ids", () => {
+    expect(sanitizeCubicLines([line({ id: "not-a-uuid" })])).toBeNull();
+    expect(sanitizeCubicLines([line(), line({ title: "Second sofa" })])).toBeNull();
+  });
+
+  it("keeps valid room/source/provenance and strips only malformed optional metadata", () => {
+    const detectionId = "10000000-0000-4000-8000-000000000001";
+    const valid = sanitizeCubicLines([
+      line({ room: " Bedroom 1 ", source: "ai", aiDetectionIds: [detectionId] }),
+    ])!;
+    expect(valid[0]).toMatchObject({ room: "Bedroom 1", source: "ai", aiDetectionIds: [detectionId] });
+
+    const malformed = sanitizeCubicLines([{
+      ...line({ id: "00000000-0000-4000-8000-000000000002" }),
+      room: "x".repeat(61),
+      source: "robot",
+      aiDetectionIds: ["bad"],
+      smuggledVolume: 99999,
+    }])!;
+    expect(malformed[0]).not.toHaveProperty("room");
+    expect(malformed[0]).not.toHaveProperty("source");
+    expect(malformed[0]).not.toHaveProperty("aiDetectionIds");
+    expect(malformed[0]).not.toHaveProperty("smuggledVolume");
+  });
+
+  it("keeps the same catalogue key as independent lines in different rooms", () => {
+    const lines = sanitizeCubicLines([
+      line({ room: "Bedroom 1" }),
+      line({ id: "00000000-0000-4000-8000-000000000002", room: "Bedroom 2", qty: 2 }),
+    ])!;
+    expect(lines).toHaveLength(2);
+    expect(new Set(lines.map((item) => item.id)).size).toBe(2);
+    expect(computeCubicTotals(lines).totalFt3).toBe(105);
+  });
+});
+
+describe("reconcileCubicLineProvenance", () => {
+  const detectionId = "10000000-0000-4000-8000-000000000001";
+
+  it("preserves trusted AI metadata when a client edits ordinary fields", () => {
+    const trusted = line({ room: "Office", source: "ai", aiDetectionIds: [detectionId] });
+    const incoming = line({
+      room: "Forged room",
+      source: "manual",
+      aiDetectionIds: ["20000000-0000-4000-8000-000000000002"],
+      qty: 2,
+    });
+    expect(reconcileCubicLineProvenance([incoming], [trusted])).toEqual([
+      expect.objectContaining({
+        id: trusted.id,
+        qty: 2,
+        room: "Office",
+        source: "ai",
+        aiDetectionIds: [detectionId],
+      }),
+    ]);
+  });
+
+  it("prevents manual or new lines being promoted to AI by client payloads", () => {
+    const trustedManual = line({ source: "manual", room: "Living room" });
+    const forgedExisting = line({ source: "ai", aiDetectionIds: [detectionId], room: "Office" });
+    const forgedNew = line({
+      id: "00000000-0000-4000-8000-000000000002",
+      source: "ai",
+      aiDetectionIds: [detectionId],
+      room: "Bedroom",
+    });
+    const reconciled = reconcileCubicLineProvenance([forgedExisting, forgedNew], [trustedManual]);
+    expect(reconciled[0]).toMatchObject({ source: "manual", room: "Living room" });
+    expect(reconciled[0]).not.toHaveProperty("aiDetectionIds");
+    expect(reconciled[1]).not.toHaveProperty("source");
+    expect(reconciled[1]).not.toHaveProperty("room");
+    expect(reconciled[1]).not.toHaveProperty("aiDetectionIds");
   });
 });

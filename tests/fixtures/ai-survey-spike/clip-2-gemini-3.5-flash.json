@@ -1,0 +1,308 @@
+{
+  "fixtureVersion": 1,
+  "promptVersion": "spike-v1",
+  "source": {
+    "clipId": "clip-2",
+    "durationMs": 45568,
+    "sha256Prefix": "redacted"
+  },
+  "model": "gemini-3.5-flash",
+  "elapsedMs": 21249,
+  "usage": {
+    "inputTokens": 7401,
+    "outputTokens": 3777,
+    "estimatedCostUsd": 0.0450945
+  },
+  "checks": {
+    "schemaHonoured": true,
+    "detectionCount": 13,
+    "matchedCount": 13,
+    "catalogueMatchRate": 1,
+    "invalidCandidateCount": 0,
+    "outOfRangeTimestampCount": 0,
+    "timestampsSane": true,
+    "visualEvidenceDetected": true,
+    "audioEvidenceDetected": true,
+    "humanCatalogueReviewRequired": true
+  },
+  "result": {
+    "roomType": "office",
+    "roomConfidence": 1,
+    "audio": {
+      "narrationHeard": true,
+      "movingInstructionsHeard": true,
+      "summaryRedacted": true
+    },
+    "coverage": {
+      "level": "complete",
+      "issues": [
+        "none"
+      ]
+    },
+    "detections": [
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 5000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:filing-cabinet-2-drawers",
+            "confidence": 0.9
+          },
+          {
+            "key": "office-and-commercial:storage-unit",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": true,
+        "timestampMs": 8000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:office-desk",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": true,
+        "dismantle": false,
+        "timestampMs": 9000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:monitor",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 15000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:filing-cabinet-2-drawers",
+            "confidence": 0.9
+          },
+          {
+            "key": "office-and-commercial:storage-unit",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": true,
+        "dismantle": false,
+        "timestampMs": 18000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:desktop-computer",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": true,
+        "dismantle": false,
+        "timestampMs": 21000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:printer",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 23000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:storage-unit",
+            "confidence": 0.8
+          },
+          {
+            "key": "living-space:cabinet-small",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 24000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:fan",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": true,
+        "timestampMs": 27000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:office-desk",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 30000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:office-chair",
+            "confidence": 0.8
+          },
+          {
+            "key": "living-space:armchair-small",
+            "confidence": 0.7
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 34000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:office-chair",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 38000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "office-and-commercial:filing-cabinet-2-drawers",
+            "confidence": 0.9
+          }
+        ],
+        "evidence": "[redacted]"
+      },
+      {
+        "quantity": 1,
+        "moving": "moving",
+        "fragile": false,
+        "dismantle": false,
+        "timestampMs": 41000,
+        "timestampSane": true,
+        "evidenceSources": [
+          "visual",
+          "audio"
+        ],
+        "catalogueCandidates": [
+          {
+            "key": "living-space:sofa-2-seater",
+            "confidence": 0.95
+          }
+        ],
+        "evidence": "[redacted]"
+      }
+    ]
+  }
+}
