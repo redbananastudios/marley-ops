@@ -12,9 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function SurveysSchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ leadId?: string }>;
+  searchParams: Promise<{ leadId?: string; new?: string }>;
 }) {
-  const { leadId } = await searchParams;
+  const { leadId, new: createNew } = await searchParams;
   const sb = await createClient();
   const {
     data: { user },
@@ -101,6 +101,7 @@ export default async function SurveysSchedulePage({
         defaultEstimatorId={user?.id ?? null}
         presetLeadId={leadId ?? null}
         presetLocation={presetLocation}
+        openOnLoad={createNew === "1"}
         baseLocation={baseLocation}
       />
     </div>

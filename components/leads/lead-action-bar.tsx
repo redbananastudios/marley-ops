@@ -50,9 +50,9 @@ function waNumber(phone: string | null | undefined): string | null {
 }
 
 const btn =
-  "focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50";
+  "focus-ring inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-input bg-card px-3.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50";
 const primaryBtn =
-  "focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-3.5 text-sm font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-50";
+  "focus-ring inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-mm-red px-4 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep disabled:opacity-50";
 
 export function LeadActionBar({
   leadId,
@@ -92,14 +92,33 @@ export function LeadActionBar({
   const preQuote = !CLOSED.has(status) && stage <= idx("survey_booked"); // enquiry / survey booked
   const quoting = status === "quoted" || status === "provisional";
   const confirmed = status === "confirmed";
+  const nextStep = uncontacted
+    ? { title: "Contact the customer", detail: "Make the first call, then mark the lead contacted." }
+    : preQuote
+      ? { title: "Book the survey", detail: "Choose the estimator and visit time. The quote follows the survey." }
+      : quoting
+        ? { title: "Close the quote", detail: "Record the outcome or create a revised quote." }
+        : confirmed
+          ? { title: "Book the removal", detail: "Put the confirmed move into the diary and assign resources." }
+          : status === "completed"
+            ? { title: "Workflow complete", detail: "The move is complete; all actions remain available in the record." }
+            : { title: "Review this lead", detail: "Check the record and choose the next appropriate action." };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t px-5 py-4">
+    <div className="border-t bg-muted/35">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-5 pt-4">
+        <div>
+          <p className="eyebrow">Recommended next step</p>
+          <p className="mt-1 text-sm font-semibold text-foreground">{nextStep.title}</p>
+          <p className="mt-0.5 text-xs text-mist-400">{nextStep.detail}</p>
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2 px-5 py-4">
       {/* contact — always available */}
       {phone ? (
-        <a href={`tel:${phone}`} className={btn} aria-label="Call">
+        <a href={`tel:${phone}`} className={uncontacted ? primaryBtn : btn} aria-label="Call">
           <Phone className="size-4 text-[#db2777]" strokeWidth={1.75} />
-          Call
+          {uncontacted ? "Call customer" : "Call"}
         </a>
       ) : null}
       {wa ? (
@@ -119,7 +138,7 @@ export function LeadActionBar({
           type="button"
           onClick={markContacted}
           disabled={pending}
-          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+          className={btn}
         >
           <Check className="size-4 text-success" strokeWidth={1.75} />
           Mark contacted
@@ -144,7 +163,7 @@ export function LeadActionBar({
       <span className="ml-auto inline-flex flex-wrap items-center gap-2">
         {pending ? <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} /> : null}
 
-        {preQuote ? (
+        {preQuote && !uncontacted ? (
           <>
             <Link href={`/schedule/surveys?leadId=${leadId}`} className={primaryBtn}>
               <CalendarPlus className="size-4" strokeWidth={2} />
@@ -188,6 +207,7 @@ export function LeadActionBar({
           </button>
         ) : null}
       </span>
+      </div>
     </div>
   );
 }

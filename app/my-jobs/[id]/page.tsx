@@ -85,14 +85,14 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-5">
-        <span className="font-display text-xl text-foreground">
-          Marley <span className="text-mm-red">Ops</span>
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
+        <span className="font-display text-xl font-medium tracking-[-0.03em] text-white">
+          Marley <span className="text-mm-red-bright">Ops</span>
         </span>
         <SignOutButton />
       </header>
 
-      <main className="mx-auto max-w-2xl p-5 md:p-8">
+      <main className="mx-auto max-w-2xl p-4 pb-12 sm:p-5 md:p-8">
         <Link
           href="/my-jobs"
           className="focus-ring inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-mist-500 hover:text-foreground"
@@ -102,7 +102,8 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         </Link>
 
         {/* headline */}
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="mt-2 rounded-xl border border-border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-5">
+          <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="eyebrow">{isRemoval ? "Move" : apptType}{d.quoteRef ? ` · ${d.quoteRef}` : ""}</p>
             <h1 className="mt-1 font-display text-3xl font-bold text-foreground">{d.customerName}</h1>
@@ -119,6 +120,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           >
             {isRemoval ? "Move" : "Survey"}
           </span>
+          </div>
         </div>
 
         {/* contract flag — never gates the move, but the crew can't miss it */}

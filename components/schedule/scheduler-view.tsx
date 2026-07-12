@@ -93,6 +93,7 @@ export function SchedulerView({
   defaultEstimatorId,
   presetLeadId,
   presetLocation,
+  openOnLoad = false,
   baseLocation,
 }: {
   view: SchedulerKind;
@@ -103,11 +104,13 @@ export function SchedulerView({
   /** when navigated from a lead's "Book survey", auto-open the dialog prefilled */
   presetLeadId?: string | null;
   presetLocation?: string | null;
+  /** Quick-create entry point: open a blank appointment dialog immediately. */
+  openOnLoad?: boolean;
   /** business base address — origin for the view modal's route map */
   baseLocation: string;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(Boolean(presetLeadId || openOnLoad));
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
@@ -140,13 +143,6 @@ export function SchedulerView({
   }, [view, isNarrow]);
 
   // Arrived from a lead's "Book survey" — pop the create dialog straight away.
-  useEffect(() => {
-    if (presetLeadId) {
-      setEditTarget(null);
-      setDialogOpen(true);
-    }
-  }, [presetLeadId]);
-
   // Cancelled appointments leave the diary entirely (the lead keeps the history).
   // On the removals calendar, surveys are hidden unless "Show surveys" is on.
   const shown = useMemo(() => {
