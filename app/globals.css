@@ -72,10 +72,12 @@
   --color-violet-border: #ddd6fe;
 
   /* Type — Geist Sans everywhere; "display" moments are the same family,
-     just heavier + tighter (no serif). */
+     just heavier + tighter (no serif). The brand wordmark is the exception:
+     Cormorant Garamond, matching the Marley Moves website. */
   --font-display: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-sans: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-brand: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
 
   /* Radius — Vercel-crisp: 8px controls, 12px cards */
   --radius-xs: 4px;
@@ -206,6 +208,11 @@ body {
 .font-display {
   font-family: var(--font-display);
   letter-spacing: -0.025em;
+}
+
+/* Brand wordmark — Cormorant Garamond (the website heading face). */
+.font-brand {
+  font-family: var(--font-brand);
 }
 
 /* Money/figures: tabular + lining */

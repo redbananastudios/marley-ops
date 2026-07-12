@@ -89,21 +89,27 @@ export function navForRole(role: string): NavGroup[] {
   return role === "estimator" ? ESTIMATOR_NAV : OFFICE_NAV;
 }
 
-/** Brand lockup for the black rails: the Marley symbol in a white tile + the
- *  product wordmark. Shared by the desktop sidebar, mobile header and drawer. */
+/** Brand lockup for the black rails: the official full-colour Marley brandmark
+ *  in a clean white app-tile + the wordmark in Cormorant Garamond (the website
+ *  heading face). Shared by the desktop sidebar, mobile header and drawer.
+ *  The source PNG (500×500) carries whitespace padding, so the <img> is sized
+ *  larger than the tile to bring the house + van up to a confident size. */
 export function BrandMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className="flex min-w-0 items-center gap-2.5">
-      <span className={cn("grid shrink-0 place-items-center overflow-hidden rounded-lg bg-white", compact ? "size-8" : "size-9")}>
-        {/* the source mark carries generous padding — oversize it inside the
-            tile so the house + van fill the square */}
+      <span
+        className={cn(
+          "grid shrink-0 place-items-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
+          compact ? "size-9" : "size-10",
+        )}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand-mark.png" alt="Marley Moves" className={compact ? "size-10 max-w-none" : "size-12 max-w-none"} />
+        <img src="/brand-mark.png" alt="Marley Moves" className={cn("max-w-none object-contain", compact ? "size-[46px]" : "size-[52px]")} />
       </span>
       <span
         className={cn(
-          "truncate font-display font-medium tracking-[-0.03em] text-white",
-          compact ? "text-lg" : "text-xl",
+          "truncate font-brand font-semibold uppercase leading-none tracking-[0.03em] text-white",
+          compact ? "text-[19px]" : "text-[22px]",
         )}
       >
         Marley <span className="text-mm-red-bright">Ops</span>
