@@ -27,10 +27,12 @@ export default async function AiSurveyScanPage({ params }: { params: Promise<{ i
     .select("id, name, status")
     .eq("survey_id", survey.id)
     .order("sort");
+  const roomList = rooms ?? [];
+  const captureStateKey = roomList.map((room) => `${room.id}:${room.status}`).join("|");
 
   return (
     <main className="mx-auto w-full max-w-7xl px-4 pb-10 md:px-7">
-      <SurveyStatePoller surveyId={survey.id} enabled={(rooms ?? []).some((room) => room.status === "processing")} />
+      <SurveyStatePoller surveyId={survey.id} enabled={roomList.some((room) => room.status === "processing")} />
       <header className="flex items-center justify-between gap-4 py-4">
         <div>
           <Link href={`/leads/${leadId}/cubic`} className="focus-ring inline-flex min-h-10 items-center gap-1 rounded text-sm font-medium text-mist-500 hover:text-foreground"><ChevronLeft className="size-4" /> Cubic survey</Link>
@@ -38,7 +40,7 @@ export default async function AiSurveyScanPage({ params }: { params: Promise<{ i
           <p className="mt-1 text-sm text-mist-500">{survey.lead?.name ?? "Estimator survey"} · record one slow walkthrough per room</p>
         </div>
       </header>
-      <AiSurveyCapture surveyId={survey.id} initialConsent={!!survey.ai_consent} initialRooms={rooms ?? []} />
+      <AiSurveyCapture key={captureStateKey} leadId={leadId} surveyId={survey.id} initialConsent={!!survey.ai_consent} initialRooms={roomList} />
     </main>
   );
 }
