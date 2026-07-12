@@ -99,12 +99,22 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
     <span className="flex min-w-0 items-center gap-2.5">
       <span
         className={cn(
-          "grid shrink-0 place-items-center overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
+          "relative shrink-0 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
           compact ? "size-9" : "size-10",
         )}
       >
+        {/* The mark is larger than the tile (the source PNG has whitespace
+            padding); absolutely centre it — CSS grid place-items anchors an
+            oversized item top-left, which pushed the mark to the bottom-right. */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/brand-mark.png" alt="Marley Moves" className={cn("max-w-none object-contain", compact ? "size-[46px]" : "size-[52px]")} />
+        <img
+          src="/brand-mark.png"
+          alt="Marley Moves"
+          className={cn(
+            "absolute left-1/2 top-1/2 max-w-none -translate-x-1/2 -translate-y-1/2 object-contain",
+            compact ? "size-[46px]" : "size-[52px]",
+          )}
+        />
       </span>
       <span
         className={cn(
