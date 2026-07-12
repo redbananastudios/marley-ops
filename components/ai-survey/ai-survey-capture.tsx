@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- local camera Blob URLs are not image-optimiser inputs */
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   Camera,
@@ -25,6 +26,7 @@ import {
   registerMediaAction,
   saveAiConsentAction,
 } from "@/app/actions/ai-survey";
+import { applyMinimumCameraZoom } from "@/lib/ai/camera";
 import { extractEvidenceFrames } from "@/lib/ai/frames";
 import { uploadToMediaTarget, type MediaUploadControl } from "@/lib/storage/tus-upload";
 import { cn } from "@/lib/utils";
@@ -91,10 +93,12 @@ async function videoDuration(file: Blob): Promise<number> {
 }
 
 export function AiSurveyCapture({
+  leadId,
   surveyId,
   initialConsent,
   initialRooms,
 }: {
+  leadId: string;
   surveyId: string;
   initialConsent: boolean;
   initialRooms: CaptureRoom[];
@@ -126,6 +130,10 @@ export function AiSurveyCapture({
   const allAcked = CONSENT_ACKS.every(([key]) => acks[key]);
   const selectedName = useMemo(
     () => rooms.find((room) => room.id === selectedRoom)?.name,
+    [rooms, selectedRoom],
+  );
+  const selectedRoomState = useMemo(
+    () => rooms.find((room) => room.id === selectedRoom),
     [rooms, selectedRoom],
   );
   const roomPresets = useMemo(() => {
@@ -216,6 +224,8 @@ export function AiSurveyCapture({
         video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: audioEnabled,
       });
+      const [videoTrack] = stream.getVideoTracks();
+      if (videoTrack) await applyMinimumCameraZoom(videoTrack);
       streamRef.current = stream;
       if (previewRef.current) {
         previewRef.current.srcObject = stream;
@@ -340,7 +350,10 @@ export function AiSurveyCapture({
       );
       if (!finalised.ok) throw new Error(finalised.error);
       updateUpload(id, { progress: 100, status: "complete", control: undefined });
-      toast.success("Media is queued for analysis.");
+      if (media.roomId) {
+        setRooms((current) => current.map((room) => room.id === media.roomId ? { ...room, status: "processing" } : room));
+      }
+      toast.success("Upload complete. AI is analysing the room.");
       URL.revokeObjectURL(media.previewUrl);
       uploadAssetsRef.current.delete(id);
       router.refresh();
@@ -424,7 +437,7 @@ export function AiSurveyCapture({
           <div className="flex items-center gap-2 rounded-full bg-emerald-400/10 px-3 py-1.5 text-xs font-semibold text-emerald-300"><span className="size-2 rounded-full bg-emerald-400" /> Secure capture</div>
         </div>
         <div className="relative aspect-video min-h-[300px] bg-black">
-          {pending ? (pending.kind === "photo" ? <img src={pending.previewUrl} alt="Selected room" className="size-full object-contain" /> : <video src={pending.previewUrl} controls playsInline className="size-full object-contain" />) : <video ref={previewRef} muted playsInline className="size-full object-cover" />}
+          {pending ? (pending.kind === "photo" ? <img src={pending.previewUrl} alt="Selected room" className="size-full object-contain" /> : <video src={pending.previewUrl} controls playsInline className="size-full object-contain" />) : <video ref={previewRef} muted playsInline className="size-full object-contain" />}
           {!pending && !recording && <div className="absolute inset-0 grid place-items-center text-center text-white/55"><div><ScanLine className="mx-auto size-12" /><p className="mt-3 text-sm">Keep the room well lit and pan slowly</p></div></div>}
           {recording && <><div className="pointer-events-none absolute inset-x-0 top-0 h-px animate-[scan_2.4s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-cyan-300 to-transparent shadow-[0_0_18px_4px_rgba(103,232,249,.55)]" /><div className="pointer-events-none absolute inset-5 border border-cyan-300/35"><span className="absolute -left-px -top-px size-5 border-l-2 border-t-2 border-cyan-300" /><span className="absolute -bottom-px -right-px size-5 border-b-2 border-r-2 border-cyan-300" /></div></>}
           {recording && <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full bg-black/65 px-3 py-1.5 text-sm font-bold"><span className="size-2.5 animate-pulse rounded-full bg-red-500" /> REC {String(Math.floor(seconds / 60)).padStart(2, "0")}:{String(seconds % 60).padStart(2, "0")}</div>}
@@ -435,6 +448,8 @@ export function AiSurveyCapture({
           <button type="button" disabled={!pending} onClick={uploadPending} className="focus-ring flex min-h-12 items-center justify-center gap-2 rounded-xl bg-cyan-300 font-semibold text-slate-950 disabled:opacity-35"><UploadCloud className="size-5" /> Use clip</button>
         </div>
         {!!activeUploads.length && <div className="mx-4 mb-3 space-y-2">{activeUploads.map((upload) => <div key={upload.id} className="rounded-xl border border-white/10 bg-white/5 p-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0 flex-1"><div className="flex justify-between text-xs font-semibold"><span className="truncate">{upload.label}</span><span>{upload.status === "failed" ? "Upload failed" : `${Math.round(upload.progress)}%`}</span></div><div className="mt-2 h-2 overflow-hidden rounded-full bg-white/15"><div className={cn("h-full rounded-full transition-[width]", upload.status === "failed" ? "bg-red-400" : "bg-cyan-300")} style={{ width: `${Math.max(upload.progress, upload.status === "failed" ? 5 : 0)}%` }} /></div>{upload.error && <p className="mt-1 truncate text-[11px] text-red-300">{upload.error}</p>}</div>{upload.status === "failed" ? <button type="button" onClick={() => void runUpload(upload.id)} className="focus-ring min-h-11 rounded-lg border border-white/20 px-3 text-xs font-bold">Retry</button> : upload.control && <button type="button" onClick={() => toggleUpload(upload)} className="focus-ring grid size-11 shrink-0 place-items-center rounded-lg border border-white/20" aria-label={upload.status === "paused" ? "Resume upload" : "Pause upload"}>{upload.status === "paused" ? <Play className="size-4" /> : <Pause className="size-4" />}</button>}</div></div>)}</div>}
+        {selectedRoomState?.status === "processing" && <div className="mx-4 mb-3 flex items-start gap-3 rounded-xl border border-cyan-300/25 bg-cyan-300/10 p-3 text-cyan-50"><Loader2 className="mt-0.5 size-5 shrink-0 animate-spin text-cyan-300" /><div><p className="text-sm font-bold">AI is analysing {selectedRoomState.name}</p><p className="mt-0.5 text-xs leading-5 text-cyan-50/70">Usually ready within two minutes. You can add and scan the next room while this runs.</p></div></div>}
+        {selectedRoomState?.status === "ready" && <div className="mx-4 mb-3 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-300/25 bg-emerald-300/10 p-3"><div className="flex items-center gap-2 text-emerald-50"><Check className="size-5 text-emerald-300" /><div><p className="text-sm font-bold">{selectedRoomState.name} is ready</p><p className="text-xs text-emerald-50/70">Check every detected item before it enters the cubic survey.</p></div></div><Link href={`/leads/${leadId}/cubic/review?room=${selectedRoomState.id}`} className="focus-ring inline-flex min-h-11 items-center rounded-lg bg-emerald-300 px-4 text-sm font-bold text-emerald-950">Review items</Link></div>}
         <label className="mx-4 mb-3 flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm text-white/70"><input type="checkbox" checked={wholePropertyImport} onChange={(event) => setWholePropertyImport(event.target.checked)} disabled={recording || !!pending} className="size-5 accent-mm-red" /> Imported video covers multiple rooms</label>
         <label className="mx-4 mb-3 flex min-h-11 items-center gap-3 rounded-lg border border-white/10 px-3 text-sm text-white/70"><input type="checkbox" checked={audioEnabled} onChange={(event) => setAudioEnabled(event.target.checked)} disabled={recording} className="size-5 accent-mm-red" /> Record narration</label>
         <p className="px-4 pb-4 text-xs leading-5 text-white/45">Keep this page open until upload reaches 100%. AI suggestions never replace your review.</p>
