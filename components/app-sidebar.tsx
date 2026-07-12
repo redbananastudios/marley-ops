@@ -222,15 +222,18 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
 
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex">
-      <div className="flex h-16 shrink-0 items-center border-b border-white/8 px-4">
+      <div className="flex h-16 shrink-0 items-center px-4">
         <BrandMark />
       </div>
 
-      <div className="px-3 pt-4">
+      <div className="px-3 pb-1 pt-1">
         <QuickCreate className="w-full" />
       </div>
 
-      <nav className="nav-scroll flex-1 overflow-y-auto px-3 py-5">
+      {/* min-h-0 is load-bearing: without it a flex child keeps its content
+          height (min-height:auto) and the overflow never scrolls, so the last
+          groups (System → Settings) fall off the bottom on short viewports. */}
+      <nav className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4">
         <SidebarNavList pathname={pathname} role={profile.role} />
       </nav>
 

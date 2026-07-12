@@ -36,7 +36,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
             className="fixed inset-y-0 left-0 z-50 flex w-80 max-w-[88%] flex-col border-r border-white/8 bg-sidebar shadow-lg outline-none data-[state=closed]:animate-out data-[state=closed]:slide-out-to-left data-[state=open]:animate-in data-[state=open]:slide-in-from-left xl:hidden"
           >
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
-            <div className="flex h-16 items-center justify-between border-b border-white/8 px-4">
+            <div className="flex h-16 items-center justify-between px-4">
               <BrandMark compact />
               <DialogPrimitive.Close
                 aria-label="Close menu"
@@ -46,10 +46,10 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
               </DialogPrimitive.Close>
             </div>
 
-            <div className="px-3 pt-4">
+            <div className="px-3 pb-1 pt-1">
               <QuickCreate className="w-full" />
             </div>
-            <nav className="nav-scroll flex-1 overflow-y-auto px-3 py-5">
+            <nav className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4">
               <SidebarNavList pathname={pathname} role={profile.role} onNavigate={() => setOpen(false)} />
             </nav>
             <NavFooter profile={profile} />
