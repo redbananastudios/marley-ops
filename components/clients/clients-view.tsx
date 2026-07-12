@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Pager, usePager } from "@/components/ui/pager";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -150,15 +151,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
   }
 
   const toggleBtn = (v: ViewMode, Icon: typeof LayoutGrid, label: string) => (
-    <button
-      type="button"
-      onClick={() => pickView(v)}
-      aria-pressed={view === v}
-      className={cn(
-        "focus-ring inline-flex min-h-9 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
-        view === v ? "bg-mm-red-tint text-mm-red-deep" : "bg-card text-mist-500 hover:bg-muted",
-      )}
-    >
+    <button type="button" onClick={() => pickView(v)} aria-pressed={view === v} className={segmentedItemClass(view === v)}>
       <Icon className="size-4" strokeWidth={1.75} />
       {label}
     </button>
@@ -168,9 +161,8 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
     <div>
       <div className="flex flex-wrap items-center gap-3">
         {/* view toggle */}
-        <div className="inline-flex overflow-hidden rounded-md border border-input" role="group" aria-label="View format">
+        <div className={segmentedTrackClass} role="group" aria-label="View format">
           {toggleBtn("grid", LayoutGrid, "Grid")}
-          <span className="w-px bg-border" />
           {toggleBtn("list", List, "List")}
         </div>
 

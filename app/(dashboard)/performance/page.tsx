@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
@@ -64,23 +66,14 @@ type SearchParams = { month?: string; tab?: string; range?: string; from?: strin
 
 function TabBar({ active }: { active: "overview" | "sales" | "storage" }) {
   const tab = (key: "overview" | "sales" | "storage", label: string, href: string) => (
-    <Link
-      href={href}
-      aria-current={active === key ? "page" : undefined}
-      className={
-        "focus-ring flex min-h-9 items-center px-3.5 text-sm font-medium transition-colors " +
-        (active === key ? "bg-mm-red-tint text-mm-red-deep" : "text-mist-500 hover:bg-muted")
-      }
-    >
+    <Link href={href} aria-current={active === key ? "page" : undefined} className={segmentedItemClass(active === key)}>
       {label}
     </Link>
   );
   return (
-    <div className="mb-5 inline-flex overflow-hidden rounded-md border border-input bg-card">
+    <div className={cn(segmentedTrackClass, "mb-5")}>
       {tab("overview", "Overview", "/performance")}
-      <span className="w-px bg-border" />
       {tab("sales", "Sales", "/performance?tab=sales")}
-      <span className="w-px bg-border" />
       {tab("storage", "Storage", "/performance?tab=storage")}
     </div>
   );

@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { segmentedCountClass, segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import {
   Dialog,
   DialogContent,
@@ -155,27 +156,18 @@ export function ResourcesView({
   );
 
   const tabBtn = (key: "staff" | "vehicles", Icon: typeof UserRound, label: string, count: number) => (
-    <button
-      type="button"
-      onClick={() => setTab(key)}
-      aria-pressed={tab === key}
-      className={cn(
-        "focus-ring inline-flex min-h-9 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
-        tab === key ? "bg-mm-red-tint text-mm-red-deep" : "bg-card text-mist-500 hover:bg-muted",
-      )}
-    >
+    <button type="button" onClick={() => setTab(key)} aria-pressed={tab === key} className={segmentedItemClass(tab === key)}>
       <Icon className="size-4" strokeWidth={1.75} />
       {label}
-      <span className="tabular rounded-pill bg-muted px-1.5 text-xs text-mist-400">{count}</span>
+      <span className={segmentedCountClass(tab === key)}>{count}</span>
     </button>
   );
 
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <div className="inline-flex overflow-hidden rounded-md border border-input" role="group" aria-label="Resource type">
+        <div className={segmentedTrackClass} role="group" aria-label="Resource type">
           {tabBtn("staff", UserRound, "Staff", counts.staff)}
-          <span className="w-px bg-border" />
           {tabBtn("vehicles", Truck, "Vehicles", counts.vehicles)}
         </div>
         <Button

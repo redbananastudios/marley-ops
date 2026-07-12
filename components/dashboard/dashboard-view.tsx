@@ -23,8 +23,10 @@ import {
   UserPlus,
   type LucideIcon,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { IconBadge } from "@/components/ui/icon-badge";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { OverlayChart } from "@/components/dashboard/overlay-chart";
 import type { PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
@@ -95,7 +97,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <p className="eyebrow">{data.dateLabel}</p>
           <h1 className="font-display text-3xl font-semibold tracking-[-0.035em] text-foreground md:text-4xl">Dashboard</h1>
         </div>
-        <div className="inline-flex rounded-lg border border-border bg-card p-0.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]" role="tablist" aria-label="Period">
+        <div className={segmentedTrackClass} role="tablist" aria-label="Period">
           {PERIODS.map((p) => (
             <button
               key={p}
@@ -103,12 +105,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
               role="tab"
               aria-selected={period === p}
               onClick={() => setPeriod(p)}
-              className={
-                "focus-ring rounded-[6px] px-3.5 py-1.5 text-sm font-medium capitalize transition-colors " +
-                (period === p
-                  ? "bg-card text-foreground shadow-xs"
-                  : "text-mist-400 hover:text-foreground")
-              }
+              className={cn(segmentedItemClass(period === p), "capitalize")}
             >
               {data.periods[p].label}
             </button>

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Pager, usePager } from "@/components/ui/pager";
+import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 
 export interface QuoteRow {
@@ -172,15 +173,10 @@ export function QuotesView({
               type="button"
               onClick={() => setPreset(p.key)}
               aria-pressed={active}
-              className={cn(
-                "focus-ring inline-flex items-center gap-1.5 rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
-                active ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-card text-mist-500 hover:bg-muted",
-              )}
+              className={filterChipClass(active)}
             >
               {p.label}
-              <span className={cn("tabular rounded-pill px-1.5 text-xs", active ? "bg-mm-red/15 text-mm-red-deep" : "bg-muted text-mist-400")}>
-                {counts[p.key]}
-              </span>
+              <span className={filterChipCountClass(active)}>{counts[p.key]}</span>
             </button>
           );
         })}

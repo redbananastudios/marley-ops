@@ -3,6 +3,7 @@ import { FileDown, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { UK_TZ } from "@/lib/uk-time";
 
@@ -175,22 +176,14 @@ export default async function DocumentsPage({
       <PageHeader eyebrow="Sales" title="Documents" />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="flex rounded-md border border-input bg-card p-0.5">
+        <div className={segmentedTrackClass}>
           {(
             [
               ["all", `All documents (${rows.length})`],
               ["unsigned", `Unsigned contracts (${unsigned.length})`],
             ] as const
           ).map(([t, label]) => (
-            <Link
-              key={t}
-              href={tabLink(t)}
-              aria-current={tab === t ? "page" : undefined}
-              className={
-                "focus-ring rounded-[5px] px-3 py-1.5 text-sm font-medium " +
-                (tab === t ? "bg-mm-red text-white" : "text-mist-500 hover:text-foreground")
-              }
-            >
+            <Link key={t} href={tabLink(t)} aria-current={tab === t ? "page" : undefined} className={segmentedItemClass(tab === t)}>
               {label}
             </Link>
           ))}

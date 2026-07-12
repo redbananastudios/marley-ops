@@ -1,5 +1,7 @@
 import Link from "next/link";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { LEAD_STATUS_META } from "@/components/lead-status-badge";
 import type { SalesReport } from "@/lib/sales-report";
 
@@ -64,21 +66,16 @@ export function SalesTab({
     <div className="space-y-6">
       {/* range picker — links for presets + a plain GET form for custom */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex flex-wrap overflow-hidden rounded-md border border-input bg-card">
-          {RANGE_PRESETS.map((p, i) => (
-            <span key={p.key} className="inline-flex">
-              {i > 0 ? <span className="w-px bg-border" /> : null}
-              <Link
-                href={`/performance?tab=sales&range=${p.key}`}
-                aria-current={preset === p.key ? "true" : undefined}
-                className={
-                  "focus-ring flex min-h-9 items-center px-3 text-sm font-medium transition-colors " +
-                  (preset === p.key ? "bg-mm-red-tint text-mm-red-deep" : "text-mist-500 hover:bg-muted")
-                }
-              >
-                {p.label}
-              </Link>
-            </span>
+        <div className={cn(segmentedTrackClass, "flex-wrap")}>
+          {RANGE_PRESETS.map((p) => (
+            <Link
+              key={p.key}
+              href={`/performance?tab=sales&range=${p.key}`}
+              aria-current={preset === p.key ? "true" : undefined}
+              className={segmentedItemClass(preset === p.key)}
+            >
+              {p.label}
+            </Link>
           ))}
         </div>
         <form method="get" action="/performance" className="flex items-center gap-1.5">
