@@ -488,7 +488,9 @@ export function CubicBuilder({
           </div>
 
           {!searchTerm ? (
-            <div className="scrollbar-none -mx-1 mt-3 flex gap-2 overflow-x-auto px-1 pb-1">
+            <div className="mt-3 flex flex-wrap gap-2 pb-1">
+              {/* wrap, don't horizontal-scroll: a hidden-scrollbar carousel left
+                  later categories (Kitchen onward) unreachable on desktop. */}
               {CUBIC_CATEGORIES.map((c) => {
                 const catQty = lines.filter((l) => l.category === c.key && !l.flags?.notMoving).reduce((s, l) => s + l.qty, 0);
                 return (
