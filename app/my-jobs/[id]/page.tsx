@@ -10,7 +10,6 @@ import {
   MapPin,
   Package,
   PenLine,
-  Phone,
   StickyNote,
   Truck,
   UserRound,
@@ -27,6 +26,7 @@ import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { CollectContractButton } from "@/components/crew/collect-contract-button";
 import { CompleteJobButton } from "@/components/crew/complete-job-button";
+import { CrewActionBar } from "@/components/crew/crew-action-bar";
 
 /**
  * /my-jobs/[id] — the job sheet AS A WEB PAGE (Peter, 2026-07-10: "we should
@@ -92,7 +92,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         <SignOutButton />
       </header>
 
-      <main className="mx-auto max-w-2xl p-4 pb-12 sm:p-5 md:p-8">
+      <main className="mx-auto max-w-2xl p-4 pb-28 sm:p-5 sm:pb-28 md:p-8 md:pb-28">
         <Link
           href="/my-jobs"
           className="focus-ring inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-mist-500 hover:text-foreground"
@@ -157,32 +157,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           </div>
         ) : null}
 
-        {/* actions */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {isRemoval && !completion ? (
-            <CompleteJobButton
-              job={{
-                appointmentId: id,
-                customerName: d.customerName,
-                quoteRef: d.quoteRef,
-                moveDate: d.moveDate,
-                fromLine,
-                toLine,
-                crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
-              }}
-            />
-          ) : null}
-          {isRemoval ? <JobSheetButton appointmentId={id} fileHint={d.customerName} /> : null}
-          {d.customerPhone ? (
-            <a
-              href={`tel:${d.customerPhone.replace(/\s+/g, "")}`}
-              className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-muted"
-            >
-              <Phone className="size-4" strokeWidth={1.75} />
-              Call {d.customerName.split(" ")[0]}
-            </a>
-          ) : null}
-        </div>
+        {/* document action — Call + Complete live in the sticky cab bar below */}
+        {isRemoval ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <JobSheetButton appointmentId={id} fileHint={d.customerName} />
+          </div>
+        ) : null}
 
         {/* route — each address is tap-to-navigate for the van cab */}
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -316,6 +296,28 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           If anything on this job looks wrong, call the office before setting off.
         </div>
       </main>
+
+      {/* one-handed cab actions — pinned so they never scroll away */}
+      <CrewActionBar
+        phone={d.customerPhone}
+        firstName={d.customerName.split(" ")[0]}
+        directionsTo={fromLine || toLine || null}
+      >
+        {isRemoval && !completion ? (
+          <CompleteJobButton
+            job={{
+              appointmentId: id,
+              customerName: d.customerName,
+              quoteRef: d.quoteRef,
+              moveDate: d.moveDate,
+              fromLine,
+              toLine,
+              crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
+            }}
+            triggerClassName="focus-ring inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep"
+          />
+        ) : null}
+      </CrewActionBar>
     </div>
   );
 }

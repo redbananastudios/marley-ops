@@ -65,7 +65,7 @@ export interface CompletionJobInfo {
   crewNameDefault: string;
 }
 
-export function CompleteJobButton({ job }: { job: CompletionJobInfo }) {
+export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJobInfo; triggerClassName?: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [exceptions, setExceptions] = useState("");
@@ -145,7 +145,10 @@ export function CompleteJobButton({ job }: { job: CompletionJobInfo }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-4 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep"
+        className={
+          triggerClassName ??
+          "focus-ring inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-4 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep"
+        }
       >
         <CheckCircle2 className="size-4" strokeWidth={1.75} />
         Complete job
