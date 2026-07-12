@@ -209,7 +209,10 @@ export async function GET(req: Request) {
 
         // 30-day lapse = quote expiry → lost ("no_response"), chasing over.
         if (isQuoteLapsed(quote.email_sent_at, now)) {
-          await sb
+          // Guard on the status-change winning: if the customer accepted between
+          // the leads snapshot and now, the conditional update no-ops and we must
+          // NOT cancel their fresh deposit follow-up or log a false "lapsed".
+          const { data: downgraded } = await sb
             .from("leads")
             .update({
               status: "declined",
@@ -217,7 +220,9 @@ export async function GET(req: Request) {
               lost_at: now.toISOString(),
             } as never)
             .eq("id", lead.id)
-            .eq("status", "quoted");
+            .eq("status", "quoted")
+            .select("id");
+          if (!downgraded?.length) continue; // lead moved on in the race window
           await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" })
             .eq("lead_id", lead.id).eq("status", "open");
           await sb.from("activities").insert({
