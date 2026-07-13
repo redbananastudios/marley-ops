@@ -22,7 +22,7 @@ export async function sendEmail(input: {
    *  q-<token>@reply.marleymoves.co.uk address so replies route back in. */
   replyTo?: string;
   /** Override the display sender (must stay on the verified domain) — the
-   *  personal chase emails send as "Connor at Marley Moves". */
+   *  personal chase emails send as Peter Farrell. */
   from?: string;
 }): Promise<SendResult> {
   if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}` };
