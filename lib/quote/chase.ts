@@ -73,6 +73,10 @@ export interface ChaseContext {
   acceptUrl: string;
   /** Quote expiry, pre-formatted for customers (e.g. "8 August"). */
   expiryLabel: string;
+  /** The lead owner (estimator) the chase comes from, e.g. "Luke James". */
+  ownerName?: string | null;
+  /** Deposit, pre-formatted (e.g. "£100"). */
+  depositAmount?: string | null;
 }
 
 export interface ChaseEmail {
@@ -84,12 +88,18 @@ export interface ChaseEmail {
 
 const first = (name: string | null): string => (name ?? "").trim().split(/\s+/)[0] || "there";
 
+/** Owner's first name for the personal chase voice; falls back to the team. */
+const ownerFirst = (name: string | null | undefined): string =>
+  (name ?? "").trim().split(/\s+/)[0] || "the Marley Moves team";
+
 function vars(c: ChaseContext): Record<string, string> {
   return {
     CUSTOMER_FIRST_NAME: first(c.firstName),
+    OWNER_NAME: ownerFirst(c.ownerName),
     QUOTE_REF: c.quoteRef,
     ACCEPT_LINK: c.acceptUrl,
     EXPIRY_DATE: c.expiryLabel,
+    DEPOSIT_AMOUNT: c.depositAmount ?? "£100",
   };
 }
 

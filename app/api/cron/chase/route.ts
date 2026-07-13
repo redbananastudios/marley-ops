@@ -127,6 +127,18 @@ export async function GET(req: Request) {
   const run = await runCron("chase", async () => {
   const sb = createAdminClient();
   const now = new Date();
+
+  // Chases are personal, from the lead's owner (estimator). Resolve + cache names.
+  const ownerNameCache = new Map<string, string | null>();
+  const ownerNameFor = async (estimatorId: string | null): Promise<string | null> => {
+    if (!estimatorId) return null;
+    if (ownerNameCache.has(estimatorId)) return ownerNameCache.get(estimatorId)!;
+    const { data } = await sb.from("profiles").select("full_name").eq("id", estimatorId).single();
+    const name = data?.full_name ?? null;
+    ownerNameCache.set(estimatorId, name);
+    return name;
+  };
+
   const summary = {
     quoteChases: 0,
     depositChases: 0,
@@ -259,6 +271,7 @@ export async function GET(req: Request) {
           quoteRef: quote.quote_ref,
           acceptUrl: acceptUrlFor(token),
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
+          ownerName: await ownerNameFor(lead.estimator_id),
         });
         const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
@@ -323,6 +336,7 @@ export async function GET(req: Request) {
           quoteRef: quote.quote_ref,
           acceptUrl: acceptUrlFor(token),
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
+          ownerName: await ownerNameFor(lead.estimator_id),
         });
         const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token);
         if (sent) {

@@ -105,7 +105,7 @@ export function quoteEmailTemplateVars(
     GRAND_TOTAL: gbp(b.grandTotal),
     TOTAL_COST_NOTE: b.vatEnabled ? "Includes admin fee · VAT @ 20%" : "Includes admin fee · no VAT",
     EXPIRY_DATE: expiry,
-    MOVE_DATE_CLAUSE: moveDateClause,
+    QUOTE_INTRO: `Here is your written fixed price for your move${moveDateClause}.`,
     COLLECTION_HTML: escapeHtml(c1) + (c2 ? "<br>" + escapeHtml(c2) : ""),
     DESTINATION_HTML: escapeHtml(d1) + (d2 ? "<br>" + escapeHtml(d2) : ""),
     MOVE_DATE_GLANCE: moveDateGlance,

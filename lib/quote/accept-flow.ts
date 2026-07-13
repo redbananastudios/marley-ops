@@ -581,11 +581,15 @@ export async function acceptQuoteByStaff(
   // engine's next touch is day 3.
   let emailed = false;
   if (quote.customer_email && token) {
+    const owner = quote.estimator_id
+      ? ((await sb.from("profiles").select("full_name").eq("id", quote.estimator_id).single()).data?.full_name ?? null)
+      : null;
     const email = depositChaseEmail(1, {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       acceptUrl: acceptUrlFor(token),
       expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
+      ownerName: owner,
     });
     const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
     const res = await dispatchComm(sb, actorId, {

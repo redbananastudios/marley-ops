@@ -112,8 +112,8 @@ const firstNameOf = (name: string | null | undefined): string =>
 export function depositReceivedTemplateVars(m: DepositReceivedMeta): Record<string, string> {
   const balanceLine =
     m.balanceAmount != null && m.balanceAmount > 0
-      ? `The remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due before move day. We will send your final invoice nearer the time.`
-      : `We will send your final invoice nearer the time. The balance is due before move day.`;
+      ? `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`
+      : `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
   return {
     CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
     QUOTE_REF: escapeHtml(m.quoteRef),
@@ -173,8 +173,8 @@ export function buildDepositReceivedEmailHtml(m: DepositReceivedMeta): string {
     : "";
   const balanceLine =
     m.balanceAmount != null && m.balanceAmount > 0
-      ? `The remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due before move day. We will send your final invoice nearer the time.`
-      : `We will send your final invoice nearer the time. The balance is due before move day.`;
+      ? `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`
+      : `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
 
   const inner = [
     pill(`Deposit received · ${escapeHtml(m.quoteRef)}`),

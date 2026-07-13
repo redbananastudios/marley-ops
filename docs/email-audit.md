@@ -93,3 +93,18 @@ Source of truth = `scripts/create-resend-templates.mjs` (idempotent PATCH-by-nam
 - Or send a one-off test render to Peter's sink via the send-only key to confirm the look.
 
 ## Resend template IDs: scratchpad/resend-ids.json
+
+---
+
+# SHIPPED 2026-07-13
+- **All 12 marley-ops templates LIVE on Resend** in the new house style (MARLEY_RESEND_API_KEY has full write; the "send-only" note was stale). Same template IDs (PATCH-by-name) — app env wired + restarted.
+- **Corrections applied** (Peter's review): from `quotes@` → `hello@` on every template; bigger CTA button padding (17px 52px); chases render through the SAME shell + STANDARD_FOOTER as the transactional emails, with the accept link as a red button and a personal "Best regards, {{OWNER_NAME}}" sign-off (no more separate signature).
+- **Inbound:** `INBOUND_FORWARD_EMAIL` → hello@marleymoves.co.uk (was Peter's sink). Chase replies still route via `q-<token>@reply.marleymoves.co.uk` → webhook → pause/log/task/forward. Non-chase replies now land at hello@ (from addr).
+- **App wiring DONE:** `OWNER_NAME` (lead owner's first name via profiles.full_name, cached) + `DEPOSIT_AMOUNT` on chases (chase.ts + chase cron + accept-flow); `QUOTE_INTRO` replaces MOVE_DATE_CLAUSE on quote-email; `BALANCE_LINE` → "due 24 hours before your move, unless we've agreed otherwise" (payment-email.ts). tsc clean, 85 quote/comms tests green.
+- **Reviews:** review-request now uses `{{REVIEW_PLATFORM}}` + `{{REVIEW_URL}}` (app-set: Google default; Checkatrade when the lead came via Checkatrade; rotate some to Trustpilot) — the app-side platform selection is the remaining wire-up.
+
+## REMAINING
+1. `lead-auto-reply` (Resend d6f49493) — the WEBSITE's enquiry auto-reply, source in `/o/projects/red-banana/clients/marley/site/web`; restyle to the house style + fix the content (acknowledgement, not "fixed price in the hour").
+2. Review-platform selection logic (Checkatrade/Trustpilot/Google by lead source) — app-side.
+3. Chase `text` fallbacks in chase.ts still say "Peter" (internal preview/dup-hash only; templates are what send) — align when convenient.
+4. Full-journey live test through the ops flow (survey→quote→deposit→balance→completion→review) once Peter's happy with the look.
