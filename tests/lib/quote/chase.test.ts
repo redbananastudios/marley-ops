@@ -11,6 +11,7 @@ import {
   LOSS_REASONS,
   QUOTE_CHASE_DAYS,
   DEPOSIT_CHASE_DAYS,
+  CHASE_FROM,
 } from "@/lib/quote/chase";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -58,7 +59,7 @@ describe("30-day auto-lapse", () => {
   });
 });
 
-describe("chase copy (approved 2026-07-09)", () => {
+describe("chase copy (refreshed 2026-07-13)", () => {
   const ctx = {
     firstName: "Jane Smith",
     quoteRef: "MM-T-9",
@@ -80,7 +81,13 @@ describe("chase copy (approved 2026-07-09)", () => {
       expect(e.text).not.toMatch(/—/);
       expect(e.subject).not.toMatch(/—/);
       expect(e.variables.ACCEPT_LINK).toBe(ctx.acceptUrl);
+      expect(e.text).toContain("Peter");
+      expect(e.text).not.toContain("Connor");
     }
+  });
+
+  it("sends every chase as Peter from his Marley address", () => {
+    expect(CHASE_FROM).toBe("Peter Farrell at Marley Moves <peter@marleymoves.co.uk>");
   });
 
   it("final quote chase names the expiry and the ref; deposit chases name the ref", () => {
@@ -90,11 +97,16 @@ describe("chase copy (approved 2026-07-09)", () => {
     expect(depositChaseEmail(1, ctx).text).toContain("Bank transfer reference: MM-T-9");
   });
 
-  it("fallback HTML escapes and links, keeping the plain typed look", () => {
+  it("fallback HTML escapes and links, then adds Peter's Outlook-style signature", () => {
     const html = chaseTextToHtml("Hi <Jane>,\nhttps://ops.marleymoves.co.uk/q/x");
     expect(html).toContain("&lt;Jane&gt;");
     expect(html).toContain('<a href="https://ops.marleymoves.co.uk/q/x"');
-    expect(html).toContain("white-space:pre-wrap");
+    expect(html).toContain("Peter Farrell");
+    expect(html).toContain("mailto:peter@marleymoves.co.uk");
+    expect(html).toContain("Ash Cottage, Sherborne Causeway");
+    expect(html).not.toContain('width="600"');
+    expect(html).toContain('width="100%"');
+    expect(html).toContain("max-width:600px");
   });
 });
 

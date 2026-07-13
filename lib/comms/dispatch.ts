@@ -27,7 +27,7 @@ export interface DispatchCommInput {
   attachmentName?: string;
   /** Reply-To override (chase emails: the per-lead reply-routing address). */
   replyTo?: string;
-  /** Sender display override (chase emails: "Connor at Marley Moves"). */
+  /** Sender display override (chase emails: Peter Farrell at Marley Moves). */
   from?: string;
   leadId?: string;
   quoteId?: string;

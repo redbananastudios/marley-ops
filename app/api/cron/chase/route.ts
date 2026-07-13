@@ -8,6 +8,7 @@ import { sendReviewRequest } from "@/lib/comms/review-request";
 import { balanceDue } from "@/lib/quote/payments";
 import { acceptUrlFor, ensureAcceptToken } from "@/lib/quote/accept-flow";
 import {
+  CHASE_FROM,
   chaseTextToHtml,
   depositChaseEmail,
   dueChaseStep,
@@ -111,7 +112,7 @@ async function sendChase(
       ? { template: { id: templateId, variables: email.variables } }
       : { bodyHtml: chaseTextToHtml(email.text) }),
     replyTo: replyAddressFor(replyToken),
-    from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
+    from: CHASE_FROM,
     leadId: lead.id,
     quoteId: quote.id,
     clientId: lead.client_id ?? undefined,

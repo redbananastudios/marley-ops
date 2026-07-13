@@ -10,14 +10,15 @@
  *  - PROVISIONAL (accepted online, deposit unpaid): emails on day 1 / 3 after
  *    acceptance, call task on day 5.
  *
- * Voice: personal plain-text from Connor — deliberately unbranded so it reads
- * typed, not blasted. UK English, no em-dashes.
+ * Voice: personal plain-text from Peter with his Marley Moves signature. It
+ * should read like a genuine follow-up, not a campaign. UK English, no em-dashes.
  */
 
 export const QUOTE_CHASE_DAYS = [2, 5, 10] as const;
 export const DEPOSIT_CHASE_DAYS = [1, 3] as const;
 export const DEPOSIT_CALL_DAY = 5;
 export const QUOTE_LAPSE_DAYS = 30;
+export const CHASE_FROM = "Peter Farrell at Marley Moves <peter@marleymoves.co.uk>";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -96,36 +97,37 @@ export function quoteChaseEmail(step: 1 | 2 | 3, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
   if (step === 1) {
     return {
-      subject: `Did the quote come through okay, ${name}?`,
+      subject: `Did my quote come through okay, ${name}?`,
       text: `Hi ${name},
 
-Connor here from Marley Moves. Just checking the quote for your move landed safely and seeing if you had any questions about it.
+Peter here from Marley Moves. I wanted to make sure quote ${c.quoteRef} reached you and see if anything needs explaining or changing.
 
-If you're happy with everything, you can accept it online in about 30 seconds and that reserves your date:
+If you're happy with everything, you can accept it online here:
 ${c.acceptUrl}
 
-Anything you'd like changing, just reply to this email or ring me on 01747 637070.
+It takes about 30 seconds and provisionally reserves your move date.
+
+If you'd rather talk it through, reply to this email or call me on 01747 637070.
 
 Thanks,
-Connor
-Marley Moves`,
+Peter`,
       variables: vars(c),
     };
   }
   if (step === 2) {
     return {
-      subject: "Shall I pencil your date in?",
+      subject: "Would you like me to hold your move date?",
       text: `Hi ${name},
 
-Dates are starting to fill for the coming weeks (month-end and Fridays always go first), so I wanted to check where you're at with your quote.
+I'm checking in on quote ${c.quoteRef}. Dates are starting to fill for the coming weeks, with Fridays and month-end usually going first.
 
-Accepting online takes half a minute and the £100 deposit locks the crew and date in for you:
+If you'd like to go ahead, accept online and pay the £100 deposit to confirm the crew and date:
 ${c.acceptUrl}
 
-If something in the quote doesn't look right, tell me and I'll sort it before anything is booked.
+If you're still deciding, or anything in the quote needs changing, just reply and I'll help.
 
 Thanks,
-Connor`,
+Peter`,
       variables: vars(c),
     };
   }
@@ -133,16 +135,15 @@ Connor`,
     subject: `Your quote is valid until ${c.expiryLabel}`,
     text: `Hi ${name},
 
-A last note from me. Your quote ${c.quoteRef} stays valid until ${c.expiryLabel}, after that I'd need to re-check the price.
+This is my last follow-up about quote ${c.quoteRef}. It stays valid until ${c.expiryLabel}; after that I'll need to re-check both the price and availability.
 
-If you'd like the date held it's one click here:
+If you'd like to go ahead, you can accept it here:
 ${c.acceptUrl}
 
-And if you've decided to go another way, no hard feelings at all. A one-line reply telling me what swung it would genuinely help us do better.
+If you no longer need the quote, reply with "not going ahead" and I won't follow up again. If you've chosen someone else, a one-line note about what made the difference would genuinely help us improve.
 
 All the best with the move either way,
-Connor
-01747 637070`,
+Peter`,
     variables: vars(c),
   };
 }
@@ -151,44 +152,90 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
   if (step === 1) {
     return {
-      subject: `Locking in your move date (${c.quoteRef})`,
+      subject: `One last step to secure your move date (${c.quoteRef})`,
       text: `Hi ${name},
 
-Great to have you booked in. Your date is reserved, and the £100 deposit is what makes it firm on our side.
+Thanks for accepting your quote. I've provisionally held your move date; the £100 deposit confirms the booking and allocates the crew.
 
-Everything you need is on your quote page, card or bank transfer:
+You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}
 
 Bank transfer reference: ${c.quoteRef}
 
+Once payment arrives, we'll email confirmation that everything is booked in.
+
 Thanks,
-Connor`,
+Peter`,
       variables: vars(c),
     };
   }
   return {
-    subject: `Your date is still waiting (${c.quoteRef})`,
+    subject: `Your move date is still provisional (${c.quoteRef})`,
     text: `Hi ${name},
 
-Just a nudge, we're holding your move date but I can't guarantee it much longer without the £100 deposit (${c.acceptUrl}).
+I'm still holding your move date provisionally. To confirm it, please pay the £100 deposit using your quote page:
+${c.acceptUrl}
 
-If timing is tricky or plans have shifted, reply and tell me, I'd rather help than chase.
+If your plans have changed or you need help with payment, reply and let me know. I'd rather help than keep chasing.
 
 Thanks,
-Connor`,
+Peter`,
     variables: vars(c),
   };
 }
 
-/** Plain-look HTML fallback when a Resend template id isn't configured —
- *  keeps the personal typed feel (no branding, just readable text). */
+const PETER_SIGNATURE_HTML = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360" style="width:100%;max-width:360px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;color:#1F1D1B;mso-line-height-rule:exactly;">
+  <tr><td style="padding:0 0 3px;font-size:20px;line-height:24px;font-weight:700;color:#111111;">Peter Farrell</td></tr>
+  <tr><td style="padding:0 0 12px;font-size:13px;line-height:18px;color:#3A3A3A;">Director <span style="color:#C03838;">|</span> Marley Moves</td></tr>
+  <tr><td style="padding:0 0 12px;border-top:2px solid #C03838;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <tr><td style="padding:0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
+      <tr>
+        <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/phone.png" width="18" height="18" alt="Telephone" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
+        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="tel:01747637070" style="color:#1F1D1B;text-decoration:none;">01747 637070</a><span style="color:#C03838;"> | </span><a href="tel:07572382366" style="color:#1F1D1B;text-decoration:none;">07572 382 366</a></td>
+      </tr>
+      <tr>
+        <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/new-post.png" width="18" height="18" alt="Email" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
+        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="mailto:peter@marleymoves.co.uk" style="color:#1F1D1B;text-decoration:none;">peter@marleymoves.co.uk</a></td>
+      </tr>
+      <tr>
+        <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/globe--v1.png" width="18" height="18" alt="Website" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
+        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="https://www.marleymoves.co.uk" style="color:#1F1D1B;text-decoration:none;">www.marleymoves.co.uk</a></td>
+      </tr>
+      <tr>
+        <td width="24" valign="top" style="width:24px;padding:0 6px 10px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/marker.png" width="18" height="18" alt="Address" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
+        <td valign="top" style="padding:0 0 10px;font-size:12px;line-height:18px;color:#1F1D1B;">Ash Cottage, Sherborne Causeway,<br>Shaftesbury, SP7 9PX</td>
+      </tr>
+      <tr>
+        <td width="24" style="width:24px;padding:0 6px 0 0;font-size:0;line-height:0;">&nbsp;</td>
+        <td style="padding:0 0 12px;border-bottom:1px solid #D9D9D9;">
+          <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;"><tr>
+            <td style="padding:0 8px 0 0;"><a href="https://www.facebook.com/marleymoves" style="display:block;text-decoration:none;"><img src="https://img.icons8.com/ios-filled/50/c03838/facebook-new.png" width="24" height="24" alt="Facebook" border="0" style="display:block;width:24px;height:24px;border:0;"></a></td>
+            <td style="padding:0 8px 0 0;"><a href="https://www.instagram.com/marleymovesltd" style="display:block;text-decoration:none;"><img src="https://img.icons8.com/ios-filled/50/c03838/instagram-new.png" width="24" height="24" alt="Instagram" border="0" style="display:block;width:24px;height:24px;border:0;"></a></td>
+            <td style="padding:0;"><a href="https://wa.me/441747637070" style="display:block;text-decoration:none;"><img src="https://img.icons8.com/ios-filled/50/c03838/whatsapp.png" width="24" height="24" alt="WhatsApp" border="0" style="display:block;width:24px;height:24px;border:0;"></a></td>
+          </tr></table>
+        </td>
+      </tr>
+    </table>
+  </td></tr>
+  <tr><td style="padding:12px 0 0;"><a href="https://www.marleymoves.co.uk" style="text-decoration:none;border:0;"><img src="https://marleymoves.co.uk/logo.png" width="235" alt="Marley Moves" border="0" style="display:block;width:235px;max-width:100%;height:auto;border:0;"></a></td></tr>
+  <tr><td style="padding:12px 0 0;font-size:9px;line-height:13px;color:#6A6A6A;">This communication contains information which is confidential and may also be privileged. It is for the exclusive use of the intended recipient. If you are not the intended recipient, please note that any form of distribution, copying or use of this communication or the information contained therein is strictly prohibited and may be unlawful.</td></tr>
+</table>`;
+
+/** Personal HTML fallback when a Resend template id isn't configured. Mirrors
+ * the Outlook signature used by Peter, while keeping the message itself typed. */
 export function chaseTextToHtml(text: string): string {
-  const esc = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const body = text.replace(/\nPeter\s*$/, "").trim();
+  const esc = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const linked = esc.replace(
     /(https?:\/\/[^\s]+)/g,
-    '<a href="$1" style="color:#1a56db;">$1</a>',
+    '<a href="$1" style="color:#C03838;text-decoration:underline;">$1</a>',
   );
-  return `<div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;white-space:pre-wrap;">${linked}</div>`;
+  const paragraphs = linked
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p style="margin:0 0 16px;">${paragraph.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#FFFFFF;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;"><tr><td style="padding:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A1A;line-height:1.7;">${paragraphs}</td></tr><tr><td style="padding:8px 0 0;">${PETER_SIGNATURE_HTML}</td></tr></table></td></tr></table></body></html>`;
 }
 
 /** The per-lead reply address that routes an inbound reply back to its quote
