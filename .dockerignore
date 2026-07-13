@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.env*
+npm-debug.log*
+Dockerfile
+.dockerignore
+README.md
+docs
+supabase/volumes
+*.local
+.vercel
+coverage

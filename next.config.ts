@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Self-hosted on the OVH VPS via Docker: emit a standalone server bundle
+  // (minimal runtime, no full node_modules) that `node server.js` runs.
+  output: "standalone",
+
   // i9 is the host; Peter reaches the dev server over Tailscale from his laptop.
   // Next 16 blocks cross-origin dev requests (HMR, server actions) unless the
   // origin is allow-listed — without this, the LAN login hangs / 403s.

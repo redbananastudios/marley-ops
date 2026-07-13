@@ -1,32 +1,4 @@
 {
-  "crons": [
-    {
-      "path": "/api/sync/sanity-leads",
-      "schedule": "0 6 * * *"
-    },
-    {
-      "path": "/api/cron/zoho-deposits",
-      "schedule": "*/15 * * * *"
-    },
-    {
-      "path": "/api/cron/chase",
-      "schedule": "0 9 * * *"
-    },
-    {
-      "path": "/api/cron/crew-reminders",
-      "schedule": "0 17 * * *"
-    },
-    {
-      "path": "/api/cron/storage-billing",
-      "schedule": "0 7 * * *"
-    },
-    {
-      "path": "/api/cron/ai-jobs",
-      "schedule": "*/2 * * * *"
-    },
-    {
-      "path": "/api/cron/ai-retention",
-      "schedule": "30 2 * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "comment": "Self-hosted on the OVH VPS (Docker + Caddy). Scheduling is handled by on-box cron (/etc/cron.d/marley-ops), NOT Vercel Cron. Kept minimal for the Vercel rollback deployment only."
 }
