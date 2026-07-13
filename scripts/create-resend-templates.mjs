@@ -34,7 +34,26 @@ const headers = { Authorization: `Bearer ${KEY}`, "Content-Type": "application/j
 
 /* ---------------------------------------------------------------- templates */
 
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+const LOGO_URL = "https://marleymoves.co.uk/logo.png";
+
+// House style (2026-07-13, signed off with Peter): white logo header, Montserrat
+// (web-safe fallback for Outlook/Gmail-web), big light headline, red step circles,
+// bordered "included free" tick panel, red call button, standards footer.
+const FONT_STACK = "'Montserrat','Segoe UI',Helvetica,Arial,sans-serif";
+const FONT_LINK =
+  '<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">';
+
+// The standard footer on EVERY email. Legal name is MarleyMoves Ltd (one word);
+// brand "Marley Moves" (space) stays in the body copy + team sign-off.
+const STANDARD_FOOTER = `  <tr><td style="padding:26px 36px;border-top:1px solid #EAE7E2;">
+    <p style="margin:0;font-size:11px;line-height:1.85;color:#8A857E;text-align:center;">
+      <strong style="color:#5A554F;">MarleyMoves Ltd</strong> &middot; Company No. 15914266 &middot; VAT 520 2213 58<br>
+      Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX<br>
+      <a href="tel:01747637070" style="color:#8A857E;text-decoration:none;">01747 637070</a> &middot; <a href="mailto:hello@marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">hello@marleymoves.co.uk</a> &middot; <a href="https://marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">marleymoves.co.uk</a><br>
+      Fully insured &mdash; Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
+      Registered in England &amp; Wales &middot; <a href="https://marleymoves.co.uk/terms-conditions" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="https://marleymoves.co.uk/privacy-policy" style="color:#8A857E;text-decoration:underline;">Privacy</a>
+    </p>
+  </td></tr>`;
 
 const fact = (label, value) => `
       <tr>
@@ -201,42 +220,62 @@ const reviewRequestHtml = `<!DOCTYPE html>
 
 const shellHtml = (preheader, inner) => `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title></head>
-<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title>${FONT_LINK}</head>
+<body style="margin:0;padding:0;background:#F6F5F3;font-family:${FONT_STACK};color:#1A1A1A;">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${preheader}</div>
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
-  <tr><td align="center" style="padding:34px 36px 8px;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+  <tr><td align="center" style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;">
+    <img src="${LOGO_URL}" alt="Marley Moves" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">
   </td></tr>
 ${inner}
-  <tr><td style="background:#FAFAFA;border-top:1px solid #EAE7E2;padding:20px 36px;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
-        <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
-      </td>
-      <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
-        <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
-      </td>
-    </tr></table>
-  </td></tr>
+${STANDARD_FOOTER}
 </table>
 </td></tr>
 </table>
 </body>
 </html>`;
 
-const pillRow = (label) => `  <tr><td align="center" style="padding:0 36px 24px;">
-    <div style="display:inline-block;padding:6px 14px;background:#1A1A1A;border:1px solid #1A1A1A;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#FFFFFF;">${label}</div>
+// V3 "Airy Premium": small greeting, big light Montserrat headline, left-aligned.
+const greetRow = (name) => `  <tr><td style="padding:28px 36px 0;">
+    <p style="margin:0;font-size:14px;font-weight:600;color:#5A554F;">Hi ${name},</p>
   </td></tr>`;
-const headlineRow = (text) => `  <tr><td align="center" style="padding:0 36px 6px;">
-    <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">${text}</h1>
+const headlineRow = (text) => `  <tr><td style="padding:8px 36px 6px;">
+    <h1 style="font-family:${FONT_STACK};font-size:29px;font-weight:300;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.2;margin:0;">${text}</h1>
   </td></tr>`;
-const sublineRow = (html, pad = "14px 36px 22px") => `  <tr><td align="center" style="padding:${pad};">
-    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">${html}</p>
+const sublineRow = (html, pad = "12px 36px 22px") => `  <tr><td style="padding:${pad};">
+    <p style="font-size:14.5px;color:#5A554F;line-height:1.7;margin:0;">${html}</p>
+  </td></tr>`;
+// filled red numbered step (email-safe: rounded td, squares gracefully in Outlook)
+const stepsRow = (steps) => `  <tr><td style="padding:4px 36px 24px;">
+    <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#C03838;margin-bottom:16px;">What happens next</div>
+    <table width="100%" cellpadding="0" cellspacing="0">${steps
+      .map(
+        (s, i) => `<tr>
+      <td valign="top" width="40" style="padding:0 12px 16px 0;"><table cellpadding="0" cellspacing="0"><tr><td width="28" height="28" align="center" valign="middle" bgcolor="#C03838" style="width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:700;color:#FFFFFF;font-family:${FONT_STACK};">${i + 1}</td></tr></table></td>
+      <td valign="top" style="padding:0 0 16px;font-size:14px;color:#5A554F;line-height:1.5;"><strong style="color:#1A1A1A;font-weight:600;">${s.t}</strong><br>${s.d}</td>
+    </tr>`,
+      )
+      .join("")}</table>
+  </td></tr>`;
+// bordered "included free" tick panel
+const inclRow = (items) => `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;"><tr><td style="padding:16px 20px;">
+      <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:10px;">Included as standard &mdash; all free</div>
+      <table width="100%" cellpadding="0" cellspacing="0"><tr>${items
+        .map(
+          (it, i) =>
+            `<td width="50%" valign="top" style="padding:4px 0;font-size:13px;color:#1A1A1A;"><span style="color:#2F7D54;font-weight:700;">&#10003;</span>&nbsp; ${it}</td>${i % 2 === 1 ? "</tr><tr>" : ""}`,
+        )
+        .join("")}</tr></table>
+    </td></tr></table>
+  </td></tr>`;
+// red call button
+const callButton = (label) => `  <tr><td style="padding:2px 36px 24px;">
+    <table cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td align="center" bgcolor="#C03838" style="border-radius:8px;">
+      <a href="tel:01747637070" style="display:block;padding:14px;color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;font-family:${FONT_STACK};">${label}</a>
+    </td></tr></table>
   </td></tr>`;
 const amountCard = (label, amount, note) => `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
