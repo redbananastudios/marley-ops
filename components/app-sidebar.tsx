@@ -11,9 +11,11 @@ import {
   Contact,
   FileCheck2,
   FileText,
+  Gauge,
   KanbanSquare,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Radio,
   Settings,
   Sparkles,
@@ -65,6 +67,13 @@ const OFFICE_NAV: NavGroup[] = [
     ],
   },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
+  {
+    group: "Growth",
+    items: [
+      { href: "/growth", label: "Launch Readiness", icon: Gauge },
+      { href: "/growth/ads", label: "Ad Proposals", icon: Megaphone },
+    ],
+  },
   {
     group: "System",
     items: [
@@ -144,16 +153,23 @@ export function SidebarNavList({
   role: string;
   onNavigate?: () => void;
 }) {
+  const groups = navForRole(role);
+  // Longest matching href wins so nested items (/growth vs /growth/ads)
+  // highlight exactly one entry instead of both.
+  const bestMatch = groups
+    .flatMap((g) => g.items)
+    .filter((i) => (i.href === "/" ? pathname === "/" : pathname.startsWith(i.href)))
+    .reduce<string | null>((best, i) => (best === null || i.href.length > best.length ? i.href : best), null);
   return (
     <>
-      {navForRole(role).map((group) => (
+      {groups.map((group) => (
         <div key={group.group} className="mb-5 last:mb-0">
           <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
             {group.group}
           </p>
           <ul className="space-y-0.5">
             {group.items.map((item) => {
-              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const active = item.href === bestMatch;
               const Icon = item.icon;
               return (
                 <li key={item.href}>
