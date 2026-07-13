@@ -2,7 +2,9 @@
 
 ## Current State
 
-Last touched: 2026-07-13 on i9 — **Marley Ops fully migrated off Vercel + shared vps1 onto a dedicated OVH VPS**, with GitHub CI/CD. Migration complete and end-to-end verified.
+Last touched: 2026-07-13 on i9 — **Growth section built on branch `growth-suite-surface` ([PR #6](https://github.com/redbananastudios/marley-ops/pull/6), awaiting Peter's review/merge).** New office-only nav group with `/growth` (launch readiness from the RBS-OS agents' ops snapshot) and `/growth/ads` (proposal-only creative matrix + ChatGPT Ads brief + optimizer recs). Data arrives via `public.growth_artifacts` (migration `0034`, applied to LOCAL dev Supabase only), pushed from i9 by `O:\RBS-OS\agents\tools\growth_push_ops.py`. 290/290 tests, tsc + eslint clean, live-verified on the dev stack. **Before merge:** apply `0034` to prod per `docs/ovh-deployment.md`, then run the push with the prod env so the pages have data (commands in the PR body).
+
+Earlier same day — **Marley Ops fully migrated off Vercel + shared vps1 onto a dedicated OVH VPS**, with GitHub CI/CD. Migration complete and end-to-end verified.
 
 **Where it runs now (all on the OVH VPS `51.195.253.165` / `vps-a0b9c066`):**
 - **App** `ops.marleymoves.co.uk` — Next.js standalone Docker container (`marley-ops-app`), fronted by **Caddy** (auto Let's Encrypt TLS).
