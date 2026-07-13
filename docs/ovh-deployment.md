@@ -55,16 +55,18 @@ If it's a `NEXT_PUBLIC_*` var it must also be rebuilt (re-run `deploy-ovh.sh`).
 
 - **Bad deploy** → roll the app back on the box: `git revert` + push (CI/CD redeploys the
   previous code), or on the box run a prior image tag / `sudo docker run … marley-ops:<prev>`.
-- **Backend problem** → the old **vps1 Supabase** (`178.105.182.36`) is still running as a
-  short-term backend fallback. Flip `supabase.redbananastudios.com` A back to it at IONOS
-  (TTL 60 → ~1 min). Zone IDs: marleymoves.co.uk `1197dceb-63ff-11ef-adf4-0a5864441bc4`;
+- **Backend problem / catastrophic box loss** → the OVH box is now the only live copy
+  (the old vps1 Supabase was **torn down 2026-07-13**). Recover by standing up a new box
+  (Docker + Caddy + the `supabase/` stack), restoring the DB from the latest
+  `../backups/marley-ops-*.dump` (nightly) — the final vps1 snapshot is
+  `../backups/marley-ops-vps1-final-*.dump` — redeploying the app from git, and repointing
+  both DNS records. Zone IDs: marleymoves.co.uk `1197dceb-63ff-11ef-adf4-0a5864441bc4`;
   redbananastudios.com `6da2bd83-2610-11f1-8196-0a5864441a59`.
-- **Catastrophic box loss** → stand up a new box (Docker + Caddy + the `supabase/` stack),
-  restore the DB from the latest `../backups/marley-ops-*.sql.zip`, redeploy the app from
-  git, repoint both DNS records.
 
-## Decommission (once stable — verify with Peter first)
+## Decommission
 
 - ✅ Vercel `marley-ops` project — **deleted 2026-07-13**.
-- Stop + remove the `supabase-*` stack on vps1 (`cd /opt/rbs/supabase && docker compose down`) to free that shared box.
-- Raise the DNS TTLs back to 3600.
+- ✅ vps1 `supabase-*` stack — **torn down 2026-07-13** (`docker compose down`; Red Taxi on
+  vps1 untouched). On-disk data left at `/opt/rbs/supabase/volumes` on vps1 as a short-term
+  safety net — delete it (`docker compose down -v` + `rm -rf volumes`) once fully confident.
+- Optional: raise the two IONOS DNS TTLs back to 3600 once the setup has stabilised.
