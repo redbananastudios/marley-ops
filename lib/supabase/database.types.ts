@@ -1495,6 +1495,36 @@ export type Database = {
         }
         Relationships: []
       }
+      growth_artifacts: {
+        Row: {
+          artifact_type: string
+          brand: string
+          generated_at: string | null
+          id: string
+          payload: Json
+          pushed_at: string
+          source_host: string | null
+        }
+        Insert: {
+          artifact_type: string
+          brand: string
+          generated_at?: string | null
+          id?: string
+          payload: Json
+          pushed_at?: string
+          source_host?: string | null
+        }
+        Update: {
+          artifact_type?: string
+          brand?: string
+          generated_at?: string | null
+          id?: string
+          payload?: Json
+          pushed_at?: string
+          source_host?: string | null
+        }
+        Relationships: []
+      }
       job_notes: {
         Row: {
           appointment_id: string | null
