@@ -112,18 +112,6 @@ const stepsRow = (steps) => `  <tr><td style="padding:4px 36px 22px;">
       .join("")}</table>
   </td></tr>`;
 
-const inclRow = (items) => `  <tr><td style="padding:0 36px 22px;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;"><tr><td style="padding:16px 20px;">
-      <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:10px;">Included as standard &mdash; all free</div>
-      <table width="100%" cellpadding="0" cellspacing="0"><tr>${items
-        .map(
-          (it, i) =>
-            `<td width="50%" valign="top" style="padding:4px 0;font-size:13px;color:${INK};"><span style="color:#2F7D54;font-weight:700;">&#10003;</span>&nbsp; ${it}</td>${i % 2 === 1 && i < items.length - 1 ? "</tr><tr>" : ""}`,
-        )
-        .join("")}</tr></table>
-    </td></tr></table>
-  </td></tr>`;
-
 const linkButton = (label, href) => `  <tr><td align="center" style="padding:2px 36px 10px;">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${RED}" style="border-radius:8px;">
       <a href="${href}" style="display:inline-block;padding:17px 52px;background:${RED};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;font-family:${FONT_STACK};">${label}</a>
