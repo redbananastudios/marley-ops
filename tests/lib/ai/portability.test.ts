@@ -13,6 +13,12 @@ const AI_ROOTS = [
 ];
 const CODE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".mjs"]);
 
+// Repo-relative path with forward slashes on every OS (Windows `relative()` yields
+// backslashes, which broke this suite on Linux CI — see 2026-07-13).
+function rel(file: string): string {
+  return relative(ROOT, file).replace(/\\/g, "/");
+}
+
 function codeFiles(path: string): string[] {
   const absolute = join(ROOT, path);
   try {
@@ -41,16 +47,16 @@ describe("AI survey portability guardrails", () => {
       const source = readFileSync(file, "utf8").toLowerCase();
       return banned
         .filter((literal) => source.includes(literal))
-        .map((literal) => `${relative(ROOT, file)}: ${literal}`);
+        .map((literal) => `${rel(file)}: ${literal}`);
     });
     expect(violations).toEqual([]);
   });
 
   it("confines direct Supabase Storage SDK access to its driver", () => {
     const violations = files
-      .filter((file) => relative(ROOT, file) !== "lib\\storage\\supabase-media-store.ts")
+      .filter((file) => rel(file) !== "lib/storage/supabase-media-store.ts")
       .filter((file) => /\.storage\s*\.from\s*\(/.test(readFileSync(file, "utf8")))
-      .map((file) => relative(ROOT, file));
+      .map((file) => rel(file));
     expect(violations).toEqual([]);
   });
 

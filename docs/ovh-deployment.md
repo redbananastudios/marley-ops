@@ -51,18 +51,20 @@ If it's a `NEXT_PUBLIC_*` var it must also be rebuilt (re-run `deploy-ovh.sh`).
 
 ## Rollback
 
-The old stacks are kept warm during the bed-in period:
-- **vps1 Supabase** (`178.105.182.36`) — the previous backend, still running.
-- **Vercel `marley-ops` project** — the previous app host (now cron-less), still deployed.
+**Vercel is deleted** (2026-07-13) — there is no longer a warm app fallback. Options:
 
-To roll back, flip the two IONOS DNS records back (TTL 60 → ~1 min):
-- `supabase.redbananastudios.com` A → `178.105.182.36`
-- `ops.marleymoves.co.uk` → delete the A, recreate CNAME → `cname.vercel-dns.com`
-
-(Zone IDs: marleymoves.co.uk `1197dceb-63ff-11ef-adf4-0a5864441bc4`; redbananastudios.com `6da2bd83-2610-11f1-8196-0a5864441a59`.)
+- **Bad deploy** → roll the app back on the box: `git revert` + push (CI/CD redeploys the
+  previous code), or on the box run a prior image tag / `sudo docker run … marley-ops:<prev>`.
+- **Backend problem** → the old **vps1 Supabase** (`178.105.182.36`) is still running as a
+  short-term backend fallback. Flip `supabase.redbananastudios.com` A back to it at IONOS
+  (TTL 60 → ~1 min). Zone IDs: marleymoves.co.uk `1197dceb-63ff-11ef-adf4-0a5864441bc4`;
+  redbananastudios.com `6da2bd83-2610-11f1-8196-0a5864441a59`.
+- **Catastrophic box loss** → stand up a new box (Docker + Caddy + the `supabase/` stack),
+  restore the DB from the latest `../backups/marley-ops-*.sql.zip`, redeploy the app from
+  git, repoint both DNS records.
 
 ## Decommission (once stable — verify with Peter first)
 
-- Delete the Vercel `marley-ops` project.
+- ✅ Vercel `marley-ops` project — **deleted 2026-07-13**.
 - Stop + remove the `supabase-*` stack on vps1 (`cd /opt/rbs/supabase && docker compose down`) to free that shared box.
 - Raise the DNS TTLs back to 3600.
