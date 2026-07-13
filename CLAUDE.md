@@ -2,16 +2,19 @@
 
 ## Current State
 
-Last touched: 2026-07-13 on i9 — premium role-based UI redesign merged to master, deployed to prod, and migration `0033` applied to the current VPS; next up is migrating the backend to a new OVH VPS.
+Last touched: 2026-07-13 on i9 — **Marley Ops fully migrated off Vercel + shared vps1 onto a dedicated OVH VPS**, with GitHub CI/CD. Migration complete and end-to-end verified.
 
-**Where we left off:**
-- **PR #5 merged to `master`** (`8aca4e0`) — the full premium role-based UI redesign + `/automations` log + unified contact icons + pre-production hardening sweep. Built on top of codex's merged AI-survey rollout (PR #4). Vercel auto-deployed it to prod (READY, `8aca4e0`). Gate green: lint 0 errors · tsc · 278 tests · build.
-- **Migration `0033` (`cron_runs`) applied to the CURRENT prod VPS** (self-hosted Supabase on vps1, `178.105.182.36`, `supabase-db` container) + PostgREST reloaded. Prod was at `0032` (codex's `0031` AI-survey + `0032` storage already applied), so only `0033` was needed. Verified live: real `ai-jobs` crons writing `cron_runs` rows every 2 min. `/automations` is live at https://ops.marleymoves.co.uk/automations (office login).
-- **`CRON_SECRET` + `SYNC_CRON_SECRET`** confirmed set in the `marley-ops` Vercel project (production). Vercel Cron auto-sends `CRON_SECRET`; `lib/api-auth.ts` accepts either.
-- **Worktree consolidated:** the `codex/premium-role-ui` worktree + branch were the only ones besides the primary checkout; both removed after confirming 0 unique commits. The primary checkout `O:\projects\red-banana\clients\marley\marley-ops` on `master` is now the single working copy.
+**Where it runs now (all on the OVH VPS `51.195.253.165` / `vps-a0b9c066`):**
+- **App** `ops.marleymoves.co.uk` — Next.js standalone Docker container (`marley-ops-app`), fronted by **Caddy** (auto Let's Encrypt TLS).
+- **Backend** `supabase.redbananastudios.com` — the full self-hosted Supabase stack (11 services), a byte-faithful clone of the old vps1 DB (data hashes verified equal), same JWT/anon/service keys so no session breakage.
+- **Cron** — 7 jobs via on-box `/etc/cron.d/marley-ops` (fires every 2 min, verified unattended). Replaces Vercel Cron.
+- **Env** — `/opt/marley-ops/app.env` (54 vars, assembled from Vercel + credentials.env).
+- Both IONOS DNS records A → the box (TTL 60). All containers `restart: unless-stopped`.
 
-**Next move (in progress):** stand up the new **OVH VPS** (`vps-a0b9c066.vps.ovh.net`, `51.195.253.165`, ubuntu) and migrate the `ops.marleymoves.co.uk` backend (self-hosted Supabase + DB + storage) onto it, then cut Vercel/DNS over. At cutover, re-apply the migration chain on the new DB (or `0033` on top if restoring the current dump) and finish with `notify pgrst, 'reload schema';`.
+**CI/CD (new):** push to `master` → `.github/workflows/deploy.yml` runs the test gate (lint/tsc/278 tests) on a GitHub-hosted runner, then a **self-hosted runner on the OVH box** builds + restarts the app + health-checks. Runner = systemd service `actions.runner.redbananastudios-marley-ops.ovh-vps`. Manual fallback: `bash scripts/deploy-ovh.sh` from i9.
 
-**Where things live:** repo `redbananastudios/marley-ops` (master, PR workflow — codex + claude land via PRs). App at https://ops.marleymoves.co.uk. Backend currently self-hosted Supabase on vps1 (`178.105.182.36`); prod DB migrations applied via SSH → `docker exec supabase-db psql` + pgrst reload. Nightly prod backup: `scripts/backup-prod-db.ps1`. Local dev: Supabase Docker stack + `scripts/seed-dev.mjs`/`seed-dev-crew.mjs`; keep `SANITY_SYNC_DISABLED=true` in `.env.local`.
+**Full ops + rollback runbook: `docs/ovh-deployment.md`.** Covers VPS access (`ubuntu@51.195.253.165`, key `~/.ssh/rbs_vps`, key-only SSH + UFW), deploy, DB migrations (SSH → `docker exec supabase-db psql` + pgrst reload), env changes, nightly backup (`scripts/backup-prod-db.ps1` → OVH, verified), and rollback.
 
-**Go-live checklist still open** (pre-full-launch, from prior sessions): generic terms legal review (ClickUp 869e35z42), SANITY_SYNC_DISABLED removal + lead backfill, `.test` team emails swapped for real ones, INBOUND_FORWARD_EMAIL/OPS_ALERT_EMAIL → office address, Stripe card button, iMVE cutover decision, deferred audit mediums (ClickUp 869e378hj). No blockers on the code — it's green and deployed.
+**Vercel: DELETED** (2026-07-13, per Peter — no longer needed). The old **vps1 Supabase** (`178.105.182.36`) is left running short-term as a backend rollback; decommission once the OVH box has bedded in (stop its `supabase-*` stack, raise DNS TTLs back to 3600). New sudo password for the box recorded with Peter (break-glass; SSH is key-only).
+
+**Prior state (still current):** PR #5 (premium role UI + /automations + hardening) is merged + live; migration `0033` (`cron_runs`) applied. **Go-live checklist still open:** generic terms legal review (ClickUp 869e35z42), SANITY_SYNC_DISABLED removal + lead backfill, `.test` team emails → real, INBOUND_FORWARD_EMAIL/OPS_ALERT_EMAIL → office address, Stripe card button, iMVE cutover decision, deferred audit mediums (ClickUp 869e378hj). No blockers on the code — green, deployed, self-hosted.
