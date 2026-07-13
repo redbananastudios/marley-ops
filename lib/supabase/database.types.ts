@@ -2788,6 +2788,7 @@ export type Database = {
         | "phone_google"
         | "phone_facebook"
         | "phone_referral"
+        | "checkatrade"
         | "manual"
         | "referral"
       lead_status:
@@ -2968,6 +2969,7 @@ export const Constants = {
         "phone_google",
         "phone_facebook",
         "phone_referral",
+        "checkatrade",
         "manual",
         "referral",
       ],

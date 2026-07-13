@@ -5,6 +5,7 @@ export const MANUAL_ENTRY_CHANNELS = [
   { value: "phone_google", label: "Phone — Google" },
   { value: "phone_facebook", label: "Phone — Facebook" },
   { value: "phone_referral", label: "Phone — Referral" },
+  { value: "checkatrade", label: "Checkatrade" },
   { value: "manual", label: "Manual / walk-in" },
   { value: "referral", label: "Referral" },
 ] as const;
@@ -14,6 +15,7 @@ export const CHANNEL_LABELS: Record<string, string> = {
   phone_google: "Phone — Google",
   phone_facebook: "Phone — Facebook",
   phone_referral: "Phone — Referral",
+  checkatrade: "Checkatrade",
   manual: "Manual / walk-in",
   referral: "Referral",
 };
@@ -37,7 +39,7 @@ export const newLeadSchema = z.object({
   client_id: z.string().uuid().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
-  entry_channel: z.enum(["phone_google", "phone_facebook", "phone_referral", "manual", "referral"]),
+  entry_channel: z.enum(["phone_google", "phone_facebook", "phone_referral", "checkatrade", "manual", "referral"]),
   referrer_answer: z.string().trim().optional().or(z.literal("")),
   from_postcode: z.string().trim().optional().or(z.literal("")),
   to_postcode: z.string().trim().optional().or(z.literal("")),

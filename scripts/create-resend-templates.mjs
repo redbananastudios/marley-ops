@@ -498,8 +498,7 @@ const TEMPLATES = [
       {
         key: "REVIEW_URL",
         type: "string",
-        fallback_value:
-          "https://search.google.com/local/writereview?placeid=ChIJq8R84fCs_EkRc_9iHhFQXW8",
+        fallback_value: "https://g.page/r/CXD_Yh4RUF1cEBM/review",
       },
     ],
   },

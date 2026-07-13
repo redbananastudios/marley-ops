@@ -14,18 +14,25 @@ import { replyAddressFor } from "@/lib/quote/chase";
 
 type Sb = SupabaseClient<Database>;
 
+/** Where we send customers to review, by platform. Google is the default (drives
+ *  local search); a lead that came via Checkatrade is asked on Checkatrade. */
+export const REVIEW_LINKS = {
+  google: { platform: "Google", url: "https://g.page/r/CXD_Yh4RUF1cEBM/review" },
+  checkatrade: { platform: "Checkatrade", url: "https://www.checkatrade.com/give-feedback/trades/marleymoves" },
+  trustpilot: { platform: "Trustpilot", url: "https://uk.trustpilot.com/evaluate/marleymoves.co.uk" },
+} as const;
+
 export async function sendReviewRequest(
   sb: Sb,
   leadId: string,
   actorId: string | null,
 ): Promise<{ sent: boolean; reason?: string }> {
   const settings = await getBusinessSettings(sb);
-  const reviewUrl = settings.googleReviewUrl?.trim();
-  if (!reviewUrl) return { sent: false, reason: "no review URL in Settings" };
+  const googleUrl = settings.googleReviewUrl?.trim() || REVIEW_LINKS.google.url;
 
   const { data: lead } = await sb
     .from("leads")
-    .select("id, client_id, name, email, review_requested_at")
+    .select("id, client_id, name, email, entry_channel, review_requested_at")
     .eq("id", leadId)
     .maybeSingle();
   if (!lead?.email) return { sent: false, reason: "no email on the lead" };
@@ -52,6 +59,14 @@ export async function sendReviewRequest(
   const token = (q?.accept_token as string | null) ?? null;
 
   const first = (lead.name ?? "").trim().split(/\s+/)[0] || "there";
+
+  // Ask on the platform the lead came from — a Checkatrade lead is asked on
+  // Checkatrade (feeds that profile); everyone else on Google (local-search default).
+  const review =
+    lead.entry_channel === "checkatrade"
+      ? REVIEW_LINKS.checkatrade
+      : { platform: "Google", url: googleUrl };
+
   // Prefer the published Resend template (copy editable in the dashboard, no
   // deploy); the in-repo HTML is the fallback when the env id isn't set.
   const templateId = process.env.RESEND_TEMPLATE_REVIEW_REQUEST;
@@ -59,12 +74,17 @@ export async function sendReviewRequest(
     channel: "email",
     to: lead.email,
     subject: `How did we do, ${first}?`,
-    bodyText: `Thanks for moving with Marley Moves. If we looked after you, a quick Google review makes a real difference to us: ${reviewUrl} — and if anything wasn't right, reply to this email or call Connor on 01747 637070 first.`,
+    bodyText: `Thanks for moving with Marley Moves. If Connor and the crew looked after you, a quick ${review.platform} review makes a real difference to us: ${review.url} — and if anything wasn't right, reply to this email or call the team on 01747 637070 first.`,
     ...(templateId
-      ? { template: { id: templateId, variables: { CUSTOMER_FIRST_NAME: first, REVIEW_URL: reviewUrl } } }
-      : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl }) }),
+      ? {
+          template: {
+            id: templateId,
+            variables: { CUSTOMER_FIRST_NAME: first, REVIEW_PLATFORM: review.platform, REVIEW_URL: review.url },
+          },
+        }
+      : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }) }),
     replyTo: token ? replyAddressFor(token) : undefined,
-    from: "Connor at Marley Moves <quotes@marleymoves.co.uk>",
+    from: "Marley Moves <hello@marleymoves.co.uk>",
     leadId,
     clientId: lead.client_id ?? undefined,
   });
