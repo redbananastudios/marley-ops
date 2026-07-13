@@ -4,6 +4,11 @@
 
 **Production `ops.marleymoves.co.uk` holds MOCK/TEST data only until Peter approves testing complete.** No live-lead backfill, no real customer records, keep `SANITY_SYNC_DISABLED` in place. The `growth_artifacts` rows are exempt (agent proposals + tracking summaries — no customer data). Do not flip anything to live data without his explicit approval.
 
+## AI survey gotchas (2026-07-13)
+
+- **`GEMINI_API_BASE_URL` MUST include `/v1beta`** (`https://generativelanguage.googleapis.com/v1beta`). `lib/ai/gemini.ts` polls file status at `${baseUrl}/${file.name}` and passes baseUrl into `createGoogle` — the bare origin 404s every analysis ("Gemini file status failed (404)"). Only the upload path tolerates both forms. Prod `app.env` had the bare origin — fix pending (sed + `docker restart marley-ops-app`).
+- **Local dev has NO cron** — `ai_jobs` sit `queued` forever and the survey UI polls indefinitely. Drain manually while logged in as office: open `http://localhost:3015/api/cron/ai-jobs`.
+
 ## Current State
 
 Last touched: 2026-07-13 on i9 — **Growth section MERGED + LIVE on prod** ([PR #6](https://github.com/redbananastudios/marley-ops/pull/6) merged, CI deploy green). Office-only nav group: `/growth` (launch readiness — verdict, tracking gaps card with per-platform missing events, leads-by-variant on `utm_content`, artifact freshness) and `/growth/ads` (proposal-only creative matrix, ChatGPT Ads brief, optimizer recs). Migration `0034` (`growth_artifacts`) applied to BOTH local dev and prod Supabase; 10 artifacts in each. Delivery: `O:\RBS-OS\agents\tools\growth_push_ops.py` (PostgREST for dev; `--emit-sql` piped over SSH+psql for prod, so the service key never leaves the VPS), refreshed nightly by i9 task `AIOS Growth Ops Push` (07:00). Tracking validation runs for real against PostHog project 202362: status **fail** — GA4 fires 5/9 critical events (all missing `variant_key`), PostHog 0/9 canonical. Launch stays blocked until the site fires the spec events and validation passes. 293/293 tests.
