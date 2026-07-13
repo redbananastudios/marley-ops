@@ -1,4 +1,0 @@
-{
-  "$schema": "https://openapi.vercel.sh/vercel.json",
-  "comment": "Self-hosted on the OVH VPS (Docker + Caddy). Scheduling is handled by on-box cron (/etc/cron.d/marley-ops), NOT Vercel Cron. Kept minimal for the Vercel rollback deployment only."
-}
