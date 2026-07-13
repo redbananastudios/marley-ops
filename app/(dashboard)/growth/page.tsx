@@ -11,7 +11,9 @@ import {
   SNAPSHOT_MAX_AGE_DAYS,
   type ArtifactStatus,
 } from "@/lib/growth/readiness";
-import type { OpsSnapshot } from "@/lib/growth/types";
+import type { OpsSnapshot, TrackingValidation } from "@/lib/growth/types";
+import { groupLeadsByVariant } from "@/lib/growth/variants";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { UK_TZ } from "@/lib/uk-time";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +34,11 @@ function fmt(iso: string | null | undefined): string {
 
 export default async function GrowthPage() {
   const sb = await createClient();
-  const row = await getGrowthArtifact<OpsSnapshot>(sb, "marley_ops_snapshot");
+  const [row, validationRow, variantLeads] = await Promise.all([
+    getGrowthArtifact<OpsSnapshot>(sb, "marley_ops_snapshot"),
+    getGrowthArtifact<TrackingValidation>(sb, "tracking_validation"),
+    fetchAllRows((f, t) => sb.from("leads").select("utm_content, status").order("id").range(f, t)),
+  ]);
 
   if (!row) {
     return (
@@ -56,6 +62,8 @@ export default async function GrowthPage() {
   const funnel = snapshot.funnel_summary;
   const tracking = snapshot.tracking_summary;
   const ads = snapshot.ads_summary;
+  const validation = validationRow?.payload ?? null;
+  const variants = groupLeadsByVariant(variantLeads);
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -158,6 +166,96 @@ export default async function GrowthPage() {
           </ul>
         </Card>
       ) : null}
+
+      {/* tracking gaps — what the site must fire, straight from the validator */}
+      {validation && validation.status !== "pass" ? (
+        <Card className="mb-6 p-0">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
+            <h2 className="font-display text-lg font-semibold text-foreground">Tracking gaps</h2>
+            <span className="text-xs text-mist-400">
+              validation {validation.validation_id} · {fmt(validation.generated_at)}
+            </span>
+          </div>
+          <div className="grid gap-0 sm:grid-cols-2">
+            {(["ga4", "posthog"] as const).map((platform) => (
+              <div key={platform} className="border-b px-5 py-4 sm:odd:border-r">
+                <p className="text-xs font-semibold uppercase tracking-wide text-mist-500">
+                  {platform === "ga4" ? "GA4" : "PostHog"}
+                </p>
+                {validation.missing[platform].length > 0 ? (
+                  <>
+                    <p className="mt-2 text-xs text-mist-400">Missing critical events</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {validation.missing[platform].map((ev) => (
+                        <span key={ev} className="rounded-pill bg-danger-bg px-2 py-0.5 font-mono text-[11px] text-danger">
+                          {ev}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <p className="mt-2 text-xs text-success">All critical events observed</p>
+                )}
+                {Object.keys(validation.property_gaps[platform]).length > 0 ? (
+                  <>
+                    <p className="mt-3 text-xs text-mist-400">Events firing without variant_key</p>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {Object.keys(validation.property_gaps[platform]).map((ev) => (
+                        <span key={ev} className="rounded-pill bg-warn-bg px-2 py-0.5 font-mono text-[11px] text-warn">
+                          {ev}
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <p className="px-5 py-3 text-xs text-mist-400">
+            Red = the event was never observed on that platform. Amber = it fires but without the variant_key property,
+            so it cannot be attributed to a landing variant.
+          </p>
+        </Card>
+      ) : null}
+
+      {/* leads by landing variant (Ops-side, joined on utm_content) */}
+      <Card className="mb-6 p-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
+          <h2 className="font-display text-lg font-semibold text-foreground">Leads by landing variant</h2>
+          <span className="text-xs text-mist-400">
+            utm_content carries the agents&apos; variant key
+            {variants.untagged > 0 ? ` · ${variants.untagged} leads without a variant tag` : ""}
+          </span>
+        </div>
+        {variants.rows.length === 0 ? (
+          <p className="px-5 py-8 text-center text-sm text-mist-400">
+            No variant-tagged leads yet — they appear here once paid traffic lands on a tagged landing page.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left">
+                  <th className="eyebrow px-5 py-3 font-semibold">Variant</th>
+                  <th className="eyebrow px-2 py-3 text-right font-semibold">Leads</th>
+                  <th className="eyebrow px-2 py-3 text-right font-semibold">Won</th>
+                  <th className="eyebrow px-5 py-3 text-right font-semibold">Win rate</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {variants.rows.map((v) => (
+                  <tr key={v.variant}>
+                    <td className="px-5 py-3 font-mono text-xs text-foreground">{v.variant}</td>
+                    <td className="tabular px-2 py-3 text-right text-foreground">{v.total}</td>
+                    <td className="tabular px-2 py-3 text-right text-foreground">{v.won}</td>
+                    <td className="tabular px-5 py-3 text-right font-semibold text-foreground">{v.winRate}%</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       {/* artifact freshness */}
       <Card className="mb-6 p-0">

@@ -148,6 +148,23 @@ describe("nextActions", () => {
     expect(actions[2].detail).toContain("tracking.cli validate --brand marley-moves");
   });
 
+  it("drops the creds step once a validation run produced a verdict", () => {
+    const s = snapshot({
+      blocking_issues: [
+        {
+          code: "tracking_not_passing",
+          kind: "tracking_validation",
+          blocks_paid_launch: true,
+          message: "tracking validation status is fail; paid launch is blocked",
+        },
+      ],
+    });
+    const actions = nextActions(s);
+    expect(actions).toHaveLength(2);
+    expect(actions[0].title).toContain("Wire the site");
+    expect(actions[1].title).toContain("Re-run tracking validation");
+  });
+
   it("passes unknown blockers through verbatim", () => {
     const s = snapshot({
       blocking_issues: [

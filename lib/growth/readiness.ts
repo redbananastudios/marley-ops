@@ -68,17 +68,21 @@ export function nextActions(snapshot: OpsSnapshot): NextAction[] {
     if (seen.has(key)) continue;
     seen.add(key);
     if (issue.kind === "tracking_validation") {
-      actions.push(
-        {
+      // A run that produced a verdict means creds already work; only a
+      // missing/stale artifact needs the access step.
+      if (issue.code === "missing_required_artifact" || issue.code === "tracking_validation_stale") {
+        actions.push({
           title: "Confirm PostHog project + GA4 access",
           detail: "PostHog keys and GA4 grants must cover the Marley properties before validation can read events.",
-        },
+        });
+      }
+      actions.push(
         {
           title: "Wire the site to fire the spec events",
-          detail: `The landing tracking spec (variant ${snapshot.landing_summary.variant_key ?? "—"}) defines the required events and properties.`,
+          detail: `The landing tracking spec (variant ${snapshot.landing_summary.variant_key ?? "—"}) defines the required events and properties — the tracking gaps card below lists exactly what is missing.`,
         },
         {
-          title: "Run tracking validation on i9",
+          title: "Re-run tracking validation on i9",
           detail: "python -m tracking.cli validate --brand " + snapshot.brand + " — a pass flips this page to ready.",
         },
       );

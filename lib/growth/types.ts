@@ -82,6 +82,18 @@ export type SnapshotArtifact = {
   is_stale: boolean;
 };
 
+/** tracking validation run (GA4 + PostHog, read-only on the agents box). */
+export type TrackingValidation = {
+  brand: string;
+  validation_id: string;
+  status: "pending" | "pass" | "fail" | "inconclusive" | string;
+  launch_allowed: boolean;
+  missing: { ga4: string[]; posthog: string[] };
+  property_gaps: { ga4: Record<string, string[]>; posthog: Record<string, string[]> };
+  recommendations: string[];
+  generated_at: string;
+};
+
 /** ads creative testing matrix (channels × angles). */
 export type CreativeMatrix = {
   brand: string;
