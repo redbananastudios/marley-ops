@@ -4,6 +4,7 @@ import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
+import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 
@@ -160,17 +161,15 @@ export default async function MyJobsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-5">
-        <span className="font-display text-xl text-foreground">
-          Marley <span className="text-mm-red">Ops</span>
-        </span>
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
+        <BrandMark compact />
         <div className="flex items-center gap-2">
-          <span className="hidden text-sm text-mist-500 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
+          <span className="hidden text-sm text-white/55 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
           <SignOutButton />
         </div>
       </header>
 
-      <main className="mx-auto max-w-2xl p-5 md:p-8">
+      <main className="mx-auto max-w-2xl p-4 pb-10 sm:p-5 md:p-8">
         <p className="eyebrow">Your jobs</p>
         <h1 className="mt-1 font-display text-3xl font-bold text-foreground">My jobs</h1>
 
@@ -219,7 +218,13 @@ export default async function MyJobsPage() {
               </h2>
               <div className="space-y-3">
                 {groups.get(day)!.map((j) => (
-                  <div key={j.id} className="rounded-lg border border-border bg-card p-4">
+                  <div
+                    key={j.id}
+                    className={
+                      "overflow-hidden rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] " +
+                      (j.appt_type === "removal" ? "border-l-[3px] border-l-mm-red" : "border-l-[3px] border-l-survey")
+                    }
+                  >
                     {/* Card body opens the full job page; buttons below stay their own targets. */}
                     <Link href={`/my-jobs/${j.id}`} className="focus-ring -m-2 block rounded-md p-2 active:bg-muted">
                       <div className="flex items-start justify-between gap-3">

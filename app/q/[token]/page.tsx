@@ -29,7 +29,9 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+// Local asset — these pages used to pull the logo from the separate quotes-app
+// domain; serve it from this app so the customer surface has no cross-app dep.
+const LOGO_URL = "/logo.png";
 
 const gbp = (n: number): string =>
   "£" +
@@ -78,7 +80,7 @@ function NotFoundCard() {
     <Shell>
       <Card>
         <div className="p-6 text-center sm:p-8">
-          <h1 className="font-display text-2xl font-semibold text-ink">
+          <h1 className="font-brand text-3xl font-semibold text-ink">
             We can&apos;t find that quote
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-mist-500">
@@ -153,7 +155,7 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
       <Shell>
         <Card>
           <div className="p-6 text-center sm:p-8">
-            <h1 className="font-display text-2xl font-semibold text-ink">Thanks for letting us know</h1>
+            <h1 className="font-brand text-3xl font-semibold text-ink">Thanks for letting us know</h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">
               We&apos;ve closed the quote and you won&apos;t get any more reminders from us. If
               anything changes, call <strong className="text-ink">01747 637070</strong> and
@@ -173,7 +175,7 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
       <Shell>
         <Card>
           <div className="p-6 text-center sm:p-8">
-            <h1 className="font-display text-2xl font-semibold text-ink">This quote has expired</h1>
+            <h1 className="font-brand text-3xl font-semibold text-ink">This quote has expired</h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">
               Quotes are valid for 30 days. Prices may have changed, so give us a quick call on{" "}
               <strong className="text-ink">01747 637070</strong> and we&apos;ll refresh it for you.
@@ -204,7 +206,7 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
             </p>
           </div>
           <div className="space-y-5 p-6 sm:p-8">
-            <h1 className="font-display text-xl font-semibold text-ink">
+            <h1 className="font-brand text-2xl font-semibold text-ink">
               {quote.customer_name ? `Ready when you are, ${quote.customer_name.split(/\s+/)[0]}.` : "Ready when you are."}
             </h1>
             <SummaryRows quote={quote} />
@@ -248,7 +250,7 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
         <Card>
           <div className="p-6 text-center sm:p-8">
             <CheckCircle2 className="mx-auto size-12 text-success" strokeWidth={1.5} />
-            <h1 className="mt-4 font-display text-2xl font-semibold text-ink">
+            <h1 className="mt-4 font-brand text-3xl font-semibold text-ink">
               You&apos;re booked in
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">

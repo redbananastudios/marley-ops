@@ -12,8 +12,10 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { ClipboardCheck, Search, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Pager, usePager } from "@/components/ui/pager";
+import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 
 export interface QuoteRow {
@@ -55,9 +57,9 @@ function dateShort(d: string | null): string {
   return t.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-function ago(d: string | null): string {
+function ago(d: string | null, now: number): string {
   if (!d) return "";
-  const mins = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
+  const mins = Math.floor((now - new Date(d).getTime()) / 60000);
   if (mins < 60) return `${Math.max(0, mins)}m`;
   const h = Math.floor(mins / 60);
   if (h < 24) return `${h}h`;
@@ -73,15 +75,16 @@ function StatusPill({ status }: { status: string }) {
   );
 }
 
-/** Sent-but-unanswered → chase nudge, escalating with age. */
-function FollowUp({ quote }: { quote: QuoteRow }) {
+/** Sent-but-unanswered → chase nudge, escalating with age. `now` is captured
+ *  once per mount upstream (react-hooks/purity: no Date.now() in render). */
+function FollowUp({ quote, now }: { quote: QuoteRow; now: number }) {
   if (quote.status !== "sent") return null;
   const since = quote.updated_at || quote.created_at;
-  const days = since ? Math.floor((Date.now() - new Date(since).getTime()) / 86_400_000) : 0;
+  const days = since ? Math.floor((now - new Date(since).getTime()) / 86_400_000) : 0;
   const tone = days >= 7 ? "bg-danger-bg text-danger" : days >= 3 ? "bg-warn-bg text-warn" : "bg-mm-red-tint text-mm-red-deep";
   return (
     <span className={cn("inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-medium", tone)}>
-      sent {ago(since)} ago · follow up
+      sent {ago(since, now)} ago · follow up
     </span>
   );
 }
@@ -104,6 +107,8 @@ export function QuotesView({
 }) {
   const [preset, setPreset] = useState<PresetKey>("all");
   const [search, setSearch] = useState("");
+  // Stable clock for the age chips — lazy useState keeps render pure.
+  const [now] = useState(() => Date.now());
 
   const stats = useMemo(() => {
     const nonDraft = quotes.filter((q) => q.status !== "draft");
@@ -168,15 +173,10 @@ export function QuotesView({
               type="button"
               onClick={() => setPreset(p.key)}
               aria-pressed={active}
-              className={cn(
-                "focus-ring inline-flex items-center gap-1.5 rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
-                active ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-card text-mist-500 hover:bg-muted",
-              )}
+              className={filterChipClass(active)}
             >
               {p.label}
-              <span className={cn("tabular rounded-pill px-1.5 text-xs", active ? "bg-mm-red/15 text-mm-red-deep" : "bg-muted text-mist-400")}>
-                {counts[p.key]}
-              </span>
+              <span className={filterChipCountClass(active)}>{counts[p.key]}</span>
             </button>
           );
         })}
@@ -189,7 +189,13 @@ export function QuotesView({
       {/* list — paged so big datasets stay fast */}
       <ul className="mt-4 divide-y rounded-lg border border-border bg-card">
         {visible.length === 0 ? (
-          <li className="px-5 py-12 text-center text-sm text-mist-400">No quotes match.</li>
+          <li>
+            <EmptyState
+              icon={ClipboardCheck}
+              title="No quotes match"
+              hint="Change the filter or search, or start one with New quote."
+            />
+          </li>
         ) : (
           pager.paged.map((q) => (
             <li key={q.id} className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
@@ -205,7 +211,7 @@ export function QuotesView({
 
               <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap sm:gap-3">
                 <div className="mr-auto sm:mr-0">
-                  <FollowUp quote={q} />
+                  <FollowUp quote={q} now={now} />
                 </div>
                 <span className="tabular shrink-0 text-sm font-semibold text-foreground">
                   {q.status === "accepted" ? gbp(q.agreed_price ?? q.grand_total) : gbp(q.grand_total)}

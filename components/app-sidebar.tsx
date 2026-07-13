@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -15,138 +14,174 @@ import {
   KanbanSquare,
   LayoutDashboard,
   LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
+  Radio,
   Settings,
+  Sparkles,
   Truck,
   UserCog,
   Users,
   Warehouse,
   type LucideIcon,
 } from "lucide-react";
+import { QuickCreate } from "@/components/quick-create";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-type NavItem = { href: string; label: string; icon: LucideIcon; live: boolean };
+type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { group: string; items: NavItem[] };
 
-/* IA per the 2026-07-10 final-pass audit (Option A — low churn): every route
-   keeps its position; "Board" gains a qualifier to stop colliding with "Job
-   Board" in the collapsed icon rail; Staff & Fleet + Storage move under an
-   honest OPERATIONS eyebrow (their pages already self-describe as Operations);
-   Documents joins SALES as the paperwork tail of the sale (quote → booking →
-   signed contract → completion certificate). */
-export const NAV: NavGroup[] = [
+const OFFICE_NAV: NavGroup[] = [
   {
     group: "Pipeline",
     items: [
-      { href: "/", label: "Dashboard", icon: LayoutDashboard, live: true },
-      { href: "/leads", label: "Leads", icon: Users, live: true },
-      { href: "/follow-ups", label: "Follow-ups", icon: BellRing, live: true },
-      { href: "/clients", label: "Clients", icon: Contact, live: true },
-      { href: "/board", label: "Pipeline Board", icon: KanbanSquare, live: true },
+      { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/leads", label: "Leads", icon: Users },
+      { href: "/follow-ups", label: "Follow-ups", icon: BellRing },
+      { href: "/clients", label: "Clients", icon: Contact },
+      { href: "/board", label: "Pipeline Board", icon: KanbanSquare },
     ],
   },
   {
     group: "Schedule",
     items: [
-      { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck, live: true },
-      { href: "/schedule/removals", label: "Removals", icon: Truck, live: true },
-      { href: "/schedule/board", label: "Job Board", icon: CalendarRange, live: true },
+      { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
+      { href: "/schedule/removals", label: "Removals", icon: Truck },
+      { href: "/schedule/board", label: "Job Board", icon: CalendarRange },
     ],
   },
   {
     group: "Operations",
     items: [
-      { href: "/resources", label: "Staff & Fleet", icon: UserCog, live: true },
-      { href: "/storage", label: "Storage", icon: Warehouse, live: true },
+      { href: "/resources", label: "Staff & Fleet", icon: UserCog },
+      { href: "/storage", label: "Storage", icon: Warehouse },
     ],
   },
   {
     group: "Sales",
     items: [
-      { href: "/quotes", label: "Quotes", icon: FileText, live: true },
-      { href: "/bookings", label: "Bookings", icon: ClipboardCheck, live: true },
-      { href: "/documents", label: "Documents", icon: FileCheck2, live: true },
+      { href: "/quotes", label: "Quotes", icon: FileText },
+      { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
+      { href: "/documents", label: "Documents", icon: FileCheck2 },
     ],
   },
-  { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3, live: true }] },
-  { group: "Settings", items: [{ href: "/settings", label: "Settings", icon: Settings, live: true }] },
+  { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
+  {
+    group: "System",
+    items: [
+      { href: "/automations", label: "Automations", icon: Radio },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
-/** The grouped nav links — shared by the desktop sidebar and the mobile drawer.
-    `onNavigate` lets the drawer close itself when a link is tapped. When
-    `collapsed`, labels/eyebrows hide and icons centre in a 44px rail target
-    (label survives as title + aria-label for discoverability). */
+const ESTIMATOR_NAV: NavGroup[] = [
+  {
+    group: "Your work",
+    items: [
+      { href: "/estimator", label: "My day", icon: Sparkles },
+      { href: "/leads", label: "Leads", icon: Users },
+      { href: "/follow-ups", label: "Follow-ups", icon: BellRing },
+    ],
+  },
+  {
+    group: "Survey & quote",
+    items: [
+      { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
+      { href: "/quotes", label: "Quotes", icon: FileText },
+    ],
+  },
+];
+
+export function navForRole(role: string): NavGroup[] {
+  return role === "estimator" ? ESTIMATOR_NAV : OFFICE_NAV;
+}
+
+/** Brand lockup for the black rails: the official full-colour Marley brandmark
+ *  in a clean white app-tile + the wordmark in Cormorant Garamond (the website
+ *  heading face). Shared by the desktop sidebar, mobile header and drawer.
+ *  The source PNG (500×500) carries whitespace padding, so the <img> is sized
+ *  larger than the tile to bring the house + van up to a confident size. */
+export function BrandMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-2.5">
+      <span
+        className={cn(
+          "relative shrink-0 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
+          compact ? "size-9" : "size-10",
+        )}
+      >
+        {/* The mark is larger than the tile (the source PNG has whitespace
+            padding); absolutely centre it — CSS grid place-items anchors an
+            oversized item top-left, which pushed the mark to the bottom-right. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand-mark.png"
+          alt="Marley Moves"
+          className={cn(
+            "absolute left-1/2 top-1/2 max-w-none -translate-x-1/2 -translate-y-1/2 object-contain",
+            compact ? "size-[46px]" : "size-[52px]",
+          )}
+        />
+      </span>
+      <span
+        className={cn(
+          "truncate font-brand font-semibold uppercase leading-none tracking-[0.03em] text-white",
+          compact ? "text-[19px]" : "text-[22px]",
+        )}
+      >
+        Marley <span className="text-mm-red-bright">Ops</span>
+      </span>
+    </span>
+  );
+}
+
 export function SidebarNavList({
   pathname,
+  role,
   onNavigate,
-  collapsed = false,
 }: {
   pathname: string;
+  role: string;
   onNavigate?: () => void;
-  collapsed?: boolean;
 }) {
   return (
     <>
-      {NAV.map((g, gi) => (
-        <div key={g.group} className={cn(collapsed ? "mb-2" : "mb-5")}>
-          {collapsed ? (
-            gi > 0 ? (
-              <div className="mx-2 mb-2 border-t border-border" aria-hidden />
-            ) : null
-          ) : (
-            <p className="eyebrow px-2 pb-2">{g.group}</p>
-          )}
+      {navForRole(role).map((group) => (
+        <div key={group.group} className="mb-5 last:mb-0">
+          <p className="px-3 pb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-white/35">
+            {group.group}
+          </p>
           <ul className="space-y-0.5">
-            {g.items.map((it) => {
-              const active = it.href === "/" ? pathname === "/" : pathname.startsWith(it.href);
-              const Icon = it.icon;
-              if (!it.live) {
-                return (
-                  <li key={it.href}>
-                    <span
-                      aria-disabled="true"
-                      title={collapsed ? `${it.label} — soon` : undefined}
-                      className={cn(
-                        "flex min-h-11 cursor-not-allowed items-center gap-2.5 rounded-sm px-2 py-2 text-sm text-mist-400",
-                        collapsed && "justify-center px-0",
-                      )}
-                    >
-                      <Icon className="size-[18px]" strokeWidth={1.75} />
-                      {collapsed ? null : (
-                        <>
-                          {it.label}
-                          <span className="ml-auto text-[10px] uppercase tracking-wide text-mist-400">soon</span>
-                        </>
-                      )}
-                    </span>
-                  </li>
-                );
-              }
+            {group.items.map((item) => {
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const Icon = item.icon;
               return (
-                <li key={it.href}>
+                <li key={item.href}>
                   <Link
-                    href={it.href}
+                    href={item.href}
                     onClick={onNavigate}
-                    title={collapsed ? it.label : undefined}
-                    aria-label={collapsed ? it.label : undefined}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "focus-ring relative flex min-h-11 items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors",
-                      collapsed && "justify-center px-0",
+                      "focus-ring relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-colors",
                       active
-                        ? // Modern active state: soft crimson pill + floating rounded indicator
-                          // (no border-l, so nothing shifts) + the icon carries the accent.
-                          "bg-sidebar-accent font-medium text-sidebar-accent-foreground before:absolute before:left-0 before:top-1/2 before:h-5 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-crimson"
-                        : "text-mist-500 hover:bg-muted hover:text-foreground",
+                        ? "bg-white/[0.075] text-white before:absolute before:left-0 before:top-1/2 before:h-6 before:w-[3px] before:-translate-y-1/2 before:rounded-full before:bg-mm-red-bright"
+                        : "text-white/62 hover:bg-white/[0.055] hover:text-white",
                     )}
                   >
-                    <Icon
-                      className={cn("size-[18px] shrink-0", active ? "text-crimson" : "text-mist-400")}
-                      strokeWidth={active ? 2 : 1.75}
-                    />
-                    {collapsed ? null : it.label}
+                    {/* Borderless plates + 16px stroke-2 icons: translucent 1px
+                        borders and odd icon sizes anti-alias into mush on the
+                        black rail — solid fills and pixel-grid sizes stay sharp. */}
+                    <span
+                      className={cn(
+                        "relative grid size-7 shrink-0 place-items-center rounded-md transition-colors",
+                        active
+                          ? "bg-mm-red-bright/15 text-mm-red-bright"
+                          : "bg-white/[0.06] text-white/60 group-hover:text-white",
+                      )}
+                    >
+                      <Icon className="size-4" strokeWidth={2} />
+                    </span>
+                    {item.label}
                   </Link>
                 </li>
               );
@@ -158,105 +193,58 @@ export function SidebarNavList({
   );
 }
 
-/** Profile + sign-out footer — shared by the sidebar and the drawer. Collapsed:
-    just the sign-out icon (the name lives in the expanded view). */
-export function NavFooter({
-  profile,
-  collapsed = false,
-}: {
-  profile: { full_name: string; role: string };
-  collapsed?: boolean;
-}) {
+export function NavFooter({ profile }: { profile: { full_name: string; role: string } }) {
   const router = useRouter();
+
   async function signOut() {
     await createClient().auth.signOut();
     router.push("/login");
     router.refresh();
   }
+
   return (
-    <div className={cn("border-t", collapsed ? "p-2" : "p-3")}>
-      <div className={cn("flex items-center gap-2", collapsed ? "justify-center" : "px-2 py-1.5")}>
-        {collapsed ? null : (
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground">{profile.full_name}</p>
-            <p className="text-xs capitalize text-mist-400">{profile.role}</p>
-          </div>
-        )}
+    <div className="border-t border-white/8 p-3">
+      <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
+        <span className="grid size-9 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-xs font-semibold text-white">
+          {(profile.full_name || "M").trim().charAt(0).toUpperCase()}
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-white">{profile.full_name}</p>
+          <p className="text-xs capitalize text-white/38">{profile.role}</p>
+        </div>
         <button
           onClick={signOut}
           aria-label="Sign out"
-          title={collapsed ? `Sign out (${profile.full_name})` : undefined}
-          className="focus-ring flex size-11 items-center justify-center rounded-sm text-mist-400 hover:bg-muted hover:text-foreground"
+          className="focus-ring flex size-10 items-center justify-center rounded-md text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white"
         >
-          <LogOut className="size-[18px]" strokeWidth={1.75} />
+          <LogOut className="size-[18px]" strokeWidth={1.65} />
         </button>
       </div>
     </div>
   );
 }
 
-const COLLAPSE_STORE = "mm-sidebar-collapsed";
-
 export function AppSidebar({ profile }: { profile: { full_name: string; role: string } }) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
-
-  // After mount: the device's saved preference wins; with none saved, smaller
-  // tablets (< 1024px) start collapsed so content gets the width (adaptive nav —
-  // the drawer still covers < 768px).
-  useEffect(() => {
-    const stored = window.localStorage.getItem(COLLAPSE_STORE);
-    if (stored === "1") setCollapsed(true);
-    else if (stored === "0") setCollapsed(false);
-    else if (window.matchMedia("(max-width: 1023px)").matches) setCollapsed(true);
-  }, []);
-
-  function toggle() {
-    setCollapsed((c) => {
-      window.localStorage.setItem(COLLAPSE_STORE, c ? "0" : "1");
-      return !c;
-    });
-  }
 
   return (
-    <aside
-      className={cn(
-        "hidden shrink-0 flex-col border-r bg-sidebar transition-[width] duration-200 ease-out motion-reduce:transition-none md:flex",
-        collapsed ? "w-[68px]" : "w-60",
-      )}
-    >
-      <div
-        className={cn(
-          "flex h-16 shrink-0 items-center border-b",
-          collapsed ? "justify-center px-2" : "justify-between pl-5 pr-3",
-        )}
-      >
-        {collapsed ? null : (
-          <span className="truncate font-display text-xl text-foreground">
-            Marley <span className="text-mm-red">Ops</span>
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={toggle}
-          aria-label={collapsed ? "Expand menu" : "Collapse menu"}
-          aria-expanded={!collapsed}
-          title={collapsed ? "Expand menu" : "Collapse menu"}
-          className="focus-ring flex size-11 shrink-0 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
-        >
-          {collapsed ? (
-            <PanelLeftOpen className="size-5" strokeWidth={1.75} />
-          ) : (
-            <PanelLeftClose className="size-5" strokeWidth={1.75} />
-          )}
-        </button>
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex">
+      <div className="flex h-16 shrink-0 items-center px-4">
+        <BrandMark />
       </div>
 
-      <nav className={cn("flex-1 overflow-y-auto py-4", collapsed ? "px-2" : "px-3")}>
-        <SidebarNavList pathname={pathname} collapsed={collapsed} />
+      <div className="px-3 pb-1 pt-1">
+        <QuickCreate className="w-full" />
+      </div>
+
+      {/* min-h-0 is load-bearing: without it a flex child keeps its content
+          height (min-height:auto) and the overflow never scrolls, so the last
+          groups (System → Settings) fall off the bottom on short viewports. */}
+      <nav className="nav-scroll min-h-0 flex-1 overflow-y-auto px-3 py-4">
+        <SidebarNavList pathname={pathname} role={profile.role} />
       </nav>
 
-      <NavFooter profile={profile} collapsed={collapsed} />
+      <NavFooter profile={profile} />
     </aside>
   );
 }

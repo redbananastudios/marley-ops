@@ -241,22 +241,6 @@ export function QuoteBuilder({
         <span className="ml-3 text-xs font-medium text-mist-400">
           Step {step} / {TOTAL_STEPS} · {STEP_LABELS[step - 1]}
         </span>
-        {saveState !== "idle" ? (
-          <span
-            className="ml-auto flex items-center gap-1 text-xs text-mist-400"
-            aria-live="polite"
-          >
-            {saveState === "saving" ? (
-              <>
-                <Loader2 className="size-3 animate-spin" strokeWidth={1.75} /> Saving…
-              </>
-            ) : (
-              <>
-                <Check className="size-3" strokeWidth={2} /> Saved
-              </>
-            )}
-          </span>
-        ) : null}
       </nav>
 
       {/* current step body */}
@@ -278,9 +262,10 @@ export function QuoteBuilder({
         )}
       </div>
 
-      {/* sticky bottom bar — live total + nav. Offset by the sidebar (w-60) on
-          md+ so its centred row lines up with the wizard card, not the viewport. */}
-      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 md:left-60">
+      {/* sticky bottom bar — live total + nav. Offset by the sidebar (w-64, only
+          shown at xl) so its centred row lines up with the wizard card, not the
+          viewport; below xl the sidebar is hidden so the bar spans full width. */}
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/80 xl:left-64">
         <div className="mx-auto flex max-w-3xl items-center justify-between gap-4 px-6 py-3 md:px-8">
           <button
             type="button"
@@ -297,6 +282,24 @@ export function QuoteBuilder({
             <p className="font-display tabular text-2xl font-bold leading-tight text-foreground">
               {gbp(breakdown.grandTotal)}
             </p>
+            {/* persistent, always-on-screen autosave reassurance (fixed height
+                so the total never shifts). Read-only quotes never autosave. */}
+            {!readOnly ? (
+              <p
+                className="mt-0.5 flex h-4 items-center justify-center gap-1 text-[11px] font-medium text-mist-400"
+                aria-live="polite"
+              >
+                {saveState === "saving" ? (
+                  <>
+                    <Loader2 className="size-3 animate-spin" strokeWidth={1.75} /> Saving…
+                  </>
+                ) : saveState === "saved" ? (
+                  <>
+                    <Check className="size-3 text-success" strokeWidth={2} /> All changes saved
+                  </>
+                ) : null}
+              </p>
+            ) : null}
           </div>
 
           {step < TOTAL_STEPS ? (

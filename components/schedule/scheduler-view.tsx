@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -93,6 +94,7 @@ export function SchedulerView({
   defaultEstimatorId,
   presetLeadId,
   presetLocation,
+  openOnLoad = false,
   baseLocation,
 }: {
   view: SchedulerKind;
@@ -103,11 +105,33 @@ export function SchedulerView({
   /** when navigated from a lead's "Book survey", auto-open the dialog prefilled */
   presetLeadId?: string | null;
   presetLocation?: string | null;
+  /** Quick-create entry point: open a blank appointment dialog immediately. */
+  openOnLoad?: boolean;
   /** business base address — origin for the view modal's route map */
   baseLocation: string;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [dialogOpen, setDialogOpen] = useState(Boolean(presetLeadId || openOnLoad));
+
+  // The auto-open params (?new=1 / ?leadId=…) are one-shot: once the create
+  // dialog closes, strip them so a refresh or share of the URL doesn't
+  // unexpectedly reopen the dialog.
+  const closeCreateDialog = useCallback(
+    (open: boolean) => {
+      setDialogOpen(open);
+      if (!open && (searchParams.has("new") || searchParams.has("leadId"))) {
+        const next = new URLSearchParams(searchParams);
+        next.delete("new");
+        next.delete("leadId");
+        const qs = next.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+      }
+    },
+    [pathname, router, searchParams],
+  );
   const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
   const [viewOpen, setViewOpen] = useState(false);
   const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
@@ -140,13 +164,6 @@ export function SchedulerView({
   }, [view, isNarrow]);
 
   // Arrived from a lead's "Book survey" — pop the create dialog straight away.
-  useEffect(() => {
-    if (presetLeadId) {
-      setEditTarget(null);
-      setDialogOpen(true);
-    }
-  }, [presetLeadId]);
-
   // Cancelled appointments leave the diary entirely (the lead keeps the history).
   // On the removals calendar, surveys are hidden unless "Show surveys" is on.
   const shown = useMemo(() => {
@@ -440,7 +457,7 @@ export function SchedulerView({
 
       <AppointmentDialog
         open={dialogOpen}
-        onOpenChange={setDialogOpen}
+        onOpenChange={closeCreateDialog}
         leads={leads}
         estimators={estimators}
         defaultEstimatorId={defaultEstimatorId}

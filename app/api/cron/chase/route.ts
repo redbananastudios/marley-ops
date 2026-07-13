@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
+import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
@@ -121,6 +123,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
+  const run = await runCron("chase", async () => {
   const sb = createAdminClient();
   const now = new Date();
   const summary = {
@@ -139,7 +142,7 @@ export async function GET(req: Request) {
     .in("status", ["quoted", "provisional"])
     .eq("chase_paused", false)
     .limit(200);
-  if (!leads?.length) return NextResponse.json({ ok: true, ...summary });
+  if (!leads?.length) return summary;
 
   const { data: quotes } = await sb
     .from("quotes")
@@ -206,7 +209,10 @@ export async function GET(req: Request) {
 
         // 30-day lapse = quote expiry → lost ("no_response"), chasing over.
         if (isQuoteLapsed(quote.email_sent_at, now)) {
-          await sb
+          // Guard on the status-change winning: if the customer accepted between
+          // the leads snapshot and now, the conditional update no-ops and we must
+          // NOT cancel their fresh deposit follow-up or log a false "lapsed".
+          const { data: downgraded } = await sb
             .from("leads")
             .update({
               status: "declined",
@@ -214,7 +220,9 @@ export async function GET(req: Request) {
               lost_at: now.toISOString(),
             } as never)
             .eq("id", lead.id)
-            .eq("status", "quoted");
+            .eq("status", "quoted")
+            .select("id");
+          if (!downgraded?.length) continue; // lead moved on in the race window
           await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" })
             .eq("lead_id", lead.id).eq("status", "open");
           await sb.from("activities").insert({
@@ -332,8 +340,9 @@ export async function GET(req: Request) {
           summary.depositChases++;
         }
       }
-    } catch {
+    } catch (e) {
       summary.errors++;
+      log.error("cron.chase.lead_failed", { leadId: lead.id, status: lead.status, ...errorContext(e) });
     }
   }
 
@@ -420,8 +429,9 @@ export async function GET(req: Request) {
       });
       await sendReviewRequest(sb, leadId, null).catch(() => null);
       summary.autoCompleted++;
-    } catch {
+    } catch (e) {
       summary.errors++;
+      log.error("cron.chase.postmove_failed", { appointmentId: appt.id, leadId: appt.lead_id, ...errorContext(e) });
     }
   }
 
@@ -430,5 +440,10 @@ export async function GET(req: Request) {
       `Today's run: ${JSON.stringify(summary)}. Check the Vercel function logs.`,
     ]);
   }
-  return NextResponse.json({ ok: true, ...summary });
+  return summary;
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

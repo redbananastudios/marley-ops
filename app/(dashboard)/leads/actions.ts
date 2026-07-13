@@ -6,7 +6,7 @@ import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
 import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
-import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
+import { normalizePhone } from "@/lib/leads/phone";
 import {
   editLeadSchema,
   newLeadSchema,

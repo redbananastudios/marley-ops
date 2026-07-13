@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Select,
   SelectContent,
@@ -138,9 +139,12 @@ export function FollowUpsQueue({ rows }: { rows: FollowUpRow[] }) {
 
   if (rows.length === 0) {
     return (
-      <Card className="px-5 py-14 text-center text-sm text-mist-400">
-        Nothing outstanding. New follow-ups appear here from a lead&apos;s No-reply button, deposit/balance
-        chases, or Add follow-up on the lead.
+      <Card>
+        <EmptyState
+          icon={AlarmClock}
+          title="Nothing outstanding"
+          hint="New follow-ups appear here from a lead's No-reply button, deposit/balance chases, or Add follow-up on the lead."
+        />
       </Card>
     );
   }
@@ -200,8 +204,9 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
     });
   }
 
+  // Matches the central contact-action style (neutral; hover to foreground).
   const iconBtn =
-    "focus-ring flex size-9 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50";
+    "focus-ring flex size-9 items-center justify-center rounded-md text-mist-500 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50";
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-shadow hover:shadow-sm">
@@ -251,7 +256,7 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
       {/* actions */}
       <div className="flex items-center gap-0.5 border-t border-border bg-muted/30 px-2 py-1.5">
         {r.phone ? (
-          <a href={`tel:${r.phone}`} title="Call" aria-label="Call" className={cn(iconBtn, "text-[#db2777]")}>
+          <a href={`tel:${r.phone}`} title="Call" aria-label="Call" className={iconBtn}>
             <Phone className="size-4" strokeWidth={1.75} />
           </a>
         ) : null}
@@ -265,11 +270,11 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
           trigger={
             <span className="contents">
               {r.email ? (
-                <button type="button" title="Email (template prefilled)" aria-label="Email" className={cn(iconBtn, "text-[#2563eb]")}>
+                <button type="button" title="Email (template prefilled)" aria-label="Email" className={iconBtn}>
                   <Mail className="size-4" strokeWidth={1.75} />
                 </button>
               ) : r.phone ? (
-                <button type="button" title="SMS (template prefilled)" aria-label="SMS" className={cn(iconBtn, "text-[#16a34a]")}>
+                <button type="button" title="SMS (template prefilled)" aria-label="SMS" className={iconBtn}>
                   <MessageCircle className="size-4" strokeWidth={1.75} />
                 </button>
               ) : null}

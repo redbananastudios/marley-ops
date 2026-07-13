@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { LeadStatusBadge, LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { Pager, usePager } from "@/components/ui/pager";
+import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   markLeadContactedAction,
@@ -143,7 +144,8 @@ export function LeadsBoard({
     [leads, tab],
   );
 
-  const now = Date.now();
+  // Stable clock for the "this week" / age filters — lazy init keeps render pure.
+  const [now] = useState(() => Date.now());
   const matchesPreset = (l: LeadCard, p: PresetKey): boolean => {
     switch (p) {
       case "new":
@@ -233,22 +235,10 @@ export function LeadsBoard({
               type="button"
               onClick={() => setPreset(p.key)}
               aria-pressed={active}
-              className={cn(
-                "focus-ring inline-flex items-center gap-1.5 rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
-                active
-                  ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
-                  : "border-border bg-card text-mist-500 hover:bg-muted",
-              )}
+              className={filterChipClass(active)}
             >
               {p.label}
-              <span
-                className={cn(
-                  "tabular rounded-pill px-1.5 text-xs",
-                  active ? "bg-mm-red/15 text-mm-red-deep" : "bg-muted text-mist-400",
-                )}
-              >
-                {count}
-              </span>
+              <span className={filterChipCountClass(active)}>{count}</span>
             </button>
           );
         })}
@@ -349,7 +339,7 @@ function fmtWhen(d: string | null): string {
   return `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}, ${time}`;
 }
 
-function ResponseChip({ lead }: { lead: LeadCard }) {
+function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
   if (CLOSED.has(lead.status)) return null;
   if (lead.retry && !lead.first_contacted_at) {
     return (
@@ -374,7 +364,7 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
       </span>
     );
   }
-  const mins = Math.floor((Date.now() - tsOf(lead)) / 60000);
+  const mins = Math.floor((now - tsOf(lead)) / 60000);
   const tone = mins > 240 ? "danger" : mins > 60 ? "warn" : "neutral";
   const cls =
     tone === "danger"
@@ -392,6 +382,8 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
 function LeadCardItem({ lead }: { lead: LeadCard }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  // Stable clock for the response-age chip — lazy init keeps render pure.
+  const [now] = useState(() => Date.now());
   const route =
     lead.from_postcode || lead.to_postcode
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
@@ -488,7 +480,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
 
         {/* response / urgency chip */}
         <div className="mt-auto pt-1">
-          <ResponseChip lead={lead} />
+          <ResponseChip lead={lead} now={now} />
         </div>
       </Link>
 
@@ -499,7 +491,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             href={`tel:${lead.phone}`}
             title="Call"
             aria-label="Call"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#db2777] hover:bg-muted"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <Phone className="size-4" strokeWidth={1.75} />
             Call
@@ -512,7 +504,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             rel="noopener noreferrer"
             title="WhatsApp"
             aria-label="WhatsApp"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-[#16a34a] hover:bg-muted"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <MessageCircle className="size-4" strokeWidth={1.75} />
           </a>
@@ -548,7 +540,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             disabled={pending}
             title="No reply — retry tomorrow"
             aria-label="No reply"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mm-red hover:bg-muted disabled:opacity-50"
+            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-danger disabled:opacity-50"
           >
             <PhoneMissed className="size-4" strokeWidth={1.75} />
           </button>
@@ -558,7 +550,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             href={`/schedule/surveys?leadId=${lead.id}`}
             title="Book survey"
             aria-label="Book survey"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-[#2563eb] hover:bg-muted"
+            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
           >
             <CalendarPlus className="size-4" strokeWidth={1.75} />
             Survey
@@ -569,7 +561,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
           prefetch={false}
           title="New quote"
           aria-label="New quote"
-          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mm-red hover:bg-muted"
+          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
         >
           <FileText className="size-4" strokeWidth={1.75} />
           Quote

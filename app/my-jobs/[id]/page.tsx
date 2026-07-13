@@ -10,11 +10,12 @@ import {
   MapPin,
   Package,
   PenLine,
-  Phone,
   StickyNote,
   Truck,
   UserRound,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { BrandMark } from "@/components/app-sidebar";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
@@ -25,6 +26,7 @@ import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { CollectContractButton } from "@/components/crew/collect-contract-button";
 import { CompleteJobButton } from "@/components/crew/complete-job-button";
+import { CrewActionBar } from "@/components/crew/crew-action-bar";
 
 /**
  * /my-jobs/[id] — the job sheet AS A WEB PAGE (Peter, 2026-07-10: "we should
@@ -85,14 +87,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="min-h-screen bg-background">
-      <header className="flex h-16 items-center justify-between border-b bg-card px-5">
-        <span className="font-display text-xl text-foreground">
-          Marley <span className="text-mm-red">Ops</span>
-        </span>
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
+        <BrandMark compact />
         <SignOutButton />
       </header>
 
-      <main className="mx-auto max-w-2xl p-5 md:p-8">
+      <main className="mx-auto max-w-2xl p-4 pb-28 sm:p-5 sm:pb-28 md:p-8 md:pb-28">
         <Link
           href="/my-jobs"
           className="focus-ring inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-mist-500 hover:text-foreground"
@@ -102,9 +102,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         </Link>
 
         {/* headline */}
-        <div className="mt-2 flex items-start justify-between gap-3">
+        <div className="mt-2 rounded-xl border border-border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-5">
+          <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="eyebrow">{isRemoval ? "Move" : apptType}{d.quoteRef ? ` · ${d.quoteRef}` : ""}</p>
+            {/* The pill on the right already says Move/Survey — the eyebrow names
+                the surface (this page is the digital job sheet) + the quote ref. */}
+            <p className="eyebrow">Job sheet{d.quoteRef ? ` · ${d.quoteRef}` : ""}</p>
             <h1 className="mt-1 font-display text-3xl font-bold text-foreground">{d.customerName}</h1>
             <p className="mt-1 text-sm text-mist-500">
               {fmtDate(d.moveDate)} · {d.timeWindow}
@@ -119,6 +122,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           >
             {isRemoval ? "Move" : "Survey"}
           </span>
+          </div>
         </div>
 
         {/* contract flag — never gates the move, but the crew can't miss it */}
@@ -153,32 +157,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           </div>
         ) : null}
 
-        {/* actions */}
-        <div className="mt-4 flex flex-wrap gap-2">
-          {isRemoval && !completion ? (
-            <CompleteJobButton
-              job={{
-                appointmentId: id,
-                customerName: d.customerName,
-                quoteRef: d.quoteRef,
-                moveDate: d.moveDate,
-                fromLine,
-                toLine,
-                crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
-              }}
-            />
-          ) : null}
-          {isRemoval ? <JobSheetButton appointmentId={id} fileHint={d.customerName} /> : null}
-          {d.customerPhone ? (
-            <a
-              href={`tel:${d.customerPhone.replace(/\s+/g, "")}`}
-              className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md border border-input bg-card px-4 text-sm font-medium text-foreground hover:bg-muted"
-            >
-              <Phone className="size-4" strokeWidth={1.75} />
-              Call {d.customerName.split(" ")[0]}
-            </a>
-          ) : null}
-        </div>
+        {/* document action — Call + Complete live in the sticky cab bar below */}
+        {isRemoval ? (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <JobSheetButton appointmentId={id} fileHint={d.customerName} />
+          </div>
+        ) : null}
 
         {/* route — each address is tap-to-navigate for the van cab */}
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
@@ -192,8 +176,12 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
             return (
               <div key={title} className="rounded-lg border border-border bg-card p-4">
                 {eyebrow(<MapPin className="size-3.5" strokeWidth={1.75} />, title)}
-                <p className="mt-1.5 text-sm font-medium text-foreground">{side.address || "—"}</p>
-                {side.postcode ? <p className="tabular text-sm font-semibold text-foreground">{side.postcode}</p> : null}
+                {/* no street on file → lead with the postcode rather than a "—" line */}
+                {side.address ? <p className="mt-1.5 text-sm font-medium text-foreground">{side.address}</p> : null}
+                {side.postcode ? (
+                  <p className={cn("tabular text-sm font-semibold text-foreground", !side.address && "mt-1.5")}>{side.postcode}</p>
+                ) : null}
+                {!side.address && !side.postcode ? <p className="mt-1.5 text-sm text-mist-400">No address on file</p> : null}
                 {accessLine(side) ? <p className="mt-1 text-xs capitalize text-mist-400">{accessLine(side)}</p> : null}
                 {dest ? (
                   <a
@@ -308,6 +296,28 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           If anything on this job looks wrong, call the office before setting off.
         </div>
       </main>
+
+      {/* one-handed cab actions — pinned so they never scroll away */}
+      <CrewActionBar
+        phone={d.customerPhone}
+        firstName={d.customerName.split(" ")[0]}
+        directionsTo={fromLine || toLine || null}
+      >
+        {isRemoval && !completion ? (
+          <CompleteJobButton
+            job={{
+              appointmentId: id,
+              customerName: d.customerName,
+              quoteRef: d.quoteRef,
+              moveDate: d.moveDate,
+              fromLine,
+              toLine,
+              crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
+            }}
+            triggerClassName="focus-ring inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep"
+          />
+        ) : null}
+      </CrewActionBar>
     </div>
   );
 }

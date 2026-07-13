@@ -6,6 +6,8 @@
  * together. Use it for any unbounded list select on a growing table.
  */
 
+import { log } from "@/lib/log";
+
 const BATCH = 1000;
 
 export async function fetchAllRows<T>(
@@ -17,7 +19,7 @@ export async function fetchAllRows<T>(
     if (error) {
       // Fail-soft with what we have — the page renders rather than 500s, and the
       // first window (newest rows) is always present.
-      console.error("[fetch-all] window failed:", error.message);
+      log.error("fetch-all.window_failed", { from, gotSoFar: out.length, error: error.message });
       break;
     }
     out.push(...(data ?? []));

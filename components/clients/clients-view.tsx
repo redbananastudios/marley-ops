@@ -41,6 +41,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Pager, usePager } from "@/components/ui/pager";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -150,15 +151,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
   }
 
   const toggleBtn = (v: ViewMode, Icon: typeof LayoutGrid, label: string) => (
-    <button
-      type="button"
-      onClick={() => pickView(v)}
-      aria-pressed={view === v}
-      className={cn(
-        "focus-ring inline-flex min-h-9 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
-        view === v ? "bg-mm-red-tint text-mm-red-deep" : "bg-card text-mist-500 hover:bg-muted",
-      )}
-    >
+    <button type="button" onClick={() => pickView(v)} aria-pressed={view === v} className={segmentedItemClass(view === v)}>
       <Icon className="size-4" strokeWidth={1.75} />
       {label}
     </button>
@@ -168,9 +161,8 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
     <div>
       <div className="flex flex-wrap items-center gap-3">
         {/* view toggle */}
-        <div className="inline-flex overflow-hidden rounded-md border border-input" role="group" aria-label="View format">
+        <div className={segmentedTrackClass} role="group" aria-label="View format">
           {toggleBtn("grid", LayoutGrid, "Grid")}
-          <span className="w-px bg-border" />
           {toggleBtn("list", List, "List")}
         </div>
 
@@ -360,7 +352,6 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapOpen, dest]);
   // Classic keyless embed (no API key needed) — directions base → client.
   // Origin anchored to the base POSTCODE: the embed fuzzy-matches house names
@@ -406,8 +397,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
 
       <div className="space-y-1 text-xs text-mist-500">
         {c.phone ? (
-          <a href={`tel:${c.phone}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#db2777]")} title="Call">
-            <Phone className="size-3.5 shrink-0 text-[#db2777]" strokeWidth={1.75} />
+          <a href={`tel:${c.phone}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Call">
+            <Phone className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.phone}</span>
           </a>
         ) : (
@@ -417,8 +408,8 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           </p>
         )}
         {c.email ? (
-          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-[#2563eb]")} title="Email">
-            <Mail className="size-3.5 shrink-0 text-[#2563eb]" strokeWidth={1.75} />
+          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Email">
+            <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.email}</span>
           </a>
         ) : (
@@ -431,10 +422,10 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           <button
             type="button"
             onClick={() => setMapOpen(true)}
-            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-mm-red")}
+            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-foreground")}
             title="Show route from base"
           >
-            <MapPin className="size-3.5 shrink-0 text-mm-red" strokeWidth={1.75} />
+            <MapPin className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.address || c.postcode}</span>
           </button>
         ) : (

@@ -143,13 +143,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <BookSurveyButton clientId={client.id} openLeadId={openLead?.id ?? null} />
           {phone ? (
             <a href={`tel:${phone}`} className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted" aria-label="Call">
-              <Phone className="size-4 text-[#2563eb]" strokeWidth={1.75} />
+              <Phone className="size-4 text-mist-400" strokeWidth={1.75} />
               Call
             </a>
           ) : null}
           {wa ? (
             <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer" className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted" aria-label="WhatsApp">
-              <MessageCircle className="size-4 text-[#16a34a]" strokeWidth={1.75} />
+              <MessageCircle className="size-4 text-mist-400" strokeWidth={1.75} />
               WhatsApp
             </a>
           ) : null}

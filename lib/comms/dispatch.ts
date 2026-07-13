@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { contentHash, normRecipient } from "@/lib/comms/hash";
 import { sendEmail, sendSms } from "@/lib/comms/send";
+import { log } from "@/lib/log";
 
 type Sb = SupabaseClient<Database>;
 
@@ -115,7 +116,7 @@ export async function dispatchComm(
   }
 
   const now = new Date().toISOString();
-  await sb.from("communications").insert({
+  const { error: logErr } = await sb.from("communications").insert({
     ...baseRow,
     status: "sent",
     provider_id: result.providerId ?? null,
@@ -123,12 +124,24 @@ export async function dispatchComm(
     first_sent_at: now,
     last_sent_at: now,
   });
+  if (logErr) {
+    // The DB duplicate-guard (partial unique index on content_hash where sent)
+    // rejected this row — almost always a concurrent identical send that already
+    // landed. The provider send has ALREADY happened and can't be unsent, so log
+    // it: a genuine double-send is now visible instead of silently swallowed.
+    log.warn("comm.sent_log_insert_failed", {
+      channel: input.channel,
+      quoteId: input.quoteId ?? null,
+      leadId: input.leadId ?? null,
+      error: logErr.message,
+    });
+  }
 
   // Stamp the quote's send counters + email fields.
   if (input.quoteId) {
     const { data: q } = await sb
       .from("quotes")
-      .select("email_send_count, sms_send_count")
+      .select("email_send_count, sms_send_count, email_sent_at")
       .eq("id", input.quoteId)
       .single();
     if (input.channel === "email") {
@@ -136,7 +149,12 @@ export async function dispatchComm(
         .from("quotes")
         .update({
           email_sent: true,
-          email_sent_at: now,
+          // Set-once: email_sent_at anchors the 30-day accept expiry AND the
+          // chase cadence / auto-lapse, so it must stay pinned to the ORIGINAL
+          // quote email. Letting a chase reminder move it silently stretched the
+          // 2/5/10-day cadence to 2/7/17 and re-extended the price-validity +
+          // accept-link window on every send (bug found in the 2026-07-12 sweep).
+          email_sent_at: q?.email_sent_at ?? now,
           email_message_id: result.providerId ?? null,
           email_send_count: (q?.email_send_count ?? 0) + 1,
         })

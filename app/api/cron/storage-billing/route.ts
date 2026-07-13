@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
+import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import {
@@ -13,7 +15,6 @@ import { periodsDue, storageInvoiceReference, type BillableLet } from "@/lib/sto
 import {
   buildStorageInvoiceEmailHtml,
   storageInvoiceSubject,
-  storageInvoiceText,
   type StorageInvoiceEmailInput,
 } from "@/lib/comms/storage-invoice-email";
 import { UNIT_TYPES } from "@/lib/storage-units";
@@ -44,6 +45,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ ok: false, error: "unauthorised" }, { status: 401 });
   }
+  const run = await runCron("storage-billing", async () => {
   const admin = createAdminClient();
   const today = new Date().toLocaleDateString("en-CA", { timeZone: UK });
   const summary = { raised: 0, emailed: 0, statusUpdated: 0, errors: [] as string[] };
@@ -157,8 +159,9 @@ export async function GET(req: Request) {
           let pdf: string | undefined;
           try {
             pdf = await getInvoicePdfBase64(ref.invoiceId);
-          } catch {
-            pdf = undefined;
+          } catch (e) {
+            pdf = undefined; // email still sends, just without the VAT PDF
+            log.warn("cron.storage-billing.pdf_failed", { invoiceId: ref.invoiceId, ...errorContext(e) });
           }
           const sent = await sendEmail({
             to: client.email,
@@ -205,10 +208,16 @@ export async function GET(req: Request) {
         await admin.from("storage_invoices").update({ status: "void" } as never).eq("id", row.id);
         summary.statusUpdated++;
       }
-    } catch {
-      // transient Zoho error — next run retries
+    } catch (e) {
+      // transient Zoho error — next run retries; log so a persistent one is visible
+      log.warn("cron.storage-billing.status_refresh_failed", { invoiceId: row.zoho_invoice_id, ...errorContext(e) });
     }
   }
 
-  return NextResponse.json({ ok: true, today, ...summary });
+  return { today, ...summary };
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

@@ -59,11 +59,25 @@
   --color-danger-bg: #fef2f2;
   --color-danger-border: #fecaca;
 
+  /* Operational signals: pale tints carry hierarchy without turning the
+     product into a rainbow. */
+  --color-info: #2563eb;
+  --color-info-bg: #eff6ff;
+  --color-info-border: #bfdbfe;
+  --color-survey: #0f8f8f;
+  --color-survey-bg: #ecfdfb;
+  --color-survey-border: #99f6e4;
+  --color-violet: #6d4cc7;
+  --color-violet-bg: #f5f3ff;
+  --color-violet-border: #ddd6fe;
+
   /* Type — Geist Sans everywhere; "display" moments are the same family,
-     just heavier + tighter (no serif). */
+     just heavier + tighter (no serif). The brand wordmark is the exception:
+     Cormorant Garamond, matching the Marley Moves website. */
   --font-display: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-sans: var(--font-geist), -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-brand: var(--font-cormorant), "Cormorant Garamond", Georgia, serif;
 
   /* Radius — Vercel-crisp: 8px controls, 12px cards */
   --radius-xs: 4px;
@@ -82,7 +96,7 @@
 /* shadcn semantic vars — LIGHT (primary).
    Canvas + cards are pure white; separation is the 1px hairline, not shadow. */
 :root {
-  --background: #ffffff;
+  --background: #f4f6f8;
   --foreground: var(--color-ink);
   --card: #ffffff;
   --card-foreground: var(--color-ink);
@@ -103,11 +117,11 @@
   --ring: var(--color-mm-red);
   --radius: 0.5rem;
 
-  --sidebar: #ffffff;
-  --sidebar-foreground: var(--color-ink);
-  --sidebar-border: var(--color-mist-200);
-  --sidebar-accent: var(--color-crimson-tint);
-  --sidebar-accent-foreground: var(--color-crimson-deep);
+  --sidebar: #0d1117;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-border: #222a35;
+  --sidebar-accent: rgba(192, 56, 56, 0.18);
+  --sidebar-accent-foreground: #ffffff;
 }
 
 /* shadcn semantic vars — DARK (desktop, secondary) — cool zinc, red-bright accent */
@@ -187,12 +201,18 @@ body {
   letter-spacing: -0.011em; /* Geist reads best with a touch of negative tracking */
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 /* Display moments — same Geist family, heavier + tighter (no serif). */
 .font-display {
   font-family: var(--font-display);
   letter-spacing: -0.025em;
+}
+
+/* Brand wordmark — Cormorant Garamond (the website heading face). */
+.font-brand {
+  font-family: var(--font-brand);
 }
 
 /* Money/figures: tabular + lining */
@@ -207,6 +227,41 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--color-mist-400);
+}
+
+.page-shell {
+  width: 100%;
+  max-width: 1600px;
+  margin-inline: auto;
+  padding: 1.25rem;
+}
+
+.content-auto {
+  content-visibility: auto;
+  contain-intrinsic-size: 1px 720px;
+}
+
+/* Dark-rail scrollbar — the sidebar/drawer nav overflows on short viewports and
+   the default light scrollbar glares against the black rail. Thin + ghosted. */
+.nav-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+}
+.nav-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.nav-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nav-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
+@media (min-width: 768px) {
+  .page-shell {
+    padding: 2rem;
+  }
 }
 
 /* iOS: no zoom-on-focus */

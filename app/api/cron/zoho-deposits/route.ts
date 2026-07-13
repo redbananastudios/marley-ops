@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchQuoteById, syncZohoPayments } from "@/lib/quote/accept-flow";
 
@@ -22,6 +23,7 @@ export async function GET(req: Request) {
   if (!(await requireUserOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
+  const run = await runCron("zoho-deposits", async () => {
   const sb = createAdminClient();
 
   // Stale-claim sweep (both invoice slots).
@@ -84,5 +86,10 @@ export async function GET(req: Request) {
     }
   }
 
-  return NextResponse.json({ ok: true, checked, settled });
+  return { checked, settled };
+  });
+  return NextResponse.json(
+    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    { status: run.status },
+  );
 }

@@ -1,4 +1,5 @@
 import { unstable_cache } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
 import { fetchAdSpend } from "@/lib/google-ads";
@@ -20,6 +21,7 @@ import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
+import { getSessionProfile } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
@@ -55,6 +57,9 @@ const fetchExternalPanels = unstable_cache(
 );
 
 export default async function DashboardPage() {
+  const profile = await getSessionProfile();
+  if (profile?.role === "estimator") redirect("/estimator");
+
   const supabase = await createClient();
 
   // Keep the panel current: pull any new website leads from Sanity before reading.
@@ -82,6 +87,9 @@ export default async function DashboardPage() {
   const appts = apptData ?? [];
   const quotes = quoteData ?? [];
 
+  // Server component: a per-request timestamp is correct here (this is not a
+  // client render that must stay idempotent across re-renders).
+  // eslint-disable-next-line react-hooks/purity
   const now = Date.now();
   const startToday = startOfUkDay().getTime();
 

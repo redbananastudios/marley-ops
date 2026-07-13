@@ -9,6 +9,7 @@ import { z } from "zod";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createMediaStore, type MediaUploadTarget } from "@/lib/storage/media-store";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { log, errorContext } from "@/lib/log";
 
 type ActionResult<T extends object = object> =
   | ({ ok: true } & T)
@@ -377,7 +378,7 @@ export async function finalizeMediaUploadAction(
     });
     if (error) throw error;
   } catch (error) {
-    console.error("AI media upload verification failed", { mediaId: media.id, error });
+    log.error("ai-survey.upload_verification_failed", { mediaId: media.id, ...errorContext(error) });
     return { ok: false, error: "Upload verification failed. Retry from this screen." };
   }
   const kickUrl = process.env.AI_JOBS_KICK_URL;

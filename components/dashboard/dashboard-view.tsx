@@ -11,8 +11,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ArrowDownRight, ArrowUpRight, ChevronRight, Minus, Clock } from "lucide-react";
+import {
+  ArrowDownRight,
+  ArrowUpRight,
+  CalendarCheck2,
+  ChevronRight,
+  Clock3,
+  Minus,
+  PhoneCall,
+  Trophy,
+  UserPlus,
+  type LucideIcon,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
+import { IconBadge } from "@/components/ui/icon-badge";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { OverlayChart } from "@/components/dashboard/overlay-chart";
 import type { PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
@@ -76,14 +90,14 @@ export function DashboardView({ data }: { data: DashboardData }) {
   const delta = s.newLeads - s.prevNewLeads;
 
   return (
-    <main className="flex-1 space-y-6 p-6 md:p-8">
+    <main className="page-shell flex-1 space-y-6">
       {/* header + period toggle */}
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="eyebrow">{data.dateLabel}</p>
-          <h1 className="font-display text-3xl font-semibold text-foreground">Dashboard</h1>
+          <h1 className="font-display text-3xl font-semibold tracking-[-0.035em] text-foreground md:text-4xl">Dashboard</h1>
         </div>
-        <div className="inline-flex rounded-md border border-border bg-muted/50 p-0.5" role="tablist" aria-label="Period">
+        <div className={segmentedTrackClass} role="tablist" aria-label="Period">
           {PERIODS.map((p) => (
             <button
               key={p}
@@ -91,12 +105,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
               role="tab"
               aria-selected={period === p}
               onClick={() => setPeriod(p)}
-              className={
-                "focus-ring rounded-[6px] px-3.5 py-1.5 text-sm font-medium capitalize transition-colors " +
-                (period === p
-                  ? "bg-card text-foreground shadow-xs"
-                  : "text-mist-400 hover:text-foreground")
-              }
+              className={cn(segmentedItemClass(period === p), "capitalize")}
             >
               {data.periods[p].label}
             </button>
@@ -106,19 +115,19 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       {/* headline KPI strip */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi label="New leads" value={s.newLeads} accent>
+        <Kpi label="New leads" value={s.newLeads} icon={UserPlus} tone="red" accent>
           <Delta delta={delta} sub={s.vsLabel} />
         </Kpi>
-        <Kpi label="Contacted" value={s.contacted} sub={`${pctOf(s.contacted, s.newLeads)} of leads`} />
-        <Kpi label="Surveys booked" value={s.surveys} sub={`${s.leadToSurveyPct}% of leads`} />
-        <Kpi label="Jobs won" value={s.jobs} sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} />
-        <Kpi label="Median response" value={fmtDuration(data.medianRespMins)} icon>
+        <Kpi label="Contacted" value={s.contacted} icon={PhoneCall} tone="blue" sub={`${pctOf(s.contacted, s.newLeads)} of leads`} />
+        <Kpi label="Surveys booked" value={s.surveys} icon={CalendarCheck2} tone="teal" sub={`${s.leadToSurveyPct}% of leads`} />
+        <Kpi label="Jobs won" value={s.jobs} icon={Trophy} tone="green" sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} />
+        <Kpi label="Median response" value={fmtDuration(data.medianRespMins)} icon={Clock3} tone="amber">
           <span className="text-xs text-mist-400">to first contact</span>
         </Kpi>
       </section>
 
       {/* conversion rings */}
-      <section className="grid grid-cols-3 gap-3 sm:gap-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         <RingStat label="Lead → Survey" pct={s.leadToSurveyPct} color="#C0822E" caption={`${s.surveys}/${s.newLeads}`} />
         <RingStat label="Survey → Job" pct={s.surveyToJobPct} color="#3F9B6B" caption={`${s.jobs}/${s.surveys}`} />
         <RingStat label="Lead → Job" pct={s.leadToJobPct} color="#c03838" caption={`${s.jobs}/${s.newLeads}`} />
@@ -287,6 +296,7 @@ function Kpi({
   accent,
   good,
   icon,
+  tone = "neutral",
   children,
 }: {
   label: string;
@@ -294,24 +304,44 @@ function Kpi({
   sub?: string;
   accent?: boolean;
   good?: boolean;
-  icon?: boolean;
+  icon: LucideIcon;
+  tone?: "red" | "blue" | "teal" | "green" | "amber" | "violet" | "neutral";
   children?: React.ReactNode;
 }) {
   return (
-    <Card className="gap-0 p-4">
-      <p className="eyebrow flex items-center gap-1">
-        {icon ? <Clock className="size-3" strokeWidth={2} /> : null}
-        {label}
-      </p>
-      <p
-        className={
-          "mt-1 font-display tabular text-3xl font-bold " +
-          (accent ? "text-mm-red" : good ? "text-success" : "text-foreground")
-        }
-      >
-        {value}
-      </p>
-      {children ? <div className="mt-1">{children}</div> : sub ? <p className="mt-1 text-xs text-mist-400">{sub}</p> : null}
+    <Card
+      className={
+        "relative gap-0 overflow-hidden border-t-2 p-4 " +
+        (tone === "red"
+          ? "border-t-mm-red"
+          : tone === "blue"
+            ? "border-t-info"
+            : tone === "teal"
+              ? "border-t-survey"
+              : tone === "green"
+                ? "border-t-success"
+                : tone === "amber"
+                  ? "border-t-amber-500"
+                  : tone === "violet"
+                    ? "border-t-violet"
+                    : "border-t-mist-300")
+      }
+    >
+      <div className="flex items-start gap-3">
+        <IconBadge icon={icon} tone={tone} className="size-9" iconClassName="size-[18px]" />
+        <div className="min-w-0 flex-1">
+          <p className="eyebrow">{label}</p>
+          <p
+            className={
+              "mt-1 font-display tabular text-3xl font-bold " +
+              (accent ? "text-mm-red" : good ? "text-success" : "text-foreground")
+            }
+          >
+            {value}
+          </p>
+          {children ? <div className="mt-1">{children}</div> : sub ? <p className="mt-1 text-xs text-mist-400">{sub}</p> : null}
+        </div>
+      </div>
     </Card>
   );
 }

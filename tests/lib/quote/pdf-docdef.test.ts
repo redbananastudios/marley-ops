@@ -46,12 +46,13 @@ function kitchenSink() {
 }
 
 /** The breakdown table is the only content entry with the 5 line-item columns. */
-function lineItemRows(docDef: any): any[][] {
-  const tbl = (docDef.content as any[]).find(
-    (c) => c?.table?.widths?.length === 5 && c.table.headerRows === 1,
-  );
+type PdfCell = { text: string };
+type PdfTableEntry = { table?: { widths?: unknown[]; headerRows?: number; body?: PdfCell[][] } };
+function lineItemRows(docDef: unknown): PdfCell[][] {
+  const content = (docDef as { content: PdfTableEntry[] }).content;
+  const tbl = content.find((c) => c?.table?.widths?.length === 5 && c.table.headerRows === 1);
   expect(tbl).toBeTruthy();
-  return tbl.table.body.slice(1); // drop the header row
+  return tbl!.table!.body!.slice(1); // drop the header row
 }
 
 describe("quote PDF doc-def — money correctness", () => {
