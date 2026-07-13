@@ -182,7 +182,7 @@ async function makeAppt(ids, type, startsIso, hours, estimatorId, title) {
 }
 
 // ---------------------------------------------------------------- staff first
-const lukeStaff = await ensureStaff("Luke James", "estimator", "luke@marleymoves.co.uk");
+await ensureStaff("Luke James", "estimator", "luke@marleymoves.co.uk");
 const jackStaff = await ensureStaff("Jack", "crew", "jack@marleymoves.co.uk");
 const robStaff = await ensureStaff("Rob", "crew", "rob@marleymoves.co.uk");
 const lukeProfile = await profileByEmail("luke@marleymoves.co.uk");
