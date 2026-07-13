@@ -1,6 +1,8 @@
 /**
- * DATA RESET — wipes all business data but KEEPS users/roles and business settings
- * (rates, pricing, deposit, base location). For clearing test data before backfill.
+ * DATA RESET — wipes all business data but KEEPS users/roles, business settings
+ * (rates, pricing, deposit, base location), fleet + staff config, storage
+ * sites/units, the automation log (cron_runs) and growth_artifacts.
+ * For clearing test data before a backfill.
  *
  * Guarded: refuses without RESET_CONFIRM=yes. Prints the target and row counts.
  *
@@ -22,14 +24,37 @@ if (process.env.RESET_CONFIRM !== "yes") {
 
 const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
 
-// FK-safe order (children first). profiles + business_settings deliberately kept.
+// FK-safe order (children first). Kept deliberately: profiles, business_settings,
+// staff, vehicles, storage_sites, storage_units, cron_runs, growth_artifacts.
 const TABLES = [
+  // AI survey stack (ai_jobs/cubic_* cascade off cubic_surveys, but delete
+  // explicitly so counts are visible and no cascade surprises)
+  "ai_spend_reservations",
+  "ai_jobs",
+  "cubic_ai_detections",
+  "cubic_analysis_runs",
+  "cubic_survey_segments",
+  "cubic_survey_media",
+  "cubic_survey_rooms",
+  "cubic_surveys",
+  { name: "ai_spend_months", key: "month" }, // PK is the month date, not id
+  // job execution artefacts
+  "job_notes",
+  "job_completions",
+  "signatures",
+  "appointment_assignments",
+  "estimator_payouts",
+  // pipeline (appointments reference surveys, so they go first)
   "follow_ups",
   "survey_photos",
+  "appointments",
   "surveys",
   "communications",
   "activities",
-  "appointments",
+  // storage billing (lets reference clients; sites/units are config and stay)
+  "storage_invoices",
+  "storage_lets",
+  // core
   "quotes",
   "leads",
   "clients",
@@ -37,33 +62,35 @@ const TABLES = [
 ];
 
 console.log(`Resetting data on ${url}\n`);
-for (const t of TABLES) {
-  const { count } = await sb.from(t).select("*", { count: "exact", head: true });
-  // Delete-all via a never-null column filter (service role bypasses RLS).
-  const { error } = await sb.from(t).delete().not("id", "is", null);
+for (const entry of TABLES) {
+  const { name, key } = typeof entry === "string" ? { name: entry, key: "id" } : entry;
+  const { count } = await sb.from(name).select("*", { count: "exact", head: true });
+  // Delete-all via a never-null PK filter (service role bypasses RLS).
+  const { error } = await sb.from(name).delete().not(key, "is", null);
   if (error) {
-    console.error(`  ${t}: FAILED — ${error.message}`);
+    console.error(`  ${name}: FAILED — ${error.message}`);
     process.exit(1);
   }
-  console.log(`  ${t}: ${count ?? 0} rows deleted`);
+  console.log(`  ${name}: ${count ?? 0} rows deleted`);
 }
 
-// Empty the survey-photos bucket.
-let removed = 0;
-async function emptyPrefix(prefix) {
-  const { data: entries } = await sb.storage.from("survey-photos").list(prefix, { limit: 1000 });
-  for (const e of entries ?? []) {
-    const path = prefix ? `${prefix}/${e.name}` : e.name;
-    if (e.id) {
-      await sb.storage.from("survey-photos").remove([path]);
-      removed++;
-    } else {
-      await emptyPrefix(path); // folder
+// Empty the media buckets (survey photos + AI survey videos/frames).
+for (const bucket of ["survey-photos", "survey-media"]) {
+  let removed = 0;
+  async function emptyPrefix(prefix) {
+    const { data: entries } = await sb.storage.from(bucket).list(prefix, { limit: 1000 });
+    for (const e of entries ?? []) {
+      const path = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.id) {
+        await sb.storage.from(bucket).remove([path]);
+        removed++;
+      } else {
+        await emptyPrefix(path); // folder
+      }
     }
   }
+  await emptyPrefix("");
+  console.log(`  ${bucket} bucket: ${removed} objects removed`);
 }
-await emptyPrefix("");
-console.log(`  survey-photos bucket: ${removed} objects removed`);
 
-console.log("\nReset complete. Users, roles and business settings kept.");
-console.log("Backfill: (1) full Sanity sync from the Leads page, (2) node scripts/import-neon-quotes.mjs");
+console.log("\nReset complete. Users, settings, staff/fleet, storage sites/units, cron_runs and growth_artifacts kept.");

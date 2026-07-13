@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, Loader2, Play, RefreshCw } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
@@ -69,6 +69,8 @@ export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
   const [runs, setRuns] = useState<CronRunRow[]>(initialRuns);
   const [fetchedAt, setFetchedAt] = useState<number>(() => Date.now());
   const [loading, setLoading] = useState(false);
+  const [firing, setFiring] = useState<string | null>(null);
+  const [fireResult, setFireResult] = useState<{ slug: string; ok: boolean; text: string } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -92,6 +94,27 @@ export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
     const id = setInterval(refresh, POLL_MS);
     return () => clearInterval(id);
   }, [refresh]);
+
+  // Fire a job on demand via its office-session endpoint (same code path as the
+  // scheduler) — so testing never has to wait for the next cron slot. The run
+  // lands in cron_runs like any scheduled one; refresh() picks it up.
+  const runNow = useCallback(
+    async (slug: string, endpoint: string) => {
+      setFiring(slug);
+      setFireResult(null);
+      try {
+        const res = await fetch(endpoint, { cache: "no-store" });
+        const body = await res.text();
+        setFireResult({ slug, ok: res.ok, text: body.slice(0, 300) });
+      } catch (e) {
+        setFireResult({ slug, ok: false, text: e instanceof Error ? e.message : "request failed" });
+      } finally {
+        setFiring(null);
+        refresh();
+      }
+    },
+    [refresh],
+  );
 
   const now = fetchedAt;
   const latestByJob = new Map<string, CronRunRow>();
@@ -144,7 +167,26 @@ export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
                 ) : (
                   <span className="text-mist-400">No runs recorded yet</span>
                 )}
+                <button
+                  type="button"
+                  onClick={() => runNow(job.slug, job.endpoint)}
+                  disabled={firing !== null}
+                  className="focus-ring ml-auto inline-flex min-h-7 items-center gap-1 rounded-md border border-input px-2 text-xs font-medium text-foreground hover:bg-muted disabled:opacity-50"
+                >
+                  {firing === job.slug ? (
+                    <Loader2 className="size-3 animate-spin" strokeWidth={2} />
+                  ) : (
+                    <Play className="size-3" strokeWidth={2} />
+                  )}
+                  Run now
+                </button>
               </div>
+              {fireResult?.slug === job.slug ? (
+                <p className={cn("mt-2 break-all text-xs", fireResult.ok ? "text-success" : "text-danger")}>
+                  {fireResult.ok ? "Ran: " : "Failed: "}
+                  {fireResult.text}
+                </p>
+              ) : null}
             </Card>
           );
         })}
