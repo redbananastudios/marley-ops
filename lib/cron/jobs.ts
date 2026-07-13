@@ -16,6 +16,7 @@ export interface CronJobMeta {
   cadence: string; // human-readable, UTC
   description: string;
   maxAgeMins: number;
+  endpoint: string; // office-session GET that fires the job (Run now + cron-hit.sh)
 }
 
 export const CRON_JOBS: CronJobMeta[] = [
@@ -26,6 +27,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Every 15 minutes",
     description: "Polls Zoho for deposit + balance payments and confirms bookings as money lands.",
     maxAgeMins: 45,
+    endpoint: "/api/cron/zoho-deposits",
   },
   {
     slug: "ai-jobs",
@@ -34,6 +36,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Every 2 minutes",
     description: "Drains the queue of AI room-scan analysis jobs from the cubic survey.",
     maxAgeMins: 15,
+    endpoint: "/api/cron/ai-jobs",
   },
   {
     slug: "sanity-leads-sync",
@@ -42,6 +45,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Daily · 06:00 UTC",
     description: "Pulls new website enquiries from Sanity into the pipeline (also runs from the Sync button).",
     maxAgeMins: 26 * 60,
+    endpoint: "/api/sync/sanity-leads",
   },
   {
     slug: "storage-billing",
@@ -50,6 +54,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Daily · 07:00 UTC",
     description: "Raises recurring storage invoices in Zoho and refreshes their paid/void status.",
     maxAgeMins: 26 * 60,
+    endpoint: "/api/cron/storage-billing",
   },
   {
     slug: "chase",
@@ -58,6 +63,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Daily · 09:00 UTC",
     description: "Sends quote + deposit reminders, raises call tasks, and settles finished jobs.",
     maxAgeMins: 26 * 60,
+    endpoint: "/api/cron/chase",
   },
   {
     slug: "crew-reminders",
@@ -66,6 +72,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Daily · 17:00 UTC",
     description: "Emails each crew member the jobs they're assigned to tomorrow.",
     maxAgeMins: 26 * 60,
+    endpoint: "/api/cron/crew-reminders",
   },
   {
     slug: "ai-retention",
@@ -74,6 +81,7 @@ export const CRON_JOBS: CronJobMeta[] = [
     cadence: "Daily · 02:30 UTC",
     description: "Deletes expired AI survey video/media per the retention policy.",
     maxAgeMins: 26 * 60,
+    endpoint: "/api/cron/ai-retention",
   },
 ];
 
