@@ -44,13 +44,13 @@ const TABLES = [
   "signatures",
   "appointment_assignments",
   "estimator_payouts",
-  // pipeline
+  // pipeline (appointments reference surveys, so they go first)
   "follow_ups",
   "survey_photos",
+  "appointments",
   "surveys",
   "communications",
   "activities",
-  "appointments",
   // storage billing (lets reference clients; sites/units are config and stay)
   "storage_invoices",
   "storage_lets",
