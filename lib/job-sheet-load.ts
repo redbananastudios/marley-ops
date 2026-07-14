@@ -30,7 +30,11 @@ const CATEGORY_LABEL: Record<string, string> = {
 
 const SURVEY_MEDIA_BUCKET = "survey-media";
 const SURVEY_VIDEO_KINDS = ["room_video", "import_video"] as const;
-const SURVEY_VIDEO_STATUSES = ["processed", "uploaded"] as const;
+// Crew can watch any footage that finished uploading — the walkthrough is
+// useful to them regardless of whether the AI analysis is still running or
+// even failed. Excluded: uploading (incomplete), ignored (estimator
+// discarded), deletion_pending/deleted (retention/consent-withdrawn).
+const SURVEY_VIDEO_STATUSES = ["uploaded", "processing", "processed", "failed"] as const;
 
 type Admin = ReturnType<typeof createAdminClient>;
 

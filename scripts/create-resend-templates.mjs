@@ -525,7 +525,7 @@ const TEMPLATES = [
     html: chaseHtml("Shall I hold your move date?", {
       intro: [
         "Dates for the coming weeks are starting to fill up, with month-end and Fridays always going first, so I wanted to check where you're at with your quote.",
-        "If your completion date isn't confirmed yet, that's completely normal &mdash; most of our customers only have theirs two or three weeks before the move. Accepting now simply adds you to our priority list, so when your date does land we're best placed to accommodate it.",
+        "If your completion date isn't confirmed yet, that's completely normal. Most of our customers only have theirs two or three weeks before the move. Accepting now simply adds you to our priority list, so when your date does land we're best placed to accommodate it.",
         "Accepting takes about half a minute, and your {{{DEPOSIT_AMOUNT}}} deposit secures your place and your crew:",
       ],
       cta: "Accept your quote online&nbsp;&rarr;",
