@@ -11,7 +11,7 @@
  * and uses example names rather than touching the database.
  */
 
-export type TourName = "office" | "crew";
+export type TourName = "office" | "estimator" | "crew";
 
 export type TourStep = {
   /** CSS selector for the element to spotlight. Omit for a centred modal. */
@@ -117,6 +117,71 @@ const OFFICE: TourStep[] = [
   },
 ];
 
+/** Estimator walkthrough — scoped strictly to the estimator nav (My day, Leads,
+ *  Follow-ups, Surveys, Quotes, User manual). Never references admin-only
+ *  surfaces (Bookings, Job Board, Documents, Storage, Performance) — an
+ *  estimator can't see them, so the tour must not either. */
+const ESTIMATOR: TourStep[] = [
+  {
+    title: "Welcome to Marley Ops",
+    description:
+      "This is your two-minute tour of the estimator workspace — from a fresh enquiry to a sent quote. You can rerun it any time from the menu.",
+  },
+  {
+    selector: '[data-tour="nav-/estimator"]',
+    title: "1. My day",
+    description:
+      "Your day starts here — today's survey visits and anything waiting on you, in one list.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/leads"]',
+    title: "2. Leads",
+    description:
+      "Every enquiry lands in Leads — a website lead arrives with a sound alert and an Acknowledge banner. Open a lead, say one from Sarah in Shaftesbury, to see its timeline, comms and quotes in one place.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/follow-ups"]',
+    title: "3. Follow-ups",
+    description:
+      "Calls and check-ins that are due or overdue. Clear these first thing — a same-day call back is what wins the job.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/schedule/surveys"]',
+    title: "4. Your survey diary",
+    description:
+      "Booked home surveys land in this diary. At the property you can use AI room scan — film each room, narrate what's staying, and it drafts the inventory for you to check.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/quotes"]',
+    title: "5. Build the quote",
+    description:
+      "Quotes are built in the seven-step wizard — New quote also captures the lead in one step. The cubic survey sits on the quote header when you need a volume count and a van recommendation.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/quotes"]',
+    title: "6. Send it",
+    description:
+      "Send the quote and the customer gets a branded email with an Accept button. If they go quiet, polite chase emails go out in your name automatically — and stop the moment they reply.",
+    side: "right",
+    align: "start",
+  },
+  {
+    title: "That's your loop",
+    description:
+      "Enquiry → survey → quote → accepted. The office takes it from there. The User manual in the menu has the full field guide.",
+  },
+];
+
 /** Crew walkthrough — runs on /my-jobs. Phone-first, price-free, gets read in a
  *  van cab. Steps tolerate an empty day (no jobs assigned) via centred modals. */
 const CREW: TourStep[] = [
@@ -161,4 +226,8 @@ const CREW: TourStep[] = [
   },
 ];
 
-export const TOURS: Record<TourName, TourStep[]> = { office: OFFICE, crew: CREW };
+export const TOURS: Record<TourName, TourStep[]> = { office: OFFICE, estimator: ESTIMATOR, crew: CREW };
+
+/** The tour a dashboard role gets: estimators have their own scoped tour;
+ *  admins get the full office walkthrough. (Crew mount theirs on /my-jobs.) */
+export const tourForRole = (role: string): TourName => (role === "estimator" ? "estimator" : "office");

@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
 import { NewLeadAlert } from "@/components/alerts/new-lead-alert";
 import { OnboardingTour } from "@/components/onboarding/tour";
+import { tourForRole } from "@/components/onboarding/tours";
 
 export default async function DashboardLayout({
   children,
@@ -23,7 +24,8 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen bg-background">
       <NewLeadAlert />
-      <OnboardingTour tour="office" role={profile.role} />
+      {/* Role-scoped: estimators get their own tour — never admin-only surfaces. */}
+      <OnboardingTour tour={tourForRole(profile.role)} role={profile.role} />
       <AppSidebar profile={navProfile} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav profile={navProfile} />

@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import { QuickCreate } from "@/components/quick-create";
 import { TourButton } from "@/components/onboarding/launch";
+import { tourForRole } from "@/components/onboarding/tours";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -230,7 +231,7 @@ export function NavFooter({ profile }: { profile: { full_name: string; role: str
   return (
     <div className="border-t border-white/8 p-3">
       <TourButton
-        tour="office"
+        tour={tourForRole(profile.role)}
         icon={<Compass className="size-4 shrink-0" strokeWidth={1.75} />}
         className="mb-1 w-full justify-start rounded-lg px-2 text-[13px] font-medium text-white/55 transition-colors hover:bg-white/[0.055] hover:text-white"
       >
