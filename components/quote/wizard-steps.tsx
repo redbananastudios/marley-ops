@@ -29,6 +29,7 @@ import {
   ITEM_FIELDS,
   composeAddr,
   BLANK_QUOTE_ADDRESS,
+  type ItemGroup,
   type QuoteFormValues,
   type QuoteItems,
   type RouteLeg,
@@ -809,7 +810,12 @@ export function Step5Extras({ values, set }: StepProps) {
 export function Step6Items({ values, set, leadId }: StepProps) {
   const items = values.items;
   const setItem = (key: keyof QuoteItems, v: number) => set("items", { ...items, [key]: v });
-  const groups: ("Boxes" | "Covers")[] = ["Boxes", "Covers"];
+  const groups: ItemGroup[] = ["Boxes", "Covers", "Piano"];
+  const groupTitle: Record<ItemGroup, string> = {
+    Boxes: "Boxes",
+    Covers: "Protective covers",
+    Piano: "Piano",
+  };
   return (
     <div>
       <StepHeader title="Items &amp; Materials" sub="Tap + to add items." />
@@ -818,12 +824,12 @@ export function Step6Items({ values, set, leadId }: StepProps) {
       </p>
       {groups.map((group) => (
         <div key={group} className="mb-6">
-          <p className="eyebrow mb-3">{group === "Boxes" ? "Boxes" : "Protective covers"}</p>
+          <p className="eyebrow mb-3">{groupTitle[group]}</p>
           <div className="divide-y divide-border rounded-md border border-border bg-card">
             {ITEM_FIELDS.filter((f) => f.group === group).map((f) => (
               <div key={f.key} className="flex items-center justify-between gap-3 px-4 py-3">
                 <span className="text-sm text-foreground">{f.label}</span>
-                <Stepper value={items[f.key]} onChange={(v) => setItem(f.key, v)} />
+                <Stepper value={items[f.key]} step={f.step ?? 1} onChange={(v) => setItem(f.key, v)} />
               </div>
             ))}
           </div>
