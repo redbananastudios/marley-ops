@@ -10,6 +10,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { contentHash, normRecipient } from "@/lib/comms/hash";
 import { sendEmail, sendSms } from "@/lib/comms/send";
+import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { log } from "@/lib/log";
 
 type Sb = SupabaseClient<Database>;
@@ -40,10 +41,6 @@ export type DispatchCommResult =
   | { ok: true }
   | { ok: false; error: string }
   | { duplicate: true; lastSentAt: string | null; sendCount: number };
-
-function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
 
 export async function dispatchComm(
   sb: Sb,
@@ -82,7 +79,17 @@ export async function dispatchComm(
           subject: input.subject ?? "Message from Marley Moves",
           ...(input.template
             ? { template: input.template }
-            : { html: input.bodyHtml ?? `<p>${escapeHtml(input.bodyText).replace(/\n/g, "<br>")}</p>` }),
+            : {
+                // No explicit HTML → wrap the plain text in the branded house
+                // shell (logo header + standard footer) so a manual panel send
+                // never lands as a bare unstyled email.
+                html:
+                  input.bodyHtml ??
+                  brandedEmailHtml({
+                    preheader: input.subject ?? input.bodyText.slice(0, 120),
+                    paragraphs: input.bodyText.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean),
+                  }),
+              }),
           attachments: input.attachmentBase64
             ? [{ filename: input.attachmentName ?? "attachment.pdf", content: input.attachmentBase64 }]
             : undefined,

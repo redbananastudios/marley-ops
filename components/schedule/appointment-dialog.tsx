@@ -43,6 +43,7 @@ import {
   deleteAppointment,
   rescheduleAppointment,
 } from "@/app/(dashboard)/schedule/actions";
+import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 
 export type ApptType = "survey" | "removal";
 
@@ -140,6 +141,11 @@ function AddrBlock({ lines }: { lines: string[] }) {
  *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets).
  *  Shared with the view-first appointment modal. */
 export function LeadContextPanels({ lead }: { lead: LeadOption }) {
+  const [emailOpen, setEmailOpen] = useState(false);
+  // A bare client anchors on client_id; a real lead on lead_id (so the email
+  // logs against the right record + reply routing).
+  const emailLeadId = lead.isClient ? undefined : lead.id;
+  const emailClientId = lead.isClient ? lead.id : undefined;
   // Address + postcode together — the postcode is what the crew navigates by.
   const addrLines = (addr: string | null | undefined, pc: string | null | undefined): string[] => {
     const a = (addr || "").trim();
@@ -155,6 +161,7 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
   const to = addrLines(lead.to_address, lead.to_postcode);
   const srcMeta = lead.source ? SOURCES.find((s) => s.key === lead.source) ?? null : null;
   return (
+    <>
     <div className="grid gap-3 sm:grid-cols-[3fr_4fr_3fr]">
       {/* Customer */}
       <div className="rounded-md border border-border bg-muted/30 p-3">
@@ -182,13 +189,14 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
             </a>
           ) : null}
           {lead.email ? (
-            <a
-              href={`mailto:${lead.email}`}
+            <button
+              type="button"
+              onClick={() => setEmailOpen(true)}
               className="focus-ring -ml-2 inline-flex min-h-11 max-w-full min-w-0 items-center gap-1.5 rounded-md px-2 text-sm font-medium text-foreground hover:bg-muted"
             >
               <Mail className="size-4 shrink-0 text-mm-red" strokeWidth={1.75} />
               <span className="truncate">{lead.email}</span>
-            </a>
+            </button>
           ) : null}
           {!lead.phone && !lead.email ? <p className="text-sm text-mist-400">No contact details on the lead.</p> : null}
         </div>
@@ -221,6 +229,16 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
         )}
       </div>
     </div>
+    {lead.email ? (
+      <EmailComposeDialog
+        open={emailOpen}
+        onOpenChange={setEmailOpen}
+        to={lead.email}
+        leadId={emailLeadId}
+        clientId={emailClientId}
+      />
+    ) : null}
+    </>
   );
 }
 

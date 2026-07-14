@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ContactAction } from "@/components/ui/contact-action";
+import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import {
   markLeadContactedAction,
   updateLeadStatusAction,
@@ -127,7 +128,7 @@ export function LeadActionBar({
         )
       ) : null}
       {wa ? <ContactAction kind="whatsapp" href={`https://wa.me/${wa}`} variant="button" /> : null}
-      {email ? <ContactAction kind="email" href={`mailto:${email}`} variant="button" /> : null}
+      {email ? <EmailComposeButton to={email} leadId={leadId} variant="button" /> : null}
       {uncontacted ? (
         <button
           type="button"

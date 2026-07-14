@@ -88,6 +88,8 @@ export interface LetRow {
   unit_id: string;
   client_id: string;
   client_name: string;
+  /** Client's email, if on file — the "Email signing link" button needs it. */
+  client_email: string | null;
   start_date: string;
   end_date: string | null;
   rate: number | null;

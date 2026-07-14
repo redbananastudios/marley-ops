@@ -4,12 +4,16 @@ import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
+import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import {
   allStorageAcksConfirmed,
   isValidSignatureDataUri,
   normalizeStorageAcks,
   TERMS_VERSION,
 } from "@/lib/signatures";
+
+const FROM = "Marley Moves <hello@marleymoves.co.uk>";
 
 async function actor() {
   const sb = await createClient();
@@ -343,4 +347,63 @@ export async function getStorageSignLinkAction(letId: string) {
     if (error) return { ok: false as const, error: error.message };
   }
   return { ok: true as const, url: `https://ops.marleymoves.co.uk/s/${token}` };
+}
+
+/** Email the remote signing link to the storage client (the "send" counterpart
+ *  to copy-link). Mints the token lazily, wraps the /s/<token> URL in the
+ *  branded shell, and logs to Comms via the shared dispatcher. */
+export async function emailStorageSignLinkAction(letId: string): Promise<DispatchCommResult> {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false, error: "Not signed in." };
+
+  const { data: row } = await sb
+    .from("storage_lets")
+    .select("sign_token, client_id, lead_id")
+    .eq("id", letId)
+    .single();
+  if (!row) return { ok: false, error: "Let not found." };
+
+  const { data: client } = await sb
+    .from("clients")
+    .select("email, display_name")
+    .eq("id", row.client_id)
+    .maybeSingle();
+  const email = client?.email ?? null;
+  if (!email) {
+    return { ok: false, error: "No email on file for this client — add one on the client record first." };
+  }
+
+  let token = row.sign_token as string | null;
+  if (!token) {
+    token = randomBytes(18).toString("base64url");
+    const { error } = await sb.from("storage_lets").update({ sign_token: token } as never).eq("id", letId);
+    if (error) return { ok: false, error: error.message };
+  }
+  const url = `https://ops.marleymoves.co.uk/s/${token}`;
+
+  const firstName = (client?.display_name ?? "").trim().split(/\s+/)[0] || undefined;
+  const bodyHtml = brandedEmailHtml({
+    preheader: "Your Marley Moves storage agreement is ready to review and sign.",
+    greeting: firstName,
+    headline: "Your storage agreement",
+    paragraphs: [
+      "Your storage agreement with Marley Moves is ready. Please review the terms and add your signature using the button below. It only takes a minute.",
+      "Any questions, just reply to this email or call us on 01747 637070.",
+    ],
+    cta: { label: "Review & sign your agreement", url },
+  });
+
+  const result = await dispatchComm(sb, userId, {
+    channel: "email",
+    to: email,
+    from: FROM,
+    subject: "Your Marley Moves storage agreement",
+    bodyText: `Your storage agreement is ready to sign: ${url}`,
+    bodyHtml,
+    clientId: row.client_id,
+    leadId: (row.lead_id as string | null) ?? undefined,
+  });
+
+  if ("ok" in result && result.ok) revalidatePath("/storage");
+  return result;
 }

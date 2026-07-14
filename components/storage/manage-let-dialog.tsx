@@ -9,7 +9,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, FileDown, Loader2, Pause, PenLine, Play } from "lucide-react";
+import { Copy, FileDown, Loader2, Mail, Pause, PenLine, Play } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +24,7 @@ import { SignaturePad } from "@/components/signature-pad";
 import { STORAGE_ACKS, type StorageAckKey } from "@/lib/signatures";
 import {
   editLetAction,
+  emailStorageSignLinkAction,
   getStorageSignLinkAction,
   setBillingPausedAction,
   signStorageAgreementAction,
@@ -90,6 +91,16 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
       } catch {
         toast.info(res.url); // clipboard blocked — show it instead
       }
+    });
+  }
+
+  function emailLink() {
+    start(async () => {
+      const res = await emailStorageSignLinkAction(let_.id);
+      if ("duplicate" in res) return void toast.info("That signing link was already emailed to the customer.");
+      if (!res.ok) return void toast.error(res.error);
+      toast.success(`Signing link emailed to ${let_.client_name}.`);
+      router.refresh();
     });
   }
 
@@ -190,6 +201,16 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
               <Button size="sm" variant="outline" onClick={copyLink} disabled={pending}>
                 <Copy className="size-4" strokeWidth={1.75} />
                 Copy signing link
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={emailLink}
+                disabled={pending || !let_.client_email}
+                title={let_.client_email ? undefined : "No email on file for this client"}
+              >
+                <Mail className="size-4" strokeWidth={1.75} />
+                Email signing link
               </Button>
             </div>
           )}

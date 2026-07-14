@@ -42,6 +42,7 @@ import {
 } from "@/components/ui/select";
 import { Pager, usePager } from "@/components/ui/pager";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
+import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -98,6 +99,8 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewMode>("grid");
   const [sort, setSort] = useState<SortKey>("newest");
+  // One compose dialog for the whole view — rows just set the recipient.
+  const [compose, setCompose] = useState<{ to: string; clientId: string } | null>(null);
   const repeat = useMemo(() => clients.filter((c) => c.leadCount > 1).length, [clients]);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -240,9 +243,16 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
                   </td>
                   <td className="max-w-[220px] truncate px-4 py-3 text-mist-500">
                     {c.email ? (
-                      <a href={`mailto:${c.email}`} onClick={(e) => e.stopPropagation()} className="focus-ring rounded-sm hover:text-foreground hover:underline">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCompose({ to: c.email!, clientId: c.id });
+                        }}
+                        className="focus-ring max-w-full truncate rounded-sm text-left hover:text-foreground hover:underline"
+                      >
                         {c.email}
-                      </a>
+                      </button>
                     ) : (
                       "—"
                     )}
@@ -270,7 +280,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   {g.rows.map((c) => (
-                    <ClientCard key={c.id} c={c} baseLocation={baseLocation} />
+                    <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
                   ))}
                 </div>
               </section>
@@ -308,7 +318,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
         /* ——— Grid view, date sorts: flat grid ——— */
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {pager.paged.map((c) => (
-            <ClientCard key={c.id} c={c} baseLocation={baseLocation} />
+            <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
           ))}
         </div>
       )}
@@ -321,6 +331,15 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
         onPage={pager.setPage}
         className="mt-4"
       />
+
+      <EmailComposeDialog
+        open={compose !== null}
+        onOpenChange={(v) => {
+          if (!v) setCompose(null);
+        }}
+        to={compose?.to ?? ""}
+        clientId={compose?.clientId}
+      />
     </div>
   );
 }
@@ -330,7 +349,15 @@ interface RouteInfo {
   durationText: string | null;
 }
 
-function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string }) {
+function ClientCard({
+  c,
+  baseLocation,
+  onEmail,
+}: {
+  c: ClientRow;
+  baseLocation: string;
+  onEmail: (to: string, clientId: string) => void;
+}) {
   const [mapOpen, setMapOpen] = useState(false);
   const [route, setRoute] = useState<RouteInfo | null | "loading" | "error">(null);
   const dest = c.address || c.postcode || "";
@@ -408,10 +435,15 @@ function ClientCard({ c, baseLocation }: { c: ClientRow; baseLocation: string })
           </p>
         )}
         {c.email ? (
-          <a href={`mailto:${c.email}`} className={cn(rowBase, "transition-colors hover:bg-muted hover:text-foreground")} title="Email">
+          <button
+            type="button"
+            onClick={() => onEmail(c.email!, c.id)}
+            className={cn(rowBase, "w-full transition-colors hover:bg-muted hover:text-foreground")}
+            title="Email"
+          >
             <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{c.email}</span>
-          </a>
+          </button>
         ) : (
           <p className="flex items-center gap-2 px-1 py-0.5">
             <Mail className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
