@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 import { acceptQuote } from "@/app/(dashboard)/quotes/actions";
 
 const gbp = (n: number): string => "£" + Number(n).toLocaleString("en-GB");
@@ -36,6 +37,7 @@ export function AcceptQuoteButton({
   status,
   depositAmount = 100,
   compact,
+  className,
 }: {
   quoteId: string;
   grandTotal: number;
@@ -43,6 +45,9 @@ export function AcceptQuoteButton({
   /** Settings defaultDeposit — shown in the dialog so the amount is never a surprise. */
   depositAmount?: number;
   compact?: boolean;
+  /** Extra classes on the default (non-compact) trigger — lets the quote header
+   *  size it as the page's primary CTA (h-11, full-width on mobile). */
+  className?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -101,7 +106,11 @@ export function AcceptQuoteButton({
           Accept
         </Button>
       ) : (
-        <Button type="button" onClick={() => setOpen(true)} className="bg-mm-red text-white hover:bg-mm-red-deep">
+        <Button
+          type="button"
+          onClick={() => setOpen(true)}
+          className={cn("bg-mm-red text-white hover:bg-mm-red-deep", className)}
+        >
           <CheckCircle2 className="size-4" strokeWidth={1.75} />
           Accept quote
         </Button>

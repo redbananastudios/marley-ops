@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Pager, usePager } from "@/components/ui/pager";
 import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
+import { QuoteStatusPill } from "@/components/quote/quote-status-pill";
 
 export interface QuoteRow {
   id: string;
@@ -38,14 +39,6 @@ export interface QuoteRow {
 
 type PresetKey = "all" | "draft" | "sent" | "accepted";
 
-const STATUS_PILL: Record<string, { label: string; className: string }> = {
-  draft: { label: "Draft", className: "bg-mist-100 text-charcoal" },
-  sent: { label: "Sent", className: "bg-mm-red-tint text-mm-red-deep" },
-  accepted: { label: "Accepted", className: "bg-success-bg text-success" },
-  rejected: { label: "Rejected", className: "bg-mist-50 text-mist-400" },
-  superseded: { label: "Superseded", className: "bg-mist-50 text-mist-400" },
-};
-
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n)
     ? "—"
@@ -65,15 +58,6 @@ function ago(d: string | null, now: number): string {
   const h = Math.floor(mins / 60);
   if (h < 24) return `${h}h`;
   return `${Math.floor(h / 24)}d`;
-}
-
-function StatusPill({ status }: { status: string }) {
-  const s = STATUS_PILL[status] ?? { label: status, className: "bg-mist-100 text-charcoal" };
-  return (
-    <span className={cn("inline-flex shrink-0 items-center rounded-pill px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide", s.className)}>
-      {s.label}
-    </span>
-  );
 }
 
 /** Sent-but-unanswered → chase nudge, escalating with age. `now` is captured
@@ -252,7 +236,7 @@ export function QuotesView({
                   {q.status === "accepted" ? gbp(q.agreed_price ?? q.grand_total) : gbp(q.grand_total)}
                 </span>
                 <div className="shrink-0">
-                  <StatusPill status={q.status} />
+                  <QuoteStatusPill status={q.status} />
                 </div>
                 {q.email_send_count && q.email_send_count > 0 ? (
                   <span className="tabular hidden shrink-0 text-xs text-mist-400 md:inline">×{q.email_send_count}</span>

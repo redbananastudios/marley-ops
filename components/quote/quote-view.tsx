@@ -1,5 +1,4 @@
-import Link from "next/link";
-import { CalendarDays, MapPin, Package, Pencil, Phone, Truck, UserRound } from "lucide-react";
+import { CalendarDays, MapPin, Package, Phone, Truck, UserRound } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { buildOpItems, type QuoteFormValues } from "@/lib/quote/form-types";
 import { vehicleLabelOf } from "@/lib/job-sheet-data";
@@ -50,7 +49,7 @@ export interface QuoteViewMoney {
   moving_date: string | null;
 }
 
-export function QuoteView({ values, money, editHref }: { values: QuoteFormValues; money: QuoteViewMoney; editHref: string }) {
+export function QuoteView({ values, money }: { values: QuoteFormValues; money: QuoteViewMoney }) {
   const items = buildOpItems(values.items);
   const days = Number(values.job.days) || 1;
 
@@ -65,16 +64,6 @@ export function QuoteView({ values, money, editHref }: { values: QuoteFormValues
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Link
-          href={editHref}
-          className="focus-ring inline-flex min-h-10 items-center gap-2 rounded-md bg-mm-red px-4 text-sm font-medium text-white transition-colors hover:bg-mm-red-deep"
-        >
-          <Pencil className="size-4" strokeWidth={1.75} />
-          Edit quote
-        </Link>
-      </div>
-
       {/* customer + move */}
       <div className="grid gap-4 sm:grid-cols-2">
         <Card className="gap-2 p-5">

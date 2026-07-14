@@ -8,7 +8,7 @@
  * lead is marked lost automatically when this was its last live quote.
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ThumbsDown } from "lucide-react";
 import { toast } from "sonner";
@@ -25,14 +25,39 @@ import { Button } from "@/components/ui/button";
 import { rejectQuote } from "@/app/(dashboard)/quotes/actions";
 import { LOSS_REASONS } from "@/lib/quote/chase";
 
-export function RejectQuoteButton({ quoteId, status }: { quoteId: string; status: string }) {
+export function RejectQuoteButton({
+  quoteId,
+  status,
+  open: openProp,
+  onOpenChange,
+}: {
+  quoteId: string;
+  status: string;
+  /** Controlled mode: driven from the quote header's "⋯ More" overflow menu. */
+  open?: boolean;
+  onOpenChange?: (o: boolean) => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const [openState, setOpenState] = useState(false);
+  const open = controlled ? openProp : openState;
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOpenState;
   const [reason, setReason] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
 
-  if (status !== "sent") return null;
+  // Reset the form each time the dialog opens (covers both the built-in trigger
+  // and the header-controlled path, which has no trigger onClick to reset in).
+  useEffect(() => {
+    if (open) {
+      setReason(null);
+      setNote("");
+    }
+  }, [open]);
+
+  // Only SENT quotes reject; the header guards this too, but keep the uncontrolled
+  // guard so a stray render can't show it on a draft/accepted quote.
+  if (!controlled && status !== "sent") return null;
 
   function submit() {
     if (!reason) {
@@ -57,18 +82,16 @@ export function RejectQuoteButton({ quoteId, status }: { quoteId: string; status
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => {
-          setReason(null);
-          setNote("");
-          setOpen(true);
-        }}
-        className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
-      >
-        <ThumbsDown className="size-3.5" strokeWidth={1.75} />
-        Reject quote
-      </button>
+      {controlled ? null : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
+        >
+          <ThumbsDown className="size-3.5" strokeWidth={1.75} />
+          Reject quote
+        </button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>

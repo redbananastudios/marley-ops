@@ -28,18 +28,35 @@ const STATUS_LABELS: Record<string, string> = {
   declined: "Declined",
 };
 
-export function ViewLeadDialog({ lead, status }: { lead: LeadOption; status?: string | null }) {
-  const [open, setOpen] = useState(false);
+export function ViewLeadDialog({
+  lead,
+  status,
+  open: openProp,
+  onOpenChange,
+}: {
+  lead: LeadOption;
+  status?: string | null;
+  /** Controlled mode: the quote header owns the trigger (so every header action
+   *  shares one button grammar) and just drives this dialog's open state. */
+  open?: boolean;
+  onOpenChange?: (o: boolean) => void;
+}) {
+  const controlled = openProp !== undefined;
+  const [openState, setOpenState] = useState(false);
+  const open = controlled ? openProp : openState;
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOpenState;
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-mm-red/40 bg-mm-red-tint px-2.5 text-sm font-medium text-mm-red-deep transition-colors hover:bg-mm-red hover:text-white"
-      >
-        <Users className="size-4" strokeWidth={1.75} />
-        View lead
-      </button>
+      {controlled ? null : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-mm-red/40 bg-mm-red-tint px-2.5 text-sm font-medium text-mm-red-deep transition-colors hover:bg-mm-red hover:text-white"
+        >
+          <Users className="size-4" strokeWidth={1.75} />
+          View lead
+        </button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-3xl">

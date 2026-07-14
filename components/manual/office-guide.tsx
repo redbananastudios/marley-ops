@@ -137,6 +137,10 @@ export function OfficeGuide() {
             "Every signed contract and completion certificate across every customer, searchable by name or reference.",
             "An “Unsigned contracts” tab flags accepted quotes that don't have a signature yet, sorted by move date — check this before a job goes out.",
             "A customer's full paperwork trail is also on their client page and their lead page (Overview tab).",
+            <>
+              Finished moves live at <strong>Sales → Completed Jobs</strong> — the by-date history with move date,
+              value, certificate and review status; the completion certificates are also here in Documents.
+            </>,
           ]}
         />
       </GuideCard>

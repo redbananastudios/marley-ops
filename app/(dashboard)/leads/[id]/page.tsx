@@ -195,13 +195,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
 
-  // Review-request control: relevant once a job is real. When switched off, the
-  // "why/when" line comes from the latest suppression activity (already loaded).
-  const showReviewControl =
-    !!acceptedQuote ||
-    !!lead.review_requested_at ||
-    lead.review_suppressed ||
-    ["confirmed", "completed"].includes(lead.status);
+  // Always visible on the lead — hiding it until acceptance meant the office
+  // couldn't find the switch when they went looking (Peter, 2026-07-14). The
+  // copy already reads correctly pre-acceptance ("sends automatically once the
+  // move is complete"). When switched off, the "why/when" line comes from the
+  // latest suppression activity (already loaded).
+  const showReviewControl = true;
   const suppressionActivity = lead.review_suppressed
     ? (activityRows.find((a) => typeof a.summary === "string" && a.summary.startsWith("Review request switched off")) ??
       null)

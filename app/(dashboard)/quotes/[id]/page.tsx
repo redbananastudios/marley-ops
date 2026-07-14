@@ -1,6 +1,5 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ClipboardCheck, Boxes } from "lucide-react";
+import { CheckCircle2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
@@ -8,7 +7,7 @@ import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
-import { QuoteBuilder, QuoteStatusBadge } from "@/components/quote/quote-builder";
+import { QuoteBuilder } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
 import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
@@ -23,11 +22,8 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
-import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
-import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
-import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
-import { ResendQuoteButton } from "@/components/quote/resend-quote-button";
-import { ViewLeadDialog } from "@/components/quote/view-lead-dialog";
+import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
+import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -188,84 +184,65 @@ export default async function QuoteDetailPage({
     }
   }
 
+  const statusStr = quote.status ?? "draft";
+  // Drafts + explicit ?edit=1 open the wizard; everything else is the read-only
+  // job card (which is where Edit becomes an offered action).
+  const editing = statusStr === "draft" || sp.edit === "1";
+
+  const headerMeta = (
+    <>
+      <QuoteStatusPill status={statusStr} />
+      {emailedCount > 0 ? <QuoteMetaChip icon={Mail}>Emailed ×{emailedCount}</QuoteMetaChip> : null}
+      {statusStr === "accepted" && quote.agreed_price != null ? (
+        <QuoteMetaChip>Agreed {gbp(quote.agreed_price)}</QuoteMetaChip>
+      ) : null}
+      {statusStr === "accepted" ? (
+        quote.deposit_paid_at ? (
+          <QuoteMetaChip icon={CheckCircle2} tone="success">
+            Deposit paid
+          </QuoteMetaChip>
+        ) : (
+          <QuoteMetaChip tone="warn">
+            Awaiting {gbp(quote.deposit_amount ?? settings.defaultDeposit)} deposit
+          </QuoteMetaChip>
+        )
+      ) : null}
+    </>
+  );
+
   return (
     <main className="mx-auto w-full max-w-3xl p-6 md:p-8">
       <PageHeader
         eyebrow={`Quote · ${quote.quote_ref}`}
+        eyebrowAccessory={headerMeta}
         title={quote.customer_name?.trim() || "New quote"}
         backHref="/quotes"
         backLabel="Quotes"
       >
-        <div className="flex items-center gap-3">
-          {leadOption ? <ViewLeadDialog lead={leadOption} status={leadStatus} /> : null}
-          {quote.lead_id ? (
-            <Link
-              href={`/leads/${quote.lead_id}/cubic`}
-              className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted"
-            >
-              <Boxes className="size-3.5 text-mm-red" strokeWidth={2} />
-              Cubic survey
-            </Link>
-          ) : null}
-          {emailedCount > 0 ? (
-            <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
-              Emailed ×{emailedCount}
-            </span>
-          ) : null}
-          {quote.status === "sent" || quote.status === "accepted" ? (
-            <ResendQuoteButton
-              quoteId={quote.id}
-              quoteRef={quote.quote_ref}
-              values={initialValues}
-              pricing={pricing}
-              leadId={quote.lead_id}
-              clientId={quote.client_id}
-              leadEmail={leadOption?.email ?? null}
-              estimatorName={estimatorName}
-              vatNumber={settings.vatNumber || undefined}
-              depositAmount={settings.defaultDeposit || undefined}
-              acceptUrl={acceptUrl}
-            />
-          ) : null}
-          {quote.status === "accepted" && quote.agreed_price != null ? (
-            <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
-              Agreed {gbp(quote.agreed_price)}
-            </span>
-          ) : null}
-          {quote.status === "accepted" ? (
-            <Link
-              href="/bookings"
-              className={`focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold ${
-                quote.deposit_paid_at
-                  ? "border-success-border bg-success-bg text-success"
-                  : "border-warn-border bg-warn-bg text-warn"
-              }`}
-            >
-              <ClipboardCheck className="size-3.5" strokeWidth={2} />
-              {quote.deposit_paid_at
-                ? "Deposit paid · Bookings"
-                : `Awaiting ${gbp(quote.deposit_amount ?? settings.defaultDeposit)} deposit · Bookings`}
-            </Link>
-          ) : null}
-          <QuoteStatusBadge status={quote.status ?? "draft"} />
-          <AcceptQuoteButton
-            quoteId={quote.id}
-            grandTotal={Number(quote.grand_total ?? 0)}
-            status={quote.status ?? "draft"}
-            depositAmount={settings.defaultDeposit}
-          />
-          <RejectQuoteButton quoteId={quote.id} status={quote.status ?? "draft"} />
-          <DeleteQuoteButton
-            quoteId={quote.id}
-            status={quote.status ?? "draft"}
-            quoteRef={quote.quote_ref ?? "—"}
-          />
-        </div>
+        <QuoteHeaderActions
+          quoteId={quote.id}
+          quoteRef={quote.quote_ref ?? "—"}
+          status={statusStr}
+          grandTotal={Number(quote.grand_total ?? 0)}
+          depositAmount={settings.defaultDeposit}
+          readOnly={!editing}
+          editHref={`/quotes/${quote.id}?edit=1`}
+          leadId={quote.lead_id}
+          clientId={quote.client_id}
+          lead={leadOption}
+          leadStatus={leadStatus}
+          leadEmail={leadOption?.email ?? null}
+          values={initialValues}
+          pricing={pricing}
+          estimatorName={estimatorName}
+          vatNumber={settings.vatNumber || undefined}
+          acceptUrl={acceptUrl}
+        />
       </PageHeader>
 
       {/* Drafts open straight into the wizard (nothing to view yet); everything
           else opens as a read-only job card — Edit is a deliberate action. */}
-      {quote.status === "draft" || sp.edit === "1" ? (
+      {editing ? (
         <QuoteBuilder
           quoteId={quote.id}
           quoteRef={quote.quote_ref}
@@ -294,7 +271,6 @@ export default async function QuoteDetailPage({
               deposit_paid_at: quote.deposit_paid_at,
               moving_date: quote.moving_date,
             }}
-            editHref={`/quotes/${quote.id}?edit=1`}
           />
           <div className="mt-4 space-y-4">
             {quote.lead_id ? (

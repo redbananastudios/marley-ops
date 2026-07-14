@@ -28,6 +28,8 @@ export function ResendQuoteButton({
   vatNumber,
   depositAmount,
   acceptUrl,
+  open: openProp,
+  onOpenChange,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -41,21 +43,31 @@ export function ResendQuoteButton({
   vatNumber?: string;
   depositAmount?: number;
   acceptUrl?: string;
+  /** Controlled mode: when `open`/`onOpenChange` are supplied the built-in
+   *  trigger is suppressed and the dialog is driven from outside (the quote
+   *  header opens it from its "⋯ More" overflow menu). */
+  open?: boolean;
+  onOpenChange?: (o: boolean) => void;
 }) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const [openState, setOpenState] = useState(false);
+  const open = controlled ? openProp : openState;
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOpenState;
   const breakdown = useMemo(() => computeQuote(deriveInputs(values), pricing), [values, pricing]);
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted"
-      >
-        <Mail className="size-3.5 text-mm-red" strokeWidth={2} />
-        Re-send quote email
-      </button>
+      {controlled ? null : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="focus-ring inline-flex h-8 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-semibold text-foreground hover:bg-muted"
+        >
+          <Mail className="size-3.5 text-mm-red" strokeWidth={2} />
+          Re-send quote email
+        </button>
+      )}
       <SendQuoteDialog
         open={open}
         onOpenChange={setOpen}

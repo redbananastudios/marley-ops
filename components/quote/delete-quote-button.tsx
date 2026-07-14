@@ -21,9 +21,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { deleteQuote } from "@/app/(dashboard)/quotes/actions";
 
-export function DeleteQuoteButton({ quoteId, status, quoteRef }: { quoteId: string; status: string; quoteRef: string }) {
+export function DeleteQuoteButton({
+  quoteId,
+  status,
+  quoteRef,
+  open: openProp,
+  onOpenChange,
+}: {
+  quoteId: string;
+  status: string;
+  quoteRef: string;
+  /** Controlled mode: driven from the quote header's "⋯ More" overflow menu. */
+  open?: boolean;
+  onOpenChange?: (o: boolean) => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const controlled = openProp !== undefined;
+  const [openState, setOpenState] = useState(false);
+  const open = controlled ? openProp : openState;
+  const setOpen = controlled ? (onOpenChange ?? (() => {})) : setOpenState;
   const [busy, setBusy] = useState(false);
   const protectedStatus = status === "sent" || status === "accepted";
 
@@ -42,15 +58,17 @@ export function DeleteQuoteButton({ quoteId, status, quoteRef }: { quoteId: stri
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label="Delete quote"
-        title="Delete quote"
-        className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-danger-bg hover:text-danger"
-      >
-        <Trash2 className="size-4" strokeWidth={1.75} />
-      </button>
+      {controlled ? null : (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Delete quote"
+          title="Delete quote"
+          className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-danger-bg hover:text-danger"
+        >
+          <Trash2 className="size-4" strokeWidth={1.75} />
+        </button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
