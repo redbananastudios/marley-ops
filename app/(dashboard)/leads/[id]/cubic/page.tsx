@@ -26,7 +26,7 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
   if (!z.string().uuid().safeParse(id).success) notFound();
 
   const sb = await createClient();
-  const { data: lead } = await sb.from("leads").select("id, name, client_id").eq("id", id).maybeSingle();
+  const { data: lead } = await sb.from("leads").select("id, name, client_id, email").eq("id", id).maybeSingle();
   if (!lead) notFound();
 
   // Get-or-create the survey row (unique per lead; loser of a race refetches).
@@ -87,7 +87,12 @@ export default async function CubicSurveyPage({ params }: { params: Promise<{ id
           {canUseAi && (
             <><Link href={`/leads/${id}/cubic/review`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-semibold"><ScanLine className="size-4" /> Review</Link><Link href={`/leads/${id}/cubic/scan#import-media`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg border border-mm-red px-4 text-sm font-semibold text-mm-red"><FileVideo className="size-4" /> Import video</Link><Link href={`/leads/${id}/cubic/scan`} className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-lg bg-mm-red px-4 text-sm font-semibold text-white hover:bg-mm-red-deep"><ScanLine className="size-4" /> AI room scan</Link></>
           )}
-          <CopyCubicLinkButton surveyId={survey.id} />
+          <CopyCubicLinkButton
+            surveyId={survey.id}
+            leadId={id}
+            leadHasEmail={!!lead.email}
+            recipientName={lead.name ?? undefined}
+          />
         </div>
       </div>
 

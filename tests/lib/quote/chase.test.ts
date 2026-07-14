@@ -11,7 +11,6 @@ import {
   LOSS_REASONS,
   QUOTE_CHASE_DAYS,
   DEPOSIT_CHASE_DAYS,
-  CHASE_FROM,
 } from "@/lib/quote/chase";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -81,13 +80,35 @@ describe("chase copy (refreshed 2026-07-13)", () => {
       expect(e.text).not.toMatch(/—/);
       expect(e.subject).not.toMatch(/—/);
       expect(e.variables.ACCEPT_LINK).toBe(ctx.acceptUrl);
-      expect(e.text).toContain("Peter");
+      // owner-aware sign-off; no owner on ctx → the team, never a hardcoded person
+      expect(e.text).toContain("The Marley Moves Team");
+      expect(e.text).not.toContain("Peter");
       expect(e.text).not.toContain("Connor");
     }
   });
 
-  it("sends every chase as Peter from his Marley address", () => {
-    expect(CHASE_FROM).toBe("Peter Farrell at Marley Moves <peter@marleymoves.co.uk>");
+  it("capitalises customer + owner names that arrive all-lower or all-upper", () => {
+    const e1 = quoteChaseEmail(1, { ...ctx, firstName: "freddy", ownerName: "luke" });
+    expect(e1.subject).toContain("Freddy");
+    expect(e1.text).toContain("Hi Freddy,");
+    expect(e1.text).toContain("It's Luke here.");
+    expect(e1.variables.CUSTOMER_FIRST_NAME).toBe("Freddy");
+    expect(e1.variables.OWNER_NAME).toBe("Luke");
+    // all-upper collapses too
+    expect(quoteChaseEmail(1, { ...ctx, firstName: "FREDDY" }).variables.CUSTOMER_FIRST_NAME).toBe("Freddy");
+    // intentional mixed case is left untouched
+    expect(quoteChaseEmail(1, { ...ctx, firstName: "McDonald" }).variables.CUSTOMER_FIRST_NAME).toBe("McDonald");
+  });
+
+  it("sends each chase from the lead owner at the monitored hello@ box (never peter@)", () => {
+    const owned = quoteChaseEmail(1, { ...ctx, ownerName: "luke james" });
+    expect(owned.from).toBe("Luke at Marley Moves <hello@marleymoves.co.uk>");
+    // no owner known → generic Marley sender, still the monitored mailbox
+    expect(quoteChaseEmail(1, ctx).from).toBe("Marley Moves <hello@marleymoves.co.uk>");
+    for (const e of [quoteChaseEmail(1, ctx), depositChaseEmail(1, { ...ctx, ownerName: "LUKE" })]) {
+      expect(e.from).toContain("hello@marleymoves.co.uk");
+      expect(e.from).not.toContain("peter@marleymoves.co.uk");
+    }
   });
 
   it("final quote chase names the expiry and the ref; deposit chases name the ref", () => {
@@ -114,10 +135,11 @@ describe("reply-address round trip (inbound webhook routing)", () => {
   it("token survives the address round trip with its case intact", () => {
     const token = "XaoNCO7FGwZzfN46T-HuZ5E9";
     const addr = replyAddressFor(token);
-    expect(addr).toBe(`q-${token}@reply.marleymoves.co.uk`);
+    // now carries a display name so mail clients hide the raw token
+    expect(addr).toBe(`Marley Moves <q-${token}@reply.marleymoves.co.uk>`);
     expect(tokenFromReplyAddress(addr)).toBe(token);
-    // display-name form Resend may deliver
-    expect(tokenFromReplyAddress(`Marley Moves <${addr}>`)).toBe(token);
+    // the bare recipient form Resend inbound may deliver still parses
+    expect(tokenFromReplyAddress(`q-${token}@reply.marleymoves.co.uk`)).toBe(token);
   });
 
   it("foreign addresses do not match", () => {

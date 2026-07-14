@@ -296,7 +296,14 @@ export default async function QuoteDetailPage({
             editHref={`/quotes/${quote.id}?edit=1`}
           />
           <div className="mt-4 space-y-4">
-            {quote.lead_id ? <CubicSurveyCard leadId={quote.lead_id} data={cubicCard} /> : null}
+            {quote.lead_id ? (
+              <CubicSurveyCard
+                leadId={quote.lead_id}
+                data={cubicCard}
+                leadHasEmail={!!leadOption?.email}
+                recipientName={leadOption?.name ?? undefined}
+              />
+            ) : null}
             <ContractSignatureCard signature={contractSignature} quoteStatus={quote.status ?? "draft"} />
             <CompletionCard completion={completion} />
             <CrewNotesCard notes={crewNotes} canDelete />

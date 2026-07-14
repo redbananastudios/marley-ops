@@ -18,7 +18,6 @@ export const QUOTE_CHASE_DAYS = [2, 5, 10] as const;
 export const DEPOSIT_CHASE_DAYS = [1, 3] as const;
 export const DEPOSIT_CALL_DAY = 5;
 export const QUOTE_LAPSE_DAYS = 30;
-export const CHASE_FROM = "Peter Farrell at Marley Moves <peter@marleymoves.co.uk>";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -82,15 +81,38 @@ export interface ChaseContext {
 export interface ChaseEmail {
   subject: string;
   text: string;
+  /** Owner-aware sender for this email (see chaseFromFor). */
+  from: string;
   /** Resend template variables (the template mirrors `text`). */
   variables: Record<string, string>;
 }
 
-const first = (name: string | null): string => (name ?? "").trim().split(/\s+/)[0] || "there";
+/** Capitalise a name segment that arrives all-lower ("freddy") or all-upper
+ *  ("FREDDY") -> "Freddy"; leave intentional mixed case (McDonald, O'Brien) alone. */
+const cap = (seg: string): string => {
+  const letters = seg.replace(/[^A-Za-z]/g, "");
+  if (!letters) return seg;
+  if (letters === letters.toLowerCase() || letters === letters.toUpperCase()) {
+    return seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase();
+  }
+  return seg;
+};
+
+const first = (name: string | null): string => cap((name ?? "").trim().split(/\s+/)[0]) || "there";
 
 /** Owner's first name for the personal chase voice; falls back to the team. */
 const ownerFirst = (name: string | null | undefined): string =>
-  (name ?? "").trim().split(/\s+/)[0] || "the Marley Moves team";
+  cap((name ?? "").trim().split(/\s+/)[0]) || "The Marley Moves Team";
+
+/** The chase sender: the lead owner at the monitored Marley mailbox when a real
+ *  owner name is known, otherwise a generic Marley sender. Never the unmonitored
+ *  peter@ box. */
+function chaseFromFor(ownerName: string | null | undefined): string {
+  const owner = (ownerName ?? "").trim().split(/\s+/)[0];
+  return owner
+    ? `${cap(owner)} at Marley Moves <hello@marleymoves.co.uk>`
+    : "Marley Moves <hello@marleymoves.co.uk>";
+}
 
 function vars(c: ChaseContext): Record<string, string> {
   return {
@@ -105,12 +127,14 @@ function vars(c: ChaseContext): Record<string, string> {
 
 export function quoteChaseEmail(step: 1 | 2 | 3, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
+  const owner = ownerFirst(c.ownerName);
+  const from = chaseFromFor(c.ownerName);
   if (step === 1) {
     return {
       subject: `Did my quote come through okay, ${name}?`,
       text: `Hi ${name},
 
-Peter here from Marley Moves. I wanted to make sure quote ${c.quoteRef} reached you and see if anything needs explaining or changing.
+It's ${owner} here. I wanted to make sure quote ${c.quoteRef} reached you and see if anything needs explaining or changing.
 
 If you're happy with everything, you can accept it online here:
 ${c.acceptUrl}
@@ -119,8 +143,9 @@ It takes about 30 seconds and provisionally reserves your move date.
 
 If you'd rather talk it through, reply to this email or call me on 01747 637070.
 
-Thanks,
-Peter`,
+Best regards,
+${owner}`,
+      from,
       variables: vars(c),
     };
   }
@@ -136,8 +161,9 @@ ${c.acceptUrl}
 
 If you're still deciding, or anything in the quote needs changing, just reply and I'll help.
 
-Thanks,
-Peter`,
+Best regards,
+${owner}`,
+      from,
       variables: vars(c),
     };
   }
@@ -153,19 +179,22 @@ ${c.acceptUrl}
 If you no longer need the quote, reply with "not going ahead" and I won't follow up again. If you've chosen someone else, a one-line note about what made the difference would genuinely help us improve.
 
 All the best with the move either way,
-Peter`,
+${owner}`,
+    from,
     variables: vars(c),
   };
 }
 
 export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
+  const owner = ownerFirst(c.ownerName);
+  const from = chaseFromFor(c.ownerName);
   if (step === 1) {
     return {
       subject: `One last step to secure your move date (${c.quoteRef})`,
       text: `Hi ${name},
 
-Thanks for accepting your quote. I've provisionally held your move date; the £100 deposit confirms the booking and allocates the crew.
+It's ${owner} here. Thanks for accepting your quote. I've provisionally held your move date; the £100 deposit confirms the booking and allocates the crew.
 
 You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}
@@ -174,8 +203,9 @@ Bank transfer reference: ${c.quoteRef}
 
 Once payment arrives, we'll email confirmation that everything is booked in.
 
-Thanks,
-Peter`,
+Best regards,
+${owner}`,
+      from,
       variables: vars(c),
     };
   }
@@ -188,8 +218,9 @@ ${c.acceptUrl}
 
 If your plans have changed or you need help with payment, reply and let me know. I'd rather help than keep chasing.
 
-Thanks,
-Peter`,
+Best regards,
+${owner}`,
+    from,
     variables: vars(c),
   };
 }
@@ -252,7 +283,9 @@ export function chaseTextToHtml(text: string): string {
  *  (Resend inbound on the reply subdomain → webhook → pause chase + log). */
 export function replyAddressFor(acceptToken: string): string {
   const domain = process.env.REPLY_EMAIL_DOMAIN || "reply.marleymoves.co.uk";
-  return `q-${acceptToken}@${domain}`;
+  // Display name so mail clients show "Marley Moves" not the raw token. The
+  // inbound webhook's tokenFromReplyAddress parses either form.
+  return `Marley Moves <q-${acceptToken}@${domain}>`;
 }
 
 /** Parse a reply address back to its accept token (null when not ours).

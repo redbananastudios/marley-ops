@@ -21,6 +21,10 @@ import { randomBytes } from "node:crypto";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeCubicTotals, reconcileCubicLineProvenance, sanitizeCubicLines } from "@/lib/cubic-survey";
+import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
+import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+
+const FROM = "Marley Moves <hello@marleymoves.co.uk>";
 
 async function requireActiveProfile() {
   const sb = await createClient();
@@ -189,4 +193,56 @@ export async function getCubicShareLinkAction(
   const base = process.env.NEXT_PUBLIC_APP_URL;
   if (!base) return { ok: false, error: "The application URL is not configured." };
   return { ok: true, url: `${base}/cv/${token}` };
+}
+
+/** Email the customer self-fill link to the lead's email address (the "send"
+ *  counterpart to copy-link). Mirrors emailStorageSignLinkAction: mints the
+ *  share link lazily, wraps the /cv/<token> URL in the branded shell, and logs
+ *  to the lead's Comms tab via the shared dispatcher. */
+export async function emailCubicShareLinkAction(leadId: string): Promise<DispatchCommResult> {
+  if (!z.string().uuid().safeParse(leadId).success) return { ok: false, error: "Invalid lead" };
+  const prof = await requireActiveProfile();
+  if (!prof) return { ok: false, error: "Not signed in." };
+
+  const admin = createAdminClient();
+  const { data: lead } = await admin
+    .from("leads")
+    .select("id, name, email, client_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!lead) return { ok: false, error: "Lead not found." };
+  const email = (lead.email ?? "").trim();
+  if (!email) return { ok: false, error: "No email on this lead" };
+
+  // Mint (or create + mint) the customer self-fill link for this lead's survey.
+  const link = await getCubicShareLinkByLeadAction(leadId);
+  if (!link.ok) return { ok: false, error: link.error };
+
+  const firstName = (lead.name ?? "").trim().split(/\s+/)[0] || undefined;
+  const bodyHtml = brandedEmailHtml({
+    preheader: "Fill in a quick inventory of your move so your Marley Moves quote covers everything.",
+    greeting: firstName,
+    headline: "Your moving inventory",
+    paragraphs: [
+      "To make sure your quote covers everything, please fill in a quick inventory of what's moving, room by room, tapping what you have.",
+      "It only takes a few minutes on your phone, and you can save and come back any time.",
+      "Any questions, just reply to this email or call us on 01747 637070.",
+    ],
+    cta: { label: "Fill in your inventory", url: link.url },
+  });
+
+  const sb = await createClient();
+  const result = await dispatchComm(sb, prof.id, {
+    channel: "email",
+    to: email,
+    from: FROM,
+    subject: "Your Marley Moves moving inventory",
+    bodyText: `Fill in a quick inventory of your move so we can quote accurately: ${link.url}`,
+    bodyHtml,
+    clientId: lead.client_id ?? undefined,
+    leadId,
+  });
+
+  if ("ok" in result && result.ok) revalidatePath(`/leads/${leadId}`);
+  return result;
 }

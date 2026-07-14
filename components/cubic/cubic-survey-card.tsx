@@ -29,7 +29,17 @@ const STATUS_LABEL: Record<string, string> = {
   customer_submitted: "Sent by the customer",
 };
 
-export function CubicSurveyCard({ leadId, data }: { leadId: string; data: CubicCardData | null }) {
+export function CubicSurveyCard({
+  leadId,
+  data,
+  leadHasEmail,
+  recipientName,
+}: {
+  leadId: string;
+  data: CubicCardData | null;
+  leadHasEmail?: boolean;
+  recipientName?: string;
+}) {
   const has = data?.hasSurvey && data.rawFt3 > 0;
   return (
     <Card className="gap-3 p-5">
@@ -70,7 +80,7 @@ export function CubicSurveyCard({ leadId, data }: { leadId: string; data: CubicC
           {has ? "Open cubic survey" : "Start cubic survey"}
           <ChevronRight className="size-4" strokeWidth={2} />
         </Link>
-        <CopyCubicLinkButton leadId={leadId} />
+        <CopyCubicLinkButton leadId={leadId} leadHasEmail={leadHasEmail} recipientName={recipientName} />
       </div>
     </Card>
   );

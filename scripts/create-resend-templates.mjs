@@ -114,7 +114,7 @@ const stepsRow = (steps) => `  <tr><td style="padding:4px 36px 22px;">
 
 const linkButton = (label, href) => `  <tr><td align="center" style="padding:2px 36px 10px;">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${RED}" style="border-radius:8px;">
-      <a href="${href}" style="display:inline-block;padding:17px 52px;background:${RED};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;font-family:${FONT_STACK};">${label}</a>
+      <a href="${href}" style="display:inline-block;padding:16px 36px;background:${RED};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;white-space:nowrap;font-family:${FONT_STACK};">${label}</a>
     </td></tr></table>
   </td></tr>`;
 
@@ -226,7 +226,7 @@ const quoteEmailHtml = shellHtml(
       </td></tr>
     </table>
   </td></tr>`,
-    linkButton("Accept your quote online &rarr;", "{{{ACCEPT_URL}}}"),
+    linkButton("Accept your quote online&nbsp;&rarr;", "{{{ACCEPT_URL}}}"),
     `  <tr><td align="center" style="padding:0 36px 22px;">
     <p style="font-size:11px;color:#9CA3AF;margin:0;">Prefer email? <a href="{{{REPLY_HREF}}}" style="color:#8A857E;">Reply to confirm</a> instead.</p>
   </td></tr>`,
@@ -341,7 +341,7 @@ const reviewRequestHtml = shellHtml(
       `If Connor and the crew looked after you well, a quick <strong style="color:${INK};">{{{REVIEW_PLATFORM}}}</strong> review would make a real difference &mdash; it only takes a minute.`,
       "0 36px 20px",
     ),
-    linkButton("Leave a {{{REVIEW_PLATFORM}}} review &rarr;", "{{{REVIEW_URL}}}"),
+    linkButton("Leave a {{{REVIEW_PLATFORM}}} review&nbsp;&rarr;", "{{{REVIEW_URL}}}"),
     sublineRow(
       `And if anything wasn't quite right, please reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070 first &mdash; we'd always rather put it right.`,
       "16px 36px 6px",
@@ -359,7 +359,7 @@ const ownerSignoffRow = () => `  <tr><td style="padding:8px 36px 30px;">
 // Chases render in the SAME shell + standard footer as the transactional emails
 // (for consistency), with a personal owner sign-off and the accept link as a red
 // button rather than a raw URL.
-const chaseHtml = (preheader, { intro, cta = "Accept your quote online &rarr;", closing = [] }) =>
+const chaseHtml = (preheader, { intro, cta = "Accept your quote online&nbsp;&rarr;", closing = [] }) =>
   shellHtml(
     preheader,
     [
@@ -374,7 +374,7 @@ const chaseHtml = (preheader, { intro, cta = "Accept your quote online &rarr;", 
 const CHASE_FROM = "Marley Moves <hello@marleymoves.co.uk>";
 const CHASE_VARS = [
   { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
-  { key: "OWNER_NAME", type: "string", fallback_value: "the Marley Moves team" },
+  { key: "OWNER_NAME", type: "string", fallback_value: "The Marley Moves Team" },
   { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
   { key: "ACCEPT_LINK", type: "string", fallback_value: "https://marleymoves.co.uk/quote/" },
   { key: "EXPIRY_DATE", type: "string", fallback_value: "the expiry date on your quote" },
@@ -509,10 +509,10 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("Just checking your quote reached you okay.", {
       intro: [
-        "{{{OWNER_NAME}}} here from Marley Moves. I wanted to make sure your quote ({{{QUOTE_REF}}}) reached you safely and check whether you have any questions.",
+        "It's {{{OWNER_NAME}}} here. I wanted to make sure your quote ({{{QUOTE_REF}}}) reached you safely and to check whether you have any questions.",
         "If everything looks right, you can accept online in about 30 seconds and that reserves your date:",
       ],
-      cta: "Accept your quote online &rarr;",
+      cta: "Accept your quote online&nbsp;&rarr;",
       closing: ["Anything you'd like adjusted, just reply to this email or call me on 01747 637070."],
     }),
     variables: CHASE_VARS,
@@ -527,7 +527,7 @@ const TEMPLATES = [
         "Dates for the coming weeks are starting to fill up, with month-end and Fridays always going first, so I wanted to check where you're at with your quote.",
         "Accepting takes about half a minute, and your {{{DEPOSIT_AMOUNT}}} deposit secures both your date and crew:",
       ],
-      cta: "Accept your quote online &rarr;",
+      cta: "Accept your quote online&nbsp;&rarr;",
       closing: ["If anything in the quote doesn't look right, let me know and I'll sort it before anything is booked."],
     }),
     variables: CHASE_VARS,
@@ -542,7 +542,7 @@ const TEMPLATES = [
         "A final note from me. Your quote ({{{QUOTE_REF}}}) remains valid until {{{EXPIRY_DATE}}}; after that I'd need to re-check the price.",
         "If you'd like your date held, it's one click away:",
       ],
-      cta: "Accept your quote online &rarr;",
+      cta: "Accept your quote online&nbsp;&rarr;",
       closing: [
         "If you've decided to go elsewhere, that's no problem at all, and if you have a moment, any feedback on your decision would genuinely help us improve.",
         "Either way, I wish you all the best with your move.",
@@ -557,10 +557,10 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("One last step to secure your date.", {
       intro: [
-        "{{{OWNER_NAME}}} here. Great to have you booked in. Your date is reserved, and your {{{DEPOSIT_AMOUNT}}} deposit is what makes it firm and secures your crew.",
+        "It's {{{OWNER_NAME}}} here. Great to have you booked in. Your date is reserved, and your {{{DEPOSIT_AMOUNT}}} deposit is what makes it firm and secures your crew.",
         "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
       ],
-      cta: "Pay your deposit &rarr;",
+      cta: "Pay your deposit&nbsp;&rarr;",
       closing: ["Any questions, just reply to this email or call me on 01747 637070."],
     }),
     variables: CHASE_VARS,
@@ -574,7 +574,7 @@ const TEMPLATES = [
       intro: [
         "A quick note. We're holding your move date, but I can't guarantee it much longer without your {{{DEPOSIT_AMOUNT}}} deposit, which secures both the date and crew:",
       ],
-      cta: "Pay your deposit &rarr;",
+      cta: "Pay your deposit&nbsp;&rarr;",
       closing: ["If your timing has changed or plans have shifted, just reply and let me know. I'd genuinely rather help than chase."],
     }),
     variables: CHASE_VARS,

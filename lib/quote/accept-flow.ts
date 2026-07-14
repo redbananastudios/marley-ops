@@ -42,7 +42,6 @@ import {
   round2,
 } from "@/lib/quote/payments";
 import {
-  CHASE_FROM,
   chaseTextToHtml,
   depositChaseEmail,
   expiryLabelFrom,
@@ -601,7 +600,7 @@ export async function acceptQuoteByStaff(
         ? { template: { id: templateId, variables: email.variables } }
         : { bodyHtml: chaseTextToHtml(email.text) }),
       replyTo: replyAddressFor(token),
-      from: CHASE_FROM,
+      from: email.from,
       leadId: quote.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
