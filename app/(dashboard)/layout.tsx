@@ -3,6 +3,7 @@ import { getSessionProfile } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
 import { NewLeadAlert } from "@/components/alerts/new-lead-alert";
+import { OnboardingTour } from "@/components/onboarding/tour";
 
 export default async function DashboardLayout({
   children,
@@ -22,6 +23,7 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen bg-background">
       <NewLeadAlert />
+      <OnboardingTour tour="office" role={profile.role} />
       <AppSidebar profile={navProfile} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav profile={navProfile} />

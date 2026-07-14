@@ -284,6 +284,80 @@ textarea {
   50% { top: 95%; opacity: 1; }
 }
 
+/* ============================================================
+   Guided tour (driver.js) — brand skin, scoped to our popoverClass
+   so the base driver.css only styles the overlay/stage. Card surface,
+   Geist type, 8px controls, ONE brand-red accent (the primary button).
+   ============================================================ */
+.driver-popover.mm-tour-popover {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  max-width: 340px;
+  padding: 18px;
+  font-family: var(--font-sans);
+}
+.driver-popover.mm-tour-popover .driver-popover-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.02em;
+  color: var(--foreground);
+}
+.driver-popover.mm-tour-popover .driver-popover-description {
+  margin-top: 6px;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--color-mist-500);
+}
+.driver-popover.mm-tour-popover .driver-popover-close-btn {
+  width: 44px;
+  height: 44px;
+  color: var(--color-mist-400);
+}
+.driver-popover.mm-tour-popover .driver-popover-close-btn:hover,
+.driver-popover.mm-tour-popover .driver-popover-close-btn:focus {
+  color: var(--foreground);
+}
+.driver-popover.mm-tour-popover .driver-popover-progress-text {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-mist-400);
+}
+.driver-popover.mm-tour-popover .driver-popover-footer {
+  margin-top: 16px;
+  gap: 8px;
+}
+.driver-popover.mm-tour-popover .driver-popover-footer-btn {
+  min-height: 44px;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  text-shadow: none;
+  transition: background-color 0.15s, color 0.15s;
+}
+.driver-popover.mm-tour-popover .driver-popover-footer-btn:hover {
+  background: var(--muted);
+}
+/* Primary action — the single restrained red */
+.driver-popover.mm-tour-popover .driver-popover-next-btn {
+  border-color: var(--color-mm-red);
+  background: var(--color-mm-red);
+  color: #ffffff;
+}
+.driver-popover.mm-tour-popover .driver-popover-next-btn:hover {
+  background: var(--color-mm-red-deep);
+}
+
 /* Tailwind v4 dropped the default button cursor; restore it for desktop so every
    control reads as clickable (disabled buttons keep the default/not-allowed cursor). */
 button:not(:disabled),

@@ -235,7 +235,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
       </Card>
 
       {/* needs action (now) */}
-      <section>
+      <section data-tour="dashboard-needs-action">
         <p className="eyebrow mb-2">Needs action now</p>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           <ActionCard label="Follow-ups overdue" count={data.needsAction.followUpsOverdue} href="/follow-ups" accent empty="Nothing overdue" />

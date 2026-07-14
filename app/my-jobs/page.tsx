@@ -1,12 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { ChevronRight, Compass, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
 import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
+import { OnboardingTour } from "@/components/onboarding/tour";
+import { TourButton } from "@/components/onboarding/launch";
 
 /**
  * /my-jobs — the crew surface (iMVE "can access assigned jobs"). A crew login
@@ -161,10 +163,18 @@ export default async function MyJobsPage() {
 
   return (
     <div className="min-h-screen bg-background">
+      <OnboardingTour tour="crew" role={profile.role} />
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
         <BrandMark compact />
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <span className="hidden text-sm text-white/55 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
+          <TourButton
+            tour="crew"
+            icon={<Compass className="size-4" strokeWidth={1.75} />}
+            className="rounded-md px-3 text-sm font-medium text-white/55 hover:bg-white/[0.06] hover:text-white"
+          >
+            Tour
+          </TourButton>
           <SignOutButton />
         </div>
       </header>
@@ -211,15 +221,17 @@ export default async function MyJobsPage() {
             Nothing assigned to you yet. When the office puts you on a job it shows up here.
           </div>
         ) : (
-          orderedDays.map((day) => (
+          <div data-tour="crew-jobs">
+          {orderedDays.map((day) => (
             <section key={day} className="mt-6">
               <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-mist-400">
                 {dayHeading(day, today)}
               </h2>
               <div className="space-y-3">
-                {groups.get(day)!.map((j) => (
+                {groups.get(day)!.map((j, ji) => (
                   <div
                     key={j.id}
+                    data-tour={day === orderedDays[0] && ji === 0 ? "crew-job-card" : undefined}
                     className={
                       "overflow-hidden rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] " +
                       (j.appt_type === "removal" ? "border-l-[3px] border-l-mm-red" : "border-l-[3px] border-l-survey")
@@ -276,7 +288,9 @@ export default async function MyJobsPage() {
 
                     <div className="mt-3 flex flex-wrap gap-2">
                       {j.appt_type === "removal" ? (
-                        <JobSheetButton appointmentId={j.id} fileHint={j.lead_name ?? j.title ?? "job"} />
+                        <span data-tour="crew-jobsheet">
+                          <JobSheetButton appointmentId={j.id} fileHint={j.lead_name ?? j.title ?? "job"} />
+                        </span>
                       ) : null}
                       {j.lead_phone ? (
                         <a
@@ -292,7 +306,8 @@ export default async function MyJobsPage() {
                 ))}
               </div>
             </section>
-          ))
+          ))}
+          </div>
         )}
       </main>
     </div>
