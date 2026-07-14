@@ -8,9 +8,10 @@
  * quick action. Responsive: table-ish on desktop, cards on mobile.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ClipboardCheck, Search, Users } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { ClipboardCheck, Search, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
@@ -101,14 +102,36 @@ function routeLine(q: QuoteRow): string {
 export function QuotesView({
   quotes,
   defaultDeposit = 100,
+  query = "",
 }: {
   quotes: QuoteRow[];
   defaultDeposit?: number;
+  /** Active server-side search term (URL `q`) — seeds the input and empty state. */
+  query?: string;
 }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const [isPending, startTransition] = useTransition();
   const [preset, setPreset] = useState<PresetKey>("all");
-  const [search, setSearch] = useState("");
+  // The input is the source of truth for what's typed; the URL `q` (server-filtered)
+  // is synced from it, debounced. `quotes` already arrives filtered by the server.
+  const [search, setSearch] = useState(query);
   // Stable clock for the age chips — lazy useState keeps render pure.
   const [now] = useState(() => Date.now());
+
+  // Push the debounced search term into the URL so the server re-filters. Only
+  // navigate when it differs from what the server already has, so a round-trip
+  // returning the same `q` doesn't re-fire the effect into a loop.
+  useEffect(() => {
+    const id = setTimeout(() => {
+      const next = search.trim();
+      if (next === query) return;
+      startTransition(() => {
+        router.replace(next ? `${pathname}?q=${encodeURIComponent(next)}` : pathname, { scroll: false });
+      });
+    }, 300);
+    return () => clearTimeout(id);
+  }, [search, query, pathname, router]);
 
   const stats = useMemo(() => {
     const nonDraft = quotes.filter((q) => q.status !== "draft");
@@ -132,17 +155,12 @@ export function QuotesView({
     [quotes],
   );
 
-  const visible = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return quotes
-      .filter((q) => (preset === "all" ? true : q.status === preset))
-      .filter((q) => {
-        if (!term) return true;
-        return [q.customer_name, q.quote_ref, q.collect_addr, q.dest_addr]
-          .filter(Boolean)
-          .some((v) => String(v).toLowerCase().includes(term));
-      });
-  }, [quotes, preset, search]);
+  // Search is applied server-side (ref + customer/lead name + lead postcode); the
+  // chips filter within that result set.
+  const visible = useMemo(
+    () => quotes.filter((q) => (preset === "all" ? true : q.status === preset)),
+    [quotes, preset],
+  );
 
   const pager = usePager(visible, 25);
 
@@ -182,18 +200,35 @@ export function QuotesView({
         })}
         <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
           <Search strokeWidth={1.75} className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-mist-400" />
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customer, ref, postcode" className="pl-9" aria-label="Search quotes" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search customer, ref, postcode"
+            className="pl-9 pr-9 text-base"
+            aria-label="Search quotes"
+            enterKeyHint="search"
+          />
+          {search ? (
+            <button
+              type="button"
+              onClick={() => setSearch("")}
+              aria-label="Clear search"
+              className="focus-ring absolute top-1/2 right-1.5 -translate-y-1/2 rounded p-1 text-mist-400 hover:text-foreground"
+            >
+              <X strokeWidth={1.75} className="size-4" />
+            </button>
+          ) : null}
         </div>
       </div>
 
       {/* list — paged so big datasets stay fast */}
-      <ul className="mt-4 divide-y rounded-lg border border-border bg-card">
+      <ul className={cn("mt-4 divide-y rounded-lg border border-border bg-card transition-opacity", isPending && "opacity-60")}>
         {visible.length === 0 ? (
           <li>
             <EmptyState
               icon={ClipboardCheck}
-              title="No quotes match"
-              hint="Change the filter or search, or start one with New quote."
+              title={query ? `No quotes match “${query}”` : "No quotes match"}
+              hint={query ? "Try a different search, or clear it." : "Change the filter, or start one with New quote."}
             />
           </li>
         ) : (

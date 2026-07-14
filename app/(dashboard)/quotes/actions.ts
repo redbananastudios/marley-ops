@@ -17,7 +17,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { recommendVans } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
-import { ukParts } from "@/lib/uk-time";
+import { quoteRefKind } from "@/lib/quote/ref";
 
 async function ctx() {
   const sb = await createClient();
@@ -27,16 +27,21 @@ async function ctx() {
   return { sb, userId: user?.id ?? null };
 }
 
-/** MM-YYMMDD-NNN with a per-day sequence (avoids the live tool's random-NNN collision risk). */
-async function nextQuoteRef(sb: Awaited<ReturnType<typeof createClient>>): Promise<string> {
-  const d = ukParts(); // ref date = UK calendar day (server runs UTC)
-  const stamp = `${String(d.year).slice(-2)}${String(d.month).padStart(2, "0")}${String(d.day).padStart(2, "0")}`;
-  const prefix = `MM-${stamp}-`;
-  const { count } = await sb
-    .from("quotes")
-    .select("id", { count: "exact", head: true })
-    .like("quote_ref", `${prefix}%`);
-  return `${prefix}${String((count ?? 0) + 1).padStart(3, "0")}`;
+/**
+ * Allocate the next quote reference — MMR### (residential) or MMC### (commercial),
+ * an ever-growing per-kind counter minted by the DB sequence via next_quote_ref()
+ * (migration 0037). Collision-proof even when quotes are deleted (unlike the old
+ * count-of-rows-today scheme). Throws only on a genuine RPC failure.
+ */
+async function nextQuoteRef(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  kind: "R" | "C",
+): Promise<string> {
+  const { data, error } = await sb.rpc("next_quote_ref", { kind });
+  if (error || typeof data !== "string") {
+    throw new Error(error?.message ?? "Could not allocate a quote reference");
+  }
+  return data;
 }
 
 /** Create a draft quote (optionally pre-filled from a lead) so it exists in the panel immediately. */
@@ -86,9 +91,18 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
   const pricing = await getPricingConfig(sb);
   const breakdown = computeQuote(deriveInputs(seed), pricing);
 
-  // Retry once on the unlikely ref collision.
+  // Residential vs commercial reference (MMR###/MMC###), from the lead's move type.
+  const kind = quoteRefKind(lead?.property_size);
+
+  // Retry once on the unlikely ref collision (a fresh sequence value each pass
+  // can never collide — this is a belt-and-braces backstop).
   for (let attempt = 0; attempt < 2; attempt++) {
-    const quote_ref = await nextQuoteRef(sb);
+    let quote_ref: string;
+    try {
+      quote_ref = await nextQuoteRef(sb, kind);
+    } catch (e) {
+      return { ok: false as const, error: e instanceof Error ? e.message : "Could not allocate a quote reference" };
+    }
     const { data, error } = await sb
       .from("quotes")
       .insert({

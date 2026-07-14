@@ -9,20 +9,50 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
 
-export default async function QuotesPage() {
+const QUOTE_COLUMNS =
+  "id, quote_ref, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, accepted_at, lead_id, created_at, updated_at, deposit_paid_at";
+
+export default async function QuotesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
+  const query = (q ?? "").trim();
+  // Strip the characters that would break the PostgREST or()/ilike filter grammar
+  // (commas + parens delimit conditions; %/* are wildcards). Refs, names and
+  // postcodes never legitimately contain these.
+  const term = query.replace(/[,()%*\\"]/g, "").trim();
+
   const supabase = await createClient();
+
+  // Server-side search across the WHOLE table (not just the visible page). Ref
+  // matches directly on quotes; name/postcode go through the lead join — resolve
+  // the matching lead ids first, then quotes whose ref/name matches OR whose lead
+  // is in that set. Two round-trips, but simple and correct.
+  let leadIds: string[] = [];
+  if (term) {
+    const like = `%${term}%`;
+    const { data: matchedLeads } = await supabase
+      .from("leads")
+      .select("id")
+      .or(`name.ilike.${like},from_postcode.ilike.${like},to_postcode.ilike.${like}`)
+      .limit(2000);
+    leadIds = (matchedLeads ?? []).map((l) => l.id);
+  }
+
   // Unbounded table — page through fetchAllRows (PostgREST truncates at 1000 rows).
   const [quotes, settings] = await Promise.all([
-    fetchAllRows((f, t) =>
-      supabase
-        .from("quotes")
-        .select(
-          "id, quote_ref, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, accepted_at, lead_id, created_at, updated_at, deposit_paid_at",
-        )
-        .order("created_at", { ascending: false })
-        .order("id")
-        .range(f, t),
-    ),
+    fetchAllRows((f, t) => {
+      let q = supabase.from("quotes").select(QUOTE_COLUMNS);
+      if (term) {
+        const like = `%${term}%`;
+        const orParts = [`quote_ref.ilike.${like}`, `customer_name.ilike.${like}`];
+        if (leadIds.length) orParts.push(`lead_id.in.(${leadIds.join(",")})`);
+        q = q.or(orParts.join(","));
+      }
+      return q.order("created_at", { ascending: false }).order("id").range(f, t);
+    }),
     getBusinessSettings(supabase),
   ]);
 
@@ -37,7 +67,11 @@ export default async function QuotesPage() {
         </Button>
       </PageHeader>
 
-      <QuotesView quotes={quotes as QuoteRow[]} defaultDeposit={settings.defaultDeposit} />
+      <QuotesView
+        quotes={quotes as QuoteRow[]}
+        defaultDeposit={settings.defaultDeposit}
+        query={query}
+      />
     </main>
   );
 }
