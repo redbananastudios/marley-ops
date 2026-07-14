@@ -1,8 +1,12 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
+import { parseAltRecipient } from "@/lib/comms/alt-recipient";
+import { normalizeEmail } from "@/lib/leads/phone";
 import {
   dispatchComm,
   type DispatchCommInput,
@@ -15,6 +19,14 @@ export type SendCommInput = DispatchCommInput & {
    *  — which stays supplied as the fallback body. */
   templateKey?: "quote-email";
   templateVariables?: Record<string, string | number>;
+  /** Office-directed recipient for a quote email (the customer's address bounced
+   *  or was typo'd on the lead). When set, it is validated + normalised here and
+   *  becomes the send target — the server, not the client, has the last word. */
+  toEmail?: string;
+  /** When toEmail differs from the lead's stored email, also save it back onto
+   *  the lead so every later automated email (chases, deposit/balance invoices,
+   *  review request) follows the corrected address. Ignored without a leadId. */
+  updateLeadEmail?: boolean;
 };
 export type SendCommResult = DispatchCommResult;
 
@@ -33,6 +45,19 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
   if (input.templateKey && input.templateVariables && !input.template) {
     const id = TEMPLATE_KEYS[input.templateKey];
     if (id) input = { ...input, template: { id, variables: input.templateVariables } };
+  }
+
+  // Office-directed recipient: validate + normalise server-side, then it becomes
+  // the send target (a different recipient = different content hash, so the
+  // duplicate guard never mistakes it for the original send).
+  let altEmail: string | null = null;
+  if (input.channel === "email" && input.toEmail !== undefined) {
+    const parsed = parseAltRecipient(input.toEmail);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+    if (parsed.email) {
+      altEmail = parsed.email;
+      input = { ...input, to: altEmail };
+    }
   }
 
   // Every quote/lead-linked email gets the per-lead reply address, so a
@@ -61,8 +86,63 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
   const result = await dispatchComm(sb, user?.id ?? null, input);
 
   if ("ok" in result && result.ok) {
+    // A quote email went to an office-directed address — record it against the
+    // lead, and (default) adopt it as the lead's email so every later automated
+    // email follows the corrected address.
+    if (altEmail && input.leadId) {
+      await applyAltRecipientToLead(sb, user?.id ?? null, {
+        leadId: input.leadId,
+        altEmail,
+        save: !!input.updateLeadEmail,
+      });
+    }
     if (input.leadId) revalidatePath(`/leads/${input.leadId}`);
     if (input.quoteId) revalidatePath(`/quotes/${input.quoteId}`);
   }
   return result;
+}
+
+/**
+ * After a quote email went to an office-directed address, reconcile it with the
+ * lead. Only acts when the address actually differs from the lead's stored one
+ * (dispatchComm already logs the ordinary "email sent to X" activity + comms
+ * row otherwise). Updates the LEAD's email only — never the client record, whose
+ * email_norm carries a unique dedupe index a correction could collide with — and
+ * drops a timeline note either way so the redirect is auditable.
+ */
+async function applyAltRecipientToLead(
+  sb: SupabaseClient<Database>,
+  actorId: string | null,
+  { leadId, altEmail, save }: { leadId: string; altEmail: string; save: boolean },
+): Promise<void> {
+  const { data: lead } = await sb
+    .from("leads")
+    .select("email, client_id")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!lead) return;
+
+  const differs = normalizeEmail(altEmail) !== normalizeEmail(lead.email);
+  if (!differs) return; // sent to the lead's own address — nothing to reconcile
+
+  if (save) {
+    await sb.from("leads").update({ email: altEmail }).eq("id", leadId);
+    await sb.from("activities").insert({
+      lead_id: leadId,
+      client_id: lead.client_id ?? null,
+      actor_id: actorId,
+      type: "note",
+      summary: `Quote emailed to alternative address ${altEmail} — saved as the lead's email`,
+      meta: { alt_recipient: altEmail, saved_to_lead: true, previous_email: lead.email ?? null },
+    });
+  } else {
+    await sb.from("activities").insert({
+      lead_id: leadId,
+      client_id: lead.client_id ?? null,
+      actor_id: actorId,
+      type: "note",
+      summary: `Quote emailed to alternative address ${altEmail} — one-off, lead email unchanged`,
+      meta: { alt_recipient: altEmail, saved_to_lead: false },
+    });
+  }
 }

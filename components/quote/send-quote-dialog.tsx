@@ -46,6 +46,7 @@ export function SendQuoteDialog({
   breakdown,
   leadId,
   clientId,
+  leadEmail,
   estimatorName,
   vatNumber,
   depositAmount,
@@ -61,6 +62,10 @@ export function SendQuoteDialog({
   breakdown: QuoteBreakdown;
   leadId?: string | null;
   clientId?: string | null;
+  /** The lead's currently-stored email — the baseline the "Send to" address is
+   *  compared against to decide whether to offer saving a correction back. Falls
+   *  back to the quote's customer email when not supplied. */
+  leadEmail?: string | null;
   estimatorName?: string | null;
   /** VAT registration number (Settings) — printed on the attached PDF's footer. */
   vatNumber?: string;
@@ -74,20 +79,32 @@ export function SendQuoteDialog({
   resend?: boolean;
   onSent?: () => void;
 }) {
-  const [email, setEmail] = useState(values.customer.email || "");
+  // The lead's stored email is the baseline; fall back to the quote's customer
+  // email (first-send, before a lead correction exists).
+  const baseline = (leadEmail ?? values.customer.email ?? "").trim();
+  const norm = (s: string) => s.trim().toLowerCase();
+
+  const [email, setEmail] = useState(baseline || values.customer.email || "");
+  const [saveToLead, setSaveToLead] = useState(true);
   const [sending, setSending] = useState(false);
   // When the comms guard reports the identical email already went out, hold the
   // detail here and show an in-dialog confirm instead of a native window.confirm.
   const [dup, setDup] = useState<{ when: string; count: number } | null>(null);
 
-  // Refresh the recipient from the latest customer email each time the dialog opens
-  // (useState only seeds once at mount, before the wizard's customer step is filled).
+  // Refresh the recipient from the latest customer/lead email each time the dialog
+  // opens (useState only seeds once at mount, before the wizard's customer step is
+  // filled), and default the save-back checkbox to ticked — a bounced address is
+  // usually simply wrong, and chases/invoices keep using the lead's email.
   useEffect(() => {
     if (open) {
-      setEmail(values.customer.email || "");
+      setEmail((leadEmail ?? values.customer.email ?? "").trim());
+      setSaveToLead(true);
       setDup(null);
     }
-  }, [open, values.customer.email]);
+  }, [open, leadEmail, values.customer.email]);
+
+  // Once the entered address differs from the lead's stored one, offer to adopt it.
+  const differs = email.trim() !== "" && norm(email) !== norm(baseline);
 
   async function doSend(override?: { reason: string }) {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
@@ -121,6 +138,11 @@ export function SendQuoteDialog({
         quoteId,
         leadId: leadId ?? undefined,
         clientId: clientId ?? undefined,
+        // Server validates + normalises this and has the final say on the recipient.
+        toEmail: email.trim(),
+        // Only meaningful when the address differs from the lead's stored one; the
+        // server double-guards on that difference before touching the lead.
+        updateLeadEmail: differs && saveToLead,
         override: override ? true : undefined,
         overrideReason: override?.reason,
       });
@@ -170,20 +192,38 @@ export function SendQuoteDialog({
         <div className="space-y-4 py-2">
           <div>
             <Label htmlFor="send-to" className="mb-2 block">
-              Customer email
+              Send to
             </Label>
             <Input
               id="send-to"
               type="email"
               inputMode="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value);
                 setDup(null);
               }}
               placeholder="jane@example.com"
-              className="h-12"
+              className="h-12 text-base"
             />
+            {differs ? (
+              <label className="mt-3 flex min-h-11 cursor-pointer items-start gap-2.5 text-sm text-foreground">
+                <input
+                  type="checkbox"
+                  checked={saveToLead}
+                  onChange={(e) => setSaveToLead(e.target.checked)}
+                  className="mt-0.5 size-5 shrink-0 accent-mm-red"
+                />
+                <span className="leading-snug">
+                  Save as the lead&apos;s email address
+                  <span className="mt-0.5 block text-xs text-mist-400">
+                    Chases, deposit and balance invoices, and the review request will use this
+                    address. Untick to send this one email only.
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
 
           {dup ? (

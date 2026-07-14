@@ -220,6 +220,7 @@ export default async function QuoteDetailPage({
               pricing={pricing}
               leadId={quote.lead_id}
               clientId={quote.client_id}
+              leadEmail={leadOption?.email ?? null}
               estimatorName={estimatorName}
               vatNumber={settings.vatNumber || undefined}
               depositAmount={settings.defaultDeposit || undefined}

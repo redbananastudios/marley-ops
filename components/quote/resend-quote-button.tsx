@@ -23,6 +23,7 @@ export function ResendQuoteButton({
   pricing,
   leadId,
   clientId,
+  leadEmail,
   estimatorName,
   vatNumber,
   depositAmount,
@@ -34,6 +35,8 @@ export function ResendQuoteButton({
   pricing: PricingConfig;
   leadId?: string | null;
   clientId?: string | null;
+  /** The lead's stored email — the baseline for the "Send to" correction offer. */
+  leadEmail?: string | null;
   estimatorName?: string | null;
   vatNumber?: string;
   depositAmount?: number;
@@ -62,6 +65,7 @@ export function ResendQuoteButton({
         breakdown={breakdown}
         leadId={leadId}
         clientId={clientId}
+        leadEmail={leadEmail}
         estimatorName={estimatorName}
         vatNumber={vatNumber}
         depositAmount={depositAmount}
