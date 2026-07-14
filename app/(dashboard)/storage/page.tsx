@@ -82,6 +82,7 @@ export default async function StoragePage() {
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
   const clientName = new Map(clients.map((c) => [c.id, c.display_name as string]));
+  const clientEmail = new Map(clients.map((c) => [c.id, (c.email as string | null) ?? null]));
   const letRows: LetRow[] = lets.map((l) => {
     const agr = agreementByLet.get(l.id);
     return {
@@ -89,6 +90,7 @@ export default async function StoragePage() {
       rate: l.rate == null ? null : Number(l.rate),
       billing_paused: !!l.billing_paused,
       client_name: clientName.get(l.client_id) ?? "Unknown client",
+      client_email: clientEmail.get(l.client_id) ?? null,
       agreement: agr ? { signer: agr.signer_name, channel: agr.channel } : null,
       next_invoice: nextInvoiceDate(l as BillableLet, invoicedStartsByLet.get(l.id) ?? new Set(), today),
       invoices: invoicesByLet.get(l.id) ?? [],

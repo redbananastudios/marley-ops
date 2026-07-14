@@ -26,6 +26,7 @@ import { CrewNotesCard } from "@/components/crew-notes-card";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
+import { ResendQuoteButton } from "@/components/quote/resend-quote-button";
 import { ViewLeadDialog } from "@/components/quote/view-lead-dialog";
 
 const gbp = (n: number | null | undefined): string =>
@@ -210,6 +211,20 @@ export default async function QuoteDetailPage({
             <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">
               Emailed ×{emailedCount}
             </span>
+          ) : null}
+          {quote.status === "sent" || quote.status === "accepted" ? (
+            <ResendQuoteButton
+              quoteId={quote.id}
+              quoteRef={quote.quote_ref}
+              values={initialValues}
+              pricing={pricing}
+              leadId={quote.lead_id}
+              clientId={quote.client_id}
+              estimatorName={estimatorName}
+              vatNumber={settings.vatNumber || undefined}
+              depositAmount={settings.defaultDeposit || undefined}
+              acceptUrl={acceptUrl}
+            />
           ) : null}
           {quote.status === "accepted" && quote.agreed_price != null ? (
             <span className="rounded-pill bg-success-bg px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-success">

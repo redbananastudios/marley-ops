@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, FileDown, Phone, MessageCircle, Mail } from "lucide-react";
+import { ChevronLeft, FileDown, Phone, MessageCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Card } from "@/components/ui/card";
 import { BookSurveyButton } from "@/components/clients/book-survey-button";
+import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -154,10 +155,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             </a>
           ) : null}
           {email ? (
-            <a href={`mailto:${email}`} className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted" aria-label="Email">
-              <Mail className="size-4" strokeWidth={1.75} />
-              Email
-            </a>
+            <EmailComposeButton
+              to={email}
+              clientId={client.id}
+              label="Email"
+              className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted"
+            />
           ) : null}
         </div>
       </Card>

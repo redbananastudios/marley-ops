@@ -50,6 +50,7 @@ export function SendQuoteDialog({
   vatNumber,
   depositAmount,
   acceptUrl,
+  resend,
   onSent,
 }: {
   open: boolean;
@@ -67,6 +68,10 @@ export function SendQuoteDialog({
   depositAmount?: number;
   /** Customer accept page (/q/<token>) — email CTA + the PDF's QR codes. */
   acceptUrl?: string;
+  /** Re-send of an already-sent/accepted quote (customer asked again). Preserves
+   *  the quote's status — a re-send must never bump an accepted quote back to
+   *  "sent" — and the duplicate override is reasoned "customer requested re-send". */
+  resend?: boolean;
   onSent?: () => void;
 }) {
   const [email, setEmail] = useState(values.customer.email || "");
@@ -135,8 +140,10 @@ export function SendQuoteDialog({
         return;
       }
 
-      await setQuoteStatus(quoteId, "sent");
-      toast.success(`Quote emailed to ${email.trim()}.`);
+      // A re-send never changes status (an accepted quote must stay accepted);
+      // a first send moves the quote to "sent".
+      if (!resend) await setQuoteStatus(quoteId, "sent");
+      toast.success(`Quote ${resend ? "re-sent" : "emailed"} to ${email.trim()}.`);
       onSent?.();
       onOpenChange(false);
     } catch (err) {
@@ -150,9 +157,13 @@ export function SendQuoteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="font-display text-xl">Send quote {quoteRef}</DialogTitle>
+          <DialogTitle className="font-display text-xl">
+            {resend ? "Re-send quote" : "Send quote"} {quoteRef}
+          </DialogTitle>
           <DialogDescription>
-            The branded email and the quote PDF go to the customer. Status moves to Sent.
+            {resend
+              ? "The branded email and the quote PDF go to the customer again. The quote's status is unchanged."
+              : "The branded email and the quote PDF go to the customer. Status moves to Sent."}
           </DialogDescription>
         </DialogHeader>
 
@@ -205,7 +216,11 @@ export function SendQuoteDialog({
           </Button>
           <Button
             onClick={() =>
-              dup ? doSend({ reason: "Operator re-sent identical quote email" }) : doSend()
+              dup
+                ? doSend({
+                    reason: resend ? "customer requested re-send" : "Operator re-sent identical quote email",
+                  })
+                : doSend()
             }
             disabled={sending}
             className="bg-mm-red text-white hover:bg-mm-red-deep"
@@ -215,7 +230,7 @@ export function SendQuoteDialog({
             ) : (
               <Mail className="size-4" strokeWidth={1.75} />
             )}
-            {dup ? "Send again" : "Send quote"}
+            {dup ? "Send again" : resend ? "Re-send quote" : "Send quote"}
           </Button>
         </DialogFooter>
       </DialogContent>

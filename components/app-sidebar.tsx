@@ -5,9 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   BarChart3,
   BellRing,
+  BookOpen,
   CalendarCheck,
   CalendarRange,
   ClipboardCheck,
+  Compass,
   Contact,
   FileCheck2,
   FileText,
@@ -26,6 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { QuickCreate } from "@/components/quick-create";
+import { TourButton } from "@/components/onboarding/launch";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -79,6 +82,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/automations", label: "Automations", icon: Radio },
       { href: "/settings", label: "Settings", icon: Settings },
+      { href: "/manual", label: "User manual", icon: BookOpen },
     ],
   },
 ];
@@ -98,6 +102,10 @@ const ESTIMATOR_NAV: NavGroup[] = [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
       { href: "/quotes", label: "Quotes", icon: FileText },
     ],
+  },
+  {
+    group: "Help",
+    items: [{ href: "/manual", label: "User manual", icon: BookOpen }],
   },
 ];
 
@@ -177,6 +185,7 @@ export function SidebarNavList({
                     href={item.href}
                     onClick={onNavigate}
                     aria-current={active ? "page" : undefined}
+                    data-tour={`nav-${item.href}`}
                     className={cn(
                       "focus-ring relative flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-[14px] font-medium transition-colors",
                       active
@@ -220,6 +229,13 @@ export function NavFooter({ profile }: { profile: { full_name: string; role: str
 
   return (
     <div className="border-t border-white/8 p-3">
+      <TourButton
+        tour="office"
+        icon={<Compass className="size-4 shrink-0" strokeWidth={1.75} />}
+        className="mb-1 w-full justify-start rounded-lg px-2 text-[13px] font-medium text-white/55 transition-colors hover:bg-white/[0.055] hover:text-white"
+      >
+        Take the tour
+      </TourButton>
       <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
         <span className="grid size-9 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-xs font-semibold text-white">
           {(profile.full_name || "M").trim().charAt(0).toUpperCase()}

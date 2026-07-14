@@ -82,6 +82,9 @@ export interface QuoteItems {
   covFridge: number;
   covTV: number;
   covDiningTable: number;
+  babyGrandPianoCover: number;
+  babyGrandPianoShoe: number;
+  pianoDolly: number;
 }
 
 export const ZERO_ITEMS: QuoteItems = {
@@ -99,6 +102,9 @@ export const ZERO_ITEMS: QuoteItems = {
   covFridge: 0,
   covTV: 0,
   covDiningTable: 0,
+  babyGrandPianoCover: 0,
+  babyGrandPianoShoe: 0,
+  pianoDolly: 0,
 };
 
 export function defaultQuoteValues(): QuoteFormValues {
@@ -208,13 +214,19 @@ export function buildOpItems(items: QuoteItems): { label: string; qty: number }[
     ["Fridge Freezer Covers", items.covFridge],
     ["TV Boxes", items.covTV],
     ["Dining Table Covers", items.covDiningTable],
+    ["Baby Grand Piano Cover", items.babyGrandPianoCover],
+    ["Baby Grand Piano Shoe", items.babyGrandPianoShoe],
+    ["Piano Dolly", items.pianoDolly],
   ];
   return src.map(([label, qty]) => ({ label, qty: Number(qty) || 0 })).filter((i) => i.qty > 0);
 }
 
-export const ITEM_FIELDS: { key: keyof QuoteItems; label: string; group: "Boxes" | "Covers" }[] = [
+export type ItemGroup = "Boxes" | "Covers" | "Piano";
+
+/** Wizard field metadata. `step` = stepper increment (defaults to 1 when absent). */
+export const ITEM_FIELDS: { key: keyof QuoteItems; label: string; group: ItemGroup; step?: number }[] = [
   { key: "wardrobeBoxes", label: "Wardrobe Boxes", group: "Boxes" },
-  { key: "boxesBefore", label: "Boxes Before Move", group: "Boxes" },
+  { key: "boxesBefore", label: "Boxes Before Move", group: "Boxes", step: 5 },
   { key: "boxesOnCollection", label: "Boxes On Collection", group: "Boxes" },
   { key: "mirrorsQty", label: "Mirrors & Pictures", group: "Boxes" },
   { key: "mattressSingle", label: "Mattress Covers (Single)", group: "Covers" },
@@ -227,4 +239,7 @@ export const ITEM_FIELDS: { key: keyof QuoteItems; label: string; group: "Boxes"
   { key: "covFridge", label: "Fridge Freezer Covers", group: "Covers" },
   { key: "covTV", label: "TV Boxes", group: "Covers" },
   { key: "covDiningTable", label: "Dining Table Covers", group: "Covers" },
+  { key: "babyGrandPianoCover", label: "Baby Grand Piano Cover", group: "Piano" },
+  { key: "babyGrandPianoShoe", label: "Baby Grand Piano Shoe", group: "Piano" },
+  { key: "pianoDolly", label: "Piano Dolly", group: "Piano" },
 ];
