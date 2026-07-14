@@ -540,8 +540,8 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("Your quote is valid until {{{EXPIRY_DATE}}}.", {
       intro: [
-        "A final note from me. Your quote ({{{QUOTE_REF}}}) remains valid until {{{EXPIRY_DATE}}}; after that I'd need to re-check the price.",
-        "You can go ahead whether or not your date is confirmed &mdash; the {{{DEPOSIT_AMOUNT}}} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure. It's one click away:",
+        "I hope the move plans are coming along. Just to let you know, your quote ({{{QUOTE_REF}}}) remains valid until {{{EXPIRY_DATE}}}. After that I'd need to take a fresh look at price and availability before we could confirm anything.",
+        "You can go ahead whether or not your date is confirmed. The {{{DEPOSIT_AMOUNT}}} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure. It's one click away:",
       ],
       cta: "Accept your quote online&nbsp;&rarr;",
       closing: [
@@ -558,7 +558,7 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("One last step to secure your booking.", {
       intro: [
-        "It's {{{OWNER_NAME}}} here. Great to have you booked in. Your {{{DEPOSIT_AMOUNT}}} deposit is what makes it firm &mdash; it locks in your date if you have one, or holds a provisional booking with a fully amendable date while you wait on completion. Either way, your price and your crew are secured.",
+        "It's {{{OWNER_NAME}}} here. Great to have you booked in. The last step is your {{{DEPOSIT_AMOUNT}}} deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.",
         "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
@@ -573,7 +573,7 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("Your booking is still provisional.", {
       intro: [
-        "A quick note. We're holding your booking provisionally, but I can't guarantee it much longer without your {{{DEPOSIT_AMOUNT}}} deposit. It confirms your place with us &mdash; with your date locked in if it's set, and fully amendable if you're still waiting on it:",
+        "Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, your {{{DEPOSIT_AMOUNT}}} deposit is what confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
       closing: ["If your timing has changed or plans have shifted, just reply and let me know. I'd genuinely rather help than chase."],

@@ -173,7 +173,7 @@ ${owner}`,
     subject: `Your quote is valid until ${c.expiryLabel}`,
     text: `Hi ${name},
 
-This is my last follow-up about quote ${c.quoteRef}. It stays valid until ${c.expiryLabel}; after that I'll need to re-check both the price and availability.
+I hope the move plans are coming along. Just to let you know, quote ${c.quoteRef} remains valid until ${c.expiryLabel}. After that I'd need to take a fresh look at price and availability before we could confirm anything.
 
 You can go ahead whether or not your date is confirmed. The £100 deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure:
 ${c.acceptUrl}
@@ -196,7 +196,7 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
       subject: `One last step to secure your booking (${c.quoteRef})`,
       text: `Hi ${name},
 
-It's ${owner} here. Thanks for accepting your quote. The £100 deposit is what makes your booking firm: it locks in your date if you have one, or holds a provisional booking with a fully amendable date while you wait on completion. Either way, your price and your crew are secured.
+It's ${owner} here. Great to have you booked in. The last step is your £100 deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
 
 You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}
@@ -215,7 +215,7 @@ ${owner}`,
     subject: `Your booking is still provisional (${c.quoteRef})`,
     text: `Hi ${name},
 
-I'm still holding your booking provisionally. To confirm your place, please pay the £100 deposit using your quote page. Your date stays fully amendable if it isn't settled yet:
+Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, the £100 deposit confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:
 ${c.acceptUrl}
 
 If your plans have changed or you need help with payment, reply and let me know. I'd rather help than keep chasing.
