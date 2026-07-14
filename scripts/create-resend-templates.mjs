@@ -525,7 +525,8 @@ const TEMPLATES = [
     html: chaseHtml("Shall I hold your move date?", {
       intro: [
         "Dates for the coming weeks are starting to fill up, with month-end and Fridays always going first, so I wanted to check where you're at with your quote.",
-        "Accepting takes about half a minute, and your {{{DEPOSIT_AMOUNT}}} deposit secures both your date and crew:",
+        "If your completion date isn't confirmed yet, that's completely normal &mdash; most of our customers only have theirs two or three weeks before the move. Accepting now simply adds you to our priority list, so when your date does land we're best placed to accommodate it.",
+        "Accepting takes about half a minute, and your {{{DEPOSIT_AMOUNT}}} deposit secures your place and your crew:",
       ],
       cta: "Accept your quote online&nbsp;&rarr;",
       closing: ["If anything in the quote doesn't look right, let me know and I'll sort it before anything is booked."],
@@ -540,7 +541,7 @@ const TEMPLATES = [
     html: chaseHtml("Your quote is valid until {{{EXPIRY_DATE}}}.", {
       intro: [
         "A final note from me. Your quote ({{{QUOTE_REF}}}) remains valid until {{{EXPIRY_DATE}}}; after that I'd need to re-check the price.",
-        "If you'd like your date held, it's one click away:",
+        "You can go ahead whether or not your date is confirmed &mdash; the {{{DEPOSIT_AMOUNT}}} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure. It's one click away:",
       ],
       cta: "Accept your quote online&nbsp;&rarr;",
       closing: [
@@ -553,11 +554,11 @@ const TEMPLATES = [
   {
     name: "chase-deposit-1",
     envVar: "RESEND_TEMPLATE_CHASE_DEPOSIT_1",
-    subject: "One last step to secure your move date ({{{QUOTE_REF}}})",
+    subject: "One last step to secure your booking ({{{QUOTE_REF}}})",
     from: CHASE_FROM,
-    html: chaseHtml("One last step to secure your date.", {
+    html: chaseHtml("One last step to secure your booking.", {
       intro: [
-        "It's {{{OWNER_NAME}}} here. Great to have you booked in. Your date is reserved, and your {{{DEPOSIT_AMOUNT}}} deposit is what makes it firm and secures your crew.",
+        "It's {{{OWNER_NAME}}} here. Great to have you booked in. Your {{{DEPOSIT_AMOUNT}}} deposit is what makes it firm &mdash; it locks in your date if you have one, or holds a provisional booking with a fully amendable date while you wait on completion. Either way, your price and your crew are secured.",
         "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
@@ -568,11 +569,11 @@ const TEMPLATES = [
   {
     name: "chase-deposit-2",
     envVar: "RESEND_TEMPLATE_CHASE_DEPOSIT_2",
-    subject: "Your move date is still provisional ({{{QUOTE_REF}}})",
+    subject: "Your booking is still provisional ({{{QUOTE_REF}}})",
     from: CHASE_FROM,
-    html: chaseHtml("Your move date is still provisional.", {
+    html: chaseHtml("Your booking is still provisional.", {
       intro: [
-        "A quick note. We're holding your move date, but I can't guarantee it much longer without your {{{DEPOSIT_AMOUNT}}} deposit, which secures both the date and crew:",
+        "A quick note. We're holding your booking provisionally, but I can't guarantee it much longer without your {{{DEPOSIT_AMOUNT}}} deposit. It confirms your place with us &mdash; with your date locked in if it's set, and fully amendable if you're still waiting on it:",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
       closing: ["If your timing has changed or plans have shifted, just reply and let me know. I'd genuinely rather help than chase."],

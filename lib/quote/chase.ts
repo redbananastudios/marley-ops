@@ -156,7 +156,9 @@ ${owner}`,
 
 I'm checking in on quote ${c.quoteRef}. Dates are starting to fill for the coming weeks, with Fridays and month-end usually going first.
 
-If you'd like to go ahead, accept online and pay the £100 deposit to confirm the crew and date:
+If your completion date isn't confirmed yet, that's completely normal. Most of our customers only have theirs two or three weeks before the move. Accepting now simply adds you to our priority list, so when your date does land we're best placed to accommodate it.
+
+If you'd like to go ahead, accept online and pay the £100 deposit to secure your place and your crew:
 ${c.acceptUrl}
 
 If you're still deciding, or anything in the quote needs changing, just reply and I'll help.
@@ -173,7 +175,7 @@ ${owner}`,
 
 This is my last follow-up about quote ${c.quoteRef}. It stays valid until ${c.expiryLabel}; after that I'll need to re-check both the price and availability.
 
-If you'd like to go ahead, you can accept it here:
+You can go ahead whether or not your date is confirmed. The £100 deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure:
 ${c.acceptUrl}
 
 If you no longer need the quote, reply with "not going ahead" and I won't follow up again. If you've chosen someone else, a one-line note about what made the difference would genuinely help us improve.
@@ -191,10 +193,10 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
   const from = chaseFromFor(c.ownerName);
   if (step === 1) {
     return {
-      subject: `One last step to secure your move date (${c.quoteRef})`,
+      subject: `One last step to secure your booking (${c.quoteRef})`,
       text: `Hi ${name},
 
-It's ${owner} here. Thanks for accepting your quote. I've provisionally held your move date; the £100 deposit confirms the booking and allocates the crew.
+It's ${owner} here. Thanks for accepting your quote. The £100 deposit is what makes your booking firm: it locks in your date if you have one, or holds a provisional booking with a fully amendable date while you wait on completion. Either way, your price and your crew are secured.
 
 You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}
@@ -210,10 +212,10 @@ ${owner}`,
     };
   }
   return {
-    subject: `Your move date is still provisional (${c.quoteRef})`,
+    subject: `Your booking is still provisional (${c.quoteRef})`,
     text: `Hi ${name},
 
-I'm still holding your move date provisionally. To confirm it, please pay the £100 deposit using your quote page:
+I'm still holding your booking provisionally. To confirm your place, please pay the £100 deposit using your quote page. Your date stays fully amendable if it isn't settled yet:
 ${c.acceptUrl}
 
 If your plans have changed or you need help with payment, reply and let me know. I'd rather help than keep chasing.
