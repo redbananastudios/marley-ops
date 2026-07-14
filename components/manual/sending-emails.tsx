@@ -15,7 +15,7 @@ export function SendingEmails() {
       />
       <Note tone="info">
         This is for one-off, personal messages. The 13 automatic emails in the table below fire on their own —
-        you don't need to send those manually.
+        you don&apos;t need to send those manually.
       </Note>
     </Section>
   );

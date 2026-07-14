@@ -14,8 +14,8 @@ export function CrewGuide() {
         <Steps
           items={[
             <>
-              A crew login goes straight to <Kbd>/my-jobs</Kbd> — never the office dashboard. You'll only ever see
-              jobs you're assigned to.
+              A crew login goes straight to <Kbd>/my-jobs</Kbd> — never the office dashboard. You&apos;ll only ever see
+              jobs you&apos;re assigned to.
             </>,
             "The day list is grouped by date, with today's jobs at the top.",
           ]}

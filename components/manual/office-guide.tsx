@@ -157,7 +157,7 @@ export function OfficeGuide() {
           items={[
             <><strong>Overview</strong> — estimator payroll and jobs &amp; margin.</>,
             <><strong>Sales</strong> — revenue by lens (generated / paid / projected / potential), conversion, quote funnel, per-source performance.</>,
-            <><strong>Storage</strong> — occupancy, run-rate, who's in storage, stay-length stats.</>,
+            <><strong>Storage</strong> — occupancy, run-rate, who&apos;s in storage, stay-length stats.</>,
           ]}
         />
       </GuideCard>

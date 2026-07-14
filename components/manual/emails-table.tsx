@@ -34,7 +34,7 @@ export function EmailsTable() {
       />
       <Note tone="info">
         There are also two internal-only emails that never reach a customer: an ops alert to the office (new
-        acceptance, deposit landed, a failed sync) and a night-before reminder listing tomorrow's jobs to each
+        acceptance, deposit landed, a failed sync) and a night-before reminder listing tomorrow&apos;s jobs to each
         assigned crew member.
       </Note>
     </Section>
