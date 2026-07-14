@@ -147,6 +147,10 @@ export function groupCubicLinesByRoom(lines: CubicLine[]): SurveyInventoryRoom[]
         fragile: l.flags?.fragile === true,
         notMoving: l.flags?.notMoving === true,
       },
+      // Line notes reach CREW surfaces (job page + printed sheet). Today they
+      // only originate from the AI pipeline / customer self-fill (price-free by
+      // nature). If a per-line OFFICE note input is ever added, split it
+      // internal-vs-crew-safe first, like cubic_surveys.notes/customer_notes.
       note: typeof l.note === "string" && l.note.trim() ? l.note.trim() : undefined,
     };
     const arr = byRoom.get(room) ?? [];

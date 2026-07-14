@@ -3,14 +3,16 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadJobSheet, loadPhotoDataUris } from "@/lib/job-sheet-load";
+import { crewAssignedToAppointment, loadJobSheet, loadPhotoDataUris } from "@/lib/job-sheet-load";
 import type { JobSheetData } from "@/lib/job-sheet-docdef";
 
 /** Everything the client-side pdfmake needs for one job's crew sheet.
  *
- *  Available to every active login — crew included (they print their own).
- *  Data loading + the price-free guarantee live in lib/job-sheet-load.ts
- *  (shared with the /my-jobs/[id] web view). */
+ *  Office roles can pull any job's sheet; a CREW login only the jobs they are
+ *  assigned to (same gate as the /my-jobs/[id] web view — the sheet carries
+ *  customer PII, access notes, survey inventory and interior photos, so an
+ *  unassigned crew member replaying this action must get nothing). Data
+ *  loading + the price-free guarantee live in lib/job-sheet-load.ts. */
 export async function getJobSheetDataAction(
   appointmentId: string,
 ): Promise<{ ok: true; data: JobSheetData } | { ok: false; error: string }> {
@@ -20,10 +22,18 @@ export async function getJobSheetDataAction(
     data: { user },
   } = await sb.auth.getUser();
   if (!user) return { ok: false, error: "Not signed in." };
-  const { data: prof } = await sb.from("profiles").select("active").eq("id", user.id).single();
+  const { data: prof } = await sb
+    .from("profiles")
+    .select("active, role, email")
+    .eq("id", user.id)
+    .single();
   if (!prof?.active) return { ok: false, error: "Not signed in." };
 
   const admin = createAdminClient();
+  if (prof.role === "crew") {
+    const assigned = await crewAssignedToAppointment(admin, user.id, prof.email ?? null, appointmentId);
+    if (!assigned) return { ok: false, error: "Appointment not found." };
+  }
   const loaded = await loadJobSheet(admin, appointmentId);
   if (!loaded) return { ok: false, error: "Appointment not found." };
 

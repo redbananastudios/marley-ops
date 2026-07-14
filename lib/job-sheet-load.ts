@@ -55,6 +55,15 @@ export async function crewAssignedToAppointment(
   email: string | null,
   appointmentId: string,
 ): Promise<boolean> {
+  // A cancelled job never appears in the crew's /my-jobs list — don't let a
+  // stale direct URL resurrect it (review finding, 2026-07-14).
+  const { data: appt } = await admin
+    .from("appointments")
+    .select("status")
+    .eq("id", appointmentId)
+    .maybeSingle();
+  if (!appt || appt.status === "cancelled") return false;
+
   let staffId: string | null = null;
   const { data: byId } = await admin
     .from("staff")
