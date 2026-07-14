@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { z } from "zod";
 import {
   ArrowLeft,
+  Boxes,
   CalendarDays,
   Camera,
   CheckCircle2,
@@ -13,12 +14,18 @@ import {
   StickyNote,
   Truck,
   UserRound,
+  Video,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/app-sidebar";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadJobSheet, loadPhotoSignedUrls } from "@/lib/job-sheet-load";
+import {
+  crewAssignedToAppointment,
+  loadJobSheet,
+  loadPhotoSignedUrls,
+  loadSurveyVideoSignedUrls,
+} from "@/lib/job-sheet-load";
 import { loadJobNotesForAppointment } from "@/lib/job-notes";
 import { JobNotes } from "@/components/crew/job-notes";
 import type { JobSheetAddress } from "@/lib/job-sheet-docdef";
@@ -53,6 +60,19 @@ function accessLine(a: JobSheetAddress): string {
   return bits.filter(Boolean).join(" · ");
 }
 
+function fmtDuration(s: number | null): string {
+  if (!s || s <= 0) return "";
+  const total = Math.round(s);
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
+function videoLabel(v: { room: string | null; kind: "room_video" | "import_video" }): string {
+  if (v.room) return v.room;
+  return v.kind === "import_video" ? "Imported video" : "Room walkthrough";
+}
+
 export default async function CrewJobPage({ params }: { params: Promise<{ id: string }> }) {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
@@ -61,11 +81,21 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
   if (!z.string().uuid().safeParse(id).success) notFound();
 
   const admin = createAdminClient();
+
+  // A crew member may only open jobs they're assigned to (matches the /my-jobs
+  // listing gate); office roles review any job. This is what guards the signed
+  // survey-media (photos + videos) minted below — never widen storage RLS.
+  if (profile.role === "crew") {
+    const assigned = await crewAssignedToAppointment(admin, profile.id, profile.email, id);
+    if (!assigned) notFound();
+  }
+
   const loaded = await loadJobSheet(admin, id);
   if (!loaded) notFound();
-  const { data: d, apptType, surveyId } = loaded;
-  const [photos, crewNotes, { data: completion }, { data: myStaff }] = await Promise.all([
+  const { data: d, apptType, surveyId, cubicSurveyId } = loaded;
+  const [photos, videos, crewNotes, { data: completion }, { data: myStaff }] = await Promise.all([
     surveyId ? loadPhotoSignedUrls(admin, surveyId) : Promise.resolve([]),
+    cubicSurveyId ? loadSurveyVideoSignedUrls(admin, cubicSurveyId) : Promise.resolve([]),
     loadJobNotesForAppointment(admin, id),
     admin
       .from("job_completions")
@@ -244,6 +274,56 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           )}
         </div>
 
+        {/* survey inventory — the full room-grouped item list the survey
+            collected, price-free; notMoving lines stay in, clearly flagged */}
+        {d.surveyInventory?.length ? (
+          <div className="mt-3 rounded-lg border border-border bg-card">
+            <div className="border-b px-4 py-3">
+              {eyebrow(<Boxes className="size-3.5" strokeWidth={1.75} />, "Survey inventory")}
+            </div>
+            <div className="divide-y">
+              {d.surveyInventory.map((room) => (
+                <div key={room.room} className="px-4 py-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-mist-400">{room.room}</p>
+                  <ul className="mt-1.5 space-y-1.5">
+                    {room.items.map((it, i) => (
+                      <li key={`${it.title}-${i}`} className="text-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="text-foreground">
+                            {it.title}
+                            {it.qty > 1 ? <span className="text-mist-400"> ×{it.qty}</span> : null}
+                          </span>
+                          {it.ft3 ? <span className="tabular shrink-0 text-xs text-mist-400">{it.ft3} ft³</span> : null}
+                        </div>
+                        {it.flags.notMoving || it.flags.dismantle || it.flags.fragile ? (
+                          <div className="mt-1 flex flex-wrap gap-1.5">
+                            {it.flags.notMoving ? (
+                              <span className="rounded-pill bg-mm-red-tint px-2 py-0.5 text-[11px] font-semibold text-mm-red-deep">
+                                Not moving — leave in place
+                              </span>
+                            ) : null}
+                            {it.flags.dismantle ? (
+                              <span className="rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium text-mist-500">
+                                Dismantle
+                              </span>
+                            ) : null}
+                            {it.flags.fragile ? (
+                              <span className="rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium text-mist-500">
+                                Fragile
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {it.note ? <p className="mt-0.5 text-xs text-mist-400">{it.note}</p> : null}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         {/* notes */}
         {d.volumeLine || d.accessNotes || d.largeItemsNotes || d.jobNotes ? (
           <div className="mt-3 rounded-lg border border-border bg-card p-4">
@@ -284,6 +364,34 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
                   </p>
                 </a>
               ))}
+            </div>
+          </div>
+        ) : null}
+
+        {/* survey walkthrough videos — the clips the survey captured, played
+            inline in the cab; signed URLs minted per request, office-only bucket */}
+        {videos.length ? (
+          <div className="mt-3 rounded-lg border border-border bg-card p-4">
+            {eyebrow(<Video className="size-3.5" strokeWidth={1.75} />, "Survey videos")}
+            <div className="mt-2 space-y-4">
+              {videos.map((v, i) => {
+                const dur = fmtDuration(v.durationS);
+                return (
+                  <div key={i}>
+                    <div className="mb-1.5 flex items-center justify-between gap-2 text-sm">
+                      <span className="font-medium text-foreground">{videoLabel(v)}</span>
+                      {dur ? <span className="tabular shrink-0 text-xs text-mist-400">{dur}</span> : null}
+                    </div>
+                    <video
+                      controls
+                      preload="none"
+                      playsInline
+                      src={v.url}
+                      className="w-full rounded-md border border-border bg-black"
+                    />
+                  </div>
+                );
+              })}
             </div>
           </div>
         ) : null}

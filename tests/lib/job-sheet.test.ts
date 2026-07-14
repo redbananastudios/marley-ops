@@ -150,6 +150,48 @@ describe("buildJobSheetDocDef", () => {
     expect(JSON.stringify(buildJobSheetDocDef(data))).not.toContain("SURVEY PHOTOS");
   });
 
+  it("renders the room-grouped survey inventory and flags NOT MOVING — staying price-free", () => {
+    const withSurvey = {
+      ...data,
+      surveyInventory: [
+        {
+          room: "Lounge",
+          items: [
+            { title: "Sofa 2 seater", qty: 2, ft3: 70, flags: { dismantle: false, fragile: true, notMoving: false } },
+            { title: "Chest freezer", qty: 1, ft3: 45, flags: { dismantle: false, fragile: false, notMoving: true }, note: "Customer keeps it" },
+          ],
+        },
+        {
+          room: "General",
+          items: [{ title: "Odd box", qty: 1, ft3: 5, flags: { dismantle: false, fragile: false, notMoving: false } }],
+        },
+      ],
+    };
+    const s = JSON.stringify(buildJobSheetDocDef(withSurvey));
+    expect(s).toContain("SURVEY INVENTORY");
+    expect(s).toContain("Sofa 2 seater");
+    expect(s).toContain("Chest freezer");
+    expect(s).toContain("Lounge");
+    expect(s).toContain("NOT MOVING — leave in place");
+    expect(s).toContain("Customer keeps it");
+    // still price-free with the survey block present
+    expect(s).not.toContain("£");
+    expect(s.toLowerCase()).not.toContain("deposit");
+    // and no survey block when there's no inventory
+    expect(JSON.stringify(buildJobSheetDocDef(data))).not.toContain("SURVEY INVENTORY");
+  });
+
+  it("shows a QR to the job page when the survey has walkthrough videos; hidden otherwise", () => {
+    const jobUrl = "https://ops.marleymoves.co.uk/my-jobs/abc-123";
+    const withVideos = JSON.stringify(buildJobSheetDocDef({ ...data, videoCount: 2, jobUrl }));
+    expect(withVideos).toContain("SURVEY WALKTHROUGH VIDEOS");
+    expect(withVideos).toContain(`"qr":"${jobUrl}"`);
+    expect(withVideos).toContain("2 videos on file");
+    // no count, or no url → no QR block
+    expect(JSON.stringify(buildJobSheetDocDef({ ...data, videoCount: 0, jobUrl }))).not.toContain("SURVEY WALKTHROUGH VIDEOS");
+    expect(JSON.stringify(buildJobSheetDocDef({ ...data, videoCount: 2, jobUrl: null }))).not.toContain("SURVEY WALKTHROUGH VIDEOS");
+  });
+
   it("unsigned contract prints the collect-on-arrival banner; signed/no-quote stays clean", () => {
     const flagged = JSON.stringify(buildJobSheetDocDef({ ...data, contractSigned: false }));
     expect(flagged).toContain("CONTRACT NOT YET SIGNED");

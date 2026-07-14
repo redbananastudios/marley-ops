@@ -4,6 +4,7 @@ import {
   computeCubicTotals,
   DEFAULT_CAPACITIES,
   ft3ToM3,
+  groupCubicLinesByRoom,
   MAX_LINES,
   reconcileCubicLineProvenance,
   recommendVans,
@@ -88,6 +89,30 @@ describe("computeCubicTotals", () => {
     expect(t.dismantleCount).toBe(0);
     expect(t.fragileCount).toBe(0);
     expect(t.totalFt3).toBe(0);
+  });
+});
+
+describe("groupCubicLinesByRoom (crew survey inventory)", () => {
+  it("groups by room, keeps line ft³, sorts rooms with General last", () => {
+    const groups = groupCubicLinesByRoom([
+      line({ id: "00000000-0000-4000-8000-000000000001", room: "Lounge", qty: 2, unitFt3: 35 }), // 70
+      line({ id: "00000000-0000-4000-8000-000000000002", room: undefined, title: "Odd box", qty: 1, unitFt3: 5 }),
+      line({ id: "00000000-0000-4000-8000-000000000003", room: "Bedroom 1", qty: 1, unitFt3: 40 }),
+    ]);
+    expect(groups.map((g) => g.room)).toEqual(["Bedroom 1", "Lounge", "General"]);
+    const lounge = groups.find((g) => g.room === "Lounge")!;
+    expect(lounge.items[0]).toMatchObject({ title: "Sofa 2 seater", qty: 2, ft3: 70 });
+  });
+
+  it("INCLUDES notMoving lines and marks them, while zero-qty lines drop out", () => {
+    const groups = groupCubicLinesByRoom([
+      line({ id: "00000000-0000-4000-8000-000000000001", room: "Garage", title: "Chest freezer", flags: { notMoving: true } }),
+      line({ id: "00000000-0000-4000-8000-000000000002", room: "Garage", qty: 0 }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].room).toBe("Garage");
+    expect(groups[0].items).toHaveLength(1);
+    expect(groups[0].items[0]).toMatchObject({ title: "Chest freezer", flags: { notMoving: true } });
   });
 });
 

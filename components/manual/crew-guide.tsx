@@ -27,7 +27,7 @@ export function CrewGuide() {
           items={[
             "Open a job to see the route (with a Directions link for each address), who else is on the job, the van(s), the inventory from the accepted quote, and any notes.",
             "Add your own notes and photos on site — damage, access issues, anything worth a record. These are internal only and are never sent to the customer.",
-            "Survey photos taken at the original visit are also visible here for context.",
+            "Everything the survey collected is here for context — the full room-by-room item list, the survey photos, and the walkthrough videos — with prices always stripped out.",
           ]}
         />
       </GuideCard>

@@ -10,6 +10,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { SurveyInventoryRoom } from "@/lib/cubic-survey";
+
 const C = {
   red: "#C03838",
   redSoft: "#FDF1F1",
@@ -58,6 +60,13 @@ export interface JobSheetData {
   volumeLine?: string | null;
   /** Survey photos (data URIs) — rendered on their own page when present. */
   photos?: JobSheetPhoto[];
+  /** Full room-grouped survey item list — price-free, notMoving lines flagged. */
+  surveyInventory?: SurveyInventoryRoom[];
+  /** How many AI walkthrough videos exist for this job (a PDF can't play them,
+   *  so the sheet shows a QR to the job page instead). */
+  videoCount?: number;
+  /** Absolute URL to this job's /my-jobs/[id] page — encoded into the video QR. */
+  jobUrl?: string | null;
   /** Contract signature state: false = accepted quote with NO signature yet
    *  (crew must collect on arrival); null/undefined = no accepted quote. */
   contractSigned?: boolean | null;
@@ -182,6 +191,105 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
       ]
     : [];
 
+  /* survey inventory — the FULL room-grouped item list the survey collected,
+     price-free. notMoving lines stay in, clearly marked. */
+  const surveyRooms = d.surveyInventory ?? [];
+  const flagLabel = (f: { dismantle: boolean; fragile: boolean; notMoving: boolean }): string => {
+    const bits: string[] = [];
+    if (f.notMoving) bits.push("NOT MOVING — leave in place");
+    if (f.dismantle) bits.push("Dismantle");
+    if (f.fragile) bits.push("Fragile");
+    return bits.join(" · ");
+  };
+  const surveyBody: any[] = [
+    [
+      { text: "ITEM", style: "colHead", fillColor: C.charcoal, margin: [10, 5, 10, 5] },
+      { text: "QTY", style: "colHead", fillColor: C.charcoal, alignment: "right", margin: [10, 5, 10, 5] },
+      { text: "FT³", style: "colHead", fillColor: C.charcoal, alignment: "right", margin: [10, 5, 10, 5] },
+      { text: "NOTES", style: "colHead", fillColor: C.charcoal, margin: [10, 5, 10, 5] },
+    ],
+  ];
+  for (const grp of surveyRooms) {
+    surveyBody.push([
+      { text: grp.room, style: "colHead", color: C.red, fillColor: C.softPanel, colSpan: 4, margin: [10, 5, 10, 5] },
+      {},
+      {},
+      {},
+    ]);
+    grp.items.forEach((it, idx) => {
+      const fill = idx % 2 ? C.rowAlt : C.white;
+      const flags = flagLabel(it.flags);
+      const noteBits = [flags || null, it.note || null].filter(Boolean).join(" — ");
+      surveyBody.push([
+        { text: it.title, style: "body", fillColor: fill, margin: cellM },
+        { text: String(it.qty), style: "bodyQty", fillColor: fill, margin: cellM },
+        { text: it.ft3 ? String(it.ft3) : "", style: "bodyQty", fillColor: fill, margin: cellM },
+        {
+          text: noteBits,
+          style: it.flags.notMoving ? "flagWarn" : "meta",
+          fillColor: fill,
+          margin: cellM,
+        },
+      ]);
+    });
+  }
+  const surveyInventorySection: any[] = surveyRooms.length
+    ? [
+        {
+          table: { headerRows: 1, widths: ["*", 34, 40, "*"], body: surveyBody },
+          layout: {
+            hLineWidth: () => 0.75,
+            vLineWidth: () => 0.75,
+            hLineColor: () => C.border,
+            vLineColor: () => C.border,
+            paddingLeft: () => 0,
+            paddingRight: () => 0,
+            paddingTop: () => 0,
+            paddingBottom: () => 0,
+          },
+          margin: [0, 0, 0, 12],
+        },
+      ]
+    : [];
+
+  /* survey walkthrough videos — a PDF can't play them; a single QR scan opens
+     the (assignment-gated) job page on the crew member's phone. */
+  const videoCount = d.videoCount ?? 0;
+  const videoSection: any[] =
+    videoCount > 0 && d.jobUrl
+      ? [
+          {
+            table: {
+              widths: ["*", "auto"],
+              body: [
+                [
+                  {
+                    stack: [
+                      { text: "SURVEY WALKTHROUGH VIDEOS", style: "colHead", color: C.red },
+                      {
+                        text: `${videoCount} video${videoCount === 1 ? "" : "s"} on file. Scan to open this job in Marley Ops on your phone and watch the walkthrough.`,
+                        style: "body",
+                        margin: [0, 4, 0, 0],
+                      },
+                    ],
+                    fillColor: C.redSoft,
+                    margin: [10, 9, 10, 9],
+                  },
+                  {
+                    stack: [{ qr: d.jobUrl, fit: 90, foreground: C.ink }],
+                    fillColor: C.redSoft,
+                    alignment: "center",
+                    margin: [10, 8, 12, 8],
+                  },
+                ],
+              ],
+            },
+            layout: "noBorders",
+            margin: [0, 0, 0, 12],
+          },
+        ]
+      : [];
+
   return {
     pageSize: "A4",
     pageMargins: [38, 38, 38, 46],
@@ -208,6 +316,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
       bodyQty: { fontSize: 9.5, bold: true, color: C.ink, alignment: "right" },
       meta: { fontSize: 8.5, color: C.muted },
       colHead: { fontSize: 8.5, bold: true, color: C.white },
+      flagWarn: { fontSize: 8.5, bold: true, color: C.red },
       footerText: { fontSize: 7.5, color: C.muted },
     },
     content: [
@@ -363,6 +472,15 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
         },
         margin: [0, 0, 0, 12],
       },
+
+      /* survey inventory — full room-grouped item list from the survey */
+      ...(surveyInventorySection.length
+        ? [{ text: "SURVEY INVENTORY", style: "colHead", color: C.red, margin: [0, 0, 0, 8] }]
+        : []),
+      ...surveyInventorySection,
+
+      /* survey walkthrough videos — QR to the job page */
+      ...videoSection,
 
       /* notes */
       listCard("Notes for the crew", notes, "No notes recorded."),

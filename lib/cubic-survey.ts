@@ -106,6 +106,62 @@ export function computeCubicTotals(lines: CubicLine[]): CubicTotals {
   };
 }
 
+/* ------------------------------------------------- crew survey inventory */
+
+export interface SurveyInventoryItem {
+  title: string;
+  qty: number;
+  /** Line total ft³ (qty × unit), rounded — display only, never a price. */
+  ft3: number;
+  flags: { dismantle: boolean; fragile: boolean; notMoving: boolean };
+  note?: string;
+}
+
+export interface SurveyInventoryRoom {
+  /** Real room name, or "General" for lines with no room. */
+  room: string;
+  items: SurveyInventoryItem[];
+}
+
+export const GENERAL_ROOM = "General";
+
+/**
+ * Room-group the canonical cubic lines for a crew's eyes — the FULL item list
+ * the survey collected, price-free. notMoving lines are INCLUDED (a crew needs
+ * to know what to leave) and flagged; the work-tally counts (computeCubicTotals)
+ * still exclude them. Sorted by room, the "General" bucket last.
+ */
+export function groupCubicLinesByRoom(lines: CubicLine[]): SurveyInventoryRoom[] {
+  const byRoom = new Map<string, SurveyInventoryItem[]>();
+  for (const l of lines) {
+    const qty = Number(l.qty) || 0;
+    if (qty <= 0) continue;
+    const unit = Number(l.unitFt3) || 0;
+    const room = (typeof l.room === "string" && l.room.trim()) || GENERAL_ROOM;
+    const item: SurveyInventoryItem = {
+      title: l.title,
+      qty,
+      ft3: Math.round(qty * unit * 10) / 10,
+      flags: {
+        dismantle: l.flags?.dismantle === true,
+        fragile: l.flags?.fragile === true,
+        notMoving: l.flags?.notMoving === true,
+      },
+      note: typeof l.note === "string" && l.note.trim() ? l.note.trim() : undefined,
+    };
+    const arr = byRoom.get(room) ?? [];
+    arr.push(item);
+    byRoom.set(room, arr);
+  }
+  return [...byRoom.entries()]
+    .map(([room, items]) => ({ room, items }))
+    .sort((a, b) => {
+      if (a.room === GENERAL_ROOM) return 1;
+      if (b.room === GENERAL_ROOM) return -1;
+      return a.room.localeCompare(b.room, "en-GB");
+    });
+}
+
 export interface VanCapacities {
   fillPct: number; // e.g. 90
   transitFt3: number;

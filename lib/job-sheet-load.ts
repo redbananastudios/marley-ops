@@ -9,7 +9,13 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
-import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
+import {
+  computeCubicTotals,
+  groupCubicLinesByRoom,
+  recommendVans,
+  sanitizeCubicLines,
+  vehicleShortLabel,
+} from "@/lib/cubic-survey";
 import { getBusinessSettings } from "@/lib/settings";
 import type { JobSheetData, JobSheetPhoto } from "@/lib/job-sheet-docdef";
 
@@ -22,14 +28,59 @@ const CATEGORY_LABEL: Record<string, string> = {
   cubic: "Volume survey",
 };
 
+const SURVEY_MEDIA_BUCKET = "survey-media";
+const SURVEY_VIDEO_KINDS = ["room_video", "import_video"] as const;
+const SURVEY_VIDEO_STATUSES = ["processed", "uploaded"] as const;
+
 type Admin = ReturnType<typeof createAdminClient>;
 
 export interface JobSheetLoad {
   data: JobSheetData;
   apptType: string;
   surveyId: string | null;
+  /** cubic_surveys.id — anchors the AI walkthrough videos (survey-media bucket). */
+  cubicSurveyId: string | null;
   quoteId: string | null;
   leadId: string | null;
+}
+
+/** Is this login assigned to this appointment? Mirrors the /my-jobs listing
+ *  gate (link login → staff by profile_id then email, then check
+ *  appointment_assignments) so the detail page can only serve a crew member the
+ *  jobs they're actually on. Office roles bypass this — they legitimately view
+ *  any job. Used before minting signed survey-media URLs on the crew page. */
+export async function crewAssignedToAppointment(
+  admin: Admin,
+  profileId: string,
+  email: string | null,
+  appointmentId: string,
+): Promise<boolean> {
+  let staffId: string | null = null;
+  const { data: byId } = await admin
+    .from("staff")
+    .select("id")
+    .eq("profile_id", profileId)
+    .eq("is_active", true)
+    .maybeSingle();
+  staffId = byId?.id ?? null;
+  if (!staffId && email) {
+    const { data: byEmail } = await admin
+      .from("staff")
+      .select("id")
+      .ilike("email", email)
+      .eq("is_active", true)
+      .maybeSingle();
+    staffId = byEmail?.id ?? null;
+  }
+  if (!staffId) return false;
+
+  const { data: assign } = await admin
+    .from("appointment_assignments")
+    .select("appointment_id")
+    .eq("appointment_id", appointmentId)
+    .eq("staff_id", staffId)
+    .maybeSingle();
+  return !!assign;
 }
 
 /** Assemble the price-free sheet for one appointment (photos NOT included —
@@ -96,29 +147,55 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     vehicles,
   );
 
-  // Cubic-survey summary — total + the flags a crew cares about. Price-free.
+  // Cubic-survey data for the crew — volume summary + the FULL room-grouped
+  // item list + a count of the AI walkthrough videos. All price-free (owner
+  // decision, 2026-07-14: crew see everything a survey collected except money).
+  let cubicSurveyId: string | null = null;
   if (appt.lead_id) {
     const { data: cubic } = await admin
       .from("cubic_surveys")
-      .select("items, total_ft3")
+      .select("id, items, total_ft3")
       .eq("lead_id", appt.lead_id)
       .maybeSingle();
-    if (cubic && Number(cubic.total_ft3) > 0) {
+    if (cubic) {
+      cubicSurveyId = cubic.id;
       const lines = sanitizeCubicLines(cubic.items) ?? [];
-      const totals = computeCubicTotals(lines);
-      const settings = await getBusinessSettings(admin);
-      const rec = recommendVans(Number(cubic.total_ft3), {
-        fillPct: settings.cubicFillPct,
-        transitFt3: settings.cubicTransitFt3,
-        lutonFt3: settings.cubicLutonFt3,
-        sevenFiveTFt3: settings.cubic75tFt3,
-      });
-      const bits = [
-        `Volume survey: ${Number(cubic.total_ft3).toLocaleString("en-GB")} ft³${rec ? ` (≈ ${vehicleShortLabel(rec)})` : ""}`,
-        totals.dismantleCount ? `${totals.dismantleCount} to dismantle` : null,
-        totals.fragileCount ? `${totals.fragileCount} fragile/high-value` : null,
-      ].filter(Boolean);
-      data.volumeLine = bits.join(" · ");
+
+      // Full room-grouped inventory (regardless of total_ft3 — a survey may
+      // have videos/items before the office confirms the volume total).
+      const inventory = groupCubicLinesByRoom(lines);
+      if (inventory.length) data.surveyInventory = inventory;
+
+      if (Number(cubic.total_ft3) > 0) {
+        const totals = computeCubicTotals(lines);
+        const settings = await getBusinessSettings(admin);
+        const rec = recommendVans(Number(cubic.total_ft3), {
+          fillPct: settings.cubicFillPct,
+          transitFt3: settings.cubicTransitFt3,
+          lutonFt3: settings.cubicLutonFt3,
+          sevenFiveTFt3: settings.cubic75tFt3,
+        });
+        const bits = [
+          `Volume survey: ${Number(cubic.total_ft3).toLocaleString("en-GB")} ft³${rec ? ` (≈ ${vehicleShortLabel(rec)})` : ""}`,
+          totals.dismantleCount ? `${totals.dismantleCount} to dismantle` : null,
+          totals.fragileCount ? `${totals.fragileCount} fragile/high-value` : null,
+        ].filter(Boolean);
+        data.volumeLine = bits.join(" · ");
+      }
+
+      // Video count gates the PDF's QR block; the web view mints signed URLs.
+      const { count } = await admin
+        .from("cubic_survey_media")
+        .select("id", { count: "exact", head: true })
+        .eq("survey_id", cubic.id)
+        .in("kind", SURVEY_VIDEO_KINDS as unknown as string[])
+        .in("status", SURVEY_VIDEO_STATUSES as unknown as string[])
+        .not("storage_path", "is", null);
+      data.videoCount = count ?? 0;
+      if ((count ?? 0) > 0) {
+        const base = process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk";
+        data.jobUrl = `${base}/my-jobs/${appointmentId}`;
+      }
     }
   }
 
@@ -137,7 +214,14 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     data.contractSigned = null;
   }
 
-  return { data, apptType: appt.appt_type, surveyId: survey?.id ?? null, quoteId, leadId: appt.lead_id ?? null };
+  return {
+    data,
+    apptType: appt.appt_type,
+    surveyId: survey?.id ?? null,
+    cubicSurveyId,
+    quoteId,
+    leadId: appt.lead_id ?? null,
+  };
 }
 
 /** Survey photos as data URIs for pdfmake — capped, oversized files skipped. */
@@ -200,4 +284,50 @@ export async function loadPhotoSignedUrls(admin: Admin, surveyId: string): Promi
         : null;
     })
     .filter(Boolean) as WebPhoto[];
+}
+
+export interface SurveyVideo {
+  url: string;
+  room: string | null;
+  durationS: number | null;
+  kind: "room_video" | "import_video";
+}
+
+/** AI survey walkthrough videos as short-lived signed URLs for the crew job
+ *  page. The survey-media bucket is office-only at the RLS layer — crew reach
+ *  it exclusively through this service-role loader, never by widening RLS. */
+export async function loadSurveyVideoSignedUrls(admin: Admin, cubicSurveyId: string): Promise<SurveyVideo[]> {
+  const { data: rows } = await admin
+    .from("cubic_survey_media")
+    .select("room_id, kind, storage_path, duration_s")
+    .eq("survey_id", cubicSurveyId)
+    .in("kind", SURVEY_VIDEO_KINDS as unknown as string[])
+    .in("status", SURVEY_VIDEO_STATUSES as unknown as string[])
+    .not("storage_path", "is", null)
+    .order("created_at", { ascending: true });
+  if (!rows?.length) return [];
+
+  const roomIds = [...new Set(rows.map((r) => r.room_id).filter(Boolean))] as string[];
+  const { data: roomRows } = roomIds.length
+    ? await admin.from("cubic_survey_rooms").select("id, name").in("id", roomIds)
+    : { data: [] as { id: string; name: string }[] };
+  const roomName = new Map((roomRows ?? []).map((r) => [r.id, r.name]));
+
+  const { data: signed } = await admin.storage
+    .from(SURVEY_MEDIA_BUCKET)
+    .createSignedUrls(rows.map((r) => r.storage_path), 3600);
+  const urlByPath = new Map((signed ?? []).filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl]));
+
+  return rows
+    .map((r) => {
+      const url = urlByPath.get(r.storage_path);
+      if (!url) return null;
+      return {
+        url,
+        room: r.room_id ? roomName.get(r.room_id) ?? null : null,
+        durationS: r.duration_s ?? null,
+        kind: r.kind as "room_video" | "import_video",
+      };
+    })
+    .filter(Boolean) as SurveyVideo[];
 }
