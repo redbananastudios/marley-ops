@@ -27,9 +27,15 @@ export default async function QuotesPage({
   const supabase = await createClient();
 
   // Server-side search across the WHOLE table (not just the visible page). Ref
-  // matches directly on quotes; name/postcode go through the lead join — resolve
-  // the matching lead ids first, then quotes whose ref/name matches OR whose lead
-  // is in that set. Two round-trips, but simple and correct.
+  // and address text match directly on quotes; name/postcode go through the lead
+  // join — resolve the matching lead ids first, then quotes whose ref/name/address
+  // matches OR whose lead is in that set. Two round-trips, but simple and correct.
+  //
+  // The id list is CAPPED at 100 most-recent leads: PostgREST reads are GETs, so
+  // every id rides the request URL and ~200 uuids would cross the gateway's 8KB
+  // header limit — the query would 414 and the page would silently show "no
+  // matches" (review finding, 2026-07-14). A term matching >100 leads is a
+  // too-broad search anyway; the direct ref/name/address matches are unaffected.
   let leadIds: string[] = [];
   if (term) {
     const like = `%${term}%`;
@@ -37,7 +43,8 @@ export default async function QuotesPage({
       .from("leads")
       .select("id")
       .or(`name.ilike.${like},from_postcode.ilike.${like},to_postcode.ilike.${like}`)
-      .limit(2000);
+      .order("created_at", { ascending: false })
+      .limit(100);
     leadIds = (matchedLeads ?? []).map((l) => l.id);
   }
 
@@ -47,7 +54,14 @@ export default async function QuotesPage({
       let q = supabase.from("quotes").select(QUOTE_COLUMNS);
       if (term) {
         const like = `%${term}%`;
-        const orParts = [`quote_ref.ilike.${like}`, `customer_name.ilike.${like}`];
+        const orParts = [
+          `quote_ref.ilike.${like}`,
+          `customer_name.ilike.${like}`,
+          // Street/town free text lives on the quote itself — the pre-search
+          // client filter matched these, so keep parity with what users expect.
+          `collect_addr.ilike.${like}`,
+          `dest_addr.ilike.${like}`,
+        ];
         if (leadIds.length) orParts.push(`lead_id.in.(${leadIds.join(",")})`);
         q = q.or(orParts.join(","));
       }
