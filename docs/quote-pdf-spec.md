@@ -428,13 +428,32 @@ Header labels:
 Format:
 
 ```text
-Vehicle & Base
-(1 Luton Van)
+Your Removal
+(Team, transport & coordination)
 ```
 
 - Label line: bold.
 - Sub-detail line: muted-grey.
 - If sub-detail is empty, omit second line and vertically centre label.
+
+### Customer-facing line grouping (source: `lib/quote/line-items.ts`)
+
+The customer PDF renders the output of `customerLineItems(breakdown)`, NOT the raw
+breakdown. Two rules apply to customer surfaces only (the office wizard-review,
+margin calculator and job board keep full operational detail):
+
+- **`Your Removal`** is one line = every fleet base (Luton base + 7.5-tonne base +
+  add-on Transit base) **plus the admin fee**. There is no separate
+  "Administration Fee" line and no "Vehicle & Base" / "+ 7.5 Tonne" / "+ Transit"
+  lines — van counts and crew sizes often change before move day, so no customer
+  line names them.
+- Every other cost keeps its own itemised line: `Packing Service`, `Additional
+  Days`, `Mileage`, `Collection/Destination Access`, `Collection/Destination Floor
+  Charge`, `Congestion Charge`, `Toll Charges`, `Parking Permit`. Floor / access /
+  congestion details drop the "× N vans" multiplier — amounts are unchanged, only
+  the label copy is count-free.
+- The visible line items still sum **exactly** to the subtotal (VAT-document
+  requirement); the admin fee lives inside "Your Removal", it is not hidden.
 
 ---
 

@@ -65,11 +65,14 @@ describe("quote PDF doc-def — money correctness", () => {
   });
   const flat = JSON.stringify(docDef);
 
-  it("line items sum EXACTLY to the subtotal (admin fee itemised, nothing rolled in)", () => {
+  it("line items sum EXACTLY to the subtotal (admin fee inside 'Your Removal', nothing hidden)", () => {
     const rows = lineItemRows(docDef);
     const sum = rows.reduce((acc, row) => acc + parseGbp(row[4].text), 0);
     expect(sum).toBeCloseTo(b.subtotal, 2);
-    expect(flat).toContain("Administration Fee");
+    // Customer-facing grouping: the admin fee is folded into "Your Removal", it is
+    // NOT a separate customer line anymore.
+    expect(flat).toContain("Your Removal");
+    expect(flat).not.toContain("Administration Fee");
   });
 
   it("subtotal − discount + VAT = quote total, all shown", () => {

@@ -38,10 +38,13 @@ function splitAddr(a: string): [string, string] {
   return [parts[0], parts.slice(1).join(", ")];
 }
 
+// Count-free labels only — the exact van count often changes before move day, so
+// the customer surfaces never name it (a generic vehicle type is fine, a count is not).
 const VEHICLE_LABEL: Record<string, string> = {
-  "1luton": "1 Luton van",
-  "2luton": "2 Luton vans",
-  "3luton": "3 Luton vans",
+  transit: "Removal van",
+  "1luton": "Luton van",
+  "2luton": "Luton van",
+  "3luton": "Luton van",
 };
 const PACKING_LABEL: Record<string, string> = {
   owner: "Owner pack",
@@ -103,7 +106,7 @@ export function quoteEmailTemplateVars(
     CUSTOMER_FIRST_NAME: (values.customer.name || "").trim().split(/\s+/)[0] || "there",
     QUOTE_REF: escapeHtml(meta.quoteRef || ""),
     GRAND_TOTAL: gbp(b.grandTotal),
-    TOTAL_COST_NOTE: b.vatEnabled ? "Includes admin fee · VAT @ 20%" : "Includes admin fee · no VAT",
+    TOTAL_COST_NOTE: b.vatEnabled ? "Fixed price, all inclusive · VAT @ 20%" : "Fixed price, all inclusive",
     EXPIRY_DATE: expiry,
     QUOTE_INTRO: `Here is your written fixed price for your move${moveDateClause}.`,
     COLLECTION_HTML: escapeHtml(c1) + (c2 ? "<br>" + escapeHtml(c2) : ""),
@@ -161,7 +164,7 @@ export function buildQuoteEmailHtml(
       }</strong>. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`
     : `Here is the full price for your move. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`;
 
-  const totalCostNote = b.vatEnabled ? "Includes admin fee · VAT @ 20%" : "Includes admin fee · no VAT";
+  const totalCostNote = b.vatEnabled ? "Fixed price, all inclusive · VAT @ 20%" : "Fixed price, all inclusive";
 
   const [collectLine1, collectLine2] = splitAddr(job.collectAddr);
   const [destLine1, destLine2] = splitAddr(job.destAddr);

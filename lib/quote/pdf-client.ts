@@ -18,9 +18,9 @@
  * buildQuoteDocDef itself is pure so the tests can walk the real doc-def.
  */
 
-import { MILEAGE_RATE, type VehicleKey, type PackingKey } from "./constants";
 import type { QuoteFormValues } from "./form-types";
 import type { QuoteBreakdown } from "./pricing";
+import { customerLineItems } from "./line-items";
 
 // pdfMake is loaded from the CDN onto window by <PdfLoader/>; no types ship here.
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -50,20 +50,6 @@ const C = {
 };
 
 const CONTENT_W = 519.28; // A4 minus 38pt margins
-
-const VEHICLE_LABELS: Record<VehicleKey, string> = {
-  transit: "Transit Van",
-  "1luton": "1 Luton Van",
-  "2luton": "2 Luton Vans",
-  "3luton": "3 Luton Vans",
-  "4luton": "4 Luton Vans",
-  "5luton": "5 Luton Vans",
-};
-const PACK_LABELS: Record<PackingKey, string> = {
-  owner: "Owner Pack",
-  fragile: "Fragile Only Pack",
-  full: "Full Pack Service",
-};
 
 /** £ formatter — ALWAYS two decimals (N2). Money on a VAT document never drops pence. */
 const fmtGBP = (n: number | null | undefined): string =>
@@ -278,11 +264,6 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     : "TBC";
   const scope = values.job.scope === "owned" ? "Owned" : "Rented";
 
-  let vLabel = VEHICLE_LABELS[b.vehicle];
-  if (b.sevenFiveT > 0) vLabel += b.sevenFiveT === 1 ? " + 7.5 Tonne" : ` + ${b.sevenFiveT} × 7.5 Tonne`;
-  if ((b.transitVans ?? 0) > 0) vLabel += b.transitVans === 1 ? " + Transit Van" : ` + ${b.transitVans} × Transit Vans`;
-  const packLabel = PACK_LABELS[b.packing];
-
   const now = new Date();
   const expiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
@@ -456,73 +437,11 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     margin: [0, 0, 0, 9],
   });
 
-  interface LineItem {
-    label: string;
-    detail: string;
-    qty: number | string;
-    unit: number;
-    amount?: number;
-  }
-  const items: LineItem[] = [{ label: "Vehicle & Base", detail: vLabel, qty: 1, unit: b.base }];
-  if (b.sevenFiveT > 0)
-    items.push({
-      label: b.sevenFiveT === 1 ? "+ 7.5 Tonne Vehicle" : `+ ${b.sevenFiveT} × 7.5 Tonne Vehicles`,
-      detail: "",
-      qty: 1,
-      unit: b.addon75Cost,
-    });
-  if ((b.transitVans ?? 0) > 0)
-    items.push({
-      label: b.transitVans === 1 ? "+ Transit Van (1 man)" : `+ ${b.transitVans} × Transit Vans (1 man each)`,
-      detail: "",
-      qty: b.transitVans,
-      unit: b.transitVans > 0 ? (b.transitCost ?? 0) / b.transitVans : 0,
-      amount: b.transitCost ?? 0,
-    });
-  if ((b.extraDaysCost ?? 0) > 0) {
-    const extraDays = Math.max(1, (b.days ?? 1) - 1);
-    items.push({
-      label: "Additional Days",
-      detail: `${extraDays} day${extraDays > 1 ? "s" : ""} beyond the first`,
-      qty: extraDays,
-      unit: (b.extraDaysCost ?? 0) / extraDays,
-      amount: b.extraDaysCost ?? 0,
-    });
-  }
-  if (b.packCost + b.addon75PackCost > 0)
-    items.push({ label: "Packing Service", detail: packLabel, qty: 1, unit: b.packCost + b.addon75PackCost });
-  if (b.mileageCost !== null)
-    items.push({
-      label: "Mileage",
-      detail: "Total mileage at £2.00/mi, rounded to the nearest £",
-      qty: (b.totalMiles as number).toFixed(1) + " mi",
-      unit: MILEAGE_RATE,
-      amount: b.mileageCost,
-    });
-  if (b.collectAccessCost > 0) items.push({ label: "Collection Access", detail: "Distance from van to door", qty: 1, unit: b.collectAccessCost });
-  if (b.destAccessCost > 0) items.push({ label: "Destination Access", detail: "Distance from van to door", qty: 1, unit: b.destAccessCost });
-  if (b.collectFloorCost > 0)
-    items.push({
-      label: "Collection Floor Charge",
-      detail: `Floor ${b.collectFloor.toUpperCase()} × ${b.vanCount} van${b.vanCount > 1 ? "s" : ""}`,
-      qty: b.vanCount,
-      unit: b.collectFloorCost / b.vanCount,
-      amount: b.collectFloorCost,
-    });
-  if (b.destFloorCost > 0)
-    items.push({
-      label: "Destination Floor Charge",
-      detail: `Floor ${b.destFloor.toUpperCase()} × ${b.vanCount} van${b.vanCount > 1 ? "s" : ""}`,
-      qty: b.vanCount,
-      unit: b.destFloorCost / b.vanCount,
-      amount: b.destFloorCost,
-    });
-  if (b.congestion > 0) items.push({ label: "Congestion Charge", detail: "£20 per van", qty: b.vanCount, unit: 20, amount: b.congestion });
-  if (b.tolls > 0) items.push({ label: "Toll Charges", detail: "", qty: 1, unit: b.tolls });
-  if (b.parking > 0) items.push({ label: "Parking Permit", detail: "", qty: 1, unit: b.parking });
-  // EVERY charge in the subtotal appears as a line — a VAT document's items must
-  // sum exactly to the subtotal, so the admin fee is itemised, never rolled in.
-  if (b.adminFee > 0) items.push({ label: "Administration Fee", detail: "Booking & coordination", qty: 1, unit: b.adminFee });
+  // CUSTOMER-facing line items (lib/quote/line-items.ts): the fleet base lines +
+  // the admin fee collapse into one "Your Removal" line and no label names a van
+  // count or crew size. The items still sum EXACTLY to the subtotal — a VAT
+  // document must reconcile — the admin fee lives inside "Your Removal".
+  const items = customerLineItems(b);
 
   const headerCell = (text: string, alignment?: string) => ({
     text,
@@ -538,7 +457,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   const tableBody = [
     [headerCell("NO.", "center"), headerCell("ITEM / SERVICES"), headerCell("QUANTITY", "center"), headerCell("UNIT PRICE", "right"), headerCell("AMOUNT", "right")],
     ...items.map((it, i) => {
-      const amount = it.amount != null ? it.amount : it.unit * (it.qty as number);
+      const amount = it.amount;
       const fill = zebra && i % 2 === 1 ? C.rowAlt : C.white;
       return [
         { text: String(i + 1), fontSize: 8.7, color: C.muted, alignment: "center", fillColor: fill, margin: [0, 4, 0, 0] },
