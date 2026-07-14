@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionProfile } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
+import { NewLeadAlert } from "@/components/alerts/new-lead-alert";
 
 export default async function DashboardLayout({
   children,
@@ -20,6 +21,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-background">
+      <NewLeadAlert />
       <AppSidebar profile={navProfile} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav profile={navProfile} />

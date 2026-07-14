@@ -1651,6 +1651,7 @@ export type Database = {
           utm_term: string | null
           variant_key: string | null
           wbraid: string | null
+          web_alert_ack_at: string | null
         }
         Insert: {
           balance_amount?: number | null
@@ -1712,6 +1713,7 @@ export type Database = {
           utm_term?: string | null
           variant_key?: string | null
           wbraid?: string | null
+          web_alert_ack_at?: string | null
         }
         Update: {
           balance_amount?: number | null
@@ -1773,6 +1775,7 @@ export type Database = {
           utm_term?: string | null
           variant_key?: string | null
           wbraid?: string | null
+          web_alert_ack_at?: string | null
         }
         Relationships: [
           {
