@@ -26,6 +26,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
 import { StatusChanger } from "./status-changer";
+import { ReviewRequestControl } from "./review-request-control";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -193,6 +194,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
+
+  // Review-request control: relevant once a job is real. When switched off, the
+  // "why/when" line comes from the latest suppression activity (already loaded).
+  const showReviewControl =
+    !!acceptedQuote ||
+    !!lead.review_requested_at ||
+    lead.review_suppressed ||
+    ["confirmed", "completed"].includes(lead.status);
+  const suppressionActivity = lead.review_suppressed
+    ? (activityRows.find((a) => typeof a.summary === "string" && a.summary.startsWith("Review request switched off")) ??
+      null)
+    : null;
 
   const hasAttribution = Boolean(
     lead.gclid ||
@@ -363,6 +376,21 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           ) : acceptedQuote ? (
             <div className="mt-5">
               <ContractSignatureCard signature={null} quoteStatus="accepted" />
+            </div>
+          ) : null}
+
+          {showReviewControl ? (
+            <div className="mt-5">
+              <ReviewRequestControl
+                leadId={lead.id}
+                reviewRequestedAt={lead.review_requested_at}
+                reviewSuppressed={lead.review_suppressed}
+                suppressionNote={
+                  suppressionActivity
+                    ? { summary: suppressionActivity.summary ?? "", at: suppressionActivity.created_at }
+                    : null
+                }
+              />
             </div>
           ) : null}
 

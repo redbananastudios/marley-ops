@@ -125,6 +125,7 @@ export function OfficeGuide() {
           items={[
             "Crew sign-off on move day (in person, or from the office if needed) raises a completion certificate PDF, emailed to the customer automatically.",
             "A review-request email follows, with a Google (or Checkatrade/Trustpilot) review link.",
+            "The lead page has a Review request switch — turn it off for a customer who wasn't fully satisfied; it's switched off automatically when the crew record exceptions at sign-off.",
             "Signed evidence — contract signature + completion certificate — can't be lost by deleting a diary entry; cancel the appointment instead.",
           ]}
         />

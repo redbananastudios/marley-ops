@@ -25,6 +25,7 @@ import {
   type CompletionEmailInput,
 } from "@/lib/comms/completion-email";
 import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
 
 async function requireActiveProfile() {
   const sb = await createClient();
@@ -220,6 +221,22 @@ export async function completeJobAction(
       : `Job completed on site — signed by "${v.customerName.trim()}" + crew lead ${v.crewName.trim()}${exceptionsNote ? ` · exceptions: ${exceptionsNote}` : " · nothing to report"}`,
     meta: { appointment_id: appointmentId, completion_id: completion.id, exceptions: exceptionsNote || null },
   });
+
+  // Exceptions recorded at sign-off → the customer wasn't fully satisfied.
+  // Auto-switch OFF the post-move review ask (reversible via the office toggle).
+  // This covers BOTH the present and customer-absent paths: absence alone (empty
+  // exceptions) never suppresses — only a real exceptions note does.
+  if (appt.lead_id && exceptionsWarrantReviewSuppression(v.exceptions)) {
+    await admin.from("leads").update({ review_suppressed: true } as never).eq("id", appt.lead_id);
+    await admin.from("activities").insert({
+      lead_id: appt.lead_id,
+      client_id: lead?.client_id ?? null,
+      actor_id: prof.id,
+      type: "note",
+      summary: "Review request switched off automatically — exceptions recorded at sign-off",
+      meta: { appointment_id: appointmentId, completion_id: completion.id, auto: true },
+    });
+  }
 
   // Email the certificate — fail-soft; completion stands regardless.
   let emailed = false;

@@ -1633,6 +1633,7 @@ export type Database = {
           quote_chase_step: number
           referrer_answer: string | null
           review_requested_at: string | null
+          review_suppressed: boolean
           sanity_id: string | null
           services: string[]
           source_form: string | null
@@ -1695,6 +1696,7 @@ export type Database = {
           quote_chase_step?: number
           referrer_answer?: string | null
           review_requested_at?: string | null
+          review_suppressed?: boolean
           sanity_id?: string | null
           services?: string[]
           source_form?: string | null
@@ -1757,6 +1759,7 @@ export type Database = {
           quote_chase_step?: number
           referrer_answer?: string | null
           review_requested_at?: string | null
+          review_suppressed?: boolean
           sanity_id?: string | null
           services?: string[]
           source_form?: string | null

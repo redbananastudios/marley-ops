@@ -32,11 +32,14 @@ export async function sendReviewRequest(
 
   const { data: lead } = await sb
     .from("leads")
-    .select("id, client_id, name, email, entry_channel, review_requested_at")
+    .select("id, client_id, name, email, entry_channel, review_requested_at, review_suppressed")
     .eq("id", leadId)
     .maybeSingle();
   if (!lead?.email) return { sent: false, reason: "no email on the lead" };
   if (lead.review_requested_at) return { sent: false, reason: "already asked" };
+  // Office/crew switched the review ask off for this job (customer wasn't fully
+  // satisfied) — bail BEFORE the claim so a re-enable can still send later.
+  if (lead.review_suppressed) return { sent: false, reason: "review request switched off for this job" };
 
   // Claim first — a cron/staff race must never double-send.
   const { data: won } = await sb

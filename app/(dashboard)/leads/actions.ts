@@ -1,7 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { requireOfficeProfile } from "@/lib/ai/auth";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
 import { voidInvoice } from "@/lib/zoho";
@@ -322,6 +324,47 @@ export async function updateLeadStatusAction(leadId: string, status: string) {
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
   revalidatePath("/");
+  return { ok: true as const };
+}
+
+/**
+ * Office switch for the automatic post-move review-request email. Off = skip the
+ * ask for a customer who wasn't fully satisfied; on = let it send after
+ * completion. Office-gated; no-op once the ask has already been sent.
+ */
+export async function setReviewSuppressionAction(leadId: string, suppressed: boolean) {
+  if (!z.string().uuid().safeParse(leadId).success) return { ok: false as const, error: "Invalid lead" };
+  const office = await requireOfficeProfile();
+  if (!office) return { ok: false as const, error: "Office access required." };
+  const sb = await createClient();
+
+  const { data: current } = await sb
+    .from("leads")
+    .select("client_id, review_requested_at, review_suppressed")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!current) return { ok: false as const, error: "Lead not found." };
+  if (current.review_requested_at) {
+    return { ok: false as const, error: "The review request has already been sent for this job." };
+  }
+  if (current.review_suppressed === suppressed) {
+    return { ok: true as const }; // already in the desired state — nothing to log
+  }
+
+  const { error } = await sb.from("leads").update({ review_suppressed: suppressed } as never).eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+
+  await sb.from("activities").insert({
+    lead_id: leadId,
+    client_id: current.client_id ?? null,
+    actor_id: office.id,
+    type: "note",
+    summary: suppressed ? "Review request switched off — office decision" : "Review request re-enabled",
+    meta: { review_suppressed: suppressed },
+  });
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
   return { ok: true as const };
 }
 

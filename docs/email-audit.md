@@ -68,6 +68,7 @@ Personal from `{{OWNER_NAME}}` (like quote chases), friendly-professional. `{{DE
 
 ## Email 13/13 — review-request — ✅ CONFIRMED
 "Hi {name}, / How did we do?" **EXTEND with real gratitude** for choosing Marley Moves. KEEP "if Connor and the crew looked after you". Google review button {REVIEW_URL}. If not right, reply/call **the team** first. Footer.
+Suppression: `leads.review_suppressed` (office toggle on the lead page) skips this email for an unsatisfied customer, and is auto-set true when the crew record exceptions at completion sign-off; `sendReviewRequest()` bails before its claim when it's set.
 
 ## Cross-cutting confirmations
 - balance-invoice payment methods: **bank transfer, card OR cash** (card NOT deposit-only — accept all three on the balance).
