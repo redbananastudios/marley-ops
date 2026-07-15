@@ -147,7 +147,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           <span
             className={
               "mt-1 shrink-0 rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
-              (isRemoval ? "bg-mm-red-tint text-mm-red-deep" : "bg-muted text-mist-500")
+              (isRemoval ? "bg-mm-red text-white" : "bg-muted text-mist-500")
             }
           >
             {isRemoval ? "Move" : "Survey"}
@@ -298,7 +298,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
                         {it.flags.notMoving || it.flags.dismantle || it.flags.fragile ? (
                           <div className="mt-1 flex flex-wrap gap-1.5">
                             {it.flags.notMoving ? (
-                              <span className="rounded-pill bg-mm-red-tint px-2 py-0.5 text-[11px] font-semibold text-mm-red-deep">
+                              <span className="rounded-pill bg-warn-bg px-2 py-0.5 text-[11px] font-semibold text-warn">
                                 Not moving — leave in place
                               </span>
                             ) : null}

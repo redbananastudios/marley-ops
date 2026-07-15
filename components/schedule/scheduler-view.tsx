@@ -351,7 +351,7 @@ export function SchedulerView({
             className={cn(
               "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
               showSurveys
-                ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+                ? "border-mm-red bg-mm-red text-white"
                 : "border-input bg-card text-mist-500 hover:bg-muted",
             )}
           >

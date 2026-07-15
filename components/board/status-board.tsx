@@ -420,7 +420,7 @@ function Card({
   const urgency = uncontacted
     ? (() => {
         const mins = Math.floor((now - new Date(lead.submitted_at || lead.created_at || 0).getTime()) / 60000);
-        const tone = mins > 240 ? "bg-danger-bg text-danger" : mins > 60 ? "bg-warn-bg text-warn" : "bg-mm-red-tint text-mm-red-deep";
+        const tone = mins > 240 ? "bg-danger-bg text-danger" : mins > 60 ? "bg-warn-bg text-warn" : "bg-mist-100 text-charcoal";
         return { tone, text: `${ago(lead.submitted_at || lead.created_at)} · not contacted` };
       })()
     : null;

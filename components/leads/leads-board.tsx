@@ -371,7 +371,7 @@ function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
       ? "bg-danger-bg text-danger"
       : tone === "warn"
         ? "bg-warn-bg text-warn"
-        : "bg-mm-red-tint text-mm-red-deep";
+        : "bg-mist-100 text-charcoal";
   return (
     <span className={cn("inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-xs font-medium", cls)}>
       {ago(lead.submitted_at || lead.created_at)} · not contacted

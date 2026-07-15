@@ -119,7 +119,17 @@ export function EmailComposeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" onInteractOutside={(e) => e.preventDefault()}>
+      <DialogContent
+        className="sm:max-w-lg"
+        onInteractOutside={(e) => {
+          // An empty compose closes on backdrop click like any dialog, but a
+          // typed draft (or an in-flight/duplicate-confirm state) must never
+          // be lost to a stray tap.
+          if (sending || dup || message.trim() || subject.trim() !== (defaultSubject ?? "").trim()) {
+            e.preventDefault();
+          }
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="font-display flex items-center gap-2">
             <Mail className="size-5 text-mm-red" strokeWidth={1.75} />
@@ -169,7 +179,7 @@ export function EmailComposeDialog({
           {dup ? (
             <div
               role="alert"
-              className="grid gap-2 rounded-md border border-mm-red/40 bg-mm-red-tint p-3 text-sm text-mm-red-deep"
+              className="grid gap-2 rounded-md border border-warn-border bg-warn-bg p-3 text-sm text-warn"
             >
               <p>
                 This exact email was already sent {dup.when}

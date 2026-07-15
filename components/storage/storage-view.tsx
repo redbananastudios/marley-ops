@@ -551,7 +551,7 @@ function UnitCard({
           <span
             className={cn(
               "shrink-0 rounded-pill px-2 py-0.5 text-[11px] font-medium",
-              occupied ? "bg-mm-red-tint text-mm-red-deep" : "bg-success-bg text-success",
+              occupied ? "bg-mm-red text-white" : "bg-success-bg text-success",
             )}
           >
             {occupied ? "Occupied" : "Available"}

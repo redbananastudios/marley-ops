@@ -81,6 +81,23 @@ function DialogContent({
   )
 }
 
+/**
+ * onInteractOutside guard that keeps the STANDARD behaviour — a genuine
+ * backdrop click closes the dialog — while ignoring pointer-downs that land in
+ * a portalled Radix Select/Popover/DropdownMenu. Those portals live outside
+ * the dialog DOM, so picking an option used to read as an "outside" click and
+ * phantom-close the dialog mid-form (the bug the old blanket preventDefault
+ * was papering over).
+ */
+function ignorePortalInteractOutside(e: {
+  detail?: { originalEvent?: Event }
+  target: EventTarget | null
+  preventDefault: () => void
+}) {
+  const target = (e.detail?.originalEvent?.target ?? e.target) as HTMLElement | null
+  if (target?.closest?.("[data-radix-popper-content-wrapper]")) e.preventDefault()
+}
+
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
@@ -155,4 +172,5 @@ export {
   DialogPortal,
   DialogTitle,
   DialogTrigger,
+  ignorePortalInteractOutside,
 }

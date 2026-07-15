@@ -235,7 +235,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
           <ul className="divide-y">
             {(sigDocs ?? []).map((s) => (
               <li key={s.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
-                <span className="shrink-0 rounded-pill bg-mm-red-tint px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
+                <span className="shrink-0 rounded-pill border border-mm-red/45 bg-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
                   {s.kind === "storage" ? "Storage agreement" : "Contract"}
                 </span>
                 <div className="min-w-0 flex-1 text-sm">

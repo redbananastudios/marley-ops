@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 const QUOTE_STATUS_PILL: Record<string, { label: string; className: string }> = {
   draft: { label: "Draft", className: "bg-mist-100 text-charcoal" },
-  sent: { label: "Sent", className: "bg-mm-red-tint text-mm-red-deep" },
+  sent: { label: "Sent", className: "border border-mm-red/45 bg-card text-mm-red-deep" },
   accepted: { label: "Accepted", className: "bg-success-bg text-success" },
   rejected: { label: "Rejected", className: "bg-mist-50 text-mist-400" },
   superseded: { label: "Superseded", className: "bg-mist-50 text-mist-400" },

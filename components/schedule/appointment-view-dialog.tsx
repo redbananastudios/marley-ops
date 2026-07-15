@@ -19,6 +19,7 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  ignorePortalInteractOutside,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { CommsDialog } from "@/components/comms/comms-dialog";
@@ -192,7 +193,7 @@ export function AppointmentViewDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="max-h-[92vh] w-[calc(100vw-2rem)] overflow-y-auto sm:max-w-3xl lg:max-w-5xl"
-        onInteractOutside={(e) => e.preventDefault()}
+        onInteractOutside={ignorePortalInteractOutside}
       >
         <DialogHeader>
           <DialogTitle className="font-display flex flex-wrap items-center gap-2 pr-6">
@@ -273,7 +274,7 @@ export function AppointmentViewDialog({
                           aria-pressed={routeMode === m.key}
                           className={cn(
                             "focus-ring rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors",
-                            routeMode === m.key ? "bg-mm-red-tint text-mm-red-deep" : "text-mist-400 hover:text-foreground",
+                            routeMode === m.key ? "bg-mm-red text-white" : "text-mist-400 hover:text-foreground",
                           )}
                         >
                           {m.label}
@@ -290,7 +291,7 @@ export function AppointmentViewDialog({
                       <span className="text-xs text-mist-400">Distance unavailable</span>
                     ) : (
                       <>
-                        <span className="rounded-pill bg-mm-red-tint px-2 py-0.5 text-xs font-semibold tabular text-mm-red-deep">
+                        <span className="rounded-pill bg-mm-red px-2 py-0.5 text-xs font-semibold tabular text-white">
                           {route.miles} mi
                         </span>
                         {route.durationText ? (

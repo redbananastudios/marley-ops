@@ -236,7 +236,7 @@ export function SendQuoteDialog({
           {dup ? (
             <div
               role="alert"
-              className="rounded-md border border-mm-red/40 bg-mm-red-tint p-3 text-sm text-mm-red-deep"
+              className="rounded-md border border-warn-border bg-warn-bg p-3 text-sm text-warn"
             >
               This exact quote email already went to this address {dup.when} (sent{" "}
               {dup.count}×). Send it again?

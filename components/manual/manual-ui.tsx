@@ -96,7 +96,7 @@ export function Note({ tone = "warn", children }: { tone?: "warn" | "info"; chil
     <div
       className={cn(
         "flex gap-2.5 rounded-md border px-3.5 py-2.5 text-sm leading-relaxed",
-        tone === "warn" ? "border-mm-red/25 bg-mm-red-tint/50 text-mm-red-deep" : "border-border bg-muted text-mist-500",
+        tone === "warn" ? "border-warn-border bg-warn-bg text-warn" : "border-border bg-muted text-mist-500",
       )}
     >
       {tone === "warn" ? <AlertTriangle className="mt-0.5 size-4 shrink-0" strokeWidth={1.75} /> : null}

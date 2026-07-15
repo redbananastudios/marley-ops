@@ -297,7 +297,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
                         {c.display_name || "Unnamed"}
                       </Link>
                       {c.leadCount > 1 ? (
-                        <span className="inline-flex items-center gap-0.5 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-semibold text-mm-red-deep">
+                        <span className="inline-flex items-center gap-0.5 rounded-pill bg-success-bg px-1.5 py-0.5 text-[10px] font-semibold text-success">
                           <Repeat className="size-2.5" strokeWidth={2} />
                           {c.leadCount}×
                         </span>
@@ -439,7 +439,7 @@ function ClientCard({
           </div>
         </div>
         {c.leadCount > 1 ? (
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mm-red-deep">
+          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-success-bg px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-success">
             <Repeat className="size-3" strokeWidth={2} />
             {c.leadCount}×
           </span>
@@ -514,7 +514,7 @@ function ClientCard({
               <span className="text-mist-400">Distance unavailable</span>
             ) : (
               <>
-                <span className="inline-flex items-center gap-1.5 rounded-pill bg-mm-red-tint px-2.5 py-1 font-semibold text-mm-red-deep">
+                <span className="inline-flex items-center gap-1.5 rounded-pill bg-mm-red px-2.5 py-1 font-semibold text-white">
                   <Route className="size-4" strokeWidth={2} />
                   {route.miles} miles
                 </span>

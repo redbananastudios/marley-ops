@@ -263,7 +263,7 @@ export default async function MyJobsPage() {
                           <span
                             className={
                               "rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
-                              (j.appt_type === "removal" ? "bg-mm-red-tint text-mm-red-deep" : "bg-muted text-mist-500")
+                              (j.appt_type === "removal" ? "bg-mm-red text-white" : "bg-muted text-mist-500")
                             }
                           >
                             {j.appt_type === "removal" ? "Move" : "Survey"}

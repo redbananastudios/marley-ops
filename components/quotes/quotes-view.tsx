@@ -66,7 +66,7 @@ function FollowUp({ quote, now }: { quote: QuoteRow; now: number }) {
   if (quote.status !== "sent") return null;
   const since = quote.updated_at || quote.created_at;
   const days = since ? Math.floor((now - new Date(since).getTime()) / 86_400_000) : 0;
-  const tone = days >= 7 ? "bg-danger-bg text-danger" : days >= 3 ? "bg-warn-bg text-warn" : "bg-mm-red-tint text-mm-red-deep";
+  const tone = days >= 7 ? "bg-danger-bg text-danger" : days >= 3 ? "bg-warn-bg text-warn" : "bg-mist-100 text-charcoal";
   return (
     <span className={cn("inline-flex items-center rounded-pill px-2 py-0.5 text-[11px] font-medium", tone)}>
       sent {ago(since, now)} ago · follow up

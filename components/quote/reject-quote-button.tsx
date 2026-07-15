@@ -114,7 +114,7 @@ export function RejectQuoteButton({
                   className={cn(
                     "focus-ring min-h-11 rounded-md border px-3 text-sm font-medium transition-colors",
                     reason === r.value
-                      ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+                      ? "border-mm-red bg-mm-red text-white"
                       : "border-input bg-card text-foreground hover:bg-muted",
                   )}
                 >

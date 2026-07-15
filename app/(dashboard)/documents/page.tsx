@@ -165,7 +165,7 @@ export default async function DocumentsPage({
     .filter((aq) => !q || (aq.customer_name ?? "").toLowerCase().includes(q) || aq.quote_ref.toLowerCase().includes(q));
 
   const KIND_META: Record<DocRow["kind"], { label: string; cls: string }> = {
-    contract: { label: "Contract", cls: "bg-mm-red-tint text-mm-red-deep" },
+    contract: { label: "Contract", cls: "border border-mm-red/45 bg-card text-mm-red-deep" },
     storage: { label: "Storage agreement", cls: "bg-muted text-mist-500" },
     completion: { label: "Completion certificate", cls: "bg-success-bg text-success" },
   };

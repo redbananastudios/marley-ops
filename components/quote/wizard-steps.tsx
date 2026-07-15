@@ -157,7 +157,7 @@ function ToggleCard({
       onClick={onToggle}
       className={cn(
         "focus-ring flex w-full items-center gap-3 rounded-md border p-4 text-left transition-colors",
-        active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card hover:bg-muted active:bg-muted",
+        active ? "border-mm-red bg-card ring-1 ring-inset ring-mm-red/30" : "border-input bg-card hover:bg-muted active:bg-muted",
       )}
     >
       <span
@@ -432,7 +432,7 @@ export function Step2Job({ values, set, pricing }: StepProps) {
       </button>
 
       {calc.error ? (
-        <p className="mb-4 rounded-md bg-mm-red-tint px-3 py-2 text-sm text-mm-red-deep">{calc.error}</p>
+        <p className="mb-4 rounded-md bg-danger-bg px-3 py-2 text-sm text-danger">{calc.error}</p>
       ) : null}
 
       {route.routeLegs.length > 0 ? (
@@ -661,7 +661,7 @@ export function Step3Vehicle({
                 onClick={() => set("packing", p.key)}
                 className={cn(
                   "focus-ring flex w-full items-center justify-between rounded-md border p-4 text-left transition-colors",
-                  active ? "border-mm-red bg-mm-red-tint" : "border-input bg-card hover:bg-muted active:bg-muted",
+                  active ? "border-mm-red bg-card ring-1 ring-inset ring-mm-red/30" : "border-input bg-card hover:bg-muted active:bg-muted",
                 )}
               >
                 <span>

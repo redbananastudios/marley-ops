@@ -54,7 +54,7 @@ export function CubicSurveyCard({
           </span>
           {data!.guidanceReady && data!.contingencyPct > 0 ? <span className="text-sm font-semibold text-amber-800">+{data!.contingencyPct}% · {data!.planningFt3.toLocaleString("en-GB")} ft³ planning</span> : null}
           {data!.vanLabel ? (
-            <span className="rounded-pill bg-mm-red-tint px-2.5 py-0.5 text-xs font-semibold text-mm-red-deep">
+            <span className="rounded-pill bg-mm-red px-2.5 py-0.5 text-xs font-semibold text-white">
               ≈ {data!.vanLabel}
             </span>
           ) : null}

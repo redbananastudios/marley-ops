@@ -394,7 +394,7 @@ export function CubicBuilder({
 
           {rec ? (
             <div className="flex min-w-0 items-center gap-2.5">
-              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-pill bg-mm-red-tint px-3 py-1 text-sm font-semibold text-mm-red-deep">
+              <span className="inline-flex shrink-0 items-center gap-1.5 rounded-pill bg-mm-red px-3 py-1 text-sm font-semibold text-white">
                 <Truck className="size-4" strokeWidth={2} />
                 {vehicleShortLabel(rec)}
                 {rec.consider75t ? (
@@ -501,13 +501,18 @@ export function CubicBuilder({
                     className={cn(
                       "focus-ring flex min-h-11 shrink-0 items-center gap-2 rounded-pill border px-4 text-sm font-medium",
                       activeCat === c.key
-                        ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+                        ? "border-mm-red bg-mm-red text-white"
                         : "border-input bg-card text-foreground hover:bg-muted",
                     )}
                   >
                     {c.title}
                     {catQty > 0 ? (
-                      <span className="tabular rounded-pill bg-mm-red px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                      <span
+                        className={cn(
+                          "tabular rounded-pill px-1.5 py-0.5 text-[10px] font-bold leading-none",
+                          activeCat === c.key ? "bg-white text-mm-red-deep" : "bg-mm-red text-white",
+                        )}
+                      >
                         {catQty}
                       </span>
                     ) : null}
@@ -637,7 +642,7 @@ export function CubicBuilder({
                         {catLines.map((l) => (
                           <li key={l.id} className={cn("px-4 py-2.5", l.flags?.notMoving && "opacity-55")}>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}{l.source === "ai" ? <span className="ml-1.5 rounded-pill bg-mm-red-tint px-1.5 py-0.5 text-[10px] font-bold text-mm-red-deep">AI</span> : null}{l.room && !groupByRoom ? <span className="ml-1.5 text-[10px] font-normal text-mist-400">{l.room}</span> : null}</span>
+                              <span className="min-w-0 truncate text-sm font-medium text-foreground">{l.title}{l.source === "ai" ? <span className="ml-1.5 rounded-pill border border-mm-red/40 px-1.5 py-0.5 text-[10px] font-bold text-mm-red-deep">AI</span> : null}{l.room && !groupByRoom ? <span className="ml-1.5 text-[10px] font-normal text-mist-400">{l.room}</span> : null}</span>
                               <div className="flex shrink-0 items-center gap-1.5">
                                 <button
                                   type="button"

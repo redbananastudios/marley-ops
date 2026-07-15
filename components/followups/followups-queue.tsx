@@ -63,7 +63,7 @@ export interface FollowUpRow {
 }
 
 const REASON_META: Record<string, { label: string; cls: string; rank: number }> = {
-  no_answer: { label: "No answer", cls: "bg-mm-red-tint text-mm-red-deep", rank: 0 },
+  no_answer: { label: "No answer", cls: "bg-danger-bg text-danger", rank: 0 },
   deposit: { label: "Deposit", cls: "bg-warn-bg text-warn", rank: 1 },
   balance: { label: "Balance", cls: "bg-warn-bg text-warn", rank: 2 },
   quote_followup: { label: "Quote follow-up", cls: "bg-[#eff6ff] text-[#2563eb]", rank: 3 },

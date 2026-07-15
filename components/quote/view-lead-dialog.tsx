@@ -51,7 +51,7 @@ export function ViewLeadDialog({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-mm-red/40 bg-mm-red-tint px-2.5 text-sm font-medium text-mm-red-deep transition-colors hover:bg-mm-red hover:text-white"
+          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-mm-red/40 bg-card px-2.5 text-sm font-medium text-mm-red-deep transition-colors hover:bg-mm-red hover:text-white"
         >
           <Users className="size-4" strokeWidth={1.75} />
           View lead

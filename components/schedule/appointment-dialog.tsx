@@ -24,6 +24,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  ignorePortalInteractOutside,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -447,12 +448,12 @@ export function AppointmentDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* Never close on outside interaction: fixes the phantom close after using a
-          Select inside the dialog (its portal makes the next click read as "outside"),
-          and stops accidental backdrop-taps losing a half-filled booking on tablets. */}
+      {/* Backdrop click closes (standard behaviour, Peter 2026-07-15); the guard
+          only ignores clicks landing in portalled Selects, which used to
+          phantom-close the dialog mid-form. */}
       <DialogContent
         className="max-h-[90vh] overflow-y-auto sm:max-w-2xl"
-        onInteractOutside={(e) => e.preventDefault()}
+        onInteractOutside={ignorePortalInteractOutside}
       >
         <DialogHeader>
           <DialogTitle className="font-display">

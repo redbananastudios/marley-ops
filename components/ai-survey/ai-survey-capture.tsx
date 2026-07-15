@@ -402,7 +402,7 @@ export function AiSurveyCapture({
           ))}
         </div>
         <div className="mt-4 flex gap-2">
-          {(["verbal", "digital"] as const).map((value) => <button key={value} type="button" onClick={() => setMethod(value)} className={cn("focus-ring min-h-11 flex-1 rounded-lg border px-3 text-sm font-semibold capitalize", method === value ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border")}>{value} agreement</button>)}
+          {(["verbal", "digital"] as const).map((value) => <button key={value} type="button" onClick={() => setMethod(value)} className={cn("focus-ring min-h-11 flex-1 rounded-lg border px-3 text-sm font-semibold capitalize", method === value ? "border-mm-red bg-mm-red text-white" : "border-border")}>{value} agreement</button>)}
         </div>
         <button type="button" disabled={!allAcked || busy} onClick={saveConsent} className="focus-ring mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-mm-red px-4 font-semibold text-white disabled:opacity-40">
           {busy ? <Loader2 className="size-5 animate-spin" /> : <Check className="size-5" />} Agreement recorded
@@ -417,7 +417,7 @@ export function AiSurveyCapture({
         <p className="text-xs font-bold uppercase tracking-[0.18em] text-mist-400">Rooms</p>
         <div className="mt-3 space-y-2">
           {rooms.map((room, index) => (
-            <button key={room.id} type="button" disabled={recording} onClick={() => setSelectedRoom(room.id)} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold disabled:opacity-50", selectedRoom === room.id ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-background")}>
+            <button key={room.id} type="button" disabled={recording} onClick={() => setSelectedRoom(room.id)} className={cn("focus-ring flex min-h-12 w-full items-center justify-between rounded-xl border px-3 text-left text-sm font-semibold disabled:opacity-50", selectedRoom === room.id ? "border-mm-red bg-mm-red text-white" : "border-border bg-background")}>
               <span>{index + 1}. {room.name}</span><span className="text-[10px] uppercase tracking-wide opacity-70">{room.status.replace("_", " ")}</span>
             </button>
           ))}
