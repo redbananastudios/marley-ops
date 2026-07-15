@@ -188,17 +188,32 @@ export default async function MyJobsPage() {
                 key={d.iso}
                 className={
                   "flex flex-col items-center rounded-lg border py-2 " +
-                  (d.isToday ? "border-mm-red bg-mm-red-tint/50" : "border-border bg-card")
+                  // Today is a solid red tile — reads instantly on a phone in
+                  // daylight, unlike the old pale-pink wash.
+                  (d.isToday ? "border-mm-red bg-mm-red" : "border-border bg-card")
                 }
               >
-                <span className="text-[10px] font-semibold uppercase tracking-wide text-mist-400">{d.dow}</span>
-                <span className={"text-sm font-semibold " + (d.isToday ? "text-mm-red-deep" : "text-foreground")}>
+                <span
+                  className={
+                    "text-[10px] font-semibold uppercase tracking-wide " +
+                    (d.isToday ? "text-white/75" : "text-mist-400")
+                  }
+                >
+                  {d.dow}
+                </span>
+                <span className={"text-sm font-semibold " + (d.isToday ? "text-white" : "text-foreground")}>
                   {d.date}
                 </span>
                 <span
                   className={
                     "mt-1 flex size-5 items-center justify-center rounded-full text-[11px] font-bold " +
-                    (d.count > 0 ? "bg-mm-red text-white" : "bg-muted text-mist-300")
+                    (d.isToday
+                      ? d.count > 0
+                        ? "bg-white text-mm-red-deep"
+                        : "bg-white/20 text-white/80"
+                      : d.count > 0
+                        ? "bg-mm-red text-white"
+                        : "bg-muted text-mist-300")
                   }
                   aria-label={`${d.count} job${d.count === 1 ? "" : "s"}`}
                 >

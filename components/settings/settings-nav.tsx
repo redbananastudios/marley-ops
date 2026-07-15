@@ -65,7 +65,7 @@ export function SettingsNav({ sections }: { sections: SettingsSection[] }) {
             className={cn(
               "focus-ring inline-flex min-h-11 shrink-0 items-center rounded-pill border px-3.5 text-sm font-medium transition-colors",
               active === s.id
-                ? "border-mm-red-tint bg-mm-red-tint text-mm-red-deep"
+                ? "border-mm-red bg-mm-red text-white"
                 : "border-border bg-card text-mist-500 hover:bg-muted hover:text-foreground",
             )}
           >

@@ -246,7 +246,7 @@ export function StatusBoard({
           className={cn(
             "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
             weekStart === null
-              ? "border-mm-red bg-mm-red-tint text-mm-red-deep"
+              ? "border-mm-red bg-mm-red text-white"
               : "border-input bg-card text-mist-500 hover:bg-muted",
           )}
         >
@@ -282,7 +282,7 @@ export function StatusBoard({
           aria-pressed={mine}
           className={cn(
             "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
-            mine ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-input bg-card text-mist-500 hover:bg-muted",
+            mine ? "border-mm-red bg-mm-red text-white" : "border-input bg-card text-mist-500 hover:bg-muted",
           )}
         >
           Mine
@@ -293,7 +293,7 @@ export function StatusBoard({
           aria-pressed={showDeclined}
           className={cn(
             "focus-ring inline-flex min-h-9 items-center rounded-md border px-3 text-sm font-medium transition-colors",
-            showDeclined ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-input bg-card text-mist-500 hover:bg-muted",
+            showDeclined ? "border-mm-red bg-mm-red text-white" : "border-input bg-card text-mist-500 hover:bg-muted",
           )}
         >
           {showDeclined ? "Hide declined" : "Show declined"}
@@ -314,7 +314,7 @@ export function StatusBoard({
               aria-pressed={active}
               className={cn(
                 "focus-ring inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-pill border px-3 py-1.5 text-sm font-medium transition-colors",
-                active ? "border-mm-red bg-mm-red-tint text-mm-red-deep" : "border-border bg-card text-mist-500",
+                active ? "border-mm-red bg-mm-red text-white" : "border-border bg-card text-mist-500",
               )}
             >
               <span className="size-2 rounded-full" style={{ background: color }} />

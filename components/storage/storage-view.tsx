@@ -243,7 +243,7 @@ export function StorageView({
                     aria-pressed={filter === key}
                     className={cn(
                       "focus-ring min-h-9 px-3 text-sm font-medium transition-colors",
-                      filter === key ? "bg-mm-red-tint text-mm-red-deep" : "bg-card text-mist-500 hover:bg-muted",
+                      filter === key ? "bg-mm-red text-white" : "bg-card text-mist-500 hover:bg-muted",
                     )}
                   >
                     {label}

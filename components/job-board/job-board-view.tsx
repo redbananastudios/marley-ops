@@ -125,7 +125,7 @@ function dayHeading(iso: string): { dow: string; date: string } {
 const STATE_META: Record<DayState, { label: string; cls: string }> = {
   free: { label: "Free", cls: "bg-success-bg text-success" },
   partial: { label: "Part busy", cls: "bg-warn-bg text-warn" },
-  booked: { label: "Booked", cls: "bg-mm-red-tint text-mm-red-deep" },
+  booked: { label: "Booked", cls: "bg-danger-bg text-danger" },
 };
 
 export function JobBoardView({
@@ -217,21 +217,25 @@ export function JobBoardView({
       <div
         key={day}
         className={cn(
-          "flex flex-col rounded-lg border border-border bg-mist-50/50",
+          "flex flex-col rounded-lg border bg-mist-50/50",
+          // Today = a solid red top rail + red frame, not a pink wash — the
+          // column surface stays clean so job cards keep full contrast.
+          isToday ? "border-mm-red/45 border-t-[3px] border-t-mm-red" : "border-border",
           stacked ? "" : "min-h-[320px]",
         )}
       >
-        <div
-          className={cn(
-            "rounded-t-lg border-b border-border px-2.5 py-2",
-            isToday ? "bg-mm-red-tint" : "bg-card",
-          )}
-        >
-          <div className="flex items-baseline justify-between">
-            <p className={cn("text-sm font-semibold", isToday ? "text-mm-red-deep" : "text-foreground")}>
+        <div className="rounded-t-lg border-b border-border bg-card px-2.5 py-2">
+          <div className="flex items-center justify-between">
+            <p className={cn("text-sm font-semibold", isToday ? "text-mm-red" : "text-foreground")}>
               {heading.dow}
             </p>
-            <p className="text-xs text-mist-400">{heading.date}</p>
+            {isToday ? (
+              <p className="rounded-pill bg-mm-red px-2 py-0.5 text-[11px] font-semibold leading-none text-white">
+                {heading.date}
+              </p>
+            ) : (
+              <p className="text-xs text-mist-400">{heading.date}</p>
+            )}
           </div>
           <CapacityStrip
             day={day}
@@ -303,7 +307,7 @@ export function JobBoardView({
           aria-pressed={showSurveys}
           className={cn(
             "focus-ring min-h-9 rounded-md border border-input px-3 text-sm font-medium transition-colors",
-            showSurveys ? "bg-mm-red-tint text-mm-red-deep" : "bg-card text-mist-500 hover:bg-muted",
+            showSurveys ? "border-mm-red bg-mm-red text-white" : "bg-card text-mist-500 hover:bg-muted",
           )}
         >
           Surveys
@@ -500,23 +504,34 @@ function CapacityStrip({
   const freeStaff = rows.staff.filter((r) => r.state === "free").length;
   const freeVans = rows.vehicles.filter((r) => r.state === "free").length;
 
+  // Traffic-light availability: everyone free = green, some committed = amber,
+  // none left = red. Reads at a glance across the whole week.
+  const tone = (free: number, total: number) =>
+    total === 0
+      ? "text-mist-400"
+      : free === 0
+        ? "text-danger"
+        : free < total
+          ? "text-warn"
+          : "text-success";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
           type="button"
           title="Who's free this day"
-          className="focus-ring mt-1.5 flex w-full items-center gap-2 rounded-md bg-muted/70 px-2 py-1 text-[11px] font-medium text-mist-500 transition-colors hover:bg-muted"
+          className="focus-ring mt-1.5 flex w-full items-center gap-2 rounded-md bg-muted/70 px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-muted"
         >
-          <span className={cn("inline-flex items-center gap-1", freeStaff === 0 && staff.length > 0 && "text-mm-red-deep")}>
+          <span className={cn("inline-flex items-center gap-1 tabular", tone(freeStaff, staff.length))}>
             <UsersRound className="size-3.5" strokeWidth={1.75} />
             {freeStaff}/{staff.length}
           </span>
-          <span className={cn("inline-flex items-center gap-1", freeVans === 0 && vehicles.length > 0 && "text-mm-red-deep")}>
+          <span className={cn("inline-flex items-center gap-1 tabular", tone(freeVans, vehicles.length))}>
             <Truck className="size-3.5" strokeWidth={1.75} />
             {freeVans}/{vehicles.length}
           </span>
-          <span className="ml-auto text-mist-400">free</span>
+          <span className="ml-auto font-medium text-mist-400">free</span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-64 p-2">
@@ -607,7 +622,11 @@ function JobCard({
       }}
       className={cn(
         "rounded-md border bg-card p-2.5 text-xs shadow-xs transition-colors",
-        isRemoval ? "border-l-[3px] border-l-mm-red border-border" : "border-dashed border-border",
+        // Job identity by colour: moves carry the solid red rail, surveys sit
+        // on the teal family (dashed = lighter commitment than a move).
+        isRemoval
+          ? "border-l-[3px] border-l-mm-red border-border"
+          : "border-dashed border-survey-border bg-survey-bg/40",
         highlight && "border-mm-red bg-mm-red-tint/40",
       )}
     >
@@ -624,11 +643,19 @@ function JobCard({
             {multiDay ? <CalendarRange className="size-3 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
             {apptWindow(appt)}
             <span className="text-mist-300">·</span>
-            <span className="capitalize">{isRemoval ? "Move" : appt.appt_type}</span>
+            <span className={cn("font-semibold capitalize", isRemoval ? "text-mm-red-deep" : "text-survey-deep")}>
+              {isRemoval ? "Move" : appt.appt_type}
+            </span>
           </p>
         </div>
         {appt.lead_status ? (
-          <span className="shrink-0 rounded-pill bg-muted px-1.5 py-0.5 text-[10px] font-medium text-mist-500">
+          <span
+            className={cn(
+              "shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-semibold",
+              LEAD_STATUS_META[appt.lead_status as keyof typeof LEAD_STATUS_META]?.className ??
+                "bg-muted text-mist-500",
+            )}
+          >
             {LEAD_STATUS_META[appt.lead_status as keyof typeof LEAD_STATUS_META]?.label ?? appt.lead_status}
           </span>
         ) : null}
@@ -641,8 +668,9 @@ function JobCard({
       ) : null}
 
       {req ? (
-        <p className={cn("mt-1 text-[11px] font-medium", under ? "text-mm-red-deep" : "text-mist-500")}>
+        <p className={cn("tabular mt-1 text-[11px] font-semibold", under ? "text-danger" : "text-success")}>
           Vans {assignedVehicles.length}/{req.vans} · Crew {assignedStaff.length}/{req.men}
+          {under ? " — short" : " ✓"}
         </p>
       ) : null}
 

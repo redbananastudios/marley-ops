@@ -40,7 +40,10 @@
   --color-mm-red: #c03838;
   --color-mm-red-deep: #963030;
   --color-mm-red-bright: #e85959; /* on charcoal only */
-  --color-mm-red-tint: #fbeded;
+  /* Rose-50, matching the nav's crimson-tint — the old brick tint (#fbeded)
+     read muddy on large surfaces (Peter, 2026-07-15). Pills/soft fills only;
+     SELECTED filter chips and "today" markers use solid mm-red + white. */
+  --color-mm-red-tint: #fff1f2;
 
   /* Nav highlight — refined crimson (rose family), used ONLY for the active menu
      state: cleaner tint + deeper label tone than the brick brand red. */
@@ -65,6 +68,7 @@
   --color-info-bg: #eff6ff;
   --color-info-border: #bfdbfe;
   --color-survey: #0f8f8f;
+  --color-survey-deep: #0b7070; /* small-text-safe teal (4.5:1 on white) */
   --color-survey-bg: #ecfdfb;
   --color-survey-border: #99f6e4;
   --color-violet: #6d4cc7;
