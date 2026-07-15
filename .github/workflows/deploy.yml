@@ -45,6 +45,7 @@ jobs:
             --build-arg NEXT_PUBLIC_SUPABASE_URL="$URL" \
             --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" \
             --build-arg NEXT_PUBLIC_APP_URL="$APP" \
+            --build-arg GIT_SHA="${GITHUB_SHA::7}" \
             -t marley-ops:latest .
       - name: Restart + health-check (auto-rollback on failure)
         run: |

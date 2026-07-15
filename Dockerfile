@@ -17,9 +17,13 @@ COPY . .
 ARG NEXT_PUBLIC_SUPABASE_URL
 ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
 ARG NEXT_PUBLIC_APP_URL
+# Short git SHA of the deployed commit — shown under the brand wordmark so
+# any device can be checked against the latest build at a glance.
+ARG GIT_SHA=dev
 ENV NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL \
     NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY \
     NEXT_PUBLIC_APP_URL=$NEXT_PUBLIC_APP_URL \
+    NEXT_PUBLIC_BUILD_SHA=$GIT_SHA \
     NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 

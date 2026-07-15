@@ -144,13 +144,20 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
           )}
         />
       </span>
-      <span
-        className={cn(
-          "truncate font-brand font-semibold uppercase leading-none tracking-[0.03em] text-white",
-          compact ? "text-[19px]" : "text-[22px]",
-        )}
-      >
-        Marley <span className="text-mm-red-bright">Ops</span>
+      <span className="flex min-w-0 flex-col">
+        <span
+          className={cn(
+            "truncate font-brand font-semibold uppercase leading-none tracking-[0.03em] text-white",
+            compact ? "text-[19px]" : "text-[22px]",
+          )}
+        >
+          Marley <span className="text-mm-red-bright">Ops</span>
+        </span>
+        {/* Deployed-build stamp (short git SHA, baked at image build) — lets
+            any device be checked against the latest deploy at a glance. */}
+        <span className="mt-0.5 truncate text-[10px] leading-none tracking-[0.08em] text-white/40">
+          v {process.env.NEXT_PUBLIC_BUILD_SHA ?? "dev"}
+        </span>
       </span>
     </span>
   );
