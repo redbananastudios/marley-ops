@@ -23,6 +23,7 @@ import {
   Clock,
   LayoutGrid,
   List,
+  Users,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { Pager, usePager } from "@/components/ui/pager";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
+import { EmptyState } from "@/components/ui/empty-state";
 import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
@@ -191,8 +193,20 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
       </div>
 
       {visible.length === 0 ? (
-        <div className="mt-4 rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-400">
-          No clients match.
+        <div className="mt-4 rounded-lg border border-border bg-card">
+          {clients.length === 0 ? (
+            <EmptyState
+              icon={Users}
+              title="No clients yet"
+              hint="Clients are created automatically from leads, or use Add client to start one."
+            />
+          ) : (
+            <EmptyState
+              icon={Search}
+              title="No clients match"
+              hint="Try a different search, or clear it to see everyone."
+            />
+          )}
         </div>
       ) : view === "list" ? (
         /* ——— List view: dense table, scales to hundreds of clients ——— */

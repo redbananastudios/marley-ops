@@ -165,7 +165,14 @@ export function SendQuoteDialog({
       // A re-send never changes status (an accepted quote must stay accepted);
       // a first send moves the quote to "sent".
       if (!resend) await setQuoteStatus(quoteId, "sent");
-      toast.success(`Quote ${resend ? "re-sent" : "emailed"} to ${email.trim()}.`);
+      // A re-send is a quiet confirmation; a first send is the moment the chase
+      // engine takes over, so say so — the estimator's steered away from the
+      // wizard by onSent, and this is the reassurance that follow-up is handled.
+      toast.success(
+        resend
+          ? `Quote re-sent to ${email.trim()}.`
+          : "Quote sent — chase emails run automatically until they reply.",
+      );
       onSent?.();
       onOpenChange(false);
     } catch (err) {

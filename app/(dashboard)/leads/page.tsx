@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { LeadsBoard, type LeadCard } from "@/components/leads/leads-board";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
+import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { startOfUkDay } from "@/lib/uk-time";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
@@ -66,8 +67,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     valueMap.set(q.lead_id, cur);
   }
 
-  /* estimator is survey-derived: whoever is assigned the booked survey owns the lead.
-     null until a survey exists — there's no estimator at the enquiry stage. */
+  /* survey-derived estimator: whoever is assigned the booked survey appointment.
+     Combined with the lead's explicit estimator_id via ownerEstimatorId() below —
+     the SAME rule the estimator "My day" cockpit uses, so "Mine" and "My day"
+     never disagree (a pre-survey assigned lead now shows in both). */
   const surveyEstimator = new Map<string, string>();
   for (const a of apptData) {
     if (a.appt_type !== "survey" || a.status === "cancelled" || !a.lead_id || !a.estimator_id) continue;
@@ -112,7 +115,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       first_contacted_at: l.first_contacted_at,
       phone: l.phone,
       email: l.email,
-      estimator_id: surveyEstimator.get(l.id) ?? null,
+      estimator_id: ownerEstimatorId(l.estimator_id, surveyEstimator.get(l.id)),
       source: classifySource(l as LeadLite),
       value: v ? (v.accepted ?? v.latest) : null,
       surveyDue: upcomingSurveyAt.has(l.id) || l.status === "survey_booked",

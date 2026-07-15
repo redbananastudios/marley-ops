@@ -337,7 +337,7 @@ export function JobBoardView({
 
                   <div className="flex flex-1 flex-col gap-2 p-2">
                     {cards.length === 0 ? (
-                      <p className="py-6 text-center text-xs text-mist-300">—</p>
+                      <p className="py-6 text-center text-xs text-mist-300">No jobs</p>
                     ) : (
                       cards.map((a) => (
                         <JobCard

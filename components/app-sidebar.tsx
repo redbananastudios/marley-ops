@@ -104,6 +104,7 @@ const ESTIMATOR_NAV: NavGroup[] = [
     items: [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
       { href: "/quotes", label: "Quotes", icon: FileText },
+      { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
     ],
   },
   {

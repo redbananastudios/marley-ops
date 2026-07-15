@@ -16,21 +16,21 @@ import { cn } from "@/lib/utils";
 const STARTS = [
   {
     href: "/leads/new",
-    label: "Create a lead",
+    label: "Add lead",
     description: "Add a new enquiry or phone caller",
     icon: UserPlus,
     tone: "red" as const,
   },
   {
     href: "/schedule/surveys?new=1",
-    label: "Book a survey",
+    label: "Book survey",
     description: "Choose a customer, estimator and time",
     icon: CalendarPlus,
     tone: "teal" as const,
   },
   {
     href: "/quotes/new",
-    label: "Create a quote",
+    label: "New quote",
     description: "Capture the move and start pricing",
     icon: FilePlus2,
     tone: "blue" as const,

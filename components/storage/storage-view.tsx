@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Dialog,
   DialogContent,
@@ -198,8 +199,12 @@ export function StorageView({
           </Button>
         </div>
         {sites.length === 0 ? (
-          <div className="mt-3 rounded-lg border border-border bg-card px-5 py-10 text-center text-sm text-mist-400">
-            No storage sites yet. Add the yard or warehouse where the containers live.
+          <div className="mt-3 rounded-lg border border-border bg-card">
+            <EmptyState
+              icon={Warehouse}
+              title="No storage sites yet"
+              hint="Add the yard or warehouse where the containers live — use Add site above."
+            />
           </div>
         ) : (
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -263,10 +268,20 @@ export function StorageView({
           </div>
 
           {siteUnits.length === 0 ? (
-            <div className="mt-4 rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-400">
-              {units.some((u) => u.site_id === site.id)
-                ? "No units match that filter."
-                : "No units yet. Add the containers or rooms at this site."}
+            <div className="mt-4 rounded-lg border border-border bg-card">
+              {units.some((u) => u.site_id === site.id) ? (
+                <EmptyState
+                  icon={Box}
+                  title="No units match"
+                  hint="No units match that filter — change the filter or clear the search."
+                />
+              ) : (
+                <EmptyState
+                  icon={Box}
+                  title="No units yet"
+                  hint="Add the containers or rooms at this site — use Add unit above."
+                />
+              )}
             </div>
           ) : (
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

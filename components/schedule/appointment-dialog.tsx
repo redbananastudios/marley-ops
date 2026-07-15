@@ -456,7 +456,7 @@ export function AppointmentDialog({
       >
         <DialogHeader>
           <DialogTitle className="font-display">
-            {isEdit ? `Edit ${apptType}` : apptType === "survey" ? "Book a survey" : "Book a removal"}
+            {isEdit ? `Edit ${apptType}` : apptType === "survey" ? "Book survey" : "Book removal"}
           </DialogTitle>
           <DialogDescription>
             {isEdit

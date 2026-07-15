@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { Menu, X } from "lucide-react";
+import { Menu, Search, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { QuickCreate } from "@/components/quick-create";
+import { openGlobalSearch } from "@/components/search/open-search";
 import { BrandMark, NavFooter, SidebarNavList } from "@/components/app-sidebar";
 
 export function MobileNav({ profile }: { profile: { full_name: string; role: string } }) {
@@ -16,6 +17,14 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 xl:hidden">
         <BrandMark compact />
         <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={openGlobalSearch}
+            aria-label="Search leads, clients and quotes"
+            className="focus-ring flex size-11 items-center justify-center rounded-md text-white/85 hover:bg-white/[0.06]"
+          >
+            <Search className="size-5" strokeWidth={1.75} />
+          </button>
           <QuickCreate compact />
           <button
             type="button"

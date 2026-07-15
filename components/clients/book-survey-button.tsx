@@ -87,7 +87,7 @@ export function BookSurveyButton({
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle className="font-display">Book a survey</DialogTitle>
+            <DialogTitle className="font-display">Book survey</DialogTitle>
             <DialogDescription>
               This opens an enquiry for the client (bookings live on enquiries) and takes you to
               the survey diary with them preselected.

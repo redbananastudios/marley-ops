@@ -239,7 +239,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
               {d.vehicles.length ? (
                 d.vehicles.map((v) => <li key={v}>{v}</li>)
               ) : (
-                <li className="text-mist-400">No vehicles assigned yet — check the board.</li>
+                <li className="text-mist-400">No vehicles assigned yet — the office will assign them; call the office if this is still empty on the morning of the move.</li>
               )}
             </ul>
           </div>
@@ -249,7 +249,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
               {d.crew.length ? (
                 d.crew.map((c) => <li key={c}>{c}</li>)
               ) : (
-                <li className="text-mist-400">No crew assigned yet — check the board.</li>
+                <li className="text-mist-400">No crew assigned yet — the office will assign them; call the office if this is still empty on the morning of the move.</li>
               )}
             </ul>
           </div>

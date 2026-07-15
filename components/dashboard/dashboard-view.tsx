@@ -126,6 +126,54 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </Kpi>
       </section>
 
+      {/* needs action (now) */}
+      <section data-tour="dashboard-needs-action">
+        <p className="eyebrow mb-2">Needs action now</p>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          <ActionCard label="Follow-ups overdue" count={data.needsAction.followUpsOverdue} href="/follow-ups" accent empty="Nothing overdue" />
+          <ActionCard label="Follow-ups due today" count={data.needsAction.followUpsDueToday} href="/follow-ups" empty="None due today" />
+          <ActionCard label="New enquiries to action" count={data.needsAction.newToAction} href="/leads?status=website_enquiry" accent empty="All enquiries triaged" />
+          <ActionCard label="Surveys today" count={data.needsAction.surveysToday} href="/schedule/surveys" empty="No surveys today" />
+          <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
+          <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
+          <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
+          <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
+          <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
+        </div>
+      </section>
+
+      {/* recent enquiries */}
+      <Card className="p-0">
+        <div className="flex items-center justify-between border-b px-5 py-3.5">
+          <h2 className="font-display text-lg font-semibold text-foreground">{data.recentHeading}</h2>
+          <Link href="/leads" className="focus-ring rounded-sm text-sm text-mm-red hover:underline">
+            View all
+          </Link>
+        </div>
+        {data.recent.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-mist-400">No leads yet.</p>
+        ) : (
+          <ul className="divide-y">
+            {data.recent.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/leads/${r.id}`}
+                  className="focus-ring flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-muted"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-foreground">{r.name ?? "—"}</p>
+                    <p className="truncate text-xs text-mist-400">
+                      {r.source} · {timeAgo(r.when)}
+                    </p>
+                  </div>
+                  <LeadStatusBadge status={r.status} />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+
       {/* conversion rings */}
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         <RingStat label="Lead → Survey" pct={s.leadToSurveyPct} color="#C0822E" caption={`${s.surveys}/${s.newLeads}`} />
@@ -231,54 +279,6 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <p className="py-6 text-center text-sm text-mist-400">
             PostHog data unavailable right now.
           </p>
-        )}
-      </Card>
-
-      {/* needs action (now) */}
-      <section data-tour="dashboard-needs-action">
-        <p className="eyebrow mb-2">Needs action now</p>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          <ActionCard label="Follow-ups overdue" count={data.needsAction.followUpsOverdue} href="/follow-ups" accent empty="Nothing overdue" />
-          <ActionCard label="Follow-ups due today" count={data.needsAction.followUpsDueToday} href="/follow-ups" empty="None due today" />
-          <ActionCard label="New enquiries to action" count={data.needsAction.newToAction} href="/leads?status=website_enquiry" accent empty="All enquiries triaged" />
-          <ActionCard label="Surveys today" count={data.needsAction.surveysToday} href="/schedule/surveys" empty="No surveys today" />
-          <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
-          <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
-          <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
-          <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
-          <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
-        </div>
-      </section>
-
-      {/* recent enquiries */}
-      <Card className="p-0">
-        <div className="flex items-center justify-between border-b px-5 py-3.5">
-          <h2 className="font-display text-lg font-semibold text-foreground">{data.recentHeading}</h2>
-          <Link href="/leads" className="focus-ring rounded-sm text-sm text-mm-red hover:underline">
-            View all
-          </Link>
-        </div>
-        {data.recent.length === 0 ? (
-          <p className="px-5 py-10 text-center text-sm text-mist-400">No leads yet.</p>
-        ) : (
-          <ul className="divide-y">
-            {data.recent.map((r) => (
-              <li key={r.id}>
-                <Link
-                  href={`/leads/${r.id}`}
-                  className="focus-ring flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-muted"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-foreground">{r.name ?? "—"}</p>
-                    <p className="truncate text-xs text-mist-400">
-                      {r.source} · {timeAgo(r.when)}
-                    </p>
-                  </div>
-                  <LeadStatusBadge status={r.status} />
-                </Link>
-              </li>
-            ))}
-          </ul>
         )}
       </Card>
     </main>

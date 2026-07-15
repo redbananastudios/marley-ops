@@ -93,7 +93,7 @@ export function PaymentsCard({
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => markPaymentPaidAction(leadId, "deposit"), "Deposit marked paid.")}>
-                Mark deposit paid
+                Deposit received
               </Button>
             </div>
           ) : (
@@ -135,7 +135,7 @@ export function PaymentsCard({
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
               <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => markPaymentPaidAction(leadId, "balance"), "Balance marked paid.")}>
-                Mark balance paid
+                Balance received
               </Button>
             </div>
           ) : (

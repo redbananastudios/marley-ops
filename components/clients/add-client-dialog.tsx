@@ -242,7 +242,7 @@ export function AddClientDialog() {
         ) : (
           <>
         <DialogHeader>
-          <DialogTitle className="font-display">Add new client</DialogTitle>
+          <DialogTitle className="font-display">Add client</DialogTitle>
           <DialogDescription>A person or household. We check for an existing match on phone or email.</DialogDescription>
         </DialogHeader>
 
@@ -382,7 +382,7 @@ export function AddClientDialog() {
           </Button>
           <Button onClick={onSave} disabled={busy} className="h-11">
             {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
-            Save details
+            Add client
           </Button>
         </DialogFooter>
           </>

@@ -23,6 +23,7 @@ import {
   FileText,
   CalendarPlus,
   CheckCircle2,
+  CreditCard,
   RotateCcw,
   Loader2,
 } from "lucide-react";
@@ -36,10 +37,7 @@ import {
 import { noReplyForLeadAction } from "@/app/(dashboard)/follow-ups/actions";
 import { MarkWonButton, type WonQuote } from "@/components/leads/mark-won-button";
 import { MarkLostButton } from "@/components/leads/mark-lost-button";
-
-const CLOSED = new Set(["completed", "declined"]);
-const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
-const idx = (s: string) => FUNNEL.indexOf(s);
+import { funnelIndex as idx, isClosed } from "@/lib/leads/funnel";
 
 function waNumber(phone: string | null | undefined): string | null {
   if (!phone) return null;
@@ -72,7 +70,7 @@ export function LeadActionBar({
   const router = useRouter();
   const [pending, start] = useTransition();
   const wa = waNumber(phone);
-  const uncontacted = !CLOSED.has(status) && !firstContactedAt;
+  const uncontacted = !isClosed(status) && !firstContactedAt;
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {
     start(async () => {
@@ -89,20 +87,29 @@ export function LeadActionBar({
   const setStatus = (s: string, msg: string) => run(() => updateLeadStatusAction(leadId, s), msg);
 
   const stage = idx(status);
-  const preQuote = !CLOSED.has(status) && stage <= idx("survey_booked"); // enquiry / survey booked
-  const quoting = status === "quoted" || status === "provisional";
+  const preQuote = !isClosed(status) && stage <= idx("survey_booked"); // enquiry / survey booked
+  const quoted = status === "quoted"; // quote out, awaiting the customer's decision
+  const provisional = status === "provisional"; // quote accepted, deposit not yet paid
   const confirmed = status === "confirmed";
+  const declined = status === "declined";
   const nextStep = uncontacted
     ? { title: "Contact the customer", detail: "Make the first call, then mark the lead contacted." }
     : preQuote
       ? { title: "Book the survey", detail: "Choose the estimator and visit time. The quote follows the survey." }
-      : quoting
+      : quoted
         ? { title: "Close the quote", detail: "Record the outcome or create a revised quote." }
-        : confirmed
-          ? { title: "Book the removal", detail: "Put the confirmed move into the diary and assign resources." }
-          : status === "completed"
-            ? { title: "Workflow complete", detail: "The move is complete; all actions remain available in the record." }
-            : { title: "Review this lead", detail: "Check the record and choose the next appropriate action." };
+        : provisional
+          ? {
+              title: "Collect the £100 deposit",
+              detail: "The invoice is raised — chase emails run automatically until it's paid.",
+            }
+          : confirmed
+            ? { title: "Book the removal", detail: "Put the confirmed move into the diary and assign resources." }
+            : status === "completed"
+              ? { title: "Workflow complete", detail: "The move is complete; all actions remain available in the record." }
+              : declined
+                ? { title: "This lead was lost", detail: "It keeps its full history. Reopen it if they come back — it returns to the enquiry stage." }
+                : { title: "Review this lead", detail: "Check the record and choose the next appropriate action." };
 
   return (
     <div className="border-t bg-muted/35">
@@ -140,7 +147,7 @@ export function LeadActionBar({
           Mark contacted
         </button>
       ) : null}
-      {!CLOSED.has(status) ? (
+      {!isClosed(status) ? (
         <button
           type="button"
           onClick={() =>
@@ -172,14 +179,29 @@ export function LeadActionBar({
           </>
         ) : null}
 
-        {quoting ? (
+        {quoted ? (
           <>
-            <MarkWonButton leadId={leadId} quotes={quotes} className={primaryBtn} />
+            {/* "Accept quote" — same unified acceptance machine as the quote page.
+                One verb for the whole app; two names ("Mark won" / "Accept") confuse. */}
+            <MarkWonButton leadId={leadId} quotes={quotes} className={primaryBtn} label="Accept quote" />
             <MarkLostButton leadId={leadId} />
             <Link href={`/quotes/new?leadId=${leadId}`} prefetch={false} className={btn}>
               <FileText className="size-4 text-mm-red" strokeWidth={1.75} />
               New quote
             </Link>
+          </>
+        ) : null}
+
+        {provisional ? (
+          <>
+            {/* Quote's accepted; the deposit invoice is out and chasing itself.
+                The next move lives in Bookings. Mark-lost stays available in case
+                they pull out before paying. */}
+            <Link href="/bookings" className={primaryBtn}>
+              <CreditCard className="size-4" strokeWidth={2} />
+              Open in Bookings
+            </Link>
+            <MarkLostButton leadId={leadId} />
           </>
         ) : null}
 

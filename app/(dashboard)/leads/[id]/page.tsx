@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Plus, ScanLine } from "lucide-react";
+import { ChevronLeft, Clock, FileText, Mail, Plus, ScanLine } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { Button } from "@/components/ui/button";
 import { CHANNEL_LABELS } from "@/lib/leads/schema";
+import { deriveReachedStatus } from "@/lib/leads/funnel";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
+import { PipelineStepper } from "@/components/leads/pipeline-stepper";
+import { LeadFollowUpsCard } from "@/components/leads/lead-followups-card";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
@@ -71,10 +75,6 @@ function Fact({ label, value, mono = false }: { label: string; value?: string | 
       </p>
     </div>
   );
-}
-
-function EmptyState({ children }: { children: React.ReactNode }) {
-  return <p className="px-5 py-12 text-center text-sm text-mist-400">{children}</p>;
 }
 
 export default async function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -141,6 +141,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
 
+  // Open follow-ups for THIS lead — the compact strip on Overview. Assigned name
+  // resolves off the active-profiles map already loaded (cheap; null if not there).
+  const { data: followUpRows } = await supabase
+    .from("follow_ups")
+    .select("id, reason, due_at, attempt_count, assigned_to, notes")
+    .eq("lead_id", id)
+    .eq("status", "open")
+    .order("due_at", { ascending: true });
+  const leadFollowUps = (followUpRows ?? []).map((f) => ({
+    id: f.id,
+    reason: f.reason,
+    dueAt: f.due_at,
+    attempts: f.attempt_count ?? 0,
+    assignedName: f.assigned_to ? (profileName.get(f.assigned_to) ?? null) : null,
+    notes: f.notes,
+  }));
+
   // Signed paperwork on this enquiry (final-pass audit: the lead page is where
   // the office lands from Leads/Board/Follow-ups — evidence must show here,
   // not just on the quote page).
@@ -186,6 +203,21 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const agreedPrice = acceptedQuote
     ? Number(acceptedQuote.agreed_price ?? acceptedQuote.grand_total ?? 0) || null
     : null;
+
+  // A lost lead reads as "declined" with no memory of how far it got, so the
+  // stepper's trail is inferred from its artefacts (survey / sent / accepted /
+  // deposit). Only needed for the declined case; live statuses drive themselves.
+  const reachedStatus =
+    lead.status === "declined"
+      ? deriveReachedStatus({
+          hasSurvey: !!surveyAppt || !!surveyRow,
+          hasSentQuote: quoteRows.some((q) =>
+            ["sent", "accepted", "rejected", "superseded"].includes(q.status),
+          ),
+          hasAcceptedQuote: !!acceptedQuote,
+          depositPaid: !!lead.deposit_paid_at,
+        })
+      : null;
   // Payments matter once the job is real (or once any payment state exists).
   const showPayments =
     ["confirmed", "completed"].includes(lead.status) ||
@@ -267,6 +299,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </div>
         </div>
 
+        <div className="border-t px-5 py-3">
+          <PipelineStepper status={lead.status} leadId={lead.id} reachedStatus={reachedStatus} />
+        </div>
+
         <div className="flex flex-wrap items-end gap-x-10 gap-y-4 border-t px-5 py-4">
           <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
           {surveyEstimatorName ? <Fact label="Estimator" value={surveyEstimatorName} /> : null}
@@ -345,6 +381,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               </div>
             </Card>
           </div>
+
+          {leadFollowUps.length ? (
+            <div className="mt-5">
+              <LeadFollowUpsCard rows={leadFollowUps} />
+            </div>
+          ) : null}
 
           {showPayments ? (
             <div className="mt-5">
@@ -437,7 +479,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               captured in the quote builder (steps 4 &amp; 6).
             </p>
             {quoteRows.length === 0 ? (
-              <EmptyState>No quotes yet.</EmptyState>
+              <EmptyState
+                icon={FileText}
+                title="No quotes yet"
+                hint="Use New quote above to price this move and send it to the customer."
+              />
             ) : (
               <ul className="divide-y">
                 {quoteRows.map((qr) => (
@@ -529,7 +575,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <TabsContent value="activity" className="mt-5">
           <Card className="p-0">
             {activityRows.length === 0 ? (
-              <EmptyState>No activity yet.</EmptyState>
+              <EmptyState
+                icon={Clock}
+                title="No activity yet"
+                hint="Calls, quotes and emails on this lead will appear here as they happen."
+              />
             ) : (
               <ol className="p-5">
                 {activityRows.map((a, i) => (
@@ -564,7 +614,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               />
             </div>
             {commsRows.length === 0 ? (
-              <EmptyState>No messages sent yet.</EmptyState>
+              <EmptyState
+                icon={Mail}
+                title="No messages yet"
+                hint="Emails and texts sent from here are logged on this timeline."
+              />
             ) : (
               <ul className="divide-y">
                 {commsRows.map((c) => (

@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { FileDown, PenLine, ShieldCheck } from "lucide-react";
+import { FileDown, FileText, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PageHeader } from "@/components/page-header";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
 import { UK_TZ } from "@/lib/uk-time";
 
 /**
@@ -203,9 +204,15 @@ export default async function DocumentsPage({
       {tab === "unsigned" ? (
         <Card className="p-0">
           {unsigned.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-mist-400">
-              Every accepted quote has a signed contract. Nothing to collect.
-            </p>
+            <EmptyState
+              icon={ShieldCheck}
+              title={q ? "No unsigned contracts match" : "All contracts signed"}
+              hint={
+                q
+                  ? "Try a different search, or clear it."
+                  : "Accepted quotes with no signature show here — the crew collect it on arrival."
+              }
+            />
           ) : (
             <ul className="divide-y">
               {unsigned.map((aq) => (
@@ -219,10 +226,19 @@ export default async function DocumentsPage({
                       {aq.deposit_paid_at ? "deposit paid" : "deposit awaiting"}
                     </p>
                   </div>
-                  <span className="inline-flex items-center gap-1.5 rounded-pill border border-warn-border bg-warn-bg px-2.5 py-1 text-[11px] font-semibold text-warn">
-                    <PenLine className="size-3.5" strokeWidth={2} />
-                    Signature needed — crew collect on arrival
-                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-pill border border-warn-border bg-warn-bg px-2.5 py-1 text-[11px] font-semibold text-warn">
+                      <PenLine className="size-3.5" strokeWidth={2} />
+                      Signature needed — crew collect on arrival
+                    </span>
+                    <Link
+                      href={`/quotes/${aq.id}`}
+                      className="focus-ring inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted"
+                    >
+                      <FileText className="size-3.5" strokeWidth={1.75} />
+                      Open quote
+                    </Link>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -231,9 +247,15 @@ export default async function DocumentsPage({
       ) : (
         <Card className="p-0">
           {rows.length === 0 ? (
-            <p className="px-5 py-12 text-center text-sm text-mist-400">
-              {q ? "Nothing matches that search." : "Signed documents will appear here as contracts and completions are collected."}
-            </p>
+            <EmptyState
+              icon={FileText}
+              title={q ? "No documents match" : "No documents yet"}
+              hint={
+                q
+                  ? "Try a different search, or clear it."
+                  : "Signed contracts and completion certificates appear here as they're collected."
+              }
+            />
           ) : (
             <ul className="divide-y">
               {rows.map((r) => (

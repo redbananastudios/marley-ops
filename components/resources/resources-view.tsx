@@ -29,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { segmentedCountClass, segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
+import { EmptyState } from "@/components/ui/empty-state";
 import {
   Dialog,
   DialogContent,
@@ -181,7 +182,12 @@ export function ResourcesView({
 
       {tab === "staff" ? (
         staff.length === 0 ? (
-          <Empty text="No staff yet. Add the crew so jobs can be assigned to them." />
+          <EmptyState
+            icon={UserRound}
+            title="No staff yet"
+            hint="Add the crew so jobs can be assigned to them — use Add staff above."
+            className="mt-4 rounded-lg border border-border bg-card"
+          />
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {staff.map((s) => (
@@ -190,7 +196,12 @@ export function ResourcesView({
           </div>
         )
       ) : vehicles.length === 0 ? (
-        <Empty text="No vehicles yet. Add the fleet to track MOT, tax and insurance." />
+        <EmptyState
+          icon={Truck}
+          title="No vehicles yet"
+          hint="Add the fleet to track MOT, tax and insurance — use Add vehicle above."
+          className="mt-4 rounded-lg border border-border bg-card"
+        />
       ) : (
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {vehicles.map((v) => (
@@ -205,14 +216,6 @@ export function ResourcesView({
       {vehicleEdit ? (
         <VehicleDialog row={vehicleEdit === "new" ? null : vehicleEdit} onClose={() => setVehicleEdit(null)} />
       ) : null}
-    </div>
-  );
-}
-
-function Empty({ text }: { text: string }) {
-  return (
-    <div className="mt-4 rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-400">
-      {text}
     </div>
   );
 }

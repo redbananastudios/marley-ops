@@ -5,6 +5,7 @@ import { MobileNav } from "@/components/mobile-nav";
 import { NewLeadAlert } from "@/components/alerts/new-lead-alert";
 import { OnboardingTour } from "@/components/onboarding/tour";
 import { tourForRole } from "@/components/onboarding/tours";
+import { CommandPalette } from "@/components/search/command-palette";
 
 export default async function DashboardLayout({
   children,
@@ -24,6 +25,9 @@ export default async function DashboardLayout({
   return (
     <div className="flex min-h-screen bg-background">
       <NewLeadAlert />
+      {/* Office-only quick search (Cmd/Ctrl-K). Crew are redirected above, so
+          mounting here keeps it off the crew surface. */}
+      <CommandPalette />
       {/* Role-scoped: estimators get their own tour — never admin-only surfaces. */}
       <OnboardingTour tour={tourForRole(profile.role)} role={profile.role} />
       <AppSidebar profile={navProfile} />

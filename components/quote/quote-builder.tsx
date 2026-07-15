@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Check, ChevronLeft, ChevronRight, Download, Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -105,6 +106,7 @@ export function QuoteBuilder({
   /** Cubic-survey van suggestion, shown on the Vehicle step. */
   cubicHint?: CubicQuoteHint | null;
 }) {
+  const router = useRouter();
   const [values, setValues] = useState<QuoteFormValues>(() => ({
     ...defaultQuoteValues(),
     ...(initialValues ?? {}),
@@ -340,6 +342,12 @@ export function QuoteBuilder({
         vatNumber={settings?.vatNumber || undefined}
         depositAmount={settings?.defaultDeposit || undefined}
         acceptUrl={acceptUrl}
+        onSent={() => {
+          // Sent successfully — leave the editable wizard for the read-only job
+          // card (the quote is now "sent"), so the estimator isn't stranded mid-form.
+          router.replace(`/quotes/${quoteId}`);
+          router.refresh();
+        }}
       />
     </div>
   );

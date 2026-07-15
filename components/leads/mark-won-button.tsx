@@ -46,10 +46,14 @@ export function MarkWonButton({
   leadId,
   quotes,
   className,
+  label = "Mark won",
 }: {
   leadId: string;
   quotes: WonQuote[];
   className?: string;
+  /** Trigger label. Defaults to "Mark won"; the lead action bar passes
+   *  "Accept quote" so the whole app uses one verb for the same acceptance. */
+  label?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -120,7 +124,7 @@ export function MarkWonButton({
     <>
       <button type="button" onClick={() => setOpen(true)} className={className}>
         <Trophy className="size-4" strokeWidth={2} />
-        Mark won
+        {label}
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
