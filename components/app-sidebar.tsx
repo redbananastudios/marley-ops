@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Banknote,
   BarChart3,
   BellRing,
   BookOpen,
@@ -30,7 +31,7 @@ import {
 } from "lucide-react";
 import { QuickCreate } from "@/components/quick-create";
 import { TourButton } from "@/components/onboarding/launch";
-import { tourForRole } from "@/components/onboarding/tours";
+import { tourForRole, type TourName } from "@/components/onboarding/tours";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -68,6 +69,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/quotes", label: "Quotes", icon: FileText },
       { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
+      { href: "/payments", label: "Payments", icon: Banknote },
       { href: "/documents", label: "Documents", icon: FileCheck2 },
       { href: "/jobs", label: "Completed Jobs", icon: History },
     ],
@@ -108,8 +110,13 @@ const ESTIMATOR_NAV: NavGroup[] = [
     ],
   },
   {
-    group: "Help",
-    items: [{ href: "/manual", label: "User manual", icon: BookOpen }],
+    group: "System",
+    items: [
+      // Estimators manage their own device here (passkey sign-in + push
+      // notifications) — the page trims itself to those cards for non-admins.
+      { href: "/settings", label: "Settings", icon: Settings },
+      { href: "/manual", label: "User manual", icon: BookOpen },
+    ],
   },
 ];
 
@@ -122,58 +129,82 @@ export function navForRole(role: string): NavGroup[] {
  *  heading face). Shared by the desktop sidebar, mobile header and drawer.
  *  The source PNG (500×500) carries whitespace padding, so the <img> is sized
  *  larger than the tile to bring the house + van up to a confident size.
- *  The whole lockup is a link home (dashboard for office, /my-jobs for crew). */
+ *  Tile + wordmark link home (dashboard for office, /my-jobs for crew); the
+ *  version row underneath can carry the small tour relaunch button, which is
+ *  why the version sits OUTSIDE the link (no button-inside-link). */
 export function BrandMark({
   compact = false,
   href = "/",
   onNavigate,
+  tour,
 }: {
   compact?: boolean;
   href?: string;
   onNavigate?: () => void;
+  /** When set, a small "Tour" trigger renders right of the version stamp. */
+  tour?: TourName;
 }) {
   return (
-    <Link
-      href={href}
-      onClick={onNavigate}
-      className="focus-ring flex min-w-0 items-center gap-2.5 rounded-md"
-      aria-label="Go to dashboard"
-    >
-      <span
-        className={cn(
-          "relative shrink-0 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
-          compact ? "size-9" : "size-10",
-        )}
+    <span className="flex min-w-0 items-center gap-2.5">
+      <Link
+        href={href}
+        onClick={onNavigate}
+        className="focus-ring shrink-0 rounded-xl"
+        aria-label="Go to dashboard"
       >
-        {/* The mark is larger than the tile (the source PNG has whitespace
-            padding); absolutely centre it — CSS grid place-items anchors an
-            oversized item top-left, which pushed the mark to the bottom-right. */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/brand-mark.png"
-          alt="Marley Moves"
-          className={cn(
-            "absolute left-1/2 top-1/2 max-w-none -translate-x-1/2 -translate-y-1/2 object-contain",
-            compact ? "size-[46px]" : "size-[52px]",
-          )}
-        />
-      </span>
-      <span className="flex min-w-0 flex-col">
         <span
+          className={cn(
+            "relative block overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
+            compact ? "size-9" : "size-10",
+          )}
+        >
+          {/* The mark is larger than the tile (the source PNG has whitespace
+              padding); absolutely centre it — CSS grid place-items anchors an
+              oversized item top-left, which pushed the mark to the bottom-right. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/brand-mark.png"
+            alt="Marley Moves"
+            className={cn(
+              "absolute left-1/2 top-1/2 max-w-none -translate-x-1/2 -translate-y-1/2 object-contain",
+              compact ? "size-[46px]" : "size-[52px]",
+            )}
+          />
+        </span>
+      </Link>
+      <span className="flex min-w-0 flex-col">
+        {/* Same destination as the tile — skip it in the tab order so keyboard
+            users don't hit two stops for one link. */}
+        <Link
+          href={href}
+          onClick={onNavigate}
+          tabIndex={-1}
+          aria-hidden
           className={cn(
             "truncate font-brand font-semibold uppercase leading-none tracking-[0.03em] text-white",
             compact ? "text-[19px]" : "text-[22px]",
           )}
         >
           Marley <span className="text-mm-red-bright">Ops</span>
-        </span>
+        </Link>
         {/* Deployed-build stamp (short git SHA, baked at image build) — lets
             any device be checked against the latest deploy at a glance. */}
-        <span className="mt-0.5 truncate text-[10px] leading-none tracking-[0.08em] text-white/40">
-          v {process.env.NEXT_PUBLIC_BUILD_SHA ?? "dev"}
+        <span className="mt-0.5 flex items-center gap-1.5">
+          <span className="truncate text-[10px] leading-none tracking-[0.08em] text-white/40">
+            v {process.env.NEXT_PUBLIC_BUILD_SHA ?? "dev"}
+          </span>
+          {tour ? (
+            <TourButton
+              tour={tour}
+              icon={<Compass className="size-3" strokeWidth={2} />}
+              className="min-h-0 shrink-0 gap-1 rounded px-1 py-0.5 text-[10px] font-semibold uppercase leading-none tracking-[0.08em] text-white/45 transition-colors hover:bg-white/[0.08] hover:text-white"
+            >
+              Tour
+            </TourButton>
+          ) : null}
         </span>
       </span>
-    </Link>
+    </span>
   );
 }
 
@@ -254,13 +285,6 @@ export function NavFooter({ profile }: { profile: { full_name: string; role: str
 
   return (
     <div className="border-t border-white/8 p-3">
-      <TourButton
-        tour={tourForRole(profile.role)}
-        icon={<Compass className="size-4 shrink-0" strokeWidth={1.75} />}
-        className="mb-1 w-full justify-start rounded-lg px-2 text-[13px] font-medium text-white/55 transition-colors hover:bg-white/[0.055] hover:text-white"
-      >
-        Take the tour
-      </TourButton>
       <div className="flex items-center gap-2 rounded-lg px-2 py-1.5">
         <span className="grid size-9 shrink-0 place-items-center rounded-full border border-white/10 bg-white/[0.06] text-xs font-semibold text-white">
           {(profile.full_name || "M").trim().charAt(0).toUpperCase()}
@@ -287,7 +311,7 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
   return (
     <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex">
       <div className="flex h-16 shrink-0 items-center px-4">
-        <BrandMark />
+        <BrandMark tour={tourForRole(profile.role)} />
       </div>
 
       <div className="px-3 pb-1 pt-1">

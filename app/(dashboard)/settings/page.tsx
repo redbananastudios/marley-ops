@@ -66,18 +66,23 @@ export default async function SettingsPage() {
   }
 
   // Pills follow the sections' DOM order below (Team → AI → Pricing → Business →
-  // Margin → Health) so the active marker tracks scroll monotonically. Team only
-  // exists for admins, so its pill is conditional too.
+  // Margin → Health) so the active marker tracks scroll monotonically. Estimators
+  // get a personal-device page only — Quick sign-in (passkeys) + Notifications
+  // (push); the business/money/system cards are admin surfaces.
   const sections: SettingsSection[] = [
     ...(canEdit ? [{ id: "team", label: "Team" }] : []),
     { id: "quick-signin", label: "Quick sign-in" },
     { id: "notifications", label: "Notifications" },
-    ...(canEdit ? [{ id: "payments", label: "Payments" }] : []),
-    { id: "ai", label: "AI" },
-    { id: "pricing", label: "Pricing" },
-    { id: "business", label: "Business" },
-    { id: "margin", label: "Margin" },
-    { id: "health", label: "Health" },
+    ...(canEdit
+      ? [
+          { id: "payments", label: "Payments" },
+          { id: "ai", label: "AI" },
+          { id: "pricing", label: "Pricing" },
+          { id: "business", label: "Business" },
+          { id: "margin", label: "Margin" },
+          { id: "health", label: "Health" },
+        ]
+      : []),
   ];
 
   // min-w-0 is load-bearing: grid items default to min-width:auto, so the
@@ -109,21 +114,25 @@ export default async function SettingsPage() {
             <CardPaymentsCard testToken={cardTestToken} />
           </section>
         ) : null}
-        <section id="ai" className={sectionClass}>
-          <AiSettingsCard settings={settings} spendHistory={(spendHistory ?? []).map((item) => ({ month: item.month, spentUsd: Number(item.spent_usd), reservedUsd: Number(item.reserved_usd), alertedAt: item.alerted_at }))} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} mediaCount={(mediaRows ?? []).length} nextRetentionSweep={nextSweep.toISOString()} diskCapacityGb={Number(process.env.AI_MEDIA_DISK_CAPACITY_GB) || null} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
-        </section>
-        <section id="pricing" className={sectionClass}>
-          <PricingForm initial={pricing} canEdit={canEdit} />
-        </section>
-        <section id="business" className={sectionClass}>
-          <SettingsForm initial={settings} canEdit={canEdit} />
-        </section>
-        <section id="margin" className={sectionClass}>
-          <MarginCalculator settings={settings} />
-        </section>
-        <section id="health" className={sectionClass}>
-          <HealthCard />
-        </section>
+        {canEdit ? (
+          <>
+            <section id="ai" className={sectionClass}>
+              <AiSettingsCard settings={settings} spendHistory={(spendHistory ?? []).map((item) => ({ month: item.month, spentUsd: Number(item.spent_usd), reservedUsd: Number(item.reserved_usd), alertedAt: item.alerted_at }))} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} mediaCount={(mediaRows ?? []).length} nextRetentionSweep={nextSweep.toISOString()} diskCapacityGb={Number(process.env.AI_MEDIA_DISK_CAPACITY_GB) || null} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
+            </section>
+            <section id="pricing" className={sectionClass}>
+              <PricingForm initial={pricing} canEdit={canEdit} />
+            </section>
+            <section id="business" className={sectionClass}>
+              <SettingsForm initial={settings} canEdit={canEdit} />
+            </section>
+            <section id="margin" className={sectionClass}>
+              <MarginCalculator settings={settings} />
+            </section>
+            <section id="health" className={sectionClass}>
+              <HealthCard />
+            </section>
+          </>
+        ) : null}
       </div>
     </main>
   );

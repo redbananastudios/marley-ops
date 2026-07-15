@@ -6,7 +6,7 @@
  * the card exists for anyone once an attempt has been made.
  */
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CreditCard, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -108,6 +108,11 @@ function RefundDialog({ row, remaining }: { row: CardPaymentRow; remaining: numb
   const [amount, setAmount] = useState((remaining / 100).toFixed(2));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [refreshing, startRefresh] = useTransition();
+  // The server action has an atomic reserve, but the UI must not invite a
+  // second click either: everything stays locked from the moment Refund is
+  // pressed until the refreshed server state (new status/remaining) renders.
+  const processing = busy || refreshing;
 
   async function submit() {
     const pence = Math.round(Number(amount) * 100);
@@ -128,14 +133,22 @@ function RefundDialog({ row, remaining }: { row: CardPaymentRow; remaining: numb
     }
     toast.success("Refund sent — the customer's card will show it in 3–5 working days.");
     setOpen(false);
-    router.refresh();
+    startRefresh(() => router.refresh());
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        // No escape hatch mid-refund — closing (Esc/overlay) while the gateway
+        // call is in flight would leave the admin unsure whether money moved.
+        if (!next && busy) return;
+        setOpen(next);
+      }}
+    >
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
-          Refund
+        <Button size="sm" variant="outline" disabled={processing}>
+          {refreshing ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : "Refund"}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
@@ -181,8 +194,14 @@ function RefundDialog({ row, remaining }: { row: CardPaymentRow; remaining: numb
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={busy} className="bg-mm-red text-white hover:bg-mm-red-deep">
-            {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : `Refund £${amount}`}
+          <Button onClick={submit} disabled={processing} className="bg-mm-red text-white hover:bg-mm-red-deep">
+            {processing ? (
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="size-4 animate-spin" strokeWidth={2} /> Refunding…
+              </span>
+            ) : (
+              `Refund £${amount}`
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

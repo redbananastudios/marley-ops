@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, Compass, MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
@@ -8,7 +8,6 @@ import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { OnboardingTour } from "@/components/onboarding/tour";
-import { TourButton } from "@/components/onboarding/launch";
 import { QuickSigninRow } from "@/components/my-jobs/quick-signin-row";
 import { NotificationsRow } from "@/components/my-jobs/notifications-row";
 import { PushSwRegister } from "@/components/push/sw-register";
@@ -169,18 +168,11 @@ export default async function MyJobsPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <OnboardingTour tour="crew" role={profile.role} />
+      <OnboardingTour tour="crew" role={profile.role} seen={!!profile.tour_seen_at} />
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
-        <BrandMark compact href="/my-jobs" />
+        <BrandMark compact href="/my-jobs" tour="crew" />
         <div className="flex items-center gap-1.5">
           <span className="hidden text-sm text-white/55 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
-          <TourButton
-            tour="crew"
-            icon={<Compass className="size-4" strokeWidth={1.75} />}
-            className="rounded-md px-3 text-sm font-medium text-white/55 hover:bg-white/[0.06] hover:text-white"
-          >
-            Tour
-          </TourButton>
           <SignOutButton />
         </div>
       </header>
@@ -316,6 +308,9 @@ export default async function MyJobsPage() {
           </div>
         )}
 
+        {/* Device settings — crew have no Settings page, so passkey sign-in,
+            job alerts and the install prompt live here under one heading. */}
+        <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your device</h2>
         <InstallPrompt />
         <QuickSigninRow />
         <NotificationsRow />

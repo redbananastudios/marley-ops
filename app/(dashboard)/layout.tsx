@@ -37,8 +37,10 @@ export default async function DashboardLayout({
       {/* Office-only quick search (Cmd/Ctrl-K). Crew are redirected above, so
           mounting here keeps it off the crew surface. */}
       <CommandPalette />
-      {/* Role-scoped: estimators get their own tour — never admin-only surfaces. */}
-      <OnboardingTour tour={tourForRole(profile.role)} role={profile.role} />
+      {/* Role-scoped: estimators get their own tour — never admin-only surfaces.
+          `seen` is the account-level flag, so the auto-start fires exactly once
+          per login across every device; the small Tour button relaunches it. */}
+      <OnboardingTour tour={tourForRole(profile.role)} role={profile.role} seen={!!profile.tour_seen_at} />
       <AppSidebar profile={navProfile} />
       <div className="flex min-w-0 flex-1 flex-col">
         <MobileNav profile={navProfile} />

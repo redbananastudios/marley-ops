@@ -17,6 +17,7 @@
 import { useEffect, useRef } from "react";
 import { driver, type DriveStep } from "driver.js";
 import "driver.js/dist/driver.css";
+import { markTourSeenAction } from "@/app/actions/tour";
 import { TOURS, type TourName, type TourStep } from "./tours";
 import { START_TOUR_EVENT, tourDoneKey } from "./launch";
 
@@ -51,11 +52,15 @@ function toDriveSteps(steps: TourStep[]): DriveStep[] {
 export function OnboardingTour({
   tour,
   autoStart = true,
+  seen = false,
 }: {
   tour: TourName;
   /** Present for API symmetry with the mount sites; behaviour keys off `tour`. */
   role?: string;
   autoStart?: boolean;
+  /** Account-level "already seen" (profiles.tour_seen_at) — the server truth
+   *  that stops auto-start firing again on a new device or fresh install. */
+  seen?: boolean;
 }) {
   const runningRef = useRef(false);
 
@@ -88,6 +93,10 @@ export function OnboardingTour({
           } catch {
             /* private mode / storage disabled — non-fatal */
           }
+          // Account-level stamp — the localStorage flag only protects THIS
+          // device. Fire-and-forget; a failed write just means one more
+          // auto-start on some future device.
+          void markTourSeenAction().catch(() => {});
         },
       });
       runningRef.current = true;
@@ -102,7 +111,7 @@ export function OnboardingTour({
     window.addEventListener(START_TOUR_EVENT, onStartEvent);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
-    if (autoStart) {
+    if (autoStart && !seen) {
       let done = false;
       try {
         done = localStorage.getItem(tourDoneKey(tour)) === "1";
@@ -116,7 +125,7 @@ export function OnboardingTour({
       window.removeEventListener(START_TOUR_EVENT, onStartEvent);
       if (timer) clearTimeout(timer);
     };
-  }, [tour, autoStart]);
+  }, [tour, autoStart, seen]);
 
   return null;
 }

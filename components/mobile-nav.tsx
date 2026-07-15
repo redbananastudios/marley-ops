@@ -6,6 +6,7 @@ import { Menu, Search, X } from "lucide-react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { QuickCreate } from "@/components/quick-create";
 import { openGlobalSearch } from "@/components/search/open-search";
+import { tourForRole } from "@/components/onboarding/tours";
 import { BrandMark, NavFooter, SidebarNavList } from "@/components/app-sidebar";
 
 export function MobileNav({ profile }: { profile: { full_name: string; role: string } }) {
@@ -15,7 +16,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
   return (
     <>
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 xl:hidden">
-        <BrandMark compact />
+        <BrandMark compact tour={tourForRole(profile.role)} />
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -46,7 +47,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
           >
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
             <div className="flex h-16 items-center justify-between px-4">
-              <BrandMark compact onNavigate={() => setOpen(false)} />
+              <BrandMark compact onNavigate={() => setOpen(false)} tour={tourForRole(profile.role)} />
               <DialogPrimitive.Close
                 aria-label="Close menu"
                 className="focus-ring flex size-11 items-center justify-center rounded-md text-white/55 hover:bg-white/[0.06] hover:text-white"
