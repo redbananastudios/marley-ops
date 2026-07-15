@@ -120,8 +120,15 @@ export function signFields(data: GatewayFields | GatewayResponse, secret: string
 /**
  * Verify a signed gateway message (browser return POST or server callback).
  * Handles the partial form `hash|field1,field2,…` — only the listed fields
- * are signed. Returns the signature-stripped fields on success, null on any
- * mismatch (treat as tampered — never act on it).
+ * are signed.
+ *
+ * SECURITY: returns ONLY the fields that were actually signed. On the browser
+ * return route the customer controls the whole POST body, so any field the
+ * gateway didn't sign is attacker-tamperable — callers must never read it.
+ * A partial signature that omits responseCode/amount/transactionUnique means
+ * those fields simply won't be present downstream, so settle fails closed
+ * (can't map the row / not treated as success) rather than trusting a forged
+ * value. Returns null on any signature mismatch.
  */
 export function verifySignedResponse(
   fields: GatewayResponse,
@@ -138,7 +145,7 @@ export function verifySignedResponse(
     const listed = signature.slice(pipe + 1).split(",");
     toSign = {};
     for (const key of listed) {
-      if (key in rest) toSign[key] = rest[key];
+      if (Object.hasOwn(rest, key)) toSign[key] = rest[key];
     }
   }
 
@@ -146,7 +153,7 @@ export function verifySignedResponse(
   const a = Buffer.from(actual, "utf8");
   const b = Buffer.from(expected, "utf8");
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return rest;
+  return toSign; // signed fields only — never the unsigned superset
 }
 
 /* ------------------------------------------------------------- requests */

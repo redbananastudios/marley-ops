@@ -93,11 +93,19 @@ describe("verifySignedResponse", () => {
     expect(verifySignedResponse({ responseCode: "0" }, secret)).toBeNull();
   });
 
-  it("handles the partial form hash|field,list — only listed fields signed", () => {
-    const all = { responseCode: "0", xref: "X1", unsignedExtra: "junk" };
+  it("partial form hash|field,list — returns ONLY the signed subset (drops unsigned fields)", () => {
+    // SECURITY: an unsigned field on the customer-controlled return route must
+    // never survive verification — settle would otherwise trust a forged value.
     const signedSubset = { responseCode: "0", xref: "X1" };
     const sig = signFields(signedSubset, secret) + "|responseCode,xref";
-    expect(verifySignedResponse({ ...all, signature: sig }, secret)).toEqual(all);
+    const attackerBody = { ...signedSubset, unsignedExtra: "junk", amountReceived: "1", signature: sig };
+    expect(verifySignedResponse(attackerBody, secret)).toEqual(signedSubset);
+  });
+
+  it("ignores prototype keys smuggled into the signed list", () => {
+    const signedSubset = { responseCode: "0" };
+    const sig = signFields(signedSubset, secret) + "|responseCode,__proto__";
+    expect(verifySignedResponse({ responseCode: "0", signature: sig }, secret)).toEqual(signedSubset);
   });
 
   it("rejects a partial form whose hash doesn't match the listed fields", () => {

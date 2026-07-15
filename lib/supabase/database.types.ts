@@ -590,6 +590,7 @@ export type Database = {
           gateway_transaction_id: string | null
           gateway_xref: string | null
           id: string
+          is_test: boolean
           kind: string
           lead_id: string | null
           quote_id: string
@@ -612,6 +613,7 @@ export type Database = {
           gateway_transaction_id?: string | null
           gateway_xref?: string | null
           id?: string
+          is_test?: boolean
           kind?: string
           lead_id?: string | null
           quote_id: string
@@ -634,6 +636,7 @@ export type Database = {
           gateway_transaction_id?: string | null
           gateway_xref?: string | null
           id?: string
+          is_test?: boolean
           kind?: string
           lead_id?: string | null
           quote_id?: string

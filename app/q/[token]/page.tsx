@@ -294,15 +294,25 @@ export default async function AcceptPage({
           </p>
         </div>
         <div className="space-y-5 p-6 sm:p-8">
-          {cardResult === "failed" || cardResult === "error" ? (
+          {cardResult === "failed" ? (
             <div className="rounded-md border border-warn-border bg-warn-bg p-4">
               <p className="text-sm font-semibold text-ink">
                 Your card payment didn&apos;t complete — no money has been taken.
               </p>
               <p className="mt-1 text-sm leading-relaxed text-mist-500">
-                You can try again below, or pay by bank transfer instead. If it keeps happening,
-                call us on <strong className="text-ink">01747 637070</strong> and we&apos;ll sort
-                it together.
+                {cardOk ? "You can try again below, or pay by bank transfer instead." : "Please pay by bank transfer below."}{" "}
+                If it keeps happening, call us on <strong className="text-ink">01747 637070</strong>{" "}
+                and we&apos;ll sort it together.
+              </p>
+            </div>
+          ) : cardResult === "error" ? (
+            <div className="rounded-md border border-warn-border bg-warn-bg p-4">
+              <p className="text-sm font-semibold text-ink">
+                We couldn&apos;t confirm your card payment.
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-mist-500">
+                Please call us on <strong className="text-ink">01747 637070</strong> before trying
+                again so we can check whether anything was taken — or pay by bank transfer below.
               </p>
             </div>
           ) : null}

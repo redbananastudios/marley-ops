@@ -49,9 +49,12 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/api/sync/") ||
     // Provider webhooks (svix-signature verified inside the route).
     path.startsWith("/api/webhooks/") ||
-    // takepayments gateway messages (SHA-512 signature verified inside the
+    // takepayments gateway messages (SHA-512 signature verified inside each
     // route) — a redirect-to-login here would eat the payment result POST.
-    path.startsWith("/api/card/");
+    // Listed EXACTLY, not by prefix, so a future /api/card/* helper isn't
+    // silently exposed unauthenticated.
+    path === "/api/card/callback" ||
+    path === "/api/card/return";
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

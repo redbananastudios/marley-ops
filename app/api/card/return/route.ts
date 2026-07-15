@@ -25,7 +25,7 @@ export async function POST(req: Request) {
   const { state, token } = await handleGatewayMessage(sb, parseGatewayBody(body));
 
   const dest = token
-    ? `${appUrl()}/q/${token}?card=${state}`
+    ? `${appUrl()}/q/${encodeURIComponent(token)}?card=${state}`
     : `${appUrl()}/q/expired`; // unknown attempt — friendly not-found shape
   return NextResponse.redirect(dest, 303);
 }

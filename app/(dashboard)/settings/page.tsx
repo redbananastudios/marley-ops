@@ -33,20 +33,26 @@ export default async function SettingsPage() {
   ]);
   const aiConfigured = !!process.env.GEMINI_API_KEY && !!process.env.GEMINI_API_BASE_URL && !!(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
 
-  // A test-payment target: the most recent accepted-but-unpaid quote (admin
-  // only — the card renders the "Run a test payment" button against it).
+  // A test-payment target (admin only — the card renders "Run a test payment"
+  // against it). Prefer a .test-email quote so the simulator never even
+  // prefills a real customer's details; the is_test flag on the attempt is the
+  // real guard that keeps the settle pipeline off real customer/Zoho records.
   let cardTestToken: string | null = null;
   if (canEdit) {
-    const { data: t } = await admin
+    const base = admin
       .from("quotes")
-      .select("accept_token")
+      .select("accept_token, customer_email")
       .eq("status", "accepted")
       .is("deposit_paid_at", null)
       .not("accept_token", "is", null)
       .order("accepted_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    cardTestToken = (t?.accept_token as string | null) ?? null;
+      .limit(20);
+    const { data: candidates } = await base;
+    const testFirst = (candidates ?? []).find((q) =>
+      (q.customer_email as string | null)?.toLowerCase().endsWith(".test"),
+    );
+    cardTestToken =
+      ((testFirst ?? candidates?.[0])?.accept_token as string | null) ?? null;
   }
 
   // Team management is admin-only — estimators don't see the card at all.

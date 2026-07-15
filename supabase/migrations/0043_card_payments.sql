@@ -25,9 +25,16 @@ create table card_payments (
   client_id              uuid references clients(id) on delete set null,
   kind                   text not null default 'deposit' check (kind in ('deposit', 'balance')),
   amount_pence           integer not null check (amount_pence > 0),
+  -- is_test attempts run through the real gateway simulator but MUST NOT touch
+  -- the customer/Zoho/confirm pipeline (they run against a real quote token).
+  is_test                boolean not null default false,
   status                 text not null default 'pending'
                          check (status in ('pending', 'paid', 'failed', 'abandoned',
-                                           'refunded', 'partially_refunded', 'voided')),
+                                           'refunded', 'partially_refunded', 'voided',
+                                           -- gateway reported success but the amount
+                                           -- didn't match what we signed: never auto-
+                                           -- confirmed, a human reconciles via the MMS.
+                                           'needs_review')),
   gateway_xref           text check (char_length(gateway_xref) <= 128),
   gateway_transaction_id text check (char_length(gateway_transaction_id) <= 128),
   response_code          integer,

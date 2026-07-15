@@ -99,7 +99,7 @@ export type StartCardPaymentOutcome =
 export async function startCardPayment(
   sb: Sb,
   token: string,
-  opts?: { testAmountPence?: number },
+  opts?: { testAmountPence?: number; isTest?: boolean },
 ): Promise<StartCardPaymentOutcome> {
   const config = getTakepaymentsConfig();
   if (!config || !(await cardPaymentsAvailable(sb))) {
@@ -119,6 +119,10 @@ export async function startCardPayment(
   }
 
   // Retire any stale pending attempt so the partial unique index lets us mint.
+  // If that older attempt was actually PAID (customer completed two HPP tabs),
+  // its callback still settles it via the abandoned-on-success path in
+  // settleCardPayment, so the second charge is recorded + double-alerted — it
+  // is never silently discarded.
   await sb
     .from("card_payments")
     .update({ status: "abandoned", response_message: "superseded by a new attempt" })
@@ -133,6 +137,7 @@ export async function startCardPayment(
       client_id: quote.client_id,
       kind: "deposit",
       amount_pence: amountPence,
+      is_test: opts?.isTest === true,
       status: "pending",
     })
     .select("id")
@@ -161,8 +166,13 @@ export type SettleOutcome =
 
 /**
  * Apply a VERIFIED gateway result to its attempt row. Idempotent and race-safe:
- * the status='pending' conditional update is the claim — whoever loses simply
+ * the conditional `.in("status", …)` update is the claim — whoever loses simply
  * reads the terminal row. Callers must have verified the signature already.
+ *
+ * A SUCCESS may settle a `pending` OR an `abandoned` row: the latter is the
+ * second charge of a two-tab double-payment, and recording it (then routing
+ * through markDepositPaid → double-payment alert) is safer than discarding
+ * real money. A decline only settles `pending`.
  */
 export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promise<SettleOutcome> {
   const rowId = fields.transactionUnique;
@@ -170,20 +180,38 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
 
   const { data: row } = await sb.from("card_payments").select("*").eq("id", rowId).maybeSingle();
   if (!row) return { ok: false, error: "unknown payment attempt" };
-  if (row.status !== "pending") return { ok: true, state: "already_terminal" };
 
   const responseCode = Number(fields.responseCode);
   const success = responseCode === RC_SUCCESS;
 
+  // A success can rescue an abandoned (superseded) row; a decline can't.
+  const claimFrom = success ? ["pending", "abandoned"] : ["pending"];
+  if (!claimFrom.includes(row.status)) return { ok: true, state: "already_terminal" };
+
   // Paranoia gate on success: the gateway must have taken exactly our amount.
-  if (success) {
-    if (!successAmountMatches(fields.amountReceived ?? fields.amount, row.amount_pence)) {
+  // A mismatch is never auto-confirmed — claim the row to `needs_review` (a
+  // TERMINAL state, so the reconcile cron won't re-alert every tick) and alert
+  // a human once to reconcile against the MMS.
+  if (success && !successAmountMatches(fields.amountReceived ?? fields.amount, row.amount_pence)) {
+    const { data: flagged } = await sb
+      .from("card_payments")
+      .update({
+        status: "needs_review",
+        gateway_xref: fields.xref ?? null,
+        gateway_transaction_id: fields.transactionID ?? null,
+        response_code: Number.isFinite(responseCode) ? responseCode : null,
+        response_message: `amount mismatch: reported ${fields.amountReceived ?? fields.amount ?? "?"} vs ${row.amount_pence}`.slice(0, 512),
+      })
+      .eq("id", row.id)
+      .in("status", claimFrom)
+      .select("id");
+    if (flagged?.length) {
       await sendOpsAlert(`Card payment AMOUNT MISMATCH — attempt ${row.id.slice(0, 8)}`, [
         `takepayments reported a successful payment of <strong>${fields.amountReceived ?? "?"}</strong> pence against an attempt for <strong>${row.amount_pence}</strong> pence (quote ${row.quote_id}).`,
-        `The attempt has NOT been marked paid — check the MMS and reconcile manually.`,
+        `The attempt is flagged <strong>needs review</strong> and NOT marked paid — check the MMS and reconcile manually.`,
       ]);
-      return { ok: false, error: "amount mismatch" };
     }
+    return { ok: false, error: "amount mismatch" };
   }
 
   const patch = {
@@ -203,7 +231,7 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
     .from("card_payments")
     .update(patch)
     .eq("id", row.id)
-    .eq("status", "pending")
+    .in("status", claimFrom)
     .select("id");
   if (claimErr) return { ok: false, error: claimErr.message };
   if (!claimed?.length) return { ok: true, state: "already_terminal" };
@@ -212,23 +240,47 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
     return { ok: true, state: "declined", message: fields.responseMessage ?? "declined" };
   }
 
-  // Money landed — run the existing paid pipeline. `already: true` here means
-  // the deposit was ALSO marked paid another way (e.g. office BACS tap) while
-  // the card was mid-flight: real money took twice → refund decision, loudly.
-  const paid = await markDepositPaid(sb, row.quote_id, {
-    method: "card",
-    actorId: null,
-    recordInZoho: true,
-  });
-  if (paid.already) {
-    await raiseDoublePaymentAlert(sb, row);
-  } else if (!paid.ok) {
-    await sendOpsAlert(`Card paid but pipeline FAILED — attempt ${row.id.slice(0, 8)}`, [
-      `takepayments took the deposit for quote ${row.quote_id} but marking it paid failed: ${paid.error ?? "unknown"}.`,
-      `Fix manually: the money IS taken (xref ${fields.xref ?? "?"}).`,
+  // A test attempt runs through the real simulator but MUST NOT touch the
+  // customer/Zoho/confirm pipeline — it's against a real quote token.
+  if (row.is_test) return { ok: true, state: "paid" };
+
+  await runPaidPipeline(sb, row, fields.xref ?? null);
+  return { ok: true, state: "paid" };
+}
+
+/**
+ * Run the deposit-paid pipeline for a settled card row, isolating every failure
+ * mode so a paid capture is NEVER silently orphaned. A throw inside
+ * markDepositPaid (leads update, Zoho, email) becomes an ops alert here rather
+ * than propagating out and leaving a `paid` card row with an unconfirmed quote
+ * that the pending-only reconcile cron would never revisit.
+ */
+async function runPaidPipeline(sb: Sb, row: CardPaymentRow, xref: string | null): Promise<void> {
+  try {
+    // Money truth uses the amount actually captured (row.amount_pence), not a
+    // possibly-since-edited quote.deposit_amount.
+    const paid = await markDepositPaid(sb, row.quote_id, {
+      method: "card",
+      actorId: null,
+      recordInZoho: true,
+      amountPence: row.amount_pence,
+    });
+    if (paid.already) {
+      // Deposit was ALSO marked paid another way (BACS tap, or the two-tab
+      // second charge) → real money twice → refund decision, loudly.
+      await raiseDoublePaymentAlert(sb, row);
+    } else if (!paid.ok) {
+      await sendOpsAlert(`Card paid but pipeline FAILED — attempt ${row.id.slice(0, 8)}`, [
+        `takepayments took the deposit for quote ${row.quote_id} but marking it paid failed: ${paid.error ?? "unknown"}.`,
+        `Fix manually: the money IS taken (xref ${xref ?? "?"}).`,
+      ]);
+    }
+  } catch (err) {
+    await sendOpsAlert(`Card paid but pipeline THREW — attempt ${row.id.slice(0, 8)}`, [
+      `takepayments took the deposit for quote ${row.quote_id} (xref ${xref ?? "?"}) but confirming the booking threw: ${err instanceof Error ? err.message : "unknown"}.`,
+      `The card row is marked paid; confirm the lead + record the Zoho payment manually.`,
     ]);
   }
-  return { ok: true, state: "paid" };
 }
 
 async function raiseDoublePaymentAlert(sb: Sb, row: CardPaymentRow): Promise<void> {
@@ -314,8 +366,13 @@ export type RefundOutcome = { ok: true; refundedPence: number } | { ok: false; e
 /**
  * Refund a paid card attempt (full or partial) back to the original card.
  * Same-day unsettled transactions are CANCELled instead (no transaction fee);
- * the gateway rejects a CANCEL once settled, and we fall through to
- * REFUND_SALE. Gateway-side over-refund protection backs up our own guard.
+ * the gateway rejects a CANCEL once settled, and we fall through to REFUND_SALE.
+ *
+ * Concurrency-safe (a double-click / two tabs must never double-refund a card):
+ * we ATOMICALLY reserve the amount by advancing refunded_pence with an
+ * optimistic guard BEFORE calling the gateway. The loser of a race sees 0 rows
+ * and aborts before any money moves. If the gateway then declines or errors, we
+ * roll the reservation back.
  */
 export async function refundCardPayment(
   sb: Sb,
@@ -343,46 +400,63 @@ export async function refundCardPayment(
   if (guard) return { ok: false, error: guard };
   const reason = input.reason.trim();
   const xref = row.gateway_xref!; // guard above proved it's present
+  const reservedPence = row.refunded_pence + amount;
+
+  // ATOMIC RESERVE — advance refunded_pence only if it hasn't changed since our
+  // read AND the row is still refundable. Postgres serialises concurrent writes
+  // on the row: a racing refund re-evaluates its guard against the committed
+  // (already-advanced) value and matches 0 rows, so it aborts here, before the
+  // gateway call. This is the lock that prevents a double-refund.
+  const { data: reserved } = await sb
+    .from("card_payments")
+    .update({ refunded_pence: reservedPence })
+    .eq("id", row.id)
+    .eq("refunded_pence", row.refunded_pence)
+    .in("status", ["paid", "partially_refunded"])
+    .select("id");
+  if (!reserved?.length) {
+    return { ok: false, error: "That refund is already being processed — refresh and check the amount." };
+  }
+
+  const rollback = () =>
+    sb.from("card_payments").update({ refunded_pence: row.refunded_pence }).eq("id", row.id).eq("refunded_pence", reservedPence);
 
   const fullAndUnsettledToday = amount === row.amount_pence && row.refunded_pence === 0;
   let response: GatewayResponse | null = null;
   let voided = false;
 
-  if (fullAndUnsettledToday) {
-    try {
-      const cancel = await directRequest(config, { action: "CANCEL", xref });
-      if (Number(cancel.responseCode) === RC_SUCCESS) {
-        response = cancel;
-        voided = true;
+  try {
+    if (fullAndUnsettledToday) {
+      try {
+        const cancel = await directRequest(config, { action: "CANCEL", xref });
+        if (Number(cancel.responseCode) === RC_SUCCESS) {
+          response = cancel;
+          voided = true;
+        }
+      } catch {
+        // CANCEL is a fee optimisation only — fall through to a normal refund.
       }
-    } catch {
-      // CANCEL is a fee optimisation only — fall through to a normal refund.
     }
-  }
 
-  if (!response) {
-    try {
-      const refund = await directRequest(config, {
-        action: "REFUND_SALE",
-        xref,
-        amount,
-      });
+    if (!response) {
+      const refund = await directRequest(config, { action: "REFUND_SALE", xref, amount });
       if (Number(refund.responseCode) !== RC_SUCCESS) {
+        await rollback();
         return { ok: false, error: `Gateway declined the refund: ${refund.responseMessage ?? "unknown"}` };
       }
       response = refund;
-    } catch (err) {
-      return { ok: false, error: err instanceof Error ? err.message : "Gateway unreachable — try again." };
     }
+  } catch (err) {
+    await rollback();
+    return { ok: false, error: err instanceof Error ? err.message : "Gateway unreachable — try again." };
   }
 
-  const refundedPence = row.refunded_pence + amount;
+  // Gateway succeeded — finalise status + audit (refunded_pence already reserved).
   const now = new Date().toISOString();
   await sb
     .from("card_payments")
     .update({
-      status: voided ? "voided" : refundedPence >= row.amount_pence ? "refunded" : "partially_refunded",
-      refunded_pence: refundedPence,
+      status: voided ? "voided" : reservedPence >= row.amount_pence ? "refunded" : "partially_refunded",
       refund_reason: reason.slice(0, 512),
       refunded_by: input.actorId,
       refunded_at: now,
@@ -409,22 +483,28 @@ export async function refundCardPayment(
     diff: { amount_pence: amount, reason } as never,
   } as never);
 
-  // Customer note — duplicate-guarded like every other send.
+  // Customer note — duplicate-guarded like every other send. A same-day VOID
+  // cancels the pending authorisation (no credit lands on a statement), so the
+  // copy must differ from a settled refund or the customer waits for a line
+  // that never arrives.
   if (quote?.customer_email) {
     const firstName = (quote.customer_name ?? "").trim().split(/\s+/)[0] || undefined;
+    const endsLine = row.card_number_mask ? ` ending ${row.card_number_mask.slice(-4)}` : "";
+    const bodyPara = voided
+      ? `We've cancelled the ${label} card payment${endsLine} — it was never taken, so there's nothing further you need to do. If it showed as pending on your statement, that will simply drop off.`
+      : `We've refunded ${label} to your card${endsLine}. It normally appears on your statement within 3–5 working days.`;
     await dispatchComm(sb, input.actorId, {
       channel: "email",
       to: quote.customer_email,
-      subject: `Your ${label} refund from Marley Moves (${quote.quote_ref})`,
-      bodyText: `We've refunded ${label} to your card${row.card_number_mask ? ` ending ${row.card_number_mask.slice(-4)}` : ""}. It normally shows within 3–5 working days. Any questions, call us on 01747 637070.`,
+      subject: voided
+        ? `Your ${label} card payment has been cancelled (${quote.quote_ref})`
+        : `Your ${label} refund from Marley Moves (${quote.quote_ref})`,
+      bodyText: `${bodyPara} Any questions, call us on 01747 637070.`,
       bodyHtml: brandedEmailHtml({
-        preheader: `${label} refunded to your card`,
+        preheader: voided ? `${label} card payment cancelled` : `${label} refunded to your card`,
         greeting: firstName,
-        headline: "Your refund is on its way",
-        paragraphs: [
-          `We've refunded ${label} to your card${row.card_number_mask ? ` ending ${row.card_number_mask.slice(-4)}` : ""}. It normally appears on your statement within 3–5 working days.`,
-          `Any questions at all, just reply to this email or call us on 01747 637070.`,
-        ],
+        headline: voided ? "Your payment has been cancelled" : "Your refund is on its way",
+        paragraphs: [bodyPara, `Any questions at all, just reply to this email or call us on 01747 637070.`],
       }),
       leadId: row.lead_id ?? undefined,
       quoteId: row.quote_id,
@@ -438,25 +518,33 @@ export async function refundCardPayment(
 /* ------------------------------------------------------------- reconcile */
 
 /**
- * Safety net for missed callbacks (the gateway doesn't document retries) and
- * abandoned HPP tabs: QUERY every pending attempt older than 10 minutes and
- * settle it from the gateway's answer; attempts the gateway has never seen
- * are swept to `abandoned` after 24 h.
+ * Safety net, three jobs:
+ *  1. QUERY pending attempts >10 min old and settle from the gateway's answer;
+ *     ones the gateway never saw are swept to `abandoned` after 24 h.
+ *  2. QUERY recently-abandoned attempts (superseded by a retry) in case one was
+ *     actually PAID — a two-tab second charge whose callback we missed. settle
+ *     records it and raises the double-payment alert.
+ *  3. Re-drive `paid` rows whose quote deposit never got confirmed — the crash
+ *     window where the card claim committed but the paid pipeline threw. Idempotent.
  */
 export async function reconcileCardPayments(
   sb: Sb,
-): Promise<{ checked: number; settled: number; abandoned: number }> {
+): Promise<{ checked: number; settled: number; abandoned: number; recovered: number }> {
   const config = getTakepaymentsConfig();
-  const out = { checked: 0, settled: 0, abandoned: 0 };
+  const out = { checked: 0, settled: 0, abandoned: 0, recovered: 0 };
   if (!config) return out;
 
   const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  // (1) + (2): pending stragglers, plus recently-abandoned rows that a missed
+  // callback might have left un-recorded despite a real charge.
   const { data: rows } = await sb
     .from("card_payments")
     .select("*")
-    .eq("status", "pending")
+    .in("status", ["pending", "abandoned"])
     .lt("created_at", tenMinAgo)
+    .gt("created_at", dayAgo)
     .limit(25);
 
   for (const row of rows ?? []) {
@@ -471,13 +559,34 @@ export async function reconcileCardPayments(
     if (found && fields.transactionUnique === row.id) {
       const outcome = await settleCardPayment(sb, fields);
       if (outcome.ok && outcome.state === "paid") out.settled++;
-    } else if (row.created_at < dayAgo) {
+    } else if (row.status === "pending" && row.created_at < dayAgo) {
       await sb
         .from("card_payments")
         .update({ status: "abandoned", response_message: "no gateway record after 24h" })
         .eq("id", row.id)
         .eq("status", "pending");
       out.abandoned++;
+    }
+  }
+
+  // (3): a `paid` non-test card row whose quote deposit is still unpaid means
+  // the pipeline threw after the claim committed. markDepositPaid is idempotent.
+  const { data: orphans } = await sb
+    .from("card_payments")
+    .select("*")
+    .eq("status", "paid")
+    .eq("is_test", false)
+    .lt("settled_at", tenMinAgo)
+    .limit(25);
+  for (const row of orphans ?? []) {
+    const { data: q } = await sb
+      .from("quotes")
+      .select("deposit_paid_at")
+      .eq("id", row.quote_id)
+      .maybeSingle();
+    if (q && !q.deposit_paid_at) {
+      await runPaidPipeline(sb, row, row.gateway_xref);
+      out.recovered++;
     }
   }
   return out;

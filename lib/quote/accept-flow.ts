@@ -845,9 +845,15 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
 export interface DepositPaidOpts {
   method: "bank_transfer" | "card" | "cash";
   actorId: string | null; // null = system (cron / customer card payment)
-  /** Record the payment in Zoho too (BACS/cash one-tap). Card payments are
-   *  already in Zoho — pass false. */
+  /** Record the payment against the Zoho deposit invoice too. Two card worlds:
+   *  a Zoho-hosted-gateway card payment is ALREADY on the invoice → pass false;
+   *  a takepayments card payment is NOT (different processor) → pass true, and
+   *  it's recorded via `creditcard` mode. BACS/cash one-tap → true. */
   recordInZoho: boolean;
+  /** Exact pence actually captured (card). Overrides quote.deposit_amount for
+   *  the Zoho record, the customer email and the lead — money truth follows the
+   *  charge, not a possibly-since-edited quote figure. */
+  amountPence?: number;
 }
 
 const zohoMode = (method: string): "banktransfer" | "cash" | "creditcard" =>
@@ -865,7 +871,8 @@ export async function markDepositPaid(
   if (quote.deposit_paid_at) return { ok: true, already: true };
 
   const settings = await getBusinessSettings(sb);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  const deposit =
+    opts.amountPence != null ? opts.amountPence / 100 : (quote.deposit_amount ?? settings.defaultDeposit);
   const now = new Date().toISOString();
 
   // Idempotency gate: only the first caller flips deposit_paid_at. A DB

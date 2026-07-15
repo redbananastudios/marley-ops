@@ -96,5 +96,7 @@ export async function startTestCardPaymentAction(
   const config = getTakepaymentsConfig();
   if (!config?.testMode) return { ok: false, error: "Test payments only run in test mode." };
   const admin = createAdminClient();
-  return startCardPayment(admin, token, { testAmountPence: 100 });
+  // isTest tags the row so settle records the simulator charge but never touches
+  // the real customer/Zoho/confirm pipeline — even against a real quote token.
+  return startCardPayment(admin, token, { testAmountPence: 100, isTest: true });
 }

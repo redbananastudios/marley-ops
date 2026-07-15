@@ -52,6 +52,7 @@ const STATUS: Record<string, { label: string; cls: string }> = {
   refunded: { label: "Refunded", cls: "bg-mist-100 text-mist-500" },
   partially_refunded: { label: "Part-refunded", cls: "bg-mist-100 text-mist-500" },
   voided: { label: "Voided", cls: "bg-mist-100 text-mist-500" },
+  needs_review: { label: "Needs review", cls: "bg-warn-bg text-warn" },
 };
 
 export function CardPaymentsCard({ rows, isAdmin }: { rows: CardPaymentRow[]; isAdmin: boolean }) {
