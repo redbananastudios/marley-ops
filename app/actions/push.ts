@@ -2,8 +2,10 @@
 
 /**
  * Web Push server actions — subscription lifecycle, preferences, admin kill
- * switches and the admin self-test send. Office-gated (admin/estimator): both
- * v1 categories are office-facing and crew never reach the dashboard.
+ * switches and the admin self-test send. Open to every ACTIVE profile: office
+ * users enable in Settings, crew enable from /my-jobs (their job-assignment
+ * category). Each user only ever sees/toggles the categories their role can
+ * receive.
  *
  * Ownership rules (PRD §13.2): the subscription owner is ALWAYS the signed-in
  * session — never a client-supplied id. One active owner per endpoint: if a
@@ -26,7 +28,7 @@ import {
 import { endpointHash, getPushFlags, sendPushForEvent } from "@/lib/push/send";
 import { vapidConfigured, vapidPublicKey } from "@/lib/push/transport";
 
-async function requireOfficeProfile() {
+async function requireActiveProfile() {
   const sb = await createClient();
   const {
     data: { user },
@@ -38,7 +40,6 @@ async function requireOfficeProfile() {
     .eq("id", user.id)
     .single();
   if (!prof?.active) return null;
-  if (prof.role !== "admin" && prof.role !== "estimator") return null;
   return prof;
 }
 
@@ -55,7 +56,7 @@ export interface PushConfig {
 }
 
 export async function getPushConfigAction(): Promise<PushConfig | null> {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof) return null;
   const admin = createAdminClient();
   const flags = await getPushFlags(admin);
@@ -71,7 +72,11 @@ export async function getPushConfigAction(): Promise<PushConfig | null> {
     enabled: vapidConfigured() && flags.enabled,
     configured: vapidConfigured(),
     vapidPublicKey: vapidPublicKey(),
-    categories: PUSH_CATEGORY_IDS.map((id) => ({
+    // Only the categories this role can actually receive — crew see job
+    // assignments, office see enquiries + payments.
+    categories: PUSH_CATEGORY_IDS.filter((id) =>
+      (PUSH_CATEGORIES[id].audience as readonly string[]).includes(prof.role),
+    ).map((id) => ({
       id,
       label: PUSH_CATEGORIES[id].label,
       description: PUSH_CATEGORIES[id].description,
@@ -97,7 +102,7 @@ const subscriptionSchema = z.object({
 export async function saveSubscriptionAction(
   input: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof) return { ok: false, error: "Not signed in." };
   const parsed = subscriptionSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid subscription." };
@@ -144,7 +149,7 @@ const removeSchema = z.object({ endpoint: z.string().url().max(2048) });
 export async function removeSubscriptionAction(
   input: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof) return { ok: false, error: "Not signed in." };
   const parsed = removeSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid request." };
@@ -180,7 +185,7 @@ const prefsSchema = z.record(z.string(), z.boolean());
 export async function setPushPreferencesAction(
   input: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof) return { ok: false, error: "Not signed in." };
   const parsed = prefsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid preferences." };
@@ -218,13 +223,14 @@ const flagsSchema = z.object({
   enabled: z.boolean().optional(),
   new_enquiry: z.boolean().optional(),
   payment_event: z.boolean().optional(),
+  crew_job: z.boolean().optional(),
 });
 
 /** Business-wide kill switches (admin only) — flip without a deploy. */
 export async function setPushFlagsAction(
   input: unknown,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof || prof.role !== "admin") return { ok: false, error: "Admins only." };
   const parsed = flagsSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Invalid flags." };
@@ -233,6 +239,7 @@ export async function setPushFlagsAction(
   if (typeof parsed.data.enabled === "boolean") patch.push_enabled = parsed.data.enabled;
   if (typeof parsed.data.new_enquiry === "boolean") patch.push_new_enquiry_enabled = parsed.data.new_enquiry;
   if (typeof parsed.data.payment_event === "boolean") patch.push_payment_event_enabled = parsed.data.payment_event;
+  if (typeof parsed.data.crew_job === "boolean") patch.push_crew_job_enabled = parsed.data.crew_job;
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to change." };
 
   try {
@@ -260,7 +267,7 @@ const TEST_MAX_PER_WINDOW = 3;
 export async function sendTestPushAction(): Promise<
   { ok: true; accepted: number; attempted: number } | { ok: false; error: string }
 > {
-  const prof = await requireOfficeProfile();
+  const prof = await requireActiveProfile();
   if (!prof || prof.role !== "admin") return { ok: false, error: "Admins only." };
 
   const now = Date.now();

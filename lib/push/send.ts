@@ -40,7 +40,7 @@ export interface PushFlags {
 export async function getPushFlags(sb: Sb): Promise<PushFlags> {
   const { data } = await sb
     .from("business_settings")
-    .select("push_enabled, push_new_enquiry_enabled, push_payment_event_enabled")
+    .select("push_enabled, push_new_enquiry_enabled, push_payment_event_enabled, push_crew_job_enabled")
     .eq("id", true)
     .maybeSingle();
   return {
@@ -48,6 +48,7 @@ export async function getPushFlags(sb: Sb): Promise<PushFlags> {
     categories: {
       new_enquiry: data?.push_new_enquiry_enabled !== false,
       payment_event: data?.push_payment_event_enabled !== false,
+      crew_job: data?.push_crew_job_enabled !== false,
     },
   };
 }
@@ -101,6 +102,9 @@ export async function sendPushForEvent(
   opts: {
     actorUserId?: string | null;
     onlyUserId?: string;
+    /** Target SPECIFIC users (e.g. the crew member just assigned) instead of
+     *  the whole role audience. Audience/active/preference rules still apply. */
+    recipientUserIds?: string[];
     /** Admin self-test: respects the global switch but not the per-category
      *  one (the test proves transport, not category policy). */
     isTest?: boolean;
@@ -126,7 +130,12 @@ export async function sendPushForEvent(
     if (opts.onlyUserId) {
       userIds = [opts.onlyUserId];
     } else {
-      const { data: profiles } = await admin.from("profiles").select("id, role, active");
+      let profileQuery = admin.from("profiles").select("id, role, active");
+      if (opts.recipientUserIds) {
+        if (opts.recipientUserIds.length === 0) return { ...none, skipped: "no_recipients" };
+        profileQuery = profileQuery.in("id", opts.recipientUserIds);
+      }
+      const { data: profiles } = await profileQuery;
       const { data: prefRows } = await admin.from("push_preferences").select("user_id, categories");
       const prefs = new Map<string, Record<string, unknown>>(
         (prefRows ?? []).map((r: { user_id: string; categories: unknown }) => [

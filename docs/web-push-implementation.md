@@ -22,8 +22,9 @@ Phase 0 discovery answers, the product decisions Peter locked, and how to operat
 
 ## Product decisions (Peter, 2026-07-15)
 
-1. **v1 categories:** `new_enquiry` + `payment_event` (deposit AND balance). Follow-ups and crew
-   categories deferred.
+1. **v1 categories:** `new_enquiry` + `payment_event` (deposit AND balance), plus `crew_job`
+   (added same day — "we do need push notifications to crew when a new job is allocated, or when
+   they are removed from a job"). Follow-ups deferred.
 2. **Devices supported:** iPhone (installed PWA), office iPad (installed PWA), Android, desktop
    Chrome/Edge.
 3. **Audio-alert conflict rule:** while a Marley Ops window is focused, the SW suppresses the OS
@@ -58,6 +59,13 @@ Phase 0 discovery answers, the product decisions Peter locked, and how to operat
 - Event wiring: `lib/sync/sanity-leads.ts` (fresh-window + >3 → digest so the cutover backfill stays
   silent), `lib/quote/accept-flow.ts` `markDepositPaid` / `markBalancePaid` (after each idempotency
   gate; actor excluded).
+- **Crew job assignments** (`crew_job`, migration 0042): `lib/push/crew.ts` fires from the three Job
+  Board assignment actions after the write commits. Targeted at the specific member via
+  `staff.profile_id` (no linked login → silent); skipped for cancelled/past appointments; assignment
+  and removal share one notification tag so a removal REPLACES the stale "you're on this job" alert.
+  Copy is day-only ("You've been put on a job on Sat 18 Jul.") — details live behind the /my-jobs
+  deep link. Crew enable from the "Get job alerts on this phone" row on /my-jobs (they never see
+  Settings); config/preferences are role-scoped so each user only sees categories they can receive.
 
 ## Operations
 

@@ -44,6 +44,16 @@ describe("resolvePushRecipients", () => {
     const ids = resolvePushRecipients("new_enquiry", OFFICE, prefs, null);
     expect(ids).toContain("admin-1");
   });
+
+  it("crew_job reaches crew only — office roles are excluded even when targeted", () => {
+    const ids = resolvePushRecipients("crew_job", OFFICE, noPrefs, null);
+    expect(ids).toEqual(["crew-1"]);
+  });
+
+  it("crew can opt out of job alerts", () => {
+    const prefs = new Map<string, Record<string, unknown>>([["crew-1", { crew_job: false }]]);
+    expect(resolvePushRecipients("crew_job", OFFICE, prefs, null)).toEqual([]);
+  });
 });
 
 describe("classifyPushError (PRD §12.2)", () => {

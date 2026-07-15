@@ -39,6 +39,19 @@ export const PUSH_CATEGORIES = {
     urgency: "normal" as const,
     suppressWhenFocused: false,
   },
+  crew_job: {
+    id: "crew_job" as const,
+    label: "Job assignments",
+    description: "You're put on a job, or taken off one.",
+    /** Crew only — targeted at the SPECIFIC assigned member, never broadcast. */
+    audience: ["crew"] as const,
+    defaultEnabled: true,
+    /** A day's shelf life — a crew member should still hear about yesterday's
+     *  late-evening allocation when their phone wakes up in the morning. */
+    ttlSeconds: 24 * 3600,
+    urgency: "high" as const,
+    suppressWhenFocused: false,
+  },
 } satisfies Record<string, PushCategory>;
 
 export type PushCategoryId = keyof typeof PUSH_CATEGORIES;
@@ -117,6 +130,48 @@ export function paymentPush(opts: {
     title: opts.kind === "deposit" ? "Deposit received" : "Balance received",
     body: `${first} has paid their ${opts.kind}.`,
     url: opts.leadId ? `/leads/${opts.leadId}` : "/bookings",
+  };
+}
+
+/** "Sat 19 Jul" in UK time from an ISO timestamp — the only job detail safe
+ *  on a lock screen (no names, addresses or times; /my-jobs has the rest). */
+export function ukJobDayLabel(startsAt: string | null | undefined): string | null {
+  if (!startsAt) return null;
+  const t = Date.parse(startsAt);
+  if (!Number.isFinite(t)) return null;
+  return new Date(t).toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
+}
+
+export function crewJobPush(opts: {
+  kind: "assigned" | "removed";
+  appointmentId: string;
+  staffUserId: string;
+  startsAt: string | null;
+}): PushEvent {
+  const day = ukJobDayLabel(opts.startsAt);
+  return {
+    category: "crew_job",
+    // One tag per (job, person): a removal REPLACES the assignment
+    // notification still sitting on the phone, so stale "you're on this job"
+    // alerts can't outlive a change of plan.
+    eventKey: `crew-job-${opts.appointmentId}-${opts.staffUserId}`,
+    title: opts.kind === "assigned" ? "New job for you" : "Job change",
+    body:
+      opts.kind === "assigned"
+        ? day
+          ? `You've been put on a job on ${day}.`
+          : "You've been put on a job."
+        : day
+          ? `You've been taken off the job on ${day}.`
+          : "You've been taken off a job.",
+    // A removed crew member no longer passes the job page's assignment gate —
+    // send them to their list instead.
+    url: opts.kind === "assigned" ? `/my-jobs/${opts.appointmentId}` : "/my-jobs",
   };
 }
 

@@ -10,6 +10,8 @@ import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { OnboardingTour } from "@/components/onboarding/tour";
 import { TourButton } from "@/components/onboarding/launch";
 import { QuickSigninRow } from "@/components/my-jobs/quick-signin-row";
+import { NotificationsRow } from "@/components/my-jobs/notifications-row";
+import { PushSwRegister } from "@/components/push/sw-register";
 
 /**
  * /my-jobs — the crew surface (iMVE "can access assigned jobs"). A crew login
@@ -312,6 +314,8 @@ export default async function MyJobsPage() {
         )}
 
         <QuickSigninRow />
+        <NotificationsRow />
+        <PushSwRegister />
       </main>
     </div>
   );

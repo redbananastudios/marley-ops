@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   PUSH_CATEGORIES,
-  PUSH_CATEGORY_IDS,
+  crewJobPush,
   decideEnquiryPushes,
   ENQUIRY_DIGEST_THRESHOLD,
   firstNameOnly,
@@ -9,24 +9,27 @@ import {
   newEnquiryDigestPush,
   newEnquiryPush,
   paymentPush,
+  ukJobDayLabel,
 } from "@/lib/push/categories";
 import { isAllowedPushRoute } from "@/lib/push/payload";
 
 describe("push category registry", () => {
-  it("declares only office audiences in v1 (crew never receive pushes)", () => {
-    for (const id of PUSH_CATEGORY_IDS) {
-      expect(PUSH_CATEGORIES[id].audience).toEqual(["admin", "estimator"]);
-    }
+  it("office categories go to office; crew_job goes ONLY to crew", () => {
+    expect(PUSH_CATEGORIES.new_enquiry.audience).toEqual(["admin", "estimator"]);
+    expect(PUSH_CATEGORIES.payment_event.audience).toEqual(["admin", "estimator"]);
+    expect(PUSH_CATEGORIES.crew_job.audience).toEqual(["crew"]);
   });
 
   it("only new_enquiry suppresses when the app is focused (the chime conflict rule)", () => {
     expect(PUSH_CATEGORIES.new_enquiry.suppressWhenFocused).toBe(true);
     expect(PUSH_CATEGORIES.payment_event.suppressWhenFocused).toBe(false);
+    expect(PUSH_CATEGORIES.crew_job.suppressWhenFocused).toBe(false);
   });
 
   it("validates category ids", () => {
     expect(isPushCategoryId("new_enquiry")).toBe(true);
     expect(isPushCategoryId("payment_event")).toBe(true);
+    expect(isPushCategoryId("crew_job")).toBe(true);
     expect(isPushCategoryId("marketing_blast")).toBe(false);
   });
 });
@@ -68,6 +71,52 @@ describe("copy builders", () => {
 
   it("digest copy carries the count", () => {
     expect(newEnquiryDigestPush(7).body).toBe("7 new website enquiries need review.");
+  });
+});
+
+describe("crewJobPush", () => {
+  const base = { appointmentId: "appt-1", staffUserId: "user-1", startsAt: "2026-07-18T08:00:00Z" };
+
+  it("assigned: day-only copy, deep link to the crew job page", () => {
+    const e = crewJobPush({ ...base, kind: "assigned" });
+    expect(e.title).toBe("New job for you");
+    expect(e.body).toBe("You've been put on a job on Sat 18 Jul.");
+    expect(e.url).toBe("/my-jobs/appt-1");
+    expect(isAllowedPushRoute(e.url)).toBe(true);
+  });
+
+  it("removed: links to the job LIST (the job page would refuse them now)", () => {
+    const e = crewJobPush({ ...base, kind: "removed" });
+    expect(e.body).toBe("You've been taken off the job on Sat 18 Jul.");
+    expect(e.url).toBe("/my-jobs");
+  });
+
+  it("assigned + removed share one tag so a removal replaces the stale alert", () => {
+    const a = crewJobPush({ ...base, kind: "assigned" });
+    const r = crewJobPush({ ...base, kind: "removed" });
+    expect(a.eventKey).toBe(r.eventKey);
+  });
+
+  it("copy never leaks names, addresses or money", () => {
+    const e = crewJobPush({ ...base, kind: "assigned" });
+    expect(e.body).not.toMatch(/£/);
+    expect(e.body).toMatch(/^You've been/);
+  });
+
+  it("copes with a missing date", () => {
+    const e = crewJobPush({ ...base, startsAt: null, kind: "assigned" });
+    expect(e.body).toBe("You've been put on a job.");
+  });
+});
+
+describe("ukJobDayLabel", () => {
+  it("formats in UK time (BST boundary: 23:30Z on the 17th is the 18th in London)", () => {
+    expect(ukJobDayLabel("2026-07-17T23:30:00Z")).toBe("Sat 18 Jul");
+  });
+
+  it("null/garbage → null", () => {
+    expect(ukJobDayLabel(null)).toBeNull();
+    expect(ukJobDayLabel("nonsense")).toBeNull();
   });
 });
 

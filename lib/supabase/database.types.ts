@@ -498,6 +498,7 @@ export type Database = {
           google_review_url: string
           id: boolean
           pricing: Json | null
+          push_crew_job_enabled: boolean
           push_enabled: boolean
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
@@ -531,6 +532,7 @@ export type Database = {
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
+          push_crew_job_enabled?: boolean
           push_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
@@ -564,6 +566,7 @@ export type Database = {
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
+          push_crew_job_enabled?: boolean
           push_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
