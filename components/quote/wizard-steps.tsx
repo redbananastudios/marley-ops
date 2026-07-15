@@ -476,14 +476,9 @@ export function Step2Job({ values, set, pricing }: StepProps) {
 
       <div className="mb-5">
         <FieldLabel>Days on the job</FieldLabel>
-        <input
-          type="number"
-          min={1}
-          step={1}
-          value={j.days}
-          onChange={(e) => set("job", { ...j, days: e.target.value === "" ? 1 : Math.max(1, Number(e.target.value)) })}
-          className="h-14 w-full rounded-md border border-input bg-card px-4 text-base text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
-        />
+        {/* Stepper, not a bare number input — iPads don't render native
+            spinners, so the field read as type-only with no +/- controls. */}
+        <Stepper value={Number(j.days) || 1} min={1} onChange={(v) => set("job", { ...j, days: v })} />
         <p className="mt-1.5 text-xs text-mist-400">
           {extraDayRate > 0
             ? `Each day after the first adds ${gbp(extraDayRate)} to the quote.`

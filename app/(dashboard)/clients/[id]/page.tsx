@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, FileDown, Phone, MessageCircle } from "lucide-react";
+import { ChevronLeft, FileDown, FileText, Phone, MessageCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { Card } from "@/components/ui/card";
@@ -142,6 +142,15 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
         <div className="flex flex-wrap gap-2 border-t px-5 py-4">
           <BookSurveyButton clientId={client.id} openLeadId={openLead?.id ?? null} />
+          {/* Repeat business: start a fresh enquiry + quote for THIS customer
+              without re-typing them — lands on /quotes/new pre-selected. */}
+          <Link
+            href={`/quotes/new?clientId=${client.id}`}
+            className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted"
+          >
+            <FileText className="size-4 text-mist-400" strokeWidth={1.75} />
+            New quote
+          </Link>
           {phone ? (
             <a href={`tel:${phone}`} className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted" aria-label="Call">
               <Phone className="size-4 text-mist-400" strokeWidth={1.75} />

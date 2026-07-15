@@ -70,18 +70,26 @@ const INPUT_H = "h-11";
 export function AddLeadForm({
   clients,
   mode = "lead",
+  initialClientId,
 }: {
   clients: ClientOption[];
   /** "lead" → save + go to the lead. "quote" → create the lead AND a draft
    *  quote seeded from it, then open the builder (the "New quote" flow). */
   mode?: "lead" | "quote";
+  /** Pre-select this customer (the client page's "New quote"/"Add enquiry"
+   *  entry points) — their contact details seed the form exactly as if they
+   *  were picked in the combobox. */
+  initialClientId?: string;
 }) {
   const router = useRouter();
+  const initialClient = initialClientId ? (clients.find((c) => c.id === initialClientId) ?? null) : null;
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(initialClient?.id ?? null);
   // Full pickup/destination addresses (street/town/county/postcode with Places
   // autofill) — stored on the lead as a one-line address + the postcode column.
-  const [fromAddr, setFromAddr] = useState<AddressValue>(BLANK_ADDRESS);
+  const [fromAddr, setFromAddr] = useState<AddressValue>(
+    initialClient?.postcode ? { ...BLANK_ADDRESS, postcode: initialClient.postcode } : BLANK_ADDRESS,
+  );
   const [toAddr, setToAddr] = useState<AddressValue>(BLANK_ADDRESS);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -95,9 +103,9 @@ export function AddLeadForm({
   } = useForm<NewLeadInput>({
     resolver: zodResolver(newLeadSchema),
     defaultValues: {
-      name: "",
-      phone: "",
-      email: "",
+      name: initialClient?.display_name ?? "",
+      phone: initialClient?.phone ?? "",
+      email: initialClient?.email ?? "",
       entry_channel: "manual",
       referrer_answer: "",
       from_postcode: "",

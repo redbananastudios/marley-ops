@@ -23,9 +23,11 @@ export const dynamic = "force-dynamic";
 export default async function NewQuotePage({
   searchParams,
 }: {
-  searchParams: Promise<{ leadId?: string }>;
+  searchParams: Promise<{ leadId?: string; clientId?: string }>;
 }) {
-  const { leadId } = await searchParams;
+  // ?clientId=… pre-selects that customer in the form (the client page's
+  // "New quote" action) — a repeat customer shouldn't be re-typed.
+  const { leadId, clientId } = await searchParams;
 
   if (leadId) {
     const res = await createDraftQuote({ leadId });
@@ -62,7 +64,11 @@ export default async function NewQuotePage({
         drop you straight into the quote builder with everything filled in.
       </p>
       <Card className="max-w-2xl p-6 md:p-8">
-        <AddLeadForm clients={clientOptions} mode="quote" />
+        <AddLeadForm
+          clients={clientOptions}
+          mode="quote"
+          initialClientId={clientId && clientOptions.some((c) => c.id === clientId) ? clientId : undefined}
+        />
       </Card>
     </main>
   );
