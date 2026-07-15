@@ -77,8 +77,16 @@ export function MarkLostDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent>
+    // While the unwind is in flight (DB writes + Zoho voids — multi-second),
+    // Escape/backdrop/X must not close the dialog: a close mid-flight reads
+    // as a successful abort, but the action was already dispatched.
+    <Dialog open={open} onOpenChange={(v) => (pending ? null : onOpenChange(v))}>
+        <DialogContent
+          onInteractOutside={(e) => {
+            // Don't lose a picked reason / typed note to a stray backdrop tap.
+            if (pending || reason !== null || note.trim()) e.preventDefault();
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="font-display text-xl">Mark lost</DialogTitle>
             <DialogDescription>

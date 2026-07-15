@@ -29,6 +29,12 @@ const gbp = (n: number): string =>
     .replace(/\.00$/, "")
     .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
+/** UK calendar day of a timestamptz — the Job Board buckets by Europe/London
+ *  day (lib/job-board.ts), so week deep-links must use this, never the raw
+ *  UTC slice (an all-day Monday move during BST is stored 23:00Z Sunday). */
+const ukDayOf = (iso: string): string =>
+  new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 function daysAgo(iso: string | null): string {
@@ -281,7 +287,7 @@ export default async function BookingsPage() {
               amount={r.deposit}
               customerName={r.customer}
               leadId={r.leadId}
-              apptStartsAt={r.apptStartsAt}
+              moveDay={r.apptStartsAt ? ukDayOf(r.apptStartsAt) : null}
             />
           </div>
         ))}
@@ -341,7 +347,7 @@ export default async function BookingsPage() {
               ) : null}
               {days >= 0 ? (
                 <Link
-                  href={`/schedule/board?week=${r.apptStartsAt!.slice(0, 10)}`}
+                  href={`/schedule/board?week=${ukDayOf(r.apptStartsAt!)}`}
                   className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
                 >
                   <CalendarRange className="size-4" strokeWidth={1.75} />

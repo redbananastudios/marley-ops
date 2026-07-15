@@ -9,7 +9,7 @@
  * (search / source / Mine / hide-declined) keep it focused. iPad-first.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MoveHorizontal, FileText, Search, Calendar, Home, ChevronLeft, ChevronRight } from "lucide-react";
@@ -146,6 +146,10 @@ export function StatusBoard({
 }) {
   const router = useRouter();
   const [leads, setLeads] = useState<BoardLead[]>(initialLeads);
+  // Server truth reseeds the board whenever a refresh lands — without this the
+  // optimistic state pins the first render's columns for the life of the tab,
+  // and a stale column feeds the backward-move check.
+  useEffect(() => setLeads(initialLeads), [initialLeads]);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
@@ -193,17 +197,39 @@ export function StatusBoard({
   const [lostFor, setLostFor] = useState<BoardLead | null>(null);
   const [reasonMove, setReasonMove] = useState<{ lead: BoardLead; toStatus: string } | null>(null);
 
-  async function applyMove(leadId: string, toStatus: string, fromStatus: string, reason?: string): Promise<boolean> {
-    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: toStatus } : l)));
-    const res = await updateLeadStatusAction(leadId, toStatus, reason ? { reason } : undefined);
-    if (res.ok) {
-      toast.success(`Moved to ${LEAD_STATUS_META[toStatus]?.label ?? toStatus}`);
+  async function applyMove(target: BoardLead, toStatus: string, reason?: string): Promise<boolean> {
+    const fromStatus = target.status;
+    const revert = () =>
+      setLeads((prev) => prev.map((l) => (l.id === target.id ? { ...l, status: fromStatus } : l)));
+    setLeads((prev) => prev.map((l) => (l.id === target.id ? { ...l, status: toStatus } : l)));
+    try {
+      const res = await updateLeadStatusAction(target.id, toStatus, reason ? { reason } : undefined);
+      if (res.ok) {
+        toast.success(`Moved to ${LEAD_STATUS_META[toStatus]?.label ?? toStatus}`);
+        router.refresh();
+        return true;
+      }
+      revert();
+      if (!reason && "needsReason" in res && res.needsReason) {
+        // Our column was stale — the server says this move is actually
+        // backward. Collect the reason so the move can still complete, and
+        // resync so the board shows server truth.
+        setReasonMove({ lead: target, toStatus });
+        router.refresh();
+        return false;
+      }
+      toast.error(res.error ?? "Could not move lead");
+      // A failure usually means this tab was stale — resync (the reseed
+      // effect above picks up the fresh initialLeads).
       router.refresh();
-      return true;
+      return false;
+    } catch (err) {
+      // A thrown action (network drop, mid-deploy) must still revert the
+      // optimistic column and say so — not die as an unhandled rejection.
+      revert();
+      toast.error(err instanceof Error ? err.message : "Could not move lead");
+      return false;
     }
-    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: fromStatus } : l)));
-    toast.error(res.error ?? "Could not move lead");
-    return false;
   }
 
   async function move(leadId: string, toStatus: string) {
@@ -217,7 +243,7 @@ export function StatusBoard({
       setReasonMove({ lead: current, toStatus });
       return;
     }
-    await applyMove(leadId, toStatus, current.status);
+    await applyMove(current, toStatus);
   }
 
   return (
@@ -436,9 +462,7 @@ export function StatusBoard({
           }}
           fromLabel={LEAD_STATUS_META[reasonMove.lead.status]?.label ?? reasonMove.lead.status}
           toLabel={LEAD_STATUS_META[reasonMove.toStatus]?.label ?? reasonMove.toStatus}
-          onConfirm={(reason) =>
-            applyMove(reasonMove.lead.id, reasonMove.toStatus, reasonMove.lead.status, reason)
-          }
+          onConfirm={(reason) => applyMove(reasonMove.lead, reasonMove.toStatus, reason)}
         />
       ) : null}
     </div>

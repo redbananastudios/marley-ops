@@ -9,7 +9,7 @@
  * from the rail onto a job card (the desktop nicety).
  */
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -148,6 +148,14 @@ export function JobBoardView({
 }) {
   const router = useRouter();
   const [weekStart, setWeekStart] = useState(initialWeekStart ?? thisWeekStart);
+  // Follow ?week= deep links even when the board is ALREADY mounted: a
+  // same-route router.push (e.g. the deposit toast's "Assign crew" clicked
+  // while sitting on the board) re-renders with a new prop but never re-runs
+  // the useState initializer, so without this the deep link is silently
+  // ignored. In-board arrows only touch local state, so they're unaffected.
+  useEffect(() => {
+    if (initialWeekStart) setWeekStart(initialWeekStart);
+  }, [initialWeekStart]);
   const [showSurveys, setShowSurveys] = useState(true);
   const [railOpen, setRailOpen] = useState(true);
   const [assignFor, setAssignFor] = useState<BoardAppt | null>(null);

@@ -56,6 +56,11 @@ export function StatusReasonDialog({
     try {
       const ok = await onConfirm(reason.trim());
       if (ok) onOpenChange(false);
+    } catch (err) {
+      // A thrown onConfirm (network drop, mid-deploy chunk failure) must not
+      // die as an unhandled rejection — surface it and keep the dialog open
+      // so the typed reason survives for a retry.
+      toast.error(err instanceof Error ? err.message : "Could not save — try again.");
     } finally {
       setPending(false);
     }
@@ -63,7 +68,14 @@ export function StatusReasonDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => (pending ? null : onOpenChange(v))}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        onInteractOutside={(e) => {
+          // A typed reason must never be lost to a stray backdrop tap (the
+          // board is iPad-first) — same convention as the email compose.
+          if (pending || reason.trim()) e.preventDefault();
+        }}
+      >
         <DialogHeader>
           <DialogTitle className="font-display flex items-center gap-2 text-xl">
             <Undo2 className="size-5 text-warn" strokeWidth={1.75} />

@@ -100,9 +100,15 @@ export default async function JobBoardPage({
   const thisWeekStart = mondayOf(ukToday);
   // ?week=<YYYY-MM-DD> deep-links the board to that date's week (Bookings'
   // "Assign crew" bridge lands on the move's week, not today's). Anything
-  // malformed falls back to the current week.
+  // malformed falls back to the current week. Years are bounded because
+  // extreme dates survive Date.parse but break toISOString's yyyy-mm-dd shape
+  // (expanded-year forms like "-000001-…"), corrupting the day columns.
   const weekParam =
-    week && /^\d{4}-\d{2}-\d{2}$/.test(week) && !Number.isNaN(Date.parse(`${week}T00:00:00Z`))
+    typeof week === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(week) &&
+    week >= "2000-01-01" &&
+    week <= "2100-12-31" &&
+    !Number.isNaN(Date.parse(`${week}T00:00:00Z`))
       ? mondayOf(week)
       : null;
 

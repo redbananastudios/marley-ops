@@ -301,7 +301,8 @@ export async function updateLeadStatusAction(
     .select("status, client_id, first_contacted_at")
     .eq("id", leadId)
     .single();
-  const from = current?.status ?? null;
+  if (!current) return { ok: false as const, error: "Lead not found." };
+  const from = current.status;
 
   // Moving a job BACKWARDS down the funnel (e.g. confirmed → quoted) is rare
   // and usually means something went wrong — require a reason so the timeline
@@ -319,22 +320,35 @@ export async function updateLeadStatusAction(
 
   // First time anyone moves a lead off its initial state = first contact.
   // Powers the dashboard "median response time" metric.
-  const stampContact = !current?.first_contacted_at;
+  const stampContact = !current.first_contacted_at;
 
   // Reopening a lost lead: clear the loss record and PAUSE chasing — a
   // reopened lead is hand-managed (its old quote dates would instantly
   // re-trip the 30-day auto-lapse otherwise).
   const reopening = from === "declined" && status !== "declined";
 
-  const { error } = await sb
+  // Conditional on the status we just read (same pattern as the auto-lapse
+  // cron): if another user moved the lead between our read and this write, the
+  // backward check above ran against a stale "from" — 0 rows matched means
+  // don't write, make the caller resync and retry against the fresh status.
+  const { data: updated, error } = await sb
     .from("leads")
     .update({
       status: status as never,
       ...(stampContact ? { first_contacted_at: new Date().toISOString() } : {}),
       ...(reopening ? { lost_reason: null, lost_note: null, lost_at: null, chase_paused: true } : {}),
     } as never)
-    .eq("id", leadId);
+    .eq("id", leadId)
+    .eq("status", from as never)
+    .select("id");
   if (error) return { ok: false as const, error: error.message };
+  if (!updated?.length) {
+    return {
+      ok: false as const,
+      stale: true as const,
+      error: "This lead just changed in another window — try again.",
+    };
+  }
 
   await sb.from("activities").insert({
     client_id: current?.client_id ?? null,

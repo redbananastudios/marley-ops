@@ -37,7 +37,7 @@ export function MarkPaidButton({
   amount,
   customerName,
   leadId,
-  apptStartsAt,
+  moveDay,
 }: {
   quoteId: string;
   kind: "deposit" | "balance";
@@ -45,10 +45,13 @@ export function MarkPaidButton({
   customerName: string | null;
   /** Lead behind the quote — powers the deposit toast's next-step action. */
   leadId?: string;
-  /** Removal appointment start (null = not in the diary yet). Decides whether
-   *  the deposit toast offers "Assign crew" (Job Board at the move's week) or
-   *  "Book removal" (removals diary). */
-  apptStartsAt?: string | null;
+  /** UK calendar day (YYYY-MM-DD) of the removal appointment, or null when it
+   *  isn't in the diary yet. MUST be the Europe/London day, not the UTC date —
+   *  the Job Board buckets by UK day, and an all-day Monday move during BST is
+   *  stored 23:00Z Sunday, so slicing the raw timestamptz would deep-link to
+   *  the previous week. Decides whether the deposit toast offers "Assign crew"
+   *  (Job Board at the move's week) or "Book removal" (removals diary). */
+  moveDay?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -69,8 +72,8 @@ export function MarkPaidButton({
       // isn't left to memory.
       const next =
         kind === "deposit" && leadId
-          ? apptStartsAt
-            ? { label: "Assign crew", href: `/schedule/board?week=${apptStartsAt.slice(0, 10)}` }
+          ? moveDay
+            ? { label: "Assign crew", href: `/schedule/board?week=${moveDay}` }
             : { label: "Book removal", href: `/schedule/removals?leadId=${leadId}` }
           : null;
       toast.success(
