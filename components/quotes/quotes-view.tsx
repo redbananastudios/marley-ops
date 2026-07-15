@@ -182,7 +182,10 @@ export function QuotesView({
             </button>
           );
         })}
-        <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
+        {/* basis-full drops the search onto its own full-width row on phones —
+            flex-1 alone squeezed it into the sliver left beside the chips and
+            the input poked past the viewport edge. */}
+        <div className="relative min-w-0 basis-full sm:ml-auto sm:basis-auto sm:flex-1 sm:max-w-xs">
           <Search strokeWidth={1.75} className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-mist-400" />
           <Input
             value={search}

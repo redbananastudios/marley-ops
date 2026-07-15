@@ -54,7 +54,11 @@ export default async function SettingsPage() {
     { id: "health", label: "Health" },
   ];
 
-  const sectionClass = "scroll-mt-28 xl:scroll-mt-16";
+  // min-w-0 is load-bearing: grid items default to min-width:auto, so the
+  // pricing table's min-content width forced every card (and the page) wider
+  // than a phone screen — the inner overflow-x-auto only works once the
+  // section itself is allowed to shrink.
+  const sectionClass = "min-w-0 scroll-mt-28 xl:scroll-mt-16";
 
   return (
     <main className="flex-1 p-6 md:p-8">
