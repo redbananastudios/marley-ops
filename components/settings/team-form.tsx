@@ -85,7 +85,10 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
               <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-muted">
                 <UserRound className="size-4 text-mist-400" strokeWidth={1.75} />
               </span>
-              <div className="min-w-0 flex-1">
+              {/* min-w-[9rem], not min-w-0: with the wrapping row, a zero
+                  minimum let the role/buttons squeeze the name down to one
+                  letter on phones — hold the name and wrap the controls. */}
+              <div className="min-w-[9rem] flex-1">
                 <p className="truncate text-sm font-semibold text-foreground">
                   {u.full_name || "Unnamed"}
                   {isMe ? <span className="ml-1.5 text-xs font-normal text-mist-400">(you)</span> : null}
