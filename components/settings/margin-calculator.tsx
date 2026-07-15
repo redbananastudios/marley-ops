@@ -80,7 +80,10 @@ function Line({
   return (
     <div
       className={
-        "grid grid-cols-[1fr_8rem_4.5rem] items-center gap-2 py-1.5 " +
+        // Narrower fixed columns below sm: the rate cell only needs ~104px
+        // (£ + w-16 input + unit slot), and 8rem+4.5rem pushed the row's
+        // min-content past a 320px screen — the one page-width offender left.
+        "grid grid-cols-[1fr_6.5rem_4rem] items-center gap-2 py-1.5 sm:grid-cols-[1fr_8rem_4.5rem] " +
         (strong ? "border-t pt-2 font-semibold" : "")
       }
     >
