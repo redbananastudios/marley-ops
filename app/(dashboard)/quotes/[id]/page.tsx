@@ -24,6 +24,7 @@ import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
 import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
+import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -55,7 +56,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, agreed_price, accepted_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date",
+      "id, quote_ref, status, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date",
     )
     .eq("id", id)
     .maybeSingle();
@@ -166,20 +167,27 @@ export default async function QuoteDetailPage({
     }
   }
 
-  // The linked lead's context for the View-lead modal (no navigation away from the form).
+  // The linked lead's context for the View-lead modal (no navigation away from the form)
+  // + the chase-engine state (step counters + pause switch live on the lead).
   let leadOption = null;
   let leadStatus: string | null = null;
+  let leadChasePaused = false;
+  let leadQuoteChaseStep = 0;
+  let leadDepositChaseStep = 0;
   if (quote.lead_id) {
     const { data: lead } = await sb
       .from("leads")
       .select(
-        "id,name,phone,email,status,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
+        "id,name,phone,email,status,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign,chase_paused,quote_chase_step,deposit_chase_step",
       )
       .eq("id", quote.lead_id)
       .maybeSingle();
     if (lead) {
-      const { notes, status, ...l } = lead;
+      const { notes, status, chase_paused, quote_chase_step, deposit_chase_step, ...l } = lead;
       leadStatus = status;
+      leadChasePaused = chase_paused ?? false;
+      leadQuoteChaseStep = quote_chase_step ?? 0;
+      leadDepositChaseStep = deposit_chase_step ?? 0;
       leadOption = { ...l, lead_notes: notes, source: classifySource(l as unknown as LeadLite) };
     }
   }
@@ -239,6 +247,19 @@ export default async function QuoteDetailPage({
           acceptUrl={acceptUrl}
         />
       </PageHeader>
+
+      {/* Where the chase engine is on this quote (renders nothing on drafts or
+          once the lead has left the quoted/provisional chase window). */}
+      <ChaseStatusLine
+        leadStatus={leadStatus}
+        chasePaused={leadChasePaused}
+        quoteStatus={statusStr}
+        emailSentAt={quote.email_sent_at}
+        acceptedAt={quote.accepted_at}
+        quoteChaseStep={leadQuoteChaseStep}
+        depositChaseStep={leadDepositChaseStep}
+        className="-mt-4 mb-6"
+      />
 
       {/* Drafts open straight into the wizard (nothing to view yet); everything
           else opens as a read-only job card — Edit is a deliberate action. */}

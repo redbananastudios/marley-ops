@@ -10,6 +10,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
+import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
 import { PipelineStepper } from "@/components/leads/pipeline-stepper";
 import { LeadFollowUpsCard } from "@/components/leads/lead-followups-card";
@@ -136,10 +137,20 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id, quote_ref, grand_total, agreed_price, status, email_send_count, created_at")
+    .select("id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at")
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
+
+  // The chase-engine driver: the latest SENT quote while "quoted", the latest
+  // ACCEPTED quote while chasing the deposit ("provisional"). quoteRows is newest
+  // first, so .find picks the latest match. Feeds the Comms-tab chase line.
+  const chaseQuote =
+    lead.status === "quoted"
+      ? quoteRows.find((q) => q.status === "sent")
+      : lead.status === "provisional"
+        ? quoteRows.find((q) => q.status === "accepted")
+        : null;
 
   // Open follow-ups for THIS lead — the compact strip on Overview. Assigned name
   // resolves off the active-profiles map already loaded (cheap; null if not there).
@@ -603,6 +614,16 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         {/* Comms */}
         <TabsContent value="comms" className="mt-5">
+          <ChaseStatusLine
+            leadStatus={lead.status}
+            chasePaused={lead.chase_paused ?? false}
+            quoteStatus={chaseQuote?.status ?? null}
+            emailSentAt={chaseQuote?.email_sent_at ?? null}
+            acceptedAt={chaseQuote?.accepted_at ?? null}
+            quoteChaseStep={lead.quote_chase_step ?? 0}
+            depositChaseStep={lead.deposit_chase_step ?? 0}
+            className="mb-3"
+          />
           <Card className="p-0">
             <div className="flex items-center justify-between border-b px-5 py-3.5">
               <h2 className="font-display text-lg text-foreground">Messages</h2>

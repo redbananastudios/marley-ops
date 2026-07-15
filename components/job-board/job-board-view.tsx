@@ -203,6 +203,69 @@ export function JobBoardView({
     }
   }
 
+  // One day's column of jobs. Rendered as a fixed-width kanban cell on desktop
+  // (≥lg) and as a full-width row in the stacked list on tablet/phone (<lg). In
+  // `stacked` mode it sizes to its content (no forced min-height) so empty days
+  // stay compact and the whole week fits a vertical scroll instead of a
+  // pan-and-hunt horizontal one. Assignment is modal-only below lg (the drag
+  // rail is desktop-only), which already works on touch.
+  const renderDay = (day: string, stacked: boolean) => {
+    const heading = dayHeading(day);
+    const isToday = day === today;
+    const cards = cardsForDay(day);
+    return (
+      <div
+        key={day}
+        className={cn(
+          "flex flex-col rounded-lg border border-border bg-mist-50/50",
+          stacked ? "" : "min-h-[320px]",
+        )}
+      >
+        <div
+          className={cn(
+            "rounded-t-lg border-b border-border px-2.5 py-2",
+            isToday ? "bg-mm-red-tint" : "bg-card",
+          )}
+        >
+          <div className="flex items-baseline justify-between">
+            <p className={cn("text-sm font-semibold", isToday ? "text-mm-red-deep" : "text-foreground")}>
+              {heading.dow}
+            </p>
+            <p className="text-xs text-mist-400">{heading.date}</p>
+          </div>
+          <CapacityStrip
+            day={day}
+            staff={staff}
+            vehicles={vehicles}
+            assignments={assignments}
+            apptById={apptById}
+          />
+        </div>
+
+        <div className="flex flex-1 flex-col gap-2 p-2">
+          {cards.length === 0 ? (
+            <p className="py-6 text-center text-xs text-mist-300">No jobs</p>
+          ) : (
+            cards.map((a) => (
+              <JobCard
+                key={`${a.id}:${day}`}
+                appt={a}
+                multiDay={(daysByAppt.get(a.id) ?? []).length > 1}
+                assigned={byAppt.get(a.id) ?? []}
+                staff={staff}
+                vehicles={vehicles}
+                highlight={dropTarget === `${a.id}:${day}`}
+                onDragOverChange={(on) => setDropTarget(on ? `${a.id}:${day}` : null)}
+                onDropResource={(res) => handleDrop(a, res)}
+                onAssign={() => setAssignFor(a)}
+              />
+            ))
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex flex-1 flex-col">
       {/* toolbar */}
@@ -305,60 +368,16 @@ export function JobBoardView({
           </aside>
         ) : null}
 
-        {/* week grid */}
-        <div className="flex-1 overflow-x-auto pb-2">
+        {/* week grid — desktop kanban (≥lg): 7 fixed columns, drag rail active */}
+        <div className="hidden min-w-0 flex-1 overflow-x-auto pb-2 lg:block">
           <div className="grid min-w-[1190px] grid-cols-7 gap-2">
-            {days.map((day) => {
-              const heading = dayHeading(day);
-              const isToday = day === today;
-              const cards = cardsForDay(day);
-              return (
-                <div key={day} className="flex min-h-[320px] flex-col rounded-lg border border-border bg-mist-50/50">
-                  <div
-                    className={cn(
-                      "rounded-t-lg border-b border-border px-2.5 py-2",
-                      isToday ? "bg-mm-red-tint" : "bg-card",
-                    )}
-                  >
-                    <div className="flex items-baseline justify-between">
-                      <p className={cn("text-sm font-semibold", isToday ? "text-mm-red-deep" : "text-foreground")}>
-                        {heading.dow}
-                      </p>
-                      <p className="text-xs text-mist-400">{heading.date}</p>
-                    </div>
-                    <CapacityStrip
-                      day={day}
-                      staff={staff}
-                      vehicles={vehicles}
-                      assignments={assignments}
-                      apptById={apptById}
-                    />
-                  </div>
-
-                  <div className="flex flex-1 flex-col gap-2 p-2">
-                    {cards.length === 0 ? (
-                      <p className="py-6 text-center text-xs text-mist-300">No jobs</p>
-                    ) : (
-                      cards.map((a) => (
-                        <JobCard
-                          key={`${a.id}:${day}`}
-                          appt={a}
-                          multiDay={(daysByAppt.get(a.id) ?? []).length > 1}
-                          assigned={byAppt.get(a.id) ?? []}
-                          staff={staff}
-                          vehicles={vehicles}
-                          highlight={dropTarget === `${a.id}:${day}`}
-                          onDragOverChange={(on) => setDropTarget(on ? `${a.id}:${day}` : null)}
-                          onDropResource={(res) => handleDrop(a, res)}
-                          onAssign={() => setAssignFor(a)}
-                        />
-                      ))
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+            {days.map((day) => renderDay(day, false))}
           </div>
+        </div>
+
+        {/* stacked day list — tablet/phone (<lg): vertical scroll, modal assign */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3 pb-2 lg:hidden">
+          {days.map((day) => renderDay(day, true))}
         </div>
       </div>
 

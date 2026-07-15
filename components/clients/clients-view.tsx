@@ -162,6 +162,66 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
     </button>
   );
 
+  // Card presentation — the grid view proper, and also the automatic fallback for
+  // list view below md (a 720px-wide table pans-and-hunts on a narrow iPad).
+  const cardsContent = groups ? (
+    /* ——— Card grid, name sort: A–Z sections + jump rail ——— */
+    <div className="mt-4 flex gap-3">
+      <div className="min-w-0 flex-1 space-y-6">
+        {groups.map((g) => (
+          <section
+            key={g.letter}
+            ref={(el) => {
+              sectionRefs.current[g.letter] = el;
+            }}
+            className="scroll-mt-20"
+          >
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {g.rows.map((c) => (
+                <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {/* A–Z jump rail */}
+      <nav
+        aria-label="Jump to letter"
+        className="sticky top-4 hidden h-fit shrink-0 flex-col items-center gap-0.5 self-start py-1 sm:flex"
+      >
+        {ALPHABET.map((l) => {
+          const enabled = present.has(l);
+          return (
+            <button
+              key={l}
+              type="button"
+              disabled={!enabled}
+              onClick={() => jumpTo(l)}
+              className={cn(
+                "focus-ring flex h-5 w-5 items-center justify-center rounded text-[11px] font-semibold leading-none transition-colors",
+                enabled
+                  ? "text-mist-500 hover:bg-mm-red-tint hover:text-mm-red-deep"
+                  : "cursor-default text-mist-300/50",
+              )}
+              aria-label={enabled ? `Jump to ${l}` : `No clients under ${l}`}
+            >
+              {l}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
+  ) : (
+    /* ——— Card grid, date sorts: flat grid ——— */
+    <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {pager.paged.map((c) => (
+        <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
+      ))}
+    </div>
+  );
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
@@ -209,8 +269,9 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
           )}
         </div>
       ) : view === "list" ? (
-        /* ——— List view: dense table, scales to hundreds of clients ——— */
-        <div className="mt-4 overflow-x-auto rounded-lg border border-border bg-card">
+        /* ——— List view: dense table on md+, card grid on narrow screens ——— */
+        <>
+        <div className="mt-4 hidden overflow-x-auto rounded-lg border border-border bg-card md:block">
           <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr className="border-b text-left">
@@ -279,62 +340,11 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
             </tbody>
           </table>
         </div>
-      ) : groups ? (
-        /* ——— Grid view, name sort: A–Z sections + jump rail ——— */
-        <div className="mt-4 flex gap-3">
-          <div className="min-w-0 flex-1 space-y-6">
-            {groups.map((g) => (
-              <section
-                key={g.letter}
-                ref={(el) => {
-                  sectionRefs.current[g.letter] = el;
-                }}
-                className="scroll-mt-20"
-              >
-                <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {g.rows.map((c) => (
-                    <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-
-          {/* A–Z jump rail */}
-          <nav
-            aria-label="Jump to letter"
-            className="sticky top-4 hidden h-fit shrink-0 flex-col items-center gap-0.5 self-start py-1 sm:flex"
-          >
-            {ALPHABET.map((l) => {
-              const enabled = present.has(l);
-              return (
-                <button
-                  key={l}
-                  type="button"
-                  disabled={!enabled}
-                  onClick={() => jumpTo(l)}
-                  className={cn(
-                    "focus-ring flex h-5 w-5 items-center justify-center rounded text-[11px] font-semibold leading-none transition-colors",
-                    enabled
-                      ? "text-mist-500 hover:bg-mm-red-tint hover:text-mm-red-deep"
-                      : "cursor-default text-mist-300/50",
-                  )}
-                  aria-label={enabled ? `Jump to ${l}` : `No clients under ${l}`}
-                >
-                  {l}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+        {/* Below md the wide table pans-and-hunts — fall back to the card grid. */}
+        <div className="md:hidden">{cardsContent}</div>
+        </>
       ) : (
-        /* ——— Grid view, date sorts: flat grid ——— */
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {pager.paged.map((c) => (
-            <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
-          ))}
-        </div>
+        cardsContent
       )}
 
       <Pager

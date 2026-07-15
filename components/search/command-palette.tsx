@@ -270,7 +270,9 @@ export function CommandPalette() {
                           onClick={() => select(item)}
                           className={cn(
                             "flex min-h-11 w-full items-center gap-3 px-4 py-2 text-left transition-colors",
-                            active ? "bg-accent" : "hover:bg-accent/60",
+                            // Neutral grey highlight — the red-tinted accent token read
+                            // as pink and unprofessional here (Peter, 2026-07-14).
+                            active ? "bg-muted" : "hover:bg-muted/70",
                           )}
                         >
                           <Icon
