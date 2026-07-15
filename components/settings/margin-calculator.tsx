@@ -296,7 +296,9 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
             {crew} men <span className="ml-1 text-xs text-mist-400">(all vehicles)</span>
           </span>
         </div>
-        <div className="flex items-end gap-4">
+        {/* flex-wrap: this pair shares a half-width grid cell on phones —
+            without it "Congestion" pokes past the viewport on 320px screens. */}
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={job.has75T} onChange={(e) => setJ("has75T", e.target.checked)} className="size-4 accent-mm-red" />
             7.5t
