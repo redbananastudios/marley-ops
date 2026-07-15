@@ -10,8 +10,9 @@ export const config = {
   // sw.js + manifest.webmanifest must bypass the auth gate: the browser
   // fetches both without a session (SW update checks run detached from any
   // page), and a 307-to-login would break push + install (same failure class
-  // as the font-307 bug).
+  // as the font-307 bug). api/version is the public build stamp the update
+  // banner polls — an expired session must still get JSON, not a redirect.
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2|woff|ttf)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|manifest\\.webmanifest|api/version|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2|woff|ttf)$).*)",
   ],
 };

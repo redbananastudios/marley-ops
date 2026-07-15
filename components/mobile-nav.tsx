@@ -46,7 +46,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
           >
             <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
             <div className="flex h-16 items-center justify-between px-4">
-              <BrandMark compact />
+              <BrandMark compact onNavigate={() => setOpen(false)} />
               <DialogPrimitive.Close
                 aria-label="Close menu"
                 className="focus-ring flex size-11 items-center justify-center rounded-md text-white/55 hover:bg-white/[0.06] hover:text-white"

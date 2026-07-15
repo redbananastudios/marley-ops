@@ -121,10 +121,24 @@ export function navForRole(role: string): NavGroup[] {
  *  in a clean white app-tile + the wordmark in Cormorant Garamond (the website
  *  heading face). Shared by the desktop sidebar, mobile header and drawer.
  *  The source PNG (500×500) carries whitespace padding, so the <img> is sized
- *  larger than the tile to bring the house + van up to a confident size. */
-export function BrandMark({ compact = false }: { compact?: boolean }) {
+ *  larger than the tile to bring the house + van up to a confident size.
+ *  The whole lockup is a link home (dashboard for office, /my-jobs for crew). */
+export function BrandMark({
+  compact = false,
+  href = "/",
+  onNavigate,
+}: {
+  compact?: boolean;
+  href?: string;
+  onNavigate?: () => void;
+}) {
   return (
-    <span className="flex min-w-0 items-center gap-2.5">
+    <Link
+      href={href}
+      onClick={onNavigate}
+      className="focus-ring flex min-w-0 items-center gap-2.5 rounded-md"
+      aria-label="Go to dashboard"
+    >
       <span
         className={cn(
           "relative shrink-0 overflow-hidden rounded-xl bg-white shadow-sm ring-1 ring-black/[0.06]",
@@ -159,7 +173,7 @@ export function BrandMark({ compact = false }: { compact?: boolean }) {
           v {process.env.NEXT_PUBLIC_BUILD_SHA ?? "dev"}
         </span>
       </span>
-    </span>
+    </Link>
   );
 }
 

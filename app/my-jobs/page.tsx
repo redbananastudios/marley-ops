@@ -12,6 +12,9 @@ import { TourButton } from "@/components/onboarding/launch";
 import { QuickSigninRow } from "@/components/my-jobs/quick-signin-row";
 import { NotificationsRow } from "@/components/my-jobs/notifications-row";
 import { PushSwRegister } from "@/components/push/sw-register";
+import { InstallPrompt } from "@/components/pwa/install-prompt";
+import { UpdateBanner } from "@/components/pwa/update-banner";
+import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
 
 /**
  * /my-jobs — the crew surface (iMVE "can access assigned jobs"). A crew login
@@ -168,7 +171,7 @@ export default async function MyJobsPage() {
     <div className="min-h-screen bg-background">
       <OnboardingTour tour="crew" role={profile.role} />
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
-        <BrandMark compact />
+        <BrandMark compact href="/my-jobs" />
         <div className="flex items-center gap-1.5">
           <span className="hidden text-sm text-white/55 sm:block">{staffRow?.full_name ?? profile.full_name}</span>
           <TourButton
@@ -313,9 +316,12 @@ export default async function MyJobsPage() {
           </div>
         )}
 
+        <InstallPrompt />
         <QuickSigninRow />
         <NotificationsRow />
         <PushSwRegister />
+        <UpdateBanner />
+        <PullToRefresh />
       </main>
     </div>
   );
