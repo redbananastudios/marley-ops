@@ -80,10 +80,10 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
     const cfg = await getPushConfigAction();
     const ok = supportedHere();
     setSupported(ok);
-    if (ok) {
-      setInstallRequired(installRequiredHere());
-      setPermission(Notification.permission);
-    }
+    // Independent of `supported`: an iOS Safari TAB hides the push APIs
+    // entirely, and the correct state there is install_required.
+    setInstallRequired(installRequiredHere());
+    if (ok) setPermission(Notification.permission);
     setConfig(cfg);
 
     if (ok && Notification.permission === "granted") {
@@ -92,11 +92,12 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
         const sub = await reg?.pushManager.getSubscription();
         setHasSubscription(!!sub);
         if (sub && cfg?.enabled) {
-          // Startup reconciliation (PRD §16.3): repair a server record that
-          // drifted (pruned, restored DB, first visit after enabling).
-          const id = getOrCreateInstallationId(window.localStorage);
-          const res = await reconcileSubscriptionAction(await subscriptionJson(sub, id));
-          setServerRegistered(res.ok);
+          // Startup reconciliation (PRD §16.3) — read-only against the server:
+          // "mine" refreshes the enabled state; anything else (missing row,
+          // revoked, or owned by another user of this shared device) shows
+          // Repair/Enable so changing ownership stays an explicit gesture.
+          const res = await reconcileSubscriptionAction({ endpoint: sub.endpoint });
+          setServerRegistered(res.ok && res.state === "mine");
         }
       } catch {
         setHasSubscription(false);
@@ -129,18 +130,35 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
     }
     setBusy(true);
     try {
-      const reg = await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      // The native prompt — only ever from this explicit gesture.
+      // Permission FIRST, straight off the click: WebKit ties the prompt to
+      // transient user activation, and awaiting SW registration first can
+      // burn it on a first-ever visit (prompt then silently fails).
       const perm = await Notification.requestPermission();
       setPermission(perm);
       if (perm !== "granted") {
         if (perm === "denied") toast.error("Notifications are blocked for this site in your browser settings.");
         return;
       }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
       const appKey = urlBase64ToUint8Array(config.vapidPublicKey);
-      const sub =
-        (await reg.pushManager.getSubscription()) ??
+
+      // A subscription minted under an OLD VAPID key is undeliverable after a
+      // key rotation — detect the mismatch and re-subscribe fresh.
+      let sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        const current = sub.options.applicationServerKey
+          ? new Uint8Array(sub.options.applicationServerKey as ArrayBuffer)
+          : null;
+        const matches =
+          !!current && current.length === appKey.length && current.every((b, i) => b === appKey[i]);
+        if (!matches) {
+          await sub.unsubscribe().catch(() => {});
+          sub = null;
+        }
+      }
+      sub =
+        sub ??
         (await reg.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: appKey as unknown as BufferSource,
@@ -168,15 +186,25 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
     try {
       const reg = await navigator.serviceWorker.getRegistration();
       const sub = await reg?.pushManager.getSubscription();
-      let browserOk = true;
       if (sub) {
-        await removeSubscriptionAction({ endpoint: sub.endpoint });
-        browserOk = await sub.unsubscribe().catch(() => false);
+        // Server first — if the revoke fails, stop and say so rather than
+        // unsubscribing the browser and toasting a false "disabled".
+        const res = await removeSubscriptionAction({ endpoint: sub.endpoint });
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        const browserOk = await sub.unsubscribe().catch(() => false);
+        if (!browserOk) {
+          toast.warning("Turned off — the browser subscription may need clearing in site settings.");
+          setHasSubscription(true);
+          setServerRegistered(false);
+          return;
+        }
       }
       setHasSubscription(false);
       setServerRegistered(false);
-      if (browserOk) toast.success("Notifications disabled on this device.");
-      else toast.warning("Server registration removed — the browser subscription may need clearing in site settings.");
+      toast.success("Notifications disabled on this device.");
     } catch {
       toast.error("Could not disable — try again.");
     } finally {

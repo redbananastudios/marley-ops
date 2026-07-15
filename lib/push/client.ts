@@ -28,7 +28,9 @@ export interface PushEnvironment {
   /** navigator.serviceWorker && PushManager && Notification all present. */
   supported: boolean;
   /** iOS/iPadOS Safari NOT running as an installed Home Screen app — push is
-   *  impossible there until the user installs (PRD §9). */
+   *  impossible there until the user installs (PRD §9). NOTE: on those
+   *  devices the push APIs are hidden too, so this must be evaluated
+   *  independently of (and take precedence over) `supported`. */
   installRequired: boolean;
   /** business_settings.push_enabled from the server. */
   systemEnabled: boolean;
@@ -40,8 +42,11 @@ export interface PushEnvironment {
 }
 
 export function derivePushUiState(env: PushEnvironment): PushUiState {
-  if (!env.supported) return "unsupported";
+  // install_required MUST beat unsupported: an iOS Safari TAB hides the push
+  // APIs entirely (supported=false), but the right answer there is "install
+  // to Home Screen", not "unsupported" — the APIs appear once installed.
   if (env.installRequired) return "install_required";
+  if (!env.supported) return "unsupported";
   if (!env.systemEnabled) return "admin_disabled";
   if (env.permission === "denied") return "blocked";
   if (env.permission === "granted" && env.hasSubscription && env.serverRegistered) return "enabled";

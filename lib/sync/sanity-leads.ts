@@ -9,6 +9,7 @@ type LeadStatus = Database["public"]["Enums"]["lead_status"];
 /** Raw shape pulled back from the Sanity query API. */
 interface SanityQuote {
   _id: string;
+  _createdAt?: string | null;
   name?: string | null;
   phone?: string | null;
   email?: string | null;
@@ -36,7 +37,7 @@ interface SanityQuote {
   msclkid?: string | null;
 }
 
-const FIELDS = `_id, name, phone, email, fromPostcode, toPostcode, propertySize, preferredDate, services, notes, submittedAt, status, source, campaign, variantKey, landingUrl, utmSource, utmMedium, utmCampaign, utmContent, utmTerm, "gclid":gclid, "gbraid":gbraid, "wbraid":wbraid, "fbclid":fbclid, "msclkid":msclkid`;
+const FIELDS = `_id, _createdAt, name, phone, email, fromPostcode, toPostcode, propertySize, preferredDate, services, notes, submittedAt, status, source, campaign, variantKey, landingUrl, utmSource, utmMedium, utmCampaign, utmContent, utmTerm, "gclid":gclid, "gbraid":gbraid, "wbraid":wbraid, "fbclid":fbclid, "msclkid":msclkid`;
 
 /** Coerce a Sanity value to a Postgres `date` (YYYY-MM-DD) or null — Sanity free-text
  *  ("ASAP", "2-3 weeks", "") would otherwise break the date column. */
@@ -215,7 +216,14 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
           .single();
         if (error) throw error;
         inserted += 1;
-        insertedLeads.push({ id: created.id, name: doc.name ?? null, submittedAt });
+        // Freshness for the push decision: fall back to the Sanity document's
+        // own creation time when submittedAt is missing/garbled — a genuinely
+        // new enquiry must never be silently skipped by the alert.
+        insertedLeads.push({
+          id: created.id,
+          name: doc.name ?? null,
+          submittedAt: submittedAt ?? toTimestampOrNull(doc._createdAt),
+        });
       }
     } catch (docErr) {
       failed += 1;

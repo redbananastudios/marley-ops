@@ -5,12 +5,18 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { notifyCrewAssignmentChange } from "@/lib/push/crew";
 
+// Office gate, not just signed-in: crew are only UI-redirected off the board,
+// so without this a crew login could invoke these actions directly and
+// reassign anyone (and fire crew pushes at them).
 async function actor() {
   const sb = await createClient();
   const {
     data: { user },
   } = await sb.auth.getUser();
-  return { sb, userId: user?.id ?? null };
+  if (!user) return { sb, userId: null };
+  const { data: prof } = await sb.from("profiles").select("role, active").eq("id", user.id).single();
+  const office = prof?.active && (prof.role === "admin" || prof.role === "estimator");
+  return { sb, userId: office ? user.id : null };
 }
 
 const setSchema = z.object({
@@ -63,22 +69,27 @@ export async function setAssignmentsAction(input: SetAssignmentsInput) {
     ...[...wantVehicles].map((id) => ({ appointment_id: v.appointment_id, vehicle_id: id })),
   ];
 
+  // Notify each half right after ITS write commits — if the insert fails
+  // after the delete succeeded, the removed crew were still genuinely taken
+  // off and must still hear about it.
   if (removeIds.length) {
     const { error } = await sb.from("appointment_assignments").delete().in("id", removeIds);
     if (error) return { ok: false as const, error: error.message };
+    await notifyCrewAssignmentChange({
+      appointmentId: v.appointment_id,
+      removedStaffIds,
+      actorUserId: userId,
+    });
   }
   if (inserts.length) {
     const { error } = await sb.from("appointment_assignments").insert(inserts);
     if (error) return { ok: false as const, error: error.message };
+    await notifyCrewAssignmentChange({
+      appointmentId: v.appointment_id,
+      assignedStaffIds,
+      actorUserId: userId,
+    });
   }
-
-  // Crew pushes AFTER the writes commit (best-effort — never fails the action).
-  await notifyCrewAssignmentChange({
-    appointmentId: v.appointment_id,
-    assignedStaffIds,
-    removedStaffIds,
-    actorUserId: userId,
-  });
 
   revalidatePath("/schedule/board");
   return { ok: true as const };
@@ -126,9 +137,16 @@ export async function unassignAction(assignmentId: string) {
     .select("staff_id, appointment_id")
     .eq("id", assignmentId)
     .maybeSingle();
-  const { error } = await sb.from("appointment_assignments").delete().eq("id", assignmentId);
+  const { data: deleted, error } = await sb
+    .from("appointment_assignments")
+    .delete()
+    .eq("id", assignmentId)
+    .select("id");
   if (error) return { ok: false as const, error: error.message };
-  if (row?.staff_id) {
+  // Only notify when THIS call actually deleted the row — a concurrent
+  // save may have already replaced it, and a false "taken off" would
+  // overwrite a live "you're on this job" alert (shared tag).
+  if (deleted?.length && row?.staff_id) {
     await notifyCrewAssignmentChange({
       appointmentId: row.appointment_id,
       removedStaffIds: [row.staff_id],

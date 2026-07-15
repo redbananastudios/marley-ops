@@ -112,6 +112,23 @@ export async function saveSubscriptionAction(
     const admin = createAdminClient();
     const hash = endpointHash(sub.endpoint);
     const now = new Date().toISOString();
+
+    // Cap active devices per user (egress/abuse bound): revoke the
+    // longest-unseen subscription before registering an 11th.
+    const { data: mine } = await admin
+      .from("push_subscriptions")
+      .select("id, last_seen_at")
+      .eq("user_id", prof.id)
+      .eq("status", "active")
+      .neq("endpoint_hash", hash)
+      .order("last_seen_at", { ascending: true, nullsFirst: true });
+    if ((mine?.length ?? 0) >= 10) {
+      await admin
+        .from("push_subscriptions")
+        .update({ status: "revoked", revoked_at: now, updated_at: now })
+        .eq("id", mine![0].id);
+    }
+
     const row = {
       user_id: prof.id, // session-derived — never trust a client-sent id
       endpoint: sub.endpoint,
@@ -157,11 +174,12 @@ export async function removeSubscriptionAction(
   try {
     const admin = createAdminClient();
     const now = new Date().toISOString();
-    await admin
+    const { error } = await admin
       .from("push_subscriptions")
       .update({ status: "revoked", revoked_at: now, updated_at: now })
       .eq("endpoint_hash", endpointHash(parsed.data.endpoint))
       .eq("user_id", prof.id);
+    if (error) throw error;
     return { ok: true };
   } catch (err) {
     log.error("push.subscription.remove_failed", errorContext(err));
@@ -169,13 +187,45 @@ export async function removeSubscriptionAction(
   }
 }
 
-/** Startup reconciliation (PRD §16.3): the browser still holds a subscription —
- *  make sure the server does too (repairs drift after a prune/restore). */
+const reconcileSchema = z.object({ endpoint: z.string().url().max(2048) });
+
+export type ReconcileState = "mine" | "missing" | "other" | "revoked";
+
+/**
+ * Startup reconciliation (PRD §16.3) — deliberately NON-destructive. It only
+ * refreshes a row the CURRENT user already actively owns; it never resurrects
+ * a revoked subscription (that would undo an opt-out whose browser-side
+ * unsubscribe failed) and never transfers ownership (that only happens on the
+ * explicit Enable/Repair gesture). The returned state drives the UI.
+ */
 export async function reconcileSubscriptionAction(
   input: unknown,
-): Promise<{ ok: boolean }> {
-  const res = await saveSubscriptionAction(input);
-  return { ok: res.ok };
+): Promise<{ ok: boolean; state: ReconcileState }> {
+  const prof = await requireActiveProfile();
+  if (!prof) return { ok: false, state: "missing" };
+  const parsed = reconcileSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, state: "missing" };
+
+  try {
+    const admin = createAdminClient();
+    const hash = endpointHash(parsed.data.endpoint);
+    const { data: row } = await admin
+      .from("push_subscriptions")
+      .select("id, user_id, status")
+      .eq("endpoint_hash", hash)
+      .maybeSingle();
+    if (!row) return { ok: true, state: "missing" };
+    if (row.user_id !== prof.id) return { ok: true, state: "other" };
+    if (row.status !== "active") return { ok: true, state: "revoked" };
+    await admin
+      .from("push_subscriptions")
+      .update({ last_seen_at: new Date().toISOString() })
+      .eq("id", row.id);
+    return { ok: true, state: "mine" };
+  } catch (err) {
+    log.error("push.subscription.reconcile_failed", errorContext(err));
+    return { ok: false, state: "missing" };
+  }
 }
 
 /* ------------------------------------------------------------- preferences */

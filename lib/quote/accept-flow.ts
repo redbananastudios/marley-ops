@@ -868,13 +868,17 @@ export async function markDepositPaid(
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
   const now = new Date().toISOString();
 
-  // Idempotency gate: only the first caller flips deposit_paid_at.
-  const { data: won } = await sb
+  // Idempotency gate: only the first caller flips deposit_paid_at. A DB
+  // error here is a FAILURE, not "already paid" — misreporting it as success
+  // would skip Zoho, the customer email and the chase close while the UI
+  // shows a green tick.
+  const { data: won, error: gateErr } = await sb
     .from("quotes")
     .update({ deposit_paid_at: now, deposit_paid_method: opts.method } as never)
     .eq("id", quoteId)
     .is("deposit_paid_at", null)
     .select("id");
+  if (gateErr) return { ok: false, error: gateErr.message };
   if (!won?.length) return { ok: true, already: true };
 
   // Zoho payment record (BACS path; card is already recorded by Zoho).
@@ -1162,12 +1166,14 @@ export async function markBalancePaid(
   if (!quote?.lead_id) return { ok: false, error: "Quote or lead not found" };
   const now = new Date().toISOString();
 
-  const { data: won } = await sb
+  // Same rule as the deposit gate: a DB error is a failure, never "already".
+  const { data: won, error: gateErr } = await sb
     .from("leads")
     .update({ balance_paid_at: now } as never)
     .eq("id", quote.lead_id)
     .is("balance_paid_at", null)
     .select("id");
+  if (gateErr) return { ok: false, error: gateErr.message };
   if (!won?.length) return { ok: true, already: true };
 
   // BACS one-tap: keep Connor's Zoho books in step (card/cron already paid).

@@ -14,10 +14,10 @@ import {
 import { isAllowedPushRoute } from "@/lib/push/payload";
 
 describe("push category registry", () => {
-  it("office categories go to office; crew_job goes ONLY to crew", () => {
+  it("office categories go to office; crew_job admits any role (targeted-only, incl. office logins working jobs)", () => {
     expect(PUSH_CATEGORIES.new_enquiry.audience).toEqual(["admin", "estimator"]);
     expect(PUSH_CATEGORIES.payment_event.audience).toEqual(["admin", "estimator"]);
-    expect(PUSH_CATEGORIES.crew_job.audience).toEqual(["crew"]);
+    expect(PUSH_CATEGORIES.crew_job.audience).toEqual(["crew", "admin", "estimator"]);
   });
 
   it("only new_enquiry suppresses when the app is focused (the chime conflict rule)", () => {

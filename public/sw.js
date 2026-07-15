@@ -94,6 +94,10 @@ self.addEventListener("push", (event) => {
         icon: ICON,
         badge: ICON,
         tag,
+        // Tag replacement is silent by default — but our replacements carry
+        // NEW news (e.g. "taken off the job" replacing "new job for you"),
+        // so they must buzz again. Ignored where unsupported.
+        renotify: Boolean(tag),
         data: { url },
       });
     })(),
@@ -110,15 +114,21 @@ self.addEventListener("notificationclick", (event) => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
       // Prefer focusing an existing Marley Ops window, navigated to the target.
       for (const client of windows) {
-        if ("focus" in client) {
-          try {
-            await client.focus();
-            if ("navigate" in client) await client.navigate(url);
-            return;
-          } catch {
-            // fall through to openWindow
-          }
+        if (!("focus" in client)) continue;
+        try {
+          await client.focus();
+        } catch {
+          continue; // couldn't focus this one — try the next
         }
+        // Focused: we're DONE even if navigation fails (an uncontrolled
+        // client rejects navigate()) — opening a second window on top of a
+        // focused one is worse than landing on the wrong page.
+        try {
+          if ("navigate" in client) await client.navigate(url);
+        } catch {
+          /* stay on the focused window */
+        }
+        return;
       }
       await self.clients.openWindow(url);
     })(),

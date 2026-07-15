@@ -43,8 +43,11 @@ export const PUSH_CATEGORIES = {
     id: "crew_job" as const,
     label: "Job assignments",
     description: "You're put on a job, or taken off one.",
-    /** Crew only — targeted at the SPECIFIC assigned member, never broadcast. */
-    audience: ["crew"] as const,
+    /** Targeted at the SPECIFIC assigned member, never broadcast (the sender
+     *  only ever passes recipientUserIds for this category). All roles are in
+     *  the audience because a staff record can link to an office login —
+     *  Connor works jobs himself and still needs the ping. */
+    audience: ["crew", "admin", "estimator"] as const,
     defaultEnabled: true,
     /** A day's shelf life — a crew member should still hear about yesterday's
      *  late-evening allocation when their phone wakes up in the morning. */

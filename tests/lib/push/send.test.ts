@@ -45,14 +45,27 @@ describe("resolvePushRecipients", () => {
     expect(ids).toContain("admin-1");
   });
 
-  it("crew_job reaches crew only — office roles are excluded even when targeted", () => {
-    const ids = resolvePushRecipients("crew_job", OFFICE, noPrefs, null);
-    expect(ids).toEqual(["crew-1"]);
+  it("crew_job is delivered per-person: only the targeted profile survives resolution", () => {
+    // The sender ONLY ever calls crew_job with recipientUserIds, which
+    // restricts the profile set BEFORE this function — simulate that here.
+    const targeted = OFFICE.filter((p) => p.id === "crew-1");
+    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual(["crew-1"]);
+  });
+
+  it("crew_job also reaches a staff member whose login is an office role (Connor on the van)", () => {
+    const targeted = OFFICE.filter((p) => p.id === "admin-1");
+    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual(["admin-1"]);
+  });
+
+  it("inactive targets never receive, even when explicitly targeted", () => {
+    const targeted = OFFICE.filter((p) => p.id === "admin-2"); // inactive
+    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual([]);
   });
 
   it("crew can opt out of job alerts", () => {
+    const targeted = OFFICE.filter((p) => p.id === "crew-1");
     const prefs = new Map<string, Record<string, unknown>>([["crew-1", { crew_job: false }]]);
-    expect(resolvePushRecipients("crew_job", OFFICE, prefs, null)).toEqual([]);
+    expect(resolvePushRecipients("crew_job", targeted, prefs, null)).toEqual([]);
   });
 });
 

@@ -155,17 +155,23 @@ export async function sendPushForEvent(
     const targets = (subs ?? []) as SubRow[];
     if (targets.length === 0) return { ...none, skipped: "no_recipients" };
 
-    const payload = JSON.stringify(
-      buildPushPayload({
-        tag: event.eventKey,
-        category: event.category,
-        title: event.title,
-        body: event.body,
-        url: event.url,
-        suppressWhenFocused: def.suppressWhenFocused,
-        now,
-      }),
-    );
+    const payloadFor = (endpoint: string) =>
+      JSON.stringify(
+        buildPushPayload({
+          tag: event.eventKey,
+          category: event.category,
+          title: event.title,
+          body: event.body,
+          url: event.url,
+          // WebKit REQUIRES every push to show a notification — a few
+          // "silently handled" pushes and Safari revokes the subscription.
+          // So Apple endpoints never suppress; the focused-window rule only
+          // applies to Chromium-family push services.
+          suppressWhenFocused:
+            def.suppressWhenFocused && !endpoint.startsWith("https://web.push.apple.com/"),
+          now,
+        }),
+      );
 
     const summary: PushSendSummary = { attempted: targets.length, accepted: 0, pruned: 0, failed: 0 };
     // Small recipient sets (a handful of office users) — sequential fan-out is
@@ -173,7 +179,7 @@ export async function sendPushForEvent(
     for (const sub of targets) {
       const res = await transport(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth_secret } },
-        payload,
+        payloadFor(sub.endpoint),
         { ttlSeconds: def.ttlSeconds, urgency: def.urgency },
       );
       const ts = new Date().toISOString();
@@ -193,15 +199,26 @@ export async function sendPushForEvent(
         log.info("push.subscription.pruned", { endpoint: redact(sub.endpoint_hash), category: event.category });
       } else {
         summary.failed += 1;
+        // A subscription that NEVER succeeds (e.g. garbage keys, dead but
+        // non-410 endpoint) must not be retried forever — retire it after a
+        // run of consecutive failures.
+        const failures = sub.failure_count + 1;
+        const retire = failures >= 8;
         await admin
           .from("push_subscriptions")
-          .update({ last_failure_at: ts, failure_count: sub.failure_count + 1, updated_at: ts })
+          .update({
+            last_failure_at: ts,
+            failure_count: failures,
+            updated_at: ts,
+            ...(retire ? { status: "invalid", revoked_at: ts } : {}),
+          })
           .eq("id", sub.id);
         log.warn("push.send.failed", {
           endpoint: redact(sub.endpoint_hash),
           category: event.category,
           kind: res.kind,
           status: res.status,
+          ...(retire ? { retired: true } : {}),
         });
       }
     }

@@ -18,11 +18,19 @@ const base: PushEnvironment = {
 };
 
 describe("derivePushUiState (PRD §16.2 state machine)", () => {
-  it("walks the precedence: unsupported → install → admin off → blocked", () => {
+  it("walks the precedence: install → unsupported → admin off → blocked", () => {
     expect(derivePushUiState({ ...base, supported: false })).toBe("unsupported");
     expect(derivePushUiState({ ...base, installRequired: true })).toBe("install_required");
     expect(derivePushUiState({ ...base, systemEnabled: false })).toBe("admin_disabled");
     expect(derivePushUiState({ ...base, permission: "denied" })).toBe("blocked");
+  });
+
+  it("iOS Safari TAB reality: push APIs hidden (unsupported) + not installed → still install_required", () => {
+    // This is the ONLY combination a real iPhone Safari tab produces — the
+    // answer must be install instructions, never "unsupported".
+    expect(derivePushUiState({ ...base, supported: false, installRequired: true })).toBe(
+      "install_required",
+    );
   });
 
   it("available until granted + subscribed + server-registered = enabled", () => {

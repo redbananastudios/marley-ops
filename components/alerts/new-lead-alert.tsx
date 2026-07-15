@@ -169,7 +169,12 @@ export function NewLeadAlert() {
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
-    if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onSwMessage);
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", onSwMessage);
+      // Without startMessages() (or an onmessage assignment) the page's
+      // message queue stays paused and postMessage from the SW never fires.
+      navigator.serviceWorker.startMessages?.();
+    }
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
