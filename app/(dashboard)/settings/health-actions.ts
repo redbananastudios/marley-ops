@@ -8,6 +8,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getTakepaymentsConfig } from "@/lib/payments/takepayments";
 
 export interface HealthCheck {
   name: string;
@@ -197,6 +198,29 @@ async function checkAi(): Promise<HealthCheck> {
   }
 }
 
+async function checkCardPayments(): Promise<HealthCheck> {
+  const name = "Card payments (takepayments)";
+  const config = getTakepaymentsConfig();
+  if (!config) return { name, status: "warn", detail: "Not configured (deposits are BACS-only)" };
+  try {
+    const admin = createAdminClient();
+    const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    const { count } = await admin
+      .from("card_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending")
+      .lt("created_at", tenMinAgo);
+    const mode = config.testMode ? "TEST" : "LIVE";
+    return {
+      name,
+      status: count ? "warn" : "ok",
+      detail: `Merchant ••••${config.merchantId.slice(-4)} · ${mode} · ${count ?? 0} unsettled >10m`,
+    };
+  } catch (e) {
+    return { name, status: "fail", detail: e instanceof Error ? e.message : "Unreachable" };
+  }
+}
+
 /** Run every check in parallel. Any signed-in user may run it (read-only diagnostics). */
 export async function runHealthChecks(): Promise<{ ok: boolean; checks: HealthCheck[]; ranAt: string }> {
   if (!(await requireStaff())) return { ok: false, checks: [], ranAt: new Date().toISOString() };
@@ -210,6 +234,7 @@ export async function runHealthChecks(): Promise<{ ok: boolean; checks: HealthCh
     checkPostHog(),
     checkGoogleAds(),
     checkAi(),
+    checkCardPayments(),
   ]);
   return { ok: true, checks, ranAt: new Date().toISOString() };
 }

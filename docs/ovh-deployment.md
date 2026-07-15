@@ -15,7 +15,7 @@ rollback reference.
 | **Backend** | Supabase stack under `/opt/rbs/supabase` (`docker compose`), 11 services, on `rbs` |
 | **Reverse proxy** | Caddy (`/opt/rbs/caddy`) — auto Let's Encrypt TLS. Routes `ops.marleymoves.co.uk`→app:3000, `supabase.redbananastudios.com`→supabase-kong:8000. Has internal network aliases for both hostnames so the app reaches the backend without a public hairpin. |
 | **App env** | `/opt/marley-ops/app.env` (chmod 600, 54 vars) — the runtime env; also holds the `NEXT_PUBLIC_*` build args |
-| **Cron** | `/etc/cron.d/marley-ops` → `cron-hit.sh` fires the 7 jobs against `localhost:3000` with `CRON_SECRET` (replaces Vercel Cron) |
+| **Cron** | `/etc/cron.d/marley-ops` → `cron-hit.sh` fires the jobs against `localhost:3000` with `CRON_SECRET` (replaces Vercel Cron). Registry: `lib/cron/jobs.ts`. **When adding a job (e.g. `card-reconcile`, `*/15`), add its endpoint to `cron-hit.sh` on the VPS** — the in-repo registry drives the /automations page, not the scheduler. |
 | **DNS** | Both records A → `51.195.253.165`, at IONOS, TTL 60 |
 | **Backups** | `scripts/backup-prod-db.ps1` (nightly on i9, 02:30) → SSH pg_dump from the OVH `supabase-db` → `../backups` |
 

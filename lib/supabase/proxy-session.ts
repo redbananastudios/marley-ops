@@ -48,7 +48,10 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/sync/") ||
     // Provider webhooks (svix-signature verified inside the route).
-    path.startsWith("/api/webhooks/");
+    path.startsWith("/api/webhooks/") ||
+    // takepayments gateway messages (SHA-512 signature verified inside the
+    // route) — a redirect-to-login here would eat the payment result POST.
+    path.startsWith("/api/card/");
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

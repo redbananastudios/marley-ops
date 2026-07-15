@@ -83,6 +83,15 @@ export const CRON_JOBS: CronJobMeta[] = [
     maxAgeMins: 26 * 60,
     endpoint: "/api/cron/ai-retention",
   },
+  {
+    slug: "card-reconcile",
+    label: "Card payment reconciler",
+    schedule: "*/15 * * * *",
+    cadence: "Every 15 minutes",
+    description: "Queries takepayments for any pending card deposit and confirms bookings a missed callback would have left hanging.",
+    maxAgeMins: 45,
+    endpoint: "/api/cron/card-reconcile",
+  },
 ];
 
 /** A row from public.cron_runs (what the page + API return). */

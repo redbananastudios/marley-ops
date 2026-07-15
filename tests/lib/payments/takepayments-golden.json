@@ -1,0 +1,85 @@
+[
+  {
+    "name": "minimal hosted SALE",
+    "secret": "9GXwHNVC87VqsqNM",
+    "data": {
+      "merchantID": "119837",
+      "action": "SALE",
+      "type": 1,
+      "amount": 10000,
+      "currencyCode": 826,
+      "countryCode": 826,
+      "transactionUnique": "9f8e7d6c-5b4a-3210-fedc-ba9876543210",
+      "orderRef": "MMR014 deposit",
+      "redirectURL": "https://ops.marleymoves.co.uk/api/card/return",
+      "callbackURL": "https://ops.marleymoves.co.uk/api/card/callback"
+    },
+    "signature": "94373e9ee129816ee6d8acc0c3333472717d34102c335eebe1fab82ceb17b8aa921aea3263e61b5cc59ecbdd4afd1c5c27aa044857fd56e942985fab7fad1267"
+  },
+  {
+    "name": "star character survives as %2A",
+    "secret": "9GXwHNVC87VqsqNM",
+    "data": {
+      "merchantID": "119837",
+      "action": "SALE",
+      "type": 1,
+      "amount": 2499,
+      "currencyCode": 826,
+      "countryCode": 826,
+      "orderRef": "Star *item* ref",
+      "redirectURL": "https://example.com/r?a=1&b=*"
+    },
+    "signature": "be1939305bc2f2796fc2c9e50ed3c4f8a2a8b5fec9c03ee7ead734ff5d1011926e96d30f7b436992f3e3b88a5b6660e371903d7e671732671ec55a25f5d78360"
+  },
+  {
+    "name": "CRLF + ampersand + unicode in orderRef",
+    "secret": "9GXwHNVC87VqsqNM",
+    "data": {
+      "merchantID": "119837",
+      "action": "SALE",
+      "type": 1,
+      "amount": 100,
+      "currencyCode": 826,
+      "countryCode": 826,
+      "orderRef": "Line1\r\nLine2 & sons — café £9",
+      "customerName": "Bob O'Neill",
+      "redirectURL": "https://example.com/return"
+    },
+    "signature": "d2ba6b3af965375205b2bf4e0ec4451a3eb34a754dd9f42cf05875424054c3d46e693183847646fafcfc596b673fc81f93bd030a822db89dd5e407a14975ed8e"
+  },
+  {
+    "name": "QUERY management request",
+    "secret": "SigningSecret!£$%^&*()",
+    "data": {
+      "merchantID": "119837",
+      "action": "QUERY",
+      "xref": "15091702MG47WN32MM88LPK"
+    },
+    "signature": "f6f94c286923e8e52604c7c4efa7fd6ae49301634a318ae1c05793f4d2065a3348ed7368ffb93ed216f53582953bde936fdf1ee78ab3eb040f3d12ffdcadd7f3"
+  },
+  {
+    "name": "partial REFUND_SALE",
+    "secret": "SigningSecret!£$%^&*()",
+    "data": {
+      "merchantID": "119837",
+      "action": "REFUND_SALE",
+      "xref": "15091702MG47WN32MM88LPK",
+      "amount": 5000
+    },
+    "signature": "8d7bd5b50e9e32580e2d47ad269512f6da7e1fc091ff06eb2c02e5eaaff5c1b4215dcbc3b1abb5939cc8f1f39feabda297018c59a25847eb08df0775dd206f18"
+  },
+  {
+    "name": "field ordering: keys out of order + numerics",
+    "secret": "9GXwHNVC87VqsqNM",
+    "data": {
+      "type": 1,
+      "merchantID": "119837",
+      "amount": 1,
+      "action": "VERIFY",
+      "countryCode": 826,
+      "currencyCode": 826,
+      "transactionUnique": "zzz-last-alphabetically"
+    },
+    "signature": "d4c5a66b0358d3f2c044d079bacb4ad117c01a830a8f020ae8614b131f977f227a9dc2ca5503a31615d2bbe3c80a547c6cfe3786097c83eb7798f818523dcae1"
+  }
+]

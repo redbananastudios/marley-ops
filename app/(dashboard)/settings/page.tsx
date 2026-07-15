@@ -11,6 +11,7 @@ import { HealthCard } from "@/components/settings/health-card";
 import { AiSettingsCard } from "@/components/settings/ai-settings-card";
 import { QuickSigninCard } from "@/components/settings/quick-signin-card";
 import { NotificationsCard } from "@/components/settings/notifications-card";
+import { CardPaymentsCard } from "@/components/settings/card-payments-card";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -32,6 +33,22 @@ export default async function SettingsPage() {
   ]);
   const aiConfigured = !!process.env.GEMINI_API_KEY && !!process.env.GEMINI_API_BASE_URL && !!(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL);
 
+  // A test-payment target: the most recent accepted-but-unpaid quote (admin
+  // only — the card renders the "Run a test payment" button against it).
+  let cardTestToken: string | null = null;
+  if (canEdit) {
+    const { data: t } = await admin
+      .from("quotes")
+      .select("accept_token")
+      .eq("status", "accepted")
+      .is("deposit_paid_at", null)
+      .not("accept_token", "is", null)
+      .order("accepted_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    cardTestToken = (t?.accept_token as string | null) ?? null;
+  }
+
   // Team management is admin-only — estimators don't see the card at all.
   let team: TeamMember[] = [];
   if (canEdit) {
@@ -49,6 +66,7 @@ export default async function SettingsPage() {
     ...(canEdit ? [{ id: "team", label: "Team" }] : []),
     { id: "quick-signin", label: "Quick sign-in" },
     { id: "notifications", label: "Notifications" },
+    ...(canEdit ? [{ id: "payments", label: "Payments" }] : []),
     { id: "ai", label: "AI" },
     { id: "pricing", label: "Pricing" },
     { id: "business", label: "Business" },
@@ -80,6 +98,11 @@ export default async function SettingsPage() {
         <section id="notifications" className={sectionClass}>
           <NotificationsCard isAdmin={canEdit} />
         </section>
+        {canEdit ? (
+          <section id="payments" className={sectionClass}>
+            <CardPaymentsCard testToken={cardTestToken} />
+          </section>
+        ) : null}
         <section id="ai" className={sectionClass}>
           <AiSettingsCard settings={settings} spendHistory={(spendHistory ?? []).map((item) => ({ month: item.month, spentUsd: Number(item.spent_usd), reservedUsd: Number(item.reserved_usd), alertedAt: item.alerted_at }))} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} mediaCount={(mediaRows ?? []).length} nextRetentionSweep={nextSweep.toISOString()} diskCapacityGb={Number(process.env.AI_MEDIA_DISK_CAPACITY_GB) || null} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
         </section>

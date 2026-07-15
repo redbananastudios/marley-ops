@@ -8,10 +8,11 @@ import {
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
-import { isPaymentGatewayActive } from "@/lib/zoho";
+import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { AcceptForm } from "./accept-form";
 import { DeclineOption, DepositSentButton } from "./customer-actions";
+import { PayCardButton } from "./pay-card-button";
 
 const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
 
@@ -144,8 +145,15 @@ function BankPanel({ reference }: { reference: string }) {
   );
 }
 
-export default async function AcceptPage({ params }: { params: Promise<{ token: string }> }) {
+export default async function AcceptPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ token: string }>;
+  searchParams: Promise<{ card?: string }>;
+}) {
   const { token } = await params;
+  const { card: cardResult } = await searchParams;
   const sb = createAdminClient();
   let quote = await fetchQuoteByToken(sb, token);
 
@@ -270,8 +278,8 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
     );
   }
 
-  const cardOk =
-    !!quote.zoho_deposit_invoice_url && (await isPaymentGatewayActive().catch(() => false));
+  // Card via takepayments — env creds + the Settings kill switch, both on.
+  const cardOk = await cardPaymentsAvailable(sb).catch(() => false);
 
   return (
     <Shell>
@@ -286,6 +294,19 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
           </p>
         </div>
         <div className="space-y-5 p-6 sm:p-8">
+          {cardResult === "failed" || cardResult === "error" ? (
+            <div className="rounded-md border border-warn-border bg-warn-bg p-4">
+              <p className="text-sm font-semibold text-ink">
+                Your card payment didn&apos;t complete — no money has been taken.
+              </p>
+              <p className="mt-1 text-sm leading-relaxed text-mist-500">
+                You can try again below, or pay by bank transfer instead. If it keeps happening,
+                call us on <strong className="text-ink">01747 637070</strong> and we&apos;ll sort
+                it together.
+              </p>
+            </div>
+          ) : null}
+
           <p className="text-sm leading-relaxed text-mist-500">
             Thanks{quote.accepted_name ? `, ${quote.accepted_name.split(/\s+/)[0]}` : ""} — quote{" "}
             <strong className="text-ink">{quote.quote_ref}</strong> is accepted. Your date is
@@ -293,12 +314,14 @@ export default async function AcceptPage({ params }: { params: Promise<{ token: 
           </p>
 
           {cardOk ? (
-            <a
-              href={quote.zoho_deposit_invoice_url!}
-              className="flex h-14 w-full items-center justify-center rounded-md bg-mm-red text-base font-semibold text-white transition hover:bg-mm-red-deep active:scale-[0.99]"
-            >
-              Pay {gbp(deposit)} by card →
-            </a>
+            <>
+              <PayCardButton token={token} amountLabel={gbp(deposit)} />
+              <div className="flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-mist-400">
+                <span className="h-px flex-1 bg-mist-150" />
+                or
+                <span className="h-px flex-1 bg-mist-150" />
+              </div>
+            </>
           ) : null}
 
           <BankPanel reference={quote.quote_ref} />

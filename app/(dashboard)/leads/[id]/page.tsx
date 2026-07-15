@@ -18,6 +18,7 @@ import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
 import { PaymentsCard } from "@/components/leads/payments-card";
+import { CardPaymentsCard } from "@/components/leads/card-payments-card";
 import {
   CompletionCard,
   ContractSignatureCard,
@@ -84,6 +85,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const { data: lead } = await supabase.from("leads").select("*").eq("id", id).single();
   if (!lead) notFound();
+
+  const {
+    data: { user: viewer },
+  } = await supabase.auth.getUser();
+  const { data: viewerProfile } = viewer
+    ? await supabase.from("profiles").select("role").eq("id", viewer.id).single()
+    : { data: null };
+  const isAdminViewer = viewerProfile?.role === "admin";
 
   const [{ data: client }, { data: activities }, { count: clientLeadCount }, { data: estimators }] =
     await Promise.all([
@@ -234,6 +243,28 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     ["confirmed", "completed"].includes(lead.status) ||
     lead.deposit_amount != null ||
     lead.balance_amount != null;
+
+  // Card-payment ledger (takepayments attempts) — newest first.
+  const { data: cardPaymentRows } = await createAdminClient()
+    .from("card_payments")
+    .select(
+      "id, status, amount_pence, refunded_pence, card_number_mask, card_scheme, created_at, settled_at, refund_reason",
+    )
+    .eq("lead_id", id)
+    .order("created_at", { ascending: false });
+  const cardPayments = (cardPaymentRows ?? [])
+    .filter((r) => r.status !== "abandoned")
+    .map((r) => ({
+      id: r.id,
+      status: r.status,
+      amountPence: r.amount_pence,
+      refundedPence: r.refunded_pence,
+      cardNumberMask: r.card_number_mask,
+      cardScheme: r.card_scheme,
+      createdAt: r.created_at,
+      settledAt: r.settled_at,
+      refundReason: r.refund_reason,
+    }));
 
   const activityRows = activities ?? [];
   const previousCount = (clientLeadCount ?? 1) - 1;
@@ -414,6 +445,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   balancePaidAt: lead.balance_paid_at,
                 }}
               />
+            </div>
+          ) : null}
+
+          {cardPayments.length ? (
+            <div className="mt-5">
+              <CardPaymentsCard rows={cardPayments} isAdmin={isAdminViewer} />
             </div>
           ) : null}
 

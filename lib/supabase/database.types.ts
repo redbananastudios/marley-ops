@@ -481,6 +481,7 @@ export type Database = {
           ai_survey_cap_gbp: number
           ai_survey_enabled: boolean
           base_location: string
+          card_payments_enabled: boolean
           cost_75t: number
           cost_box: number
           cost_fuel_75_per_mile: number
@@ -515,6 +516,7 @@ export type Database = {
           ai_survey_cap_gbp?: number
           ai_survey_enabled?: boolean
           base_location?: string
+          card_payments_enabled?: boolean
           cost_75t?: number
           cost_box?: number
           cost_fuel_75_per_mile?: number
@@ -549,6 +551,7 @@ export type Database = {
           ai_survey_cap_gbp?: number
           ai_survey_enabled?: boolean
           base_location?: string
+          card_payments_enabled?: boolean
           cost_75t?: number
           cost_box?: number
           cost_fuel_75_per_mile?: number
@@ -575,6 +578,104 @@ export type Database = {
           vat_number?: string | null
         }
         Relationships: []
+      }
+      card_payments: {
+        Row: {
+          amount_pence: number
+          authorisation_code: string | null
+          card_number_mask: string | null
+          card_scheme: string | null
+          client_id: string | null
+          created_at: string
+          gateway_transaction_id: string | null
+          gateway_xref: string | null
+          id: string
+          kind: string
+          lead_id: string | null
+          quote_id: string
+          refund_reason: string | null
+          refunded_at: string | null
+          refunded_by: string | null
+          refunded_pence: number
+          response_code: number | null
+          response_message: string | null
+          settled_at: string | null
+          status: string
+        }
+        Insert: {
+          amount_pence: number
+          authorisation_code?: string | null
+          card_number_mask?: string | null
+          card_scheme?: string | null
+          client_id?: string | null
+          created_at?: string
+          gateway_transaction_id?: string | null
+          gateway_xref?: string | null
+          id?: string
+          kind?: string
+          lead_id?: string | null
+          quote_id: string
+          refund_reason?: string | null
+          refunded_at?: string | null
+          refunded_by?: string | null
+          refunded_pence?: number
+          response_code?: number | null
+          response_message?: string | null
+          settled_at?: string | null
+          status?: string
+        }
+        Update: {
+          amount_pence?: number
+          authorisation_code?: string | null
+          card_number_mask?: string | null
+          card_scheme?: string | null
+          client_id?: string | null
+          created_at?: string
+          gateway_transaction_id?: string | null
+          gateway_xref?: string | null
+          id?: string
+          kind?: string
+          lead_id?: string | null
+          quote_id?: string
+          refund_reason?: string | null
+          refunded_at?: string | null
+          refunded_by?: string | null
+          refunded_pence?: number
+          response_code?: number | null
+          response_message?: string | null
+          settled_at?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_payments_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_payments_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_payments_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_payments_refunded_by_fkey"
+            columns: ["refunded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       clients: {
         Row: {

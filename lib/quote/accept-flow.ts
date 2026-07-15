@@ -850,8 +850,8 @@ export interface DepositPaidOpts {
   recordInZoho: boolean;
 }
 
-const zohoMode = (method: string): "banktransfer" | "cash" =>
-  method === "cash" ? "cash" : "banktransfer";
+const zohoMode = (method: string): "banktransfer" | "cash" | "creditcard" =>
+  method === "cash" ? "cash" : method === "card" ? "creditcard" : "banktransfer";
 
 /** Deposit landed: confirm the lead, close the chase, record in Zoho (BACS),
  *  email the customer, alert ops. Idempotent — a second call is a no-op. */
@@ -932,7 +932,7 @@ export async function markDepositPaid(
       client_id: lead?.client_id ?? quote.client_id,
       actor_id: opts.actorId,
       type: "status_change",
-      summary: `Deposit £${deposit.toFixed(0)} paid (${opts.method === "card" ? "card via Zoho" : "bank transfer"}) — lead Confirmed`,
+      summary: `Deposit £${deposit.toFixed(0)} paid (${opts.method === "card" ? "card" : opts.method === "cash" ? "cash" : "bank transfer"}) — lead Confirmed`,
       meta: { quote_id: quoteId, method: opts.method },
     });
   }

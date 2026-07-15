@@ -66,6 +66,7 @@ interface Row {
   balanceInvoiceNumber: string | null;
   balanceAmount: number;
   apptStartsAt: string | null;
+  cardStatus: string | null;
 }
 
 function Section({
@@ -139,6 +140,21 @@ export default async function BookingsPage() {
       : Promise.resolve({ data: [] as never[] }),
   ]);
 
+  // Latest card-payment attempt per lead → a small "did they try to pay?" chip
+  // on awaiting rows (the first question on a deposit chase call).
+  const { data: cardAttempts } = leadIds.length
+    ? await sb
+        .from("card_payments")
+        .select("lead_id, status, created_at")
+        .in("lead_id", leadIds)
+        .in("status", ["pending", "failed", "paid", "partially_refunded", "refunded", "voided"])
+        .order("created_at", { ascending: false })
+    : { data: [] as { lead_id: string | null; status: string; created_at: string }[] };
+  const cardStatusByLead = new Map<string, string>();
+  for (const a of cardAttempts ?? []) {
+    if (a.lead_id && !cardStatusByLead.has(a.lead_id)) cardStatusByLead.set(a.lead_id, a.status);
+  }
+
   const leadById = new Map((leads ?? []).map((l) => [l.id, l]));
   const apptByLead = new Map<string, string>();
   for (const a of appts ?? []) {
@@ -178,6 +194,7 @@ export default async function BookingsPage() {
           : null,
       balanceAmount: Number(q.balance_invoice_amount ?? balanceDue(agreed, deposit)),
       apptStartsAt: apptByLead.get(lead.id) ?? null,
+      cardStatus: cardStatusByLead.get(lead.id) ?? null,
     });
   }
 
@@ -245,6 +262,15 @@ export default async function BookingsPage() {
             {r.depositSelfreportAt ? (
               <span className="inline-flex items-center gap-1 rounded-pill bg-warn-bg px-2.5 py-1 text-xs font-semibold text-warn">
                 <AlertTriangle className="size-3.5" strokeWidth={2} /> Customer says sent — check the bank
+              </span>
+            ) : null}
+            {r.cardStatus === "pending" ? (
+              <span className="rounded-pill bg-mist-100 px-2.5 py-1 text-xs font-medium text-mist-500">
+                Card started
+              </span>
+            ) : r.cardStatus === "failed" ? (
+              <span className="rounded-pill bg-warn-bg px-2.5 py-1 text-xs font-medium text-warn">
+                Card declined
               </span>
             ) : null}
             <span className="tabular text-sm font-semibold text-foreground">{gbp(r.deposit)}</span>

@@ -9,6 +9,7 @@ import {
   reportDepositSent,
   type AcceptOutcome,
 } from "@/lib/quote/accept-flow";
+import { startCardPayment } from "@/lib/payments/card-payments";
 
 /**
  * PUBLIC actions — the customer at /q/<token>. No session: the unguessable
@@ -51,4 +52,16 @@ export async function reportDepositSentAction(
   const result = await reportDepositSent(sb, token);
   if (result.ok) revalidatePath(`/q/${token}`);
   return result;
+}
+
+/**
+ * Customer taps "Pay by card" — mint a takepayments attempt and hand back the
+ * signed hosted-payment form. The amount is signed server-side from the
+ * quote's deposit; nothing the browser sends can change it.
+ */
+export async function startCardPaymentAction(
+  token: string,
+): Promise<{ ok: true; url: string; fields: Record<string, string> } | { ok: false; error: string }> {
+  const sb = createAdminClient();
+  return startCardPayment(sb, token);
 }
