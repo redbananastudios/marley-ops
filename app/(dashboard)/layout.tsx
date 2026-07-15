@@ -3,6 +3,7 @@ import { getSessionProfile } from "@/lib/auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { MobileNav } from "@/components/mobile-nav";
 import { NewLeadAlert } from "@/components/alerts/new-lead-alert";
+import { PushSwRegister } from "@/components/push/sw-register";
 import { OnboardingTour } from "@/components/onboarding/tour";
 import { tourForRole } from "@/components/onboarding/tours";
 import { CommandPalette } from "@/components/search/command-palette";
@@ -24,6 +25,9 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex min-h-screen bg-background">
+      {/* Keep the push service worker registered (never prompts — enabling
+          happens in Settings › Notifications). */}
+      <PushSwRegister />
       <NewLeadAlert />
       {/* Office-only quick search (Cmd/Ctrl-K). Crew are redirected above, so
           mounting here keeps it off the crew surface. */}

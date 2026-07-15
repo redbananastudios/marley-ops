@@ -160,12 +160,21 @@ export function NewLeadAlert() {
     const onVisible = () => {
       if (!document.hidden) void poll();
     };
+    // Web Push nudge: when the app is focused the service worker suppresses
+    // the OS notification for a new enquiry and messages us instead — poll
+    // NOW so the banner + chime fire instantly rather than on the next tick.
+    const onSwMessage = (event: MessageEvent) => {
+      const data = event.data as { type?: string; category?: string } | null;
+      if (data?.type === "mm-push" && data.category === "new_enquiry") void poll();
+    };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
+    if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", onSwMessage);
     return () => {
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
+      if ("serviceWorker" in navigator) navigator.serviceWorker.removeEventListener("message", onSwMessage);
       stopChimeCycle();
       ctxRef.current?.close().catch(() => {});
     };

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Cormorant_Garamond } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
@@ -27,6 +27,13 @@ const cormorant = Cormorant_Garamond({
 export const metadata: Metadata = {
   title: "Marley Ops",
   description: "Marley Moves internal operations panel",
+  // PWA: installable (required for iOS Web Push — Home Screen only).
+  appleWebApp: { capable: true, title: "Marley Ops", statusBarStyle: "black" },
+  icons: { apple: "/icons/apple-touch-icon.png" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#18181b",
 };
 
 export default function RootLayout({

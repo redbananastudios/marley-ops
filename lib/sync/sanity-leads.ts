@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
+import { decideEnquiryPushes } from "@/lib/push/categories";
+import { sendPushForEvent } from "@/lib/push/send";
 import type { Database } from "@/lib/supabase/database.types";
 
 type LeadStatus = Database["public"]["Enums"]["lead_status"];
@@ -151,6 +153,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   let updated = 0;
   let failed = 0;
   let firstError: string | undefined;
+  const insertedLeads: { id: string; name: string | null; submittedAt: string | null }[] = [];
 
   for (const doc of docs) {
     // One bad doc must not abort the batch — isolate each.
@@ -205,14 +208,26 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         if (error) throw error;
         updated += 1;
       } else {
-        const { error } = await admin.from("leads").insert({ ...baseFields, status: mapStatus(doc.status) });
+        const { data: created, error } = await admin
+          .from("leads")
+          .insert({ ...baseFields, status: mapStatus(doc.status) })
+          .select("id")
+          .single();
         if (error) throw error;
         inserted += 1;
+        insertedLeads.push({ id: created.id, name: doc.name ?? null, submittedAt });
       }
     } catch (docErr) {
       failed += 1;
       if (!firstError) firstError = docErr instanceof Error ? docErr.message : String(docErr);
     }
+  }
+
+  // Office push for freshly-landed enquiries (best-effort — sendPushForEvent
+  // never throws). The freshness window + digest rule keep the cutover
+  // backfill (months of history in one run) completely silent.
+  for (const event of decideEnquiryPushes(insertedLeads, new Date())) {
+    await sendPushForEvent(event);
   }
 
   return { ok: true, synced: inserted + updated, inserted, updated, failed, ...(firstError ? { firstError } : {}) };

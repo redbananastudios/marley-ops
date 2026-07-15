@@ -21,6 +21,8 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
+import { paymentPush } from "@/lib/push/categories";
+import { sendPushForEvent } from "@/lib/push/send";
 import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
 import {
   buildDepositReceivedEmailHtml,
@@ -931,6 +933,13 @@ export async function markDepositPaid(
     });
   }
 
+  // Office push notification (best-effort — can never fail the payment; the
+  // one-tapper themselves is excluded as the actor).
+  await sendPushForEvent(
+    paymentPush({ kind: "deposit", quoteId, customerName: quote.customer_name, leadId: quote.lead_id }),
+    { actorUserId: opts.actorId },
+  );
+
   // Customer confirmation (duplicate-guarded). Prefers the published Resend
   // template (dashboard-editable copy); the in-repo HTML is the fallback.
   if (quote.customer_email) {
@@ -1205,6 +1214,12 @@ export async function markBalancePaid(
     summary: `Balance £${amount.toFixed(0)} paid — fully settled`,
     meta: { quote_id: quoteId },
   });
+
+  // Office push notification (best-effort — can never fail the payment).
+  await sendPushForEvent(
+    paymentPush({ kind: "balance", quoteId, customerName: quote.customer_name, leadId: quote.lead_id }),
+    { actorUserId: actorId },
+  );
 
   if (quote.customer_email && amount > 0) {
     const meta = {

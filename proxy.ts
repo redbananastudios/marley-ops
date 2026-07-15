@@ -7,7 +7,11 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
+  // sw.js + manifest.webmanifest must bypass the auth gate: the browser
+  // fetches both without a session (SW update checks run detached from any
+  // page), and a 307-to-login would break push + install (same failure class
+  // as the font-307 bug).
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2|woff|ttf)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|sw\\.js|manifest\\.webmanifest|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2|woff|ttf)$).*)",
   ],
 };

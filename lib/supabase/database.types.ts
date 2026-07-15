@@ -498,6 +498,9 @@ export type Database = {
           google_review_url: string
           id: boolean
           pricing: Json | null
+          push_enabled: boolean
+          push_new_enquiry_enabled: boolean
+          push_payment_event_enabled: boolean
           updated_at: string
           vat_default: boolean
           vat_number: string | null
@@ -528,6 +531,9 @@ export type Database = {
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
+          push_enabled?: boolean
+          push_new_enquiry_enabled?: boolean
+          push_payment_event_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
           vat_number?: string | null
@@ -558,6 +564,9 @@ export type Database = {
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
+          push_enabled?: boolean
+          push_new_enquiry_enabled?: boolean
+          push_payment_event_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
           vat_number?: string | null
@@ -1905,6 +1914,87 @@ export type Database = {
           id?: string
           role?: Database["public"]["Enums"]["user_role"]
           updated_at?: string
+        }
+        Relationships: []
+      }
+      push_preferences: {
+        Row: {
+          categories: Json
+          created_at: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          categories?: Json
+          created_at?: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          categories?: Json
+          created_at?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      push_subscriptions: {
+        Row: {
+          auth_secret: string
+          created_at: string
+          endpoint: string
+          endpoint_hash: string
+          expiration_time: string | null
+          failure_count: number
+          id: string
+          installation_id: string | null
+          last_failure_at: string | null
+          last_seen_at: string | null
+          last_success_at: string | null
+          p256dh: string
+          revoked_at: string | null
+          status: string
+          updated_at: string
+          user_agent: string | null
+          user_id: string
+        }
+        Insert: {
+          auth_secret: string
+          created_at?: string
+          endpoint: string
+          endpoint_hash: string
+          expiration_time?: string | null
+          failure_count?: number
+          id?: string
+          installation_id?: string | null
+          last_failure_at?: string | null
+          last_seen_at?: string | null
+          last_success_at?: string | null
+          p256dh: string
+          revoked_at?: string | null
+          status?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id: string
+        }
+        Update: {
+          auth_secret?: string
+          created_at?: string
+          endpoint?: string
+          endpoint_hash?: string
+          expiration_time?: string | null
+          failure_count?: number
+          id?: string
+          installation_id?: string | null
+          last_failure_at?: string | null
+          last_seen_at?: string | null
+          last_success_at?: string | null
+          p256dh?: string
+          revoked_at?: string | null
+          status?: string
+          updated_at?: string
+          user_agent?: string | null
+          user_id?: string
         }
         Relationships: []
       }
