@@ -9,6 +9,7 @@ import { MarginCalculator } from "@/components/settings/margin-calculator";
 import { TeamForm, type TeamMember } from "@/components/settings/team-form";
 import { HealthCard } from "@/components/settings/health-card";
 import { AiSettingsCard } from "@/components/settings/ai-settings-card";
+import { QuickSigninCard } from "@/components/settings/quick-signin-card";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -45,6 +46,7 @@ export default async function SettingsPage() {
   // exists for admins, so its pill is conditional too.
   const sections: SettingsSection[] = [
     ...(canEdit ? [{ id: "team", label: "Team" }] : []),
+    { id: "quick-signin", label: "Quick sign-in" },
     { id: "ai", label: "AI" },
     { id: "pricing", label: "Pricing" },
     { id: "business", label: "Business" },
@@ -66,6 +68,9 @@ export default async function SettingsPage() {
             <TeamForm users={team} meId={profile?.id ?? null} />
           </section>
         ) : null}
+        <section id="quick-signin" className={sectionClass}>
+          <QuickSigninCard />
+        </section>
         <section id="ai" className={sectionClass}>
           <AiSettingsCard settings={settings} spendHistory={(spendHistory ?? []).map((item) => ({ month: item.month, spentUsd: Number(item.spent_usd), reservedUsd: Number(item.reserved_usd), alertedAt: item.alerted_at }))} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} mediaCount={(mediaRows ?? []).length} nextRetentionSweep={nextSweep.toISOString()} diskCapacityGb={Number(process.env.AI_MEDIA_DISK_CAPACITY_GB) || null} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
         </section>

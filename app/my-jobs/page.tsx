@@ -9,6 +9,7 @@ import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { OnboardingTour } from "@/components/onboarding/tour";
 import { TourButton } from "@/components/onboarding/launch";
+import { QuickSigninRow } from "@/components/my-jobs/quick-signin-row";
 
 /**
  * /my-jobs — the crew surface (iMVE "can access assigned jobs"). A crew login
@@ -309,6 +310,8 @@ export default async function MyJobsPage() {
           ))}
           </div>
         )}
+
+        <QuickSigninRow />
       </main>
     </div>
   );
