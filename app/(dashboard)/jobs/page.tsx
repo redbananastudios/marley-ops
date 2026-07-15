@@ -100,7 +100,7 @@ export default async function CompletedJobsPage({
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Sales" title="Completed Jobs" />
+      <PageHeader eyebrow="Schedule" title="Completed Jobs" />
       <CompletedJobsView rows={viewRows} query={query} />
     </main>
   );

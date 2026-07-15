@@ -134,6 +134,7 @@ export function JobBoardView({
   vehicles,
   assignments,
   thisWeekStart,
+  initialWeekStart,
   today,
 }: {
   appts: BoardAppt[];
@@ -141,10 +142,12 @@ export function JobBoardView({
   vehicles: BoardVehicle[];
   assignments: BoardAssignment[];
   thisWeekStart: string;
+  /** Week the board opens on (?week= deep link); "This week" still resets to thisWeekStart. */
+  initialWeekStart?: string;
   today: string;
 }) {
   const router = useRouter();
-  const [weekStart, setWeekStart] = useState(thisWeekStart);
+  const [weekStart, setWeekStart] = useState(initialWeekStart ?? thisWeekStart);
   const [showSurveys, setShowSurveys] = useState(true);
   const [railOpen, setRailOpen] = useState(true);
   const [assignFor, setAssignFor] = useState<BoardAppt | null>(null);

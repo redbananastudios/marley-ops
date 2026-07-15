@@ -36,11 +36,19 @@ export function MarkPaidButton({
   kind,
   amount,
   customerName,
+  leadId,
+  apptStartsAt,
 }: {
   quoteId: string;
   kind: "deposit" | "balance";
   amount: number;
   customerName: string | null;
+  /** Lead behind the quote — powers the deposit toast's next-step action. */
+  leadId?: string;
+  /** Removal appointment start (null = not in the diary yet). Decides whether
+   *  the deposit toast offers "Assign crew" (Job Board at the move's week) or
+   *  "Book removal" (removals diary). */
+  apptStartsAt?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -56,8 +64,18 @@ export function MarkPaidButton({
         toast.error(res.error);
         return;
       }
+      // A paid deposit is the moment a job becomes real — surface the next
+      // step (crew/van assignment, or the diary if it isn't booked yet) so it
+      // isn't left to memory.
+      const next =
+        kind === "deposit" && leadId
+          ? apptStartsAt
+            ? { label: "Assign crew", href: `/schedule/board?week=${apptStartsAt.slice(0, 10)}` }
+            : { label: "Book removal", href: `/schedule/removals?leadId=${leadId}` }
+          : null;
       toast.success(
         `${kind === "deposit" ? "Deposit" : "Balance"} marked paid (${method === "cash" ? "cash" : "bank transfer"}).`,
+        next ? { duration: 8000, action: { label: next.label, onClick: () => router.push(next.href) } } : undefined,
       );
       setOpen(false);
       router.refresh();

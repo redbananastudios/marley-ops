@@ -13,7 +13,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export default async function JobBoardPage() {
+export default async function JobBoardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ week?: string }>;
+}) {
+  const { week } = await searchParams;
   const supabase = await createClient();
 
   const [appts, leads, quotes, { data: staff }, { data: vehicles }, assignments] = await Promise.all([
@@ -85,11 +90,21 @@ export default async function JobBoardPage() {
     };
   });
 
-  // Monday of the current UK week — the board's Mon–Sun window.
+  // Monday of the given date's UK week — the board's Mon–Sun window.
+  const mondayOf = (isoDate: string): string => {
+    const t = new Date(`${isoDate}T00:00:00Z`);
+    t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
+    return t.toISOString().slice(0, 10);
+  };
   const ukToday = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-  const t = new Date(`${ukToday}T00:00:00Z`);
-  t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
-  const thisWeekStart = t.toISOString().slice(0, 10);
+  const thisWeekStart = mondayOf(ukToday);
+  // ?week=<YYYY-MM-DD> deep-links the board to that date's week (Bookings'
+  // "Assign crew" bridge lands on the move's week, not today's). Anything
+  // malformed falls back to the current week.
+  const weekParam =
+    week && /^\d{4}-\d{2}-\d{2}$/.test(week) && !Number.isNaN(Date.parse(`${week}T00:00:00Z`))
+      ? mondayOf(week)
+      : null;
 
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
@@ -100,6 +115,7 @@ export default async function JobBoardPage() {
         vehicles={(vehicles ?? []) as BoardVehicle[]}
         assignments={assignments as BoardAssignment[]}
         thisWeekStart={thisWeekStart}
+        initialWeekStart={weekParam ?? thisWeekStart}
         today={ukToday}
       />
     </main>

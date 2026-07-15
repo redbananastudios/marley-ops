@@ -8,6 +8,7 @@ import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
 import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
+import { isBackwardMove } from "@/lib/leads/funnel";
 import { normalizePhone } from "@/lib/leads/phone";
 import {
   editLeadSchema,
@@ -278,14 +279,43 @@ export async function assignLeadOwnerAction(leadId: string, estimatorId: string 
   return { ok: true as const };
 }
 
-export async function updateLeadStatusAction(leadId: string, status: string) {
+export async function updateLeadStatusAction(
+  leadId: string,
+  status: string,
+  opts?: { reason?: string },
+) {
   const { sb, userId } = await actor();
+
+  // Losses must go through markLeadLostAction — it records the WHY (the
+  // "why we lose" report) and unwinds appointments/invoices. A raw status
+  // write to declined would silently skip both.
+  if (status === "declined") {
+    return {
+      ok: false as const,
+      error: "Use Mark lost instead — it records the reason and unwinds bookings and invoices.",
+    };
+  }
+
   const { data: current } = await sb
     .from("leads")
     .select("status, client_id, first_contacted_at")
     .eq("id", leadId)
     .single();
   const from = current?.status ?? null;
+
+  // Moving a job BACKWARDS down the funnel (e.g. confirmed → quoted) is rare
+  // and usually means something went wrong — require a reason so the timeline
+  // says why, mirroring mark-lost. Reopening a declined lead isn't backward
+  // (declined sits outside the funnel), so it stays a plain move.
+  const reason = opts?.reason?.trim() || null;
+  const backward = isBackwardMove(from, status);
+  if (backward && !reason) {
+    return {
+      ok: false as const,
+      needsReason: true as const,
+      error: "Moving a job backwards needs a reason.",
+    };
+  }
 
   // First time anyone moves a lead off its initial state = first contact.
   // Powers the dashboard "median response time" metric.
@@ -311,8 +341,8 @@ export async function updateLeadStatusAction(leadId: string, status: string) {
     lead_id: leadId,
     actor_id: userId,
     type: "status_change",
-    summary: `Status: ${from ?? "—"} → ${status}`,
-    meta: { from, to: status },
+    summary: `Status: ${from ?? "—"} → ${status}${backward && reason ? ` — ${reason}` : ""}`,
+    meta: { from, to: status, ...(backward && reason ? { reason } : {}) },
   });
 
   // Move done → ask for the Google review (once per lead, settings-gated;

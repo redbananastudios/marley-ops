@@ -16,6 +16,9 @@ import { MoveHorizontal, FileText, Search, Calendar, Home, ChevronLeft, ChevronR
 import { toast } from "sonner";
 import { LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { updateLeadStatusAction } from "@/app/(dashboard)/leads/actions";
+import { isBackwardMove } from "@/lib/leads/funnel";
+import { MarkLostDialog } from "@/components/leads/mark-lost-button";
+import { StatusReasonDialog } from "@/components/leads/status-reason-dialog";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   DropdownMenu,
@@ -184,19 +187,37 @@ export function StatusBoard({
     });
   }, [leads, search, source, mine, meId, weekStart, basis]);
 
-  async function move(leadId: string, toStatus: string) {
-    const current = leads.find((l) => l.id === leadId);
-    if (!current || current.status === toStatus) return;
-    const fromStatus = current.status;
+  // Gated moves: dropping a card on Declined opens the mark-lost dialog (reason
+  // + unwind), and a BACKWARD funnel move collects a reason first. Only plain
+  // forward moves write straight away.
+  const [lostFor, setLostFor] = useState<BoardLead | null>(null);
+  const [reasonMove, setReasonMove] = useState<{ lead: BoardLead; toStatus: string } | null>(null);
+
+  async function applyMove(leadId: string, toStatus: string, fromStatus: string, reason?: string): Promise<boolean> {
     setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: toStatus } : l)));
-    const res = await updateLeadStatusAction(leadId, toStatus);
+    const res = await updateLeadStatusAction(leadId, toStatus, reason ? { reason } : undefined);
     if (res.ok) {
       toast.success(`Moved to ${LEAD_STATUS_META[toStatus]?.label ?? toStatus}`);
       router.refresh();
-    } else {
-      setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: fromStatus } : l)));
-      toast.error(res.error ?? "Could not move lead");
+      return true;
     }
+    setLeads((prev) => prev.map((l) => (l.id === leadId ? { ...l, status: fromStatus } : l)));
+    toast.error(res.error ?? "Could not move lead");
+    return false;
+  }
+
+  async function move(leadId: string, toStatus: string) {
+    const current = leads.find((l) => l.id === leadId);
+    if (!current || current.status === toStatus) return;
+    if (toStatus === "declined") {
+      setLostFor(current);
+      return;
+    }
+    if (isBackwardMove(current.status, toStatus)) {
+      setReasonMove({ lead: current, toStatus });
+      return;
+    }
+    await applyMove(leadId, toStatus, current.status);
   }
 
   return (
@@ -391,6 +412,35 @@ export function StatusBoard({
           })}
         </div>
       </div>
+
+      {lostFor ? (
+        <MarkLostDialog
+          leadId={lostFor.id}
+          open
+          onOpenChange={(o) => {
+            if (!o) setLostFor(null);
+          }}
+          onDone={() => {
+            const id = lostFor.id;
+            setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, status: "declined" } : l)));
+            setLostFor(null);
+          }}
+        />
+      ) : null}
+
+      {reasonMove ? (
+        <StatusReasonDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setReasonMove(null);
+          }}
+          fromLabel={LEAD_STATUS_META[reasonMove.lead.status]?.label ?? reasonMove.lead.status}
+          toLabel={LEAD_STATUS_META[reasonMove.toStatus]?.label ?? reasonMove.toStatus}
+          onConfirm={(reason) =>
+            applyMove(reasonMove.lead.id, reasonMove.toStatus, reasonMove.lead.status, reason)
+          }
+        />
+      ) : null}
     </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   deriveReachedStatus,
   deriveStages,
   funnelIndex,
+  isBackwardMove,
   isClosed,
   nextChipHref,
   PIPELINE_STAGES,
@@ -22,6 +23,30 @@ describe("funnelIndex / isClosed", () => {
     expect(isClosed("declined")).toBe(true);
     expect(isClosed("quoted")).toBe(false);
     expect(isClosed("website_enquiry")).toBe(false);
+  });
+});
+
+describe("isBackwardMove — the reason gate", () => {
+  it("flags moves DOWN the funnel", () => {
+    expect(isBackwardMove("confirmed", "quoted")).toBe(true);
+    expect(isBackwardMove("completed", "website_enquiry")).toBe(true);
+    expect(isBackwardMove("provisional", "survey_booked")).toBe(true);
+    expect(isBackwardMove("survey_booked", "website_enquiry")).toBe(true);
+  });
+
+  it("never flags forward or same-stage moves", () => {
+    expect(isBackwardMove("website_enquiry", "quoted")).toBe(false);
+    expect(isBackwardMove("quoted", "provisional")).toBe(false);
+    expect(isBackwardMove("confirmed", "completed")).toBe(false);
+    expect(isBackwardMove("quoted", "quoted")).toBe(false);
+  });
+
+  it("off-funnel statuses are never backward (losses and reopens have their own flows)", () => {
+    expect(isBackwardMove("declined", "website_enquiry")).toBe(false); // reopen
+    expect(isBackwardMove("confirmed", "declined")).toBe(false); // loss → mark-lost path
+    expect(isBackwardMove(null, "quoted")).toBe(false);
+    expect(isBackwardMove(undefined, "quoted")).toBe(false);
+    expect(isBackwardMove("nonsense", "quoted")).toBe(false);
   });
 });
 

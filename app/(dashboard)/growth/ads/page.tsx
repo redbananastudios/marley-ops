@@ -33,7 +33,7 @@ export default async function GrowthAdsPage() {
   if (!matrix && !brief && !optimize) {
     return (
       <main className="flex-1 p-6 md:p-8">
-        <PageHeader eyebrow="Growth" title="Ad proposals" backHref="/growth" backLabel="Launch readiness" />
+        <PageHeader eyebrow="Marketing" title="Ad proposals" backHref="/growth" backLabel="Website & Tracking" />
         <Card className="p-8 text-center">
           <p className="text-sm font-medium text-foreground">No ad proposals have been pushed yet</p>
           <p className="mt-1 text-sm text-mist-400">
@@ -51,7 +51,7 @@ export default async function GrowthAdsPage() {
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Growth" title="Ad proposals" backHref="/growth" backLabel="Launch readiness" />
+      <PageHeader eyebrow="Marketing" title="Ad proposals" backHref="/growth" backLabel="Website & Tracking" />
 
       <div className="mb-4 flex items-center gap-2 rounded-lg border border-warn-border bg-warn-bg px-4 py-3">
         <CircleAlert className="size-4 shrink-0 text-warn" strokeWidth={1.75} />

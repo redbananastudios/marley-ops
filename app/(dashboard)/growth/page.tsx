@@ -43,7 +43,7 @@ export default async function GrowthPage() {
   if (!row) {
     return (
       <main className="flex-1 p-6 md:p-8">
-        <PageHeader eyebrow="Growth" title="Launch readiness" />
+        <PageHeader eyebrow="Marketing" title="Website & Tracking" />
         <Card className="p-8 text-center">
           <p className="text-sm font-medium text-foreground">No growth snapshot has been pushed yet</p>
           <p className="mt-1 text-sm text-mist-400">
@@ -67,7 +67,7 @@ export default async function GrowthPage() {
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Growth" title="Launch readiness">
+      <PageHeader eyebrow="Marketing" title="Website & Tracking">
         <span className="text-xs text-mist-400">
           Snapshot from {row.payload.brand} agents · generated {fmt(snapshot.generated_at)} · pushed {fmt(row.pushedAt)}
         </span>

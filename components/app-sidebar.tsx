@@ -38,6 +38,11 @@ import { cn } from "@/lib/utils";
 type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { group: string; items: NavItem[] };
 
+/** Grouped by lifecycle: win the work (Pipeline → Sales), deliver it
+ *  (Schedule), then the records and back-office that hang off it. Regrouped
+ *  2026-07-15 (pre-go-live review): Sales = pure quote→cash; Completed Jobs
+ *  sits with the job lifecycle; Clients + Documents form Customers (the
+ *  address book + what they signed); Growth renamed Marketing. */
 const OFFICE_NAV: NavGroup[] = [
   {
     group: "Pipeline",
@@ -45,8 +50,15 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Users },
       { href: "/follow-ups", label: "Follow-ups", icon: BellRing },
-      { href: "/clients", label: "Clients", icon: Contact },
       { href: "/board", label: "Pipeline Board", icon: KanbanSquare },
+    ],
+  },
+  {
+    group: "Sales",
+    items: [
+      { href: "/quotes", label: "Quotes", icon: FileText },
+      { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
+      { href: "/payments", label: "Payments", icon: Banknote },
     ],
   },
   {
@@ -55,6 +67,14 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
       { href: "/schedule/removals", label: "Removals", icon: Truck },
       { href: "/schedule/board", label: "Job Board", icon: CalendarRange },
+      { href: "/jobs", label: "Completed Jobs", icon: History },
+    ],
+  },
+  {
+    group: "Customers",
+    items: [
+      { href: "/clients", label: "Clients", icon: Contact },
+      { href: "/documents", label: "Documents", icon: FileCheck2 },
     ],
   },
   {
@@ -64,22 +84,12 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/storage", label: "Storage", icon: Warehouse },
     ],
   },
-  {
-    group: "Sales",
-    items: [
-      { href: "/quotes", label: "Quotes", icon: FileText },
-      { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
-      { href: "/payments", label: "Payments", icon: Banknote },
-      { href: "/documents", label: "Documents", icon: FileCheck2 },
-      { href: "/jobs", label: "Completed Jobs", icon: History },
-    ],
-  },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
   {
-    group: "Growth",
+    group: "Marketing",
     items: [
-      { href: "/growth", label: "Launch Readiness", icon: Gauge },
-      { href: "/growth/ads", label: "Ad Proposals", icon: Megaphone },
+      { href: "/growth", label: "Website & Tracking", icon: Gauge },
+      { href: "/growth/ads", label: "Ads", icon: Megaphone },
     ],
   },
   {

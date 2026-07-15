@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarPlus, CheckCircle2, PauseCircle } from "lucide-react";
+import { AlertTriangle, CalendarPlus, CalendarRange, CheckCircle2, PauseCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
@@ -275,7 +275,14 @@ export default async function BookingsPage() {
             ) : null}
             <span className="tabular text-sm font-semibold text-foreground">{gbp(r.deposit)}</span>
             {r.acceptToken ? <CopyLinkButton url={acceptUrlFor(r.acceptToken)} /> : null}
-            <MarkPaidButton quoteId={r.quoteId} kind="deposit" amount={r.deposit} customerName={r.customer} />
+            <MarkPaidButton
+              quoteId={r.quoteId}
+              kind="deposit"
+              amount={r.deposit}
+              customerName={r.customer}
+              leadId={r.leadId}
+              apptStartsAt={r.apptStartsAt}
+            />
           </div>
         ))}
       </Section>
@@ -331,6 +338,15 @@ export default async function BookingsPage() {
                 <span className="inline-flex items-center gap-1 rounded-pill bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
                   <AlertTriangle className="size-3.5" strokeWidth={2} /> OVERDUE
                 </span>
+              ) : null}
+              {days >= 0 ? (
+                <Link
+                  href={`/schedule/board?week=${r.apptStartsAt!.slice(0, 10)}`}
+                  className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+                >
+                  <CalendarRange className="size-4" strokeWidth={1.75} />
+                  Job Board
+                </Link>
               ) : null}
               {r.balancePaidAt ? (
                 <span className="inline-flex items-center gap-1 rounded-pill bg-success-bg px-2.5 py-1 text-xs font-semibold text-success">

@@ -174,7 +174,7 @@ export default async function DocumentsPage({
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Sales" title="Documents" />
+      <PageHeader eyebrow="Customers" title="Documents" />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className={segmentedTrackClass}>

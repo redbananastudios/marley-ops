@@ -29,6 +29,16 @@ export const funnelIndex = (status: string): number => FUNNEL.indexOf(status as 
 /** Closed = no forward step remains (won-complete, or lost). */
 export const isClosed = (status: string): boolean => status === "completed" || status === "declined";
 
+/**
+ * True when both statuses sit on the linear funnel and the move goes DOWN it
+ * (e.g. confirmed → quoted) — the rare "something went wrong" move that must
+ * carry a reason. Off-funnel statuses are never backward: losses go through
+ * mark-lost (its own reason + unwind) and reopening a declined lead is a
+ * deliberate restart, not a regression.
+ */
+export const isBackwardMove = (from: string | null | undefined, to: string): boolean =>
+  from != null && funnelIndex(to) >= 0 && funnelIndex(from) >= 0 && funnelIndex(to) < funnelIndex(from);
+
 export interface PipelineStage {
   key: string;
   label: string;

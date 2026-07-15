@@ -6,7 +6,7 @@
  * and stops the chase engine. Leads are never deleted.
  */
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -23,12 +23,33 @@ import { Button } from "@/components/ui/button";
 import { markLeadLostAction } from "@/app/(dashboard)/leads/actions";
 import { LOSS_REASONS } from "@/lib/quote/chase";
 
-export function MarkLostButton({ leadId, className }: { leadId: string; className?: string }) {
+/** Controlled mark-lost dialog — lets ANY surface that can set a status (the
+ *  lead-header dropdown, the kanban board) route "declined" through the
+ *  loss-reason + unwind flow instead of a raw status write. */
+export function MarkLostDialog({
+  leadId,
+  open,
+  onOpenChange,
+  onDone,
+}: {
+  leadId: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  /** Fired after a successful mark-lost (router.refresh already queued). */
+  onDone?: () => void;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [pending, start] = useTransition();
+
+  // Fresh form each open (the same dialog instance serves many rows).
+  useEffect(() => {
+    if (open) {
+      setReason(null);
+      setNote("");
+    }
+  }, [open]);
 
   function submit() {
     if (!reason) {
@@ -49,30 +70,14 @@ export function MarkLostButton({ leadId, className }: { leadId: string; classNam
       if (res.refundTask) {
         toast.warning("Money was already paid on this job — a refund-decision task is in Follow-ups.");
       }
-      setOpen(false);
+      onOpenChange(false);
+      onDone?.();
       router.refresh();
     });
   }
 
   return (
-    <>
-      <button
-        type="button"
-        onClick={() => {
-          setReason(null);
-          setNote("");
-          setOpen(true);
-        }}
-        className={
-          className ??
-          "focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
-        }
-      >
-        <X className="size-4" strokeWidth={1.75} />
-        Mark lost
-      </button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="font-display text-xl">Mark lost</DialogTitle>
@@ -111,7 +116,7 @@ export function MarkLostButton({ leadId, className }: { leadId: string; classNam
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancel
             </Button>
             <Button
@@ -124,7 +129,28 @@ export function MarkLostButton({ leadId, className }: { leadId: string; classNam
             </Button>
           </DialogFooter>
         </DialogContent>
-      </Dialog>
+    </Dialog>
+  );
+}
+
+export function MarkLostButton({ leadId, className }: { leadId: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className={
+          className ??
+          "focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-danger transition-colors hover:bg-danger-bg disabled:opacity-50"
+        }
+      >
+        <X className="size-4" strokeWidth={1.75} />
+        Mark lost
+      </button>
+
+      <MarkLostDialog leadId={leadId} open={open} onOpenChange={setOpen} />
     </>
   );
 }

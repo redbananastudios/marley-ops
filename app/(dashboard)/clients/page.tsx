@@ -109,7 +109,7 @@ export default async function ClientsPage() {
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Pipeline" title="Clients">
+      <PageHeader eyebrow="Customers" title="Clients">
         <AddClientDialog />
       </PageHeader>
       <ClientsView clients={rows} baseLocation={baseLocation} />
