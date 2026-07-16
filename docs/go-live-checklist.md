@@ -32,8 +32,10 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    together before real signatures. (ClickUp 869e35z42)
 4. ☐ **Real email addresses + phone numbers for the team** — Connor (swap
    connor@marleymoves.test), plus Jack + Rob's actual phones for enrolment day.
-5. ☐ **Bank decision (with Peter)** — Monzo Business Pro (£9/mo, live Sheets feed)
-   vs Starling (£0, first-party API) for the /payments bank feed. (ClickUp 869e58b5x)
+5. ☑ **Bank feed — DONE (16 Jul)**: Monzo (already the business bank, already on
+   Pro) → Sheets export → 2-min VPS cron → /payments "Bank transfers to confirm"
+   with confirm-to-record. Live-verified incl. a real £100 customer deposit
+   auto-detected on day one.
 6. ☐ **iMVE cutover date** — when double-entry stops (see D4).
 
 ## B — Pre-cutover verification (Peter / us — test plan is the source)
@@ -81,7 +83,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 3. ☐ Confirm Connor sets the real VAT stagger (A1) if it wasn't group 1.
 4. ☐ **Hard-cut iMVE** only after ONE real job completes end-to-end in Marley Ops
    (quote → deposit → job sheet → sign-off → balance) — target ~2 weeks parallel.
-5. ☐ Bank feed build (once A5 decided) — £1 reference spike test first.
+5. ☑ Bank feed build — SHIPPED 16 Jul (see A5).
 
 ## E — Build items that can land after go-live (month 1)
 
