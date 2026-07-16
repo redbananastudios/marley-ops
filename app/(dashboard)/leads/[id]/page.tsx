@@ -28,6 +28,8 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobNotesForLead } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
+import { LeadClaimsCard } from "@/components/claims/lead-claims-card";
+import type { ClaimChannel, ClaimStatus } from "@/lib/claims";
 import { JobMediaList } from "@/components/content/job-media-list";
 import { loadJobMedia } from "@/lib/content/job-media-load";
 import { getBusinessSettings } from "@/lib/settings";
@@ -183,7 +185,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Signed paperwork on this enquiry (final-pass audit: the lead page is where
   // the office lands from Leads/Board/Follow-ups — evidence must show here,
   // not just on the quote page).
-  const [{ data: sigRow }, { data: completionRow }, crewNotes, jobMedia] = await Promise.all([
+  const [{ data: sigRow }, { data: completionRow }, crewNotes, jobMedia, { data: claimRows }] = await Promise.all([
     supabase
       .from("signatures")
       .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
@@ -203,7 +205,20 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .maybeSingle(),
     loadJobNotesForLead(createAdminClient(), id),
     loadJobMedia({ leadId: id, limit: 40 }),
+    supabase
+      .from("claims")
+      .select("id, claim_no, status, reported_at, reported_channel, description")
+      .eq("lead_id", id)
+      .order("reported_at", { ascending: false }),
   ]);
+  const leadClaims = (claimRows ?? []).map((c) => ({
+    id: c.id,
+    claimNo: c.claim_no,
+    status: c.status as ClaimStatus,
+    reportedAt: c.reported_at,
+    reportedChannel: c.reported_channel as ClaimChannel,
+    description: c.description,
+  }));
 
   let leadCompletion: CompletionView | null = null;
   if (completionRow) {
@@ -483,6 +498,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                     : null
                 }
               />
+            </div>
+          ) : null}
+
+          {leadCompletion || leadClaims.length ? (
+            <div className="mt-5">
+              <LeadClaimsCard leadId={lead.id} claims={leadClaims} />
             </div>
           ) : null}
 

@@ -85,6 +85,8 @@ export interface DigestSnapshotIn {
   openFollowUps: number;
   storageUnitsActive: number;
   storageLetsOpen: number;
+  /** Claims still live (open / assessing / offer made) — stage 2, 2026-07-16. */
+  openClaims: number;
 }
 
 export interface DigestInputs {

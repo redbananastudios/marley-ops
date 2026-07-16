@@ -760,6 +760,98 @@ export type Database = {
           },
         ]
       }
+      claims: {
+        Row: {
+          claim_no: number
+          client_id: string | null
+          closed_at: string | null
+          completion_id: string | null
+          created_at: string
+          description: string
+          id: string
+          insurer_notified_at: string | null
+          insurer_ref: string
+          lead_id: string
+          notes: string
+          opened_by: string | null
+          reported_at: string
+          reported_channel: string
+          resolution: string | null
+          resolution_amount: number | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          claim_no?: never
+          client_id?: string | null
+          closed_at?: string | null
+          completion_id?: string | null
+          created_at?: string
+          description: string
+          id?: string
+          insurer_notified_at?: string | null
+          insurer_ref?: string
+          lead_id: string
+          notes?: string
+          opened_by?: string | null
+          reported_at?: string
+          reported_channel?: string
+          resolution?: string | null
+          resolution_amount?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          claim_no?: never
+          client_id?: string | null
+          closed_at?: string | null
+          completion_id?: string | null
+          created_at?: string
+          description?: string
+          id?: string
+          insurer_notified_at?: string | null
+          insurer_ref?: string
+          lead_id?: string
+          notes?: string
+          opened_by?: string | null
+          reported_at?: string
+          reported_channel?: string
+          resolution?: string | null
+          resolution_amount?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "claims_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "claims_completion_id_fkey"
+            columns: ["completion_id"]
+            isOneToOne: false
+            referencedRelation: "job_completions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "claims_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "claims_opened_by_fkey"
+            columns: ["opened_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       clients: {
         Row: {
           address_line1: string | null

@@ -72,6 +72,8 @@ export interface DashboardData {
     fleetDocsDue: number;
     /** Accepted quotes with no contract signature — crew collect on arrival. */
     unsignedContracts: number;
+    /** Claims still live (open / assessing / offer made). */
+    openClaims: number;
   };
   recent: {
     id: string;
@@ -139,6 +141,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
           <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
           <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
+          <ActionCard label="Open claims" count={data.needsAction.openClaims} href="/claims" accent empty="No open claims" />
         </div>
       </section>
 

@@ -24,6 +24,7 @@ import {
   Radio,
   ReceiptText,
   Settings,
+  ShieldAlert,
   Sparkles,
   Truck,
   UserCog,
@@ -84,6 +85,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/clients", label: "Clients", icon: Contact },
       { href: "/documents", label: "Documents", icon: FileCheck2 },
+      { href: "/claims", label: "Claims", icon: ShieldAlert },
       { href: "/content", label: "Content", icon: Camera },
     ],
   },
@@ -332,7 +334,7 @@ export function AppSidebar({ profile }: { profile: { full_name: string; role: st
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex">
+    <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar xl:flex print:!hidden">
       <div className="flex h-16 shrink-0 items-center px-4">
         <BrandMark tour={tourForRole(profile.role)} />
       </div>

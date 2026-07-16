@@ -203,6 +203,14 @@ export default async function DashboardPage() {
       return { unsignedContracts: (accepted ?? []).filter((qq) => !signedIds.has(qq.id)).length };
     })()),
     ...(await (async () => {
+      // Live claims (open/assessing/offer_made) — liability never sits unseen.
+      const { count } = await supabase
+        .from("claims")
+        .select("id", { count: "exact", head: true })
+        .in("status", ["open", "assessing", "offer_made"]);
+      return { openClaims: count ?? 0 };
+    })()),
+    ...(await (async () => {
       // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
       const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");
       let followUpsOverdue = 0;

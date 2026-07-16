@@ -28,6 +28,7 @@ import {
 } from "@/lib/comms/completion-email";
 import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
 import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
+import { claimRef } from "@/lib/claims";
 
 async function requireActiveProfile() {
   const sb = await createClient();
@@ -243,7 +244,9 @@ export async function completeJobAction(
   // Claims safety net (Peter, 2026-07-16 — stage 1): an exception must never
   // die silently in the sign-off record. Next-morning call task for the office
   // + an alert, so the incident-to-resolution trail starts the day after the
-  // move. Fail-soft — never blocks the completion.
+  // move. Stage 2 (same day): the claim record itself opens on the /claims
+  // register — status trail, resolution, insurer pack. Fail-soft — never
+  // blocks the completion.
   if (appt.lead_id && exceptionsNote) {
     try {
       const { data: openTask } = await admin
@@ -271,9 +274,39 @@ export async function completeJobAction(
           notes: `Crew noted exceptions at sign-off — call ${lead?.name ?? "the customer"} tomorrow, agree next steps, and record the outcome. Exceptions: ${exceptionsNote.slice(0, 400)}`,
         } as never);
       }
+
+      // Stage 2: open the claim record (idempotent — claims_signoff_once makes
+      // the DB refuse a second sign-off claim for the same completion).
+      let claimLine: string | null = null;
+      const { data: claim, error: claimErr } = await admin
+        .from("claims")
+        .insert({
+          lead_id: appt.lead_id,
+          client_id: lead?.client_id ?? null,
+          completion_id: completion.id,
+          reported_channel: "sign_off",
+          description: exceptionsNote,
+          opened_by: prof.id,
+        } as never)
+        .select("id, claim_no")
+        .single();
+      if (!claimErr && claim) {
+        const ref = claimRef(claim.claim_no);
+        claimLine = `Claim ${ref} opened automatically: https://ops.marleymoves.co.uk/claims/${claim.id}`;
+        await admin.from("activities").insert({
+          lead_id: appt.lead_id,
+          client_id: lead?.client_id ?? null,
+          actor_id: prof.id,
+          type: "note",
+          summary: `Claim ${ref} opened automatically from the sign-off exceptions`,
+          meta: { claim_id: claim.id, completion_id: completion.id, auto: true },
+        });
+      }
+
       await sendOpsAlert(`Job signed off WITH EXCEPTIONS — ${lead?.name ?? "customer"}`, [
         `The crew recorded exceptions at completion sign-off: <strong>${exceptionsNote.slice(0, 500).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</strong>`,
         `A call task is due tomorrow morning. Photos/evidence: the job's crew notes + the signed certificate.`,
+        ...(claimLine ? [claimLine] : []),
         `Lead: https://ops.marleymoves.co.uk/leads/${appt.lead_id}`,
       ]);
     } catch {

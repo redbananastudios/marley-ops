@@ -15,7 +15,7 @@ export function MobileNav({ profile }: { profile: { full_name: string; role: str
 
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 xl:hidden">
+      <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 xl:hidden print:!hidden">
         <BrandMark compact tour={tourForRole(profile.role)} />
         <div className="flex items-center gap-1">
           <button

@@ -16,7 +16,7 @@ const emptyInputs = (over?: Partial<DigestInputs>): DigestInputs => ({
   quotes: [],
   completions: [],
   appointments: [],
-  snapshot: { bankTransfersPending: 0, openFollowUps: 0, storageUnitsActive: 0, storageLetsOpen: 0 },
+  snapshot: { bankTransfersPending: 0, openFollowUps: 0, storageUnitsActive: 0, storageLetsOpen: 0, openClaims: 0 },
   ...over,
 });
 
@@ -161,7 +161,7 @@ describe("digest email", () => {
           balance_invoice_amount: null,
         },
       ],
-      snapshot: { bankTransfersPending: 2, openFollowUps: 3, storageUnitsActive: 4, storageLetsOpen: 1 },
+      snapshot: { bankTransfersPending: 2, openFollowUps: 3, storageUnitsActive: 4, storageLetsOpen: 1, openClaims: 1 },
     }),
     SEND,
   );
@@ -175,6 +175,8 @@ describe("digest email", () => {
     expect(html).toContain("This week");
     expect(html).toContain("Last week");
     expect(html).toContain("bank transfer");
+    expect(html).toContain("open claim");
+    expect(html).toContain("ops.marleymoves.co.uk/claims");
     expect(html).toContain("ops.marleymoves.co.uk/performance");
     expect(html).toContain("Jane's move");
     expect(html).not.toContain("Jane Smith");

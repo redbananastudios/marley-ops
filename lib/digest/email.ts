@@ -29,6 +29,7 @@ export function digestText(d: WeeklyDigest): string {
   ];
   const attention: string[] = [];
   if (t.exceptionsRecorded > 0) attention.push(`${t.exceptionsRecorded} job(s) signed off with exceptions`);
+  if (d.snapshot.openClaims > 0) attention.push(`${d.snapshot.openClaims} open claim(s) on the Claims page`);
   if (d.snapshot.bankTransfersPending > 0) attention.push(`${d.snapshot.bankTransfersPending} bank transfer(s) need matching on Payments`);
   if (d.snapshot.openFollowUps > 0) attention.push(`${d.snapshot.openFollowUps} open follow-ups`);
   if (attention.length) lines.push(`Needs attention: ${attention.join(" · ")}`);
@@ -49,6 +50,8 @@ export function buildDigestEmailHtml(d: WeeklyDigest): string {
   const attention: string[] = [];
   if (t.exceptionsRecorded > 0)
     attention.push(`<strong>${t.exceptionsRecorded}</strong> job${t.exceptionsRecorded === 1 ? "" : "s"} signed off with exceptions — check the sign-off records`);
+  if (d.snapshot.openClaims > 0)
+    attention.push(`<strong>${d.snapshot.openClaims}</strong> open claim${d.snapshot.openClaims === 1 ? "" : "s"} — <a href="https://ops.marleymoves.co.uk/claims" style="color:#c03838;">Claims</a>`);
   if (d.snapshot.bankTransfersPending > 0)
     attention.push(`<strong>${d.snapshot.bankTransfersPending}</strong> bank transfer${d.snapshot.bankTransfersPending === 1 ? "" : "s"} waiting to be matched on Payments`);
   if (d.snapshot.openFollowUps > 0)

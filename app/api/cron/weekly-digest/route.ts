@@ -33,7 +33,7 @@ export async function GET(req: Request) {
     const { lastWeek } = digestWeeks(now);
     const since = lastWeek.start.toISOString();
 
-    const [leads, quotes, completions, appointments, bankPending, followUps, units, lets] =
+    const [leads, quotes, completions, appointments, bankPending, followUps, units, lets, claims] =
       await Promise.all([
         sb
           .from("leads")
@@ -63,6 +63,10 @@ export async function GET(req: Request) {
         sb.from("follow_ups").select("id", { count: "exact", head: true }).eq("status", "open"),
         sb.from("storage_units").select("id", { count: "exact", head: true }).eq("is_active", true),
         sb.from("storage_lets").select("id", { count: "exact", head: true }).is("end_date", null),
+        sb
+          .from("claims")
+          .select("id", { count: "exact", head: true })
+          .in("status", ["open", "assessing", "offer_made"]),
       ]);
 
     const input: DigestInputs = {
@@ -75,6 +79,7 @@ export async function GET(req: Request) {
         openFollowUps: followUps.count ?? 0,
         storageUnitsActive: units.count ?? 0,
         storageLetsOpen: lets.count ?? 0,
+        openClaims: claims.count ?? 0,
       },
     };
     const digest = buildWeeklyDigest(input, now);
