@@ -41,7 +41,7 @@ export default async function ContentPage({
   const items = await loadJobMedia({ filter: tab === "all" ? undefined : tab, limit: 120 });
 
   return (
-    <div className="space-y-4">
+    <main className="flex-1 space-y-4 p-6 md:p-8">
       <PageHeader eyebrow="Customers" title="Content">
         <p className="text-sm text-mist-400">
           Photos, video and voice notes captured on jobs. Approve the good ones — only approved
@@ -64,6 +64,6 @@ export default async function ContentPage({
       <Card className="overflow-hidden p-0">
         <JobMediaList items={items} showJobLink />
       </Card>
-    </div>
+    </main>
   );
 }

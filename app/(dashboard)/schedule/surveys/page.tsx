@@ -91,7 +91,7 @@ export default async function SurveysSchedulePage({
   }
 
   return (
-    <div>
+    <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Schedule" title="Surveys" />
       <SchedulerView
         view="survey"
@@ -104,6 +104,6 @@ export default async function SurveysSchedulePage({
         openOnLoad={createNew === "1"}
         baseLocation={baseLocation}
       />
-    </div>
+    </main>
   );
 }

@@ -65,7 +65,7 @@ export default async function RemovalsSchedulePage({
   }
 
   return (
-    <div>
+    <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Schedule" title="Removals" />
       <SchedulerView
         view="removal"
@@ -77,6 +77,6 @@ export default async function RemovalsSchedulePage({
         presetLocation={presetLocation}
         baseLocation={baseLocation}
       />
-    </div>
+    </main>
   );
 }

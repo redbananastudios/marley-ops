@@ -40,6 +40,14 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    with confirm-to-record. Live-verified incl. a real £100 customer deposit
    auto-detected on day one.
 6. ☐ **iMVE cutover date** — when double-entry stops (see D4).
+7. ☐ **Insurance policy docs** — insurer name, excess, and the notification
+   deadline from the goods-in-transit / liability policy, so /claims shows the
+   REAL insurer deadline instead of only the 7-day T&Cs window (claims stage 2
+   is live and waiting on these — see E).
+8. ☐ **Tell Connor his sign-in email changed** — connor@marleymoves.co.uk since
+   16 Jul (same password + passkey; the old address no longer signs in). Same
+   conversation: TEST claim CLM-001 on Reggie Fortune is a demo — close it as
+   "No claim pursued" once seen.
 
 ## B — Pre-cutover verification (Peter / us — test plan is the source)
 
@@ -63,6 +71,10 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    on — acceptable; revisit a paid pinger post-launch if needed.
 5. ☐ Two-device stale-tab checks (board + lead page open on two devices) — the
    depth review proved this needs eyes on it.
+6. ☐ **Job content capture field pass on real phones** (PRD §7H): installed-PWA
+   mic permission on iOS, HEIC photos, a 2-min video on 4G with a signal drop
+   mid-upload (tray must keep the item with retry), voice-note transcribe
+   round-trip to /content. Crew phones + the office iPad.
 
 ## C — Cutover day (ordered — from the runbook in go-live-test-plan.md)
 
@@ -109,8 +121,10 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 - ☐ Job costing actuals (fuel, agency crew, materials) → real margin per job.
 - ☑ Sign-off exceptions → claims follow-through workflow — SHIPPED 16 Jul (stage 1 call task +
   stage 2 /claims register with status trail, resolution + amount, insurer evidence pack).
-  Still wanted from Connor: the policy docs (insurer, excess, notification deadline) so the
-  claim page can show the real insurer deadline instead of only the 7-day T&Cs window.
+  Policy docs to make the deadlines real = A7.
+- ☐ Job content PUBLISHING phase (PRD §9): nightly sync of approved items to the
+  Drive hub (08 Media Library/real/jobs/approved) + the marketing agents' real-photo
+  class — next build conversation with Peter.
 - ☐ Client merge UI (dedupe tombstones have no writer). (ClickUp 869e378hj)
 - ☐ Customer move-day confirmation comms (crew names + arrival window).
 
