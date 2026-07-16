@@ -21,6 +21,7 @@ import {
   LogOut,
   Megaphone,
   Radio,
+  ReceiptText,
   Settings,
   Sparkles,
   Truck,
@@ -38,11 +39,12 @@ import { cn } from "@/lib/utils";
 type NavItem = { href: string; label: string; icon: LucideIcon };
 type NavGroup = { group: string; items: NavItem[] };
 
-/** Grouped by lifecycle: win the work (Pipeline → Sales), deliver it
- *  (Schedule), then the records and back-office that hang off it. Regrouped
- *  2026-07-15 (pre-go-live review): Sales = pure quote→cash; Completed Jobs
- *  sits with the job lifecycle; Clients + Documents form Customers (the
- *  address book + what they signed); Growth renamed Marketing. */
+/** Grouped by lifecycle: win the work (Pipeline → Sales), the money it makes
+ *  (Finance), deliver it (Schedule), then the records and back-office that
+ *  hang off it. Regrouped 2026-07-15/16 (pre-go-live review): Sales = pure
+ *  quoting; Finance = money in (Payments) + money billed (Invoices & VAT);
+ *  Completed Jobs sits with the job lifecycle; Clients + Documents form
+ *  Customers; Growth renamed Marketing (Growth). */
 const OFFICE_NAV: NavGroup[] = [
   {
     group: "Pipeline",
@@ -58,7 +60,13 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/quotes", label: "Quotes", icon: FileText },
       { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
+    ],
+  },
+  {
+    group: "Finance",
+    items: [
       { href: "/payments", label: "Payments", icon: Banknote },
+      { href: "/finance", label: "Invoices & VAT", icon: ReceiptText },
     ],
   },
   {
@@ -86,7 +94,9 @@ const OFFICE_NAV: NavGroup[] = [
   },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
   {
-    group: "Marketing",
+    // "(Growth)" marks these as fed by the growth engine's nightly artifact
+    // push, not by panel data (Peter, 2026-07-16).
+    group: "Marketing (Growth)",
     items: [
       { href: "/growth", label: "Website & Tracking", icon: Gauge },
       { href: "/growth/ads", label: "Ads", icon: Megaphone },

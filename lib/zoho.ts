@@ -232,6 +232,67 @@ export async function createInvoice(input: {
   };
 }
 
+export interface ZohoInvoiceListItem {
+  invoiceId: string;
+  invoiceNumber: string;
+  reference: string;
+  customerName: string;
+  /** Invoice date (yyyy-mm-dd) — the "raised on" day the Finance page groups by. */
+  date: string;
+  status: string; // draft | sent | viewed | paid | partially_paid | overdue | void
+  /** Gross (VAT-inclusive) total. */
+  total: number;
+  /** Unpaid remainder. */
+  balance: number;
+}
+
+/**
+ * Invoices from the org's books — includes ones raised by hand in Zoho, not
+ * just the panel's (that's the point: the Finance page reports the BUSINESS,
+ * not the app). Filter by invoice-date range and/or Zoho's status buckets
+ * (Status.Unpaid = sent + viewed + overdue + partially paid). Pages through
+ * the list API; capped generously (2000 rows) as a runaway guard.
+ */
+export async function listInvoices(input: {
+  dateStart?: string;
+  dateEnd?: string;
+  filterBy?: "Status.Unpaid" | "Status.All";
+}): Promise<ZohoInvoiceListItem[]> {
+  const out: ZohoInvoiceListItem[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const params = new URLSearchParams({
+      page: String(page),
+      per_page: "200",
+      sort_column: "date",
+      sort_order: "D",
+    });
+    if (input.dateStart) params.set("date_start", input.dateStart);
+    if (input.dateEnd) params.set("date_end", input.dateEnd);
+    if (input.filterBy) params.set("filter_by", input.filterBy);
+    const res = await zoho("GET", `/invoices?${params.toString()}`);
+    for (const i of res.invoices ?? []) {
+      out.push({
+        invoiceId: i.invoice_id as string,
+        invoiceNumber: (i.invoice_number as string) ?? "",
+        reference: (i.reference_number as string) ?? "",
+        customerName: (i.customer_name as string) ?? "",
+        date: (i.date as string) ?? "",
+        status: (i.status as string) ?? "",
+        total: Number(i.total ?? 0),
+        balance: Number(i.balance ?? 0),
+      });
+    }
+    if (!res.page_context?.has_more_page) break;
+  }
+  return out;
+}
+
+/** Zoho web-app deep link for an invoice (the OFFICE view, not the customer URL). */
+export function zohoInvoiceAppUrl(invoiceId: string): string {
+  const orgId = process.env.ZOHO_ORG_ID ?? "";
+  return `https://invoice.zoho.eu/app/${orgId}#/invoices/${invoiceId}`;
+}
+
 export async function getInvoiceStatus(invoiceId: string): Promise<ZohoInvoiceStatus> {
   const res = await zoho("GET", `/invoices/${invoiceId}`);
   const i = res.invoice;

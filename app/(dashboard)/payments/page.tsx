@@ -198,7 +198,7 @@ export default async function PaymentsPage({
 
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
-      <PageHeader eyebrow="Sales" title="Payments">
+      <PageHeader eyebrow="Finance" title="Payments">
         <div className="flex items-center gap-2">
           <Link href={`/payments?date=${window.prev}`} aria-label="Previous day" className={navBtn}>
             <ChevronLeft className="size-4" strokeWidth={2} />

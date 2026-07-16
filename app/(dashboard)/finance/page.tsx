@@ -1,0 +1,252 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import {
+  Banknote,
+  ChevronLeft,
+  ChevronRight,
+  ExternalLink,
+  Info,
+  ReceiptText,
+} from "lucide-react";
+import { createClient } from "@/lib/supabase/server";
+import { listInvoices, zohoInvoiceAppUrl, type ZohoInvoiceListItem } from "@/lib/zoho";
+import {
+  addDaysIso,
+  dayLabel,
+  isValidDay,
+  monthStart,
+  netFromGross,
+  outstandingTotal,
+  summariseRaised,
+  ukTodayDate,
+  vatFromGross,
+} from "@/lib/finance/invoices";
+import { PageHeader } from "@/components/page-header";
+import { Card } from "@/components/ui/card";
+
+/**
+ * /finance — Invoices & VAT: what the business RAISED on a given UK day (and
+ * month so far), with the output-VAT position on each figure, plus everything
+ * still outstanding. Reads Zoho directly, so hand-raised invoices count too —
+ * this reports the BUSINESS's books, not just the panel's activity. Money
+ * RECEIVED lives on /payments; this page is the other half of the ledger.
+ *
+ * Admin-only: Zoho data bypasses RLS, so the gate must live here, not in nav.
+ */
+
+export const dynamic = "force-dynamic";
+
+const fmtGBP = (n: number): string =>
+  "£" +
+  Math.abs(n)
+    .toFixed(2)
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+const STATUS_PILL: Record<string, { label: string; cls: string }> = {
+  paid: { label: "Paid", cls: "bg-success-bg text-success" },
+  sent: { label: "Awaiting payment", cls: "bg-mist-100 text-mist-500" },
+  viewed: { label: "Viewed", cls: "bg-mist-100 text-mist-500" },
+  partially_paid: { label: "Part-paid", cls: "bg-warn-bg text-warn" },
+  overdue: { label: "Overdue", cls: "bg-danger-bg text-danger" },
+  void: { label: "Void", cls: "bg-mist-100 text-mist-400" },
+  draft: { label: "Draft", cls: "bg-mist-100 text-mist-400" },
+};
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  return (
+    <Card className="px-5 py-4">
+      <p className="eyebrow">{label}</p>
+      <p className="tabular mt-1 font-display text-2xl font-bold text-foreground">{value}</p>
+      {sub ? <p className="mt-0.5 text-xs text-mist-400">{sub}</p> : null}
+    </Card>
+  );
+}
+
+function InvoiceRow({ inv }: { inv: ZohoInvoiceListItem }) {
+  const pill = STATUS_PILL[inv.status] ?? { label: inv.status, cls: "bg-mist-100 text-mist-500" };
+  const dead = inv.status === "void";
+  return (
+    <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 ${dead ? "opacity-55" : ""}`}>
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">
+          {inv.customerName || "—"}
+        </p>
+        <p className="text-xs text-mist-400">
+          {inv.invoiceNumber}
+          {inv.reference ? ` · ${inv.reference}` : ""}
+        </p>
+      </div>
+      <span className={`rounded-pill px-2.5 py-0.5 text-[11px] font-semibold ${pill.cls}`}>{pill.label}</span>
+      <div className="tabular text-right text-xs text-mist-400">
+        <p>net {fmtGBP(netFromGross(inv.total))}</p>
+        <p>VAT {fmtGBP(vatFromGross(inv.total))}</p>
+      </div>
+      <span className={`tabular w-24 text-right text-sm font-semibold ${dead ? "line-through" : "text-foreground"}`}>
+        {fmtGBP(inv.total)}
+      </span>
+      <a
+        href={zohoInvoiceAppUrl(inv.invoiceId)}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open ${inv.invoiceNumber} in Zoho`}
+        className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <ExternalLink className="size-4" strokeWidth={1.75} />
+      </a>
+    </div>
+  );
+}
+
+export default async function FinancePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ date?: string }>;
+}) {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  const { data: profile } = user
+    ? await sb.from("profiles").select("role").eq("id", user.id).single()
+    : { data: null };
+  // The figures come straight from Zoho (no RLS between here and the books) —
+  // owner/admin eyes only.
+  if (profile?.role !== "admin") redirect("/");
+
+  const { date } = await searchParams;
+  const today = ukTodayDate();
+  const day = isValidDay(date) && date <= today ? date : today;
+  const isToday = day === today;
+
+  let dayInvoices: ZohoInvoiceListItem[] = [];
+  let mtdInvoices: ZohoInvoiceListItem[] = [];
+  let unpaidInvoices: ZohoInvoiceListItem[] = [];
+  let zohoError: string | null = null;
+  try {
+    [dayInvoices, mtdInvoices, unpaidInvoices] = await Promise.all([
+      listInvoices({ dateStart: day, dateEnd: day }),
+      listInvoices({ dateStart: monthStart(day), dateEnd: day }),
+      listInvoices({ filterBy: "Status.Unpaid" }),
+    ]);
+  } catch (err) {
+    zohoError = err instanceof Error ? err.message : "Could not reach Zoho.";
+  }
+
+  const daySummary = summariseRaised(dayInvoices);
+  const mtdSummary = summariseRaised(mtdInvoices);
+  const owed = outstandingTotal(unpaidInvoices);
+  const owedCount = unpaidInvoices.filter((i) => i.balance > 0).length;
+
+  const navBtn =
+    "focus-ring inline-flex size-9 items-center justify-center rounded-md border border-input bg-card text-mist-500 hover:bg-muted";
+
+  return (
+    <main className="flex-1 space-y-5 p-6 md:p-8">
+      <PageHeader eyebrow="Finance" title="Invoices & VAT">
+        <div className="flex items-center gap-2">
+          <Link href={`/finance?date=${addDaysIso(day, -1)}`} aria-label="Previous day" className={navBtn}>
+            <ChevronLeft className="size-4" strokeWidth={2} />
+          </Link>
+          <span className="min-w-36 text-center text-sm font-semibold text-foreground">
+            {isToday ? "Today" : dayLabel(day)}
+          </span>
+          {isToday ? (
+            <span aria-hidden className={`${navBtn} pointer-events-none opacity-35`}>
+              <ChevronRight className="size-4" strokeWidth={2} />
+            </span>
+          ) : (
+            <Link href={`/finance?date=${addDaysIso(day, 1)}`} aria-label="Next day" className={navBtn}>
+              <ChevronRight className="size-4" strokeWidth={2} />
+            </Link>
+          )}
+          {!isToday ? (
+            <Link href="/finance" className="ml-1 text-sm font-medium text-mm-red hover:underline">
+              Today
+            </Link>
+          ) : null}
+        </div>
+      </PageHeader>
+
+      {zohoError ? (
+        <Card className="border-warn-border bg-warn-bg px-5 py-4">
+          <p className="text-sm font-semibold text-warn">Couldn&apos;t load the books from Zoho</p>
+          <p className="mt-0.5 text-sm text-warn">{zohoError} — refresh to retry.</p>
+        </Card>
+      ) : null}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <Stat
+          label="Invoiced"
+          value={fmtGBP(daySummary.gross)}
+          sub={`${daySummary.count} invoice${daySummary.count === 1 ? "" : "s"} raised ${isToday ? "so far today" : "on this day"}`}
+        />
+        <Stat
+          label="Output VAT"
+          value={fmtGBP(daySummary.vat)}
+          sub={`on ${isToday ? "today's" : "the day's"} invoices · net ${fmtGBP(daySummary.net)}`}
+        />
+        <Stat
+          label="Month so far"
+          value={fmtGBP(mtdSummary.gross)}
+          sub={`VAT ${fmtGBP(mtdSummary.vat)} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`}
+        />
+        <Stat
+          label="Outstanding"
+          value={fmtGBP(owed)}
+          sub={`${owedCount} unpaid invoice${owedCount === 1 ? "" : "s"} across all dates`}
+        />
+      </div>
+
+      <Card className="p-0">
+        <div className="flex items-center gap-2 border-b px-5 py-3.5">
+          <ReceiptText className="size-4 text-mist-400" strokeWidth={1.75} />
+          <h2 className="font-display text-lg font-semibold text-foreground">
+            Invoices raised {isToday ? "today" : dayLabel(day)}
+          </h2>
+          <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-semibold tabular text-mist-500">
+            {dayInvoices.length}
+          </span>
+        </div>
+        {dayInvoices.length === 0 ? (
+          <p className="px-5 py-10 text-center text-sm text-mist-400">
+            {zohoError ? "—" : "No invoices were raised on this day."}
+          </p>
+        ) : (
+          <div className="divide-y">
+            {dayInvoices.map((inv) => (
+              <InvoiceRow key={inv.invoiceId} inv={inv} />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        <Card className="flex items-start gap-3 px-5 py-4">
+          <Banknote className="mt-0.5 size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Money received lives in Payments</p>
+            <p className="mt-0.5 text-sm text-mist-400">
+              This page is what we&apos;ve BILLED; card receipts, recorded bank transfers and cash are on{" "}
+              <Link href="/payments" className="font-medium text-mm-red hover:underline">
+                Payments
+              </Link>
+              . Outstanding = the gap between the two.
+            </p>
+          </div>
+        </Card>
+        <Card className="flex items-start gap-3 border-dashed px-5 py-4">
+          <Info className="mt-0.5 size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <div>
+            <p className="text-sm font-semibold text-foreground">How the VAT figures work</p>
+            <p className="mt-0.5 text-sm text-mist-400">
+              Every invoice is VAT-inclusive at the standard 20% rate, so VAT is worked out per invoice
+              (gross ÷ 6) exactly as the Zoho documents itemise it. This tracks OUTPUT VAT day to day —
+              VAT on purchases (input VAT) and the quarterly return itself stay with Zoho and the
+              accountant.
+            </p>
+          </div>
+        </Card>
+      </div>
+    </main>
+  );
+}
