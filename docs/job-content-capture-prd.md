@@ -79,7 +79,14 @@ captures on this job.
 - **Voice note**: WhatsApp ergonomics — **hold to record** with a live timer +
   pulsing level ring; **slide up to lock** for hands-free; release (unlocked) or
   tap stop (locked) → instant playback bar with re-record / keep. 3-minute cap.
-  MediaRecorder audio (mp4/AAC on iOS — Gemini-compatible).
+  MediaRecorder audio — **container detected at runtime** via
+  `MediaRecorder.isTypeSupported` (Safari emits mp4/AAC, Android Chrome
+  webm/opus; both Gemini-compatible — never hardcode one, per WebKit's
+  [MediaRecorder notes](https://webkit.org/blog/11353/mediarecorder-api/) and
+  [field reports](https://www.buildwithmatija.com/blog/iphone-safari-mediarecorder-audio-recording-transcription)).
+  Field-pass checklist: verify mic permission behaviour in STANDALONE mode on
+  Connor's installed PWA (iOS re-prompts per launch in some versions — if it
+  annoys, voice notes fall back gracefully to a typed note).
 - **Tray**: captured items appear as thumbnails in a bottom rail with per-item
   upload progress; failed uploads show retry (never silently lost). Leaving the
   sheet never cancels uploads.
