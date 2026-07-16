@@ -9,6 +9,11 @@
  * works on any data set, plus a couple of in-page anchors on the dashboard and
  * the crew /my-jobs surface. Copy is plain UK English, short and imperative,
  * and uses example names rather than touching the database.
+ *
+ * Tour-fatigue rule: keep each tour a "two-minute tour" — when the app grows,
+ * reword or merge steps before adding new ones (refreshed 2026-07-16 to cover
+ * Payments/Finance, Customers incl. Content, Claims, and the crew capture +
+ * device steps).
  */
 
 export type TourName = "office" | "estimator" | "crew";
@@ -23,12 +28,13 @@ export type TourStep = {
 };
 
 /** Office walkthrough — mirrors a real job: lead → survey → quote → deposit →
- *  move day → review. Anchored to the left-rail nav so it runs on any page/data. */
+ *  move day → the money and the records. Anchored to the left-rail nav so it
+ *  runs on any page/data. */
 const OFFICE: TourStep[] = [
   {
     title: "Welcome to Marley Ops",
     description:
-      "This is your two-minute guided tour of the panel. We'll follow a job from first enquiry through to move day. You can rerun it any time from the menu.",
+      "This is your two-minute guided tour of the panel. We'll follow a job from first enquiry through to move day and the money. You can rerun it any time from the menu.",
   },
   {
     selector: '[data-tour="nav-/leads"]',
@@ -42,7 +48,7 @@ const OFFICE: TourStep[] = [
     selector: '[data-tour="dashboard-needs-action"]',
     title: "2. Your day at a glance",
     description:
-      "The dashboard flags what needs attention today — new enquiries to action, unpaid deposits, unsigned contracts and fleet documents falling due. Clear these and the pipeline keeps moving.",
+      "The dashboard flags what needs attention today — new enquiries to action, unpaid deposits, unsigned contracts, open claims and fleet documents falling due. Clear these and the pipeline keeps moving.",
     side: "top",
     align: "center",
   },
@@ -56,25 +62,25 @@ const OFFICE: TourStep[] = [
   },
   {
     selector: '[data-tour="nav-/quotes"]',
-    title: "4. Build the quote",
+    title: "4. Quote it, send it",
     description:
-      "Quotes are built in the seven-step wizard. New quote also captures the lead in one step, so nothing's re-typed. The cubic survey lives on the quote header when you need a volume count.",
-    side: "right",
-    align: "start",
-  },
-  {
-    selector: '[data-tour="nav-/quotes"]',
-    title: "5. Send it, and get paid",
-    description:
-      "Send the quote and the customer gets a branded email with an Accept button. When they accept, the £100 deposit invoice raises itself in Zoho — no double-keying.",
+      "Quotes are built in the seven-step wizard — New quote also captures the lead in one step. Send it and the customer gets a branded email with an Accept button; accepting raises the £100 deposit invoice on its own.",
     side: "right",
     align: "start",
   },
   {
     selector: '[data-tour="nav-/bookings"]',
-    title: "6. Bookings",
+    title: "5. Bookings",
     description:
       "Deposits and to-book jobs live here. One tap marks a deposit paid and the job is confirmed, ready to schedule.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/payments"]',
+    title: "6. Money in, and what you owe",
+    description:
+      "Payments shows everything received on a day — card, bank transfer and cash, with the bank feed suggesting matches. Next door, Invoices & VAT shows what's billed and the VAT owed for the month and quarter.",
     side: "right",
     align: "start",
   },
@@ -87,16 +93,24 @@ const OFFICE: TourStep[] = [
     align: "start",
   },
   {
-    selector: '[data-tour="nav-/documents"]',
-    title: "8. Documents",
+    selector: '[data-tour="nav-/clients"]',
+    title: "8. Customers",
     description:
-      "Every signed contract and completion certificate, searchable by name or reference — with a tab for accepted quotes still waiting on a signature.",
+      "The customer's whole file: Clients, their signed paperwork in Documents, and Content — the photos, videos and voice notes crew capture on jobs, waiting for your review before marketing can touch them.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/claims"]',
+    title: "9. Claims",
+    description:
+      "A damage note at crew sign-off opens a claim here automatically — with the status trail, the customer's 7-day window and a ready-made evidence pack for the insurer.",
     side: "right",
     align: "start",
   },
   {
     selector: '[data-tour="nav-/storage"]',
-    title: "9. Storage",
+    title: "10. Storage",
     description:
       "Container storage lives here — sites, units, signed agreements and the recurring billing that runs itself each period.",
     side: "right",
@@ -104,7 +118,7 @@ const OFFICE: TourStep[] = [
   },
   {
     selector: '[data-tour="nav-/performance"]',
-    title: "10. Performance",
+    title: "11. Performance",
     description:
       "Sales, storage and estimator numbers — how the business is actually doing, by period.",
     side: "right",
@@ -118,9 +132,9 @@ const OFFICE: TourStep[] = [
 ];
 
 /** Estimator walkthrough — scoped strictly to the estimator nav (My day, Leads,
- *  Follow-ups, Surveys, Quotes, User manual). Never references admin-only
- *  surfaces (Bookings, Job Board, Documents, Storage, Performance) — an
- *  estimator can't see them, so the tour must not either. */
+ *  Follow-ups, Surveys, Quotes, Bookings, Payments, Settings, User manual).
+ *  Never references admin-only surfaces (Job Board, Documents, Claims, Storage,
+ *  Performance) — an estimator can't see them, so the tour must not either. */
 const ESTIMATOR: TourStep[] = [
   {
     title: "Welcome to Marley Ops",
@@ -176,6 +190,22 @@ const ESTIMATOR: TourStep[] = [
     align: "start",
   },
   {
+    selector: '[data-tour="nav-/bookings"]',
+    title: "7. Bookings",
+    description:
+      "Watch the deposit land here — accepted jobs move through Awaiting deposit to Booked, and deposit paid is what confirms the job.",
+    side: "right",
+    align: "start",
+  },
+  {
+    selector: '[data-tour="nav-/settings"]',
+    title: "8. Your device",
+    description:
+      "Settings holds Quick sign-in — Face ID or a fingerprint instead of a password — and Notifications, so a new enquiry or a paid deposit buzzes your phone.",
+    side: "right",
+    align: "start",
+  },
+  {
     title: "That's your loop",
     description:
       "Enquiry → survey → quote → accepted. The office takes it from there. The User manual in the menu has the full field guide.",
@@ -188,7 +218,7 @@ const CREW: TourStep[] = [
   {
     title: "This is your day",
     description:
-      "Welcome to Marley Ops. You only ever see the jobs you're assigned to — and never any prices. Here's a quick tour. You can rerun it any time from the menu.",
+      "Welcome to Marley Ops. You only ever see the jobs you're assigned to — and never any prices. Here's a quick tour. You can rerun it any time.",
   },
   {
     selector: '[data-tour="crew-jobs"]',
@@ -202,9 +232,14 @@ const CREW: TourStep[] = [
     selector: '[data-tour="crew-job-card"]',
     title: "Open a job",
     description:
-      "Tap a job to open the full sheet: the route with one-tap directions, the inventory, and a place to add notes and photos for any damage or access issues.",
+      "Tap a job to open the full sheet: the route with one-tap directions, what you're moving, and who's on the job with you.",
     side: "top",
     align: "center",
+  },
+  {
+    title: "Damage or a problem?",
+    description:
+      "Tap the red camera button on a job. Photos, notes and voice notes live on the job — the office sees them straight away. Never argue on site: record it, then call the office.",
   },
   {
     title: "Signing off",
@@ -216,6 +251,14 @@ const CREW: TourStep[] = [
     title: "The job sheet",
     description:
       "Tap Job sheet for a one-page printable brief — addresses, vehicles and inventory. Never any prices, so it's safe to leave in the cab.",
+    side: "top",
+    align: "center",
+  },
+  {
+    selector: '[data-tour="crew-device"]',
+    title: "Alerts and easy sign-in",
+    description:
+      "Turn on job alerts so your phone buzzes when you're given a job, and set up face or fingerprint sign-in. The User manual here shows every step with pictures.",
     side: "top",
     align: "center",
   },

@@ -120,13 +120,48 @@ export function OfficeGuide() {
         />
       </GuideCard>
 
+      <GuideCard id="payments-page" title="Payments — money in, by day" lead="Sidebar → Finance → Payments.">
+        <Bullets
+          items={[
+            "Everything received on a UK day: card payments (and refunds), plus bank-transfer and cash deposits/balances recorded in the panel. Browse back a day at a time.",
+            "The bank feed surfaces inbound transfers and suggests a match by quote reference and exact amount. Confirming runs the full paid pipeline — a transfer is never auto-confirmed.",
+            "Transfers the feed can't place land in a “needs a look” card — match or dismiss them so nothing sits unexplained.",
+          ]}
+        />
+      </GuideCard>
+
+      <GuideCard id="finance" title="Invoices & VAT" lead="Sidebar → Finance → Invoices & VAT (admins only).">
+        <Bullets
+          items={[
+            "Invoices raised per day, read straight from Zoho — hand-raised ones included, so it reports the business, not just the panel.",
+            "Shows what's owed under the Flat Rate Scheme alongside the VAT charged, with month-to-date and VAT-quarter cards.",
+            "The VAT scheme, rate and quarter cycle are Settings controls — change them there, not in Zoho.",
+          ]}
+        />
+      </GuideCard>
+
       <GuideCard id="completion" title="Completion & review request">
         <Bullets
           items={[
             "Crew sign-off on move day (in person, or from the office if needed) raises a completion certificate PDF, emailed to the customer automatically.",
             "A review-request email follows, with a Google (or Checkatrade/Trustpilot) review link.",
             "The lead page has a Review request switch — turn it off for a customer who wasn't fully satisfied; it's switched off automatically when the crew record exceptions at sign-off.",
+            "Exceptions recorded at sign-off also open a claim automatically — see Claims below.",
             "Signed evidence — contract signature + completion certificate — can't be lost by deleting a diary entry; cancel the appointment instead.",
+          ]}
+        />
+      </GuideCard>
+
+      <GuideCard id="claims" title="Claims" lead="Sidebar → Customers → Claims.">
+        <Bullets
+          items={[
+            "A damage or exception note at crew sign-off opens a claim here automatically (CLM-style reference) and raises a next-morning call task — an exception can never die silently.",
+            <>
+              The status trail: <strong>open</strong> → <strong>assessing</strong> → <strong>offer made</strong> →{" "}
+              <strong>settled / rejected / closed</strong>. A goodwill settlement needs the amount recorded.
+            </>,
+            "Each claim page shows the customer's 7-day T&Cs reporting window and a print-ready evidence pack for the insurer: certificate, contract, quote inventory, crew notes and captured content.",
+            "Any completed job can also open a claim manually from its lead page — a customer phoning a week later still gets a proper record.",
           ]}
         />
       </GuideCard>
@@ -141,6 +176,31 @@ export function OfficeGuide() {
               Finished moves live at <strong>Schedule → Completed Jobs</strong> — the by-date history with move date,
               value, certificate and review status; the completion certificates are also here in Documents.
             </>,
+          ]}
+        />
+      </GuideCard>
+
+      <GuideCard id="content" title="Job content — crew photos, video & voice notes" lead="Sidebar → Customers → Content.">
+        <Bullets
+          items={[
+            "Crew capture photos, video and voice notes on jobs with the red camera button — damage, access issues, and good moments worth keeping. Voice notes are transcribed automatically.",
+            <>
+              The review queue has three tabs: <strong>needs review</strong>, <strong>approved</strong> and{" "}
+              <strong>internal</strong>. Approving an item is what clears it for marketing use — internal-only items
+              never leave the panel.
+            </>,
+            "Customer consent lives on the lead (the media-consent toggle) — an item can't be approved without it.",
+            "Everything captured on a job also shows on its lead page, so the office sees problems the moment crew record them.",
+          ]}
+        />
+      </GuideCard>
+
+      <GuideCard id="staff-fleet" title="Staff & Fleet" lead="Sidebar → Operations → Staff & Fleet.">
+        <Bullets
+          items={[
+            "Crew records (day rates, contact details — no login needed) and the vehicles.",
+            "Compliance chips on every vehicle's tax, MOT and insurance: amber within 30 days of falling due, red when overdue. The dashboard flags fleet docs due too.",
+            "Creating a crew login in Settings → Team auto-links their staff record here by email.",
           ]}
         />
       </GuideCard>
@@ -172,8 +232,11 @@ export function OfficeGuide() {
           items={[
             "Team — add/remove logins and set each person's role (admin, estimator, crew). Creating a crew login auto-links their Staff & Fleet record by email.",
             "Pricing — the rate card behind every quote (vehicle prices, packing add-ons, per-mile mileage, admin fee).",
-            "The general settings card holds the estimator fee, internal cost rates, the standard deposit amount, and the Google review link the review-request email uses (clear it to switch that email off).",
+            "The general settings card holds the estimator fee, internal cost rates, the standard deposit amount, the VAT scheme and quarter cycle, and the Google review link the review-request email uses (clear it to switch that email off).",
+            "Quick sign-in — register a passkey so Face ID or a fingerprint signs you in; Notifications enables push alerts on this device (admins also hold the global kill switches per category).",
+            "Card payments — the takepayments switch and test button; the deposit is the only card payment.",
             "Margin calculator — a what-if sandbox for checking a job's margin before you send it.",
+            "The small Tour button next to the version stamp reruns the guided tour on any device.",
           ]}
         />
       </GuideCard>

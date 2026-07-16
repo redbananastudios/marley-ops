@@ -1,16 +1,17 @@
 /**
- * Small inline SVG for the crew's day — a single left-to-right row.
- * Same charcoal-box / red-arrow visual language as the full job-flow diagram.
+ * The estimator's loop — a single left-to-right row from fresh enquiry to
+ * accepted quote. Same charcoal-box / red-arrow idiom as the office job-flow
+ * diagram; the office takes over once the quote is accepted.
  */
 
 type FlowNode = { lines: string[] };
 
 const NODES: FlowNode[] = [
-  { lines: ["Open the app"] },
-  { lines: ["See today's", "jobs"] },
-  { lines: ["Open a job:", "route + items"] },
-  { lines: ["Problem?", "Photo + note"] },
-  { lines: ["Finish:", "both sign"] },
+  { lines: ["New enquiry"] },
+  { lines: ["Call them back", "(same day wins)"] },
+  { lines: ["Survey", "(visit or AI scan)"] },
+  { lines: ["Quote sent", "(chases run alone)"] },
+  { lines: ["Accepted", "(office takes over)"] },
 ];
 
 const BOX_W = 190;
@@ -54,7 +55,7 @@ function FlowBox({ x, node }: { x: number; node: FlowNode }) {
   );
 }
 
-export function CrewDayDiagram() {
+export function EstimatorFlowDiagram() {
   const centerY = ROW_Y + BOX_H / 2;
   return (
     <div className="overflow-x-auto rounded-lg border border-border bg-muted/30 p-4">
@@ -62,10 +63,18 @@ export function CrewDayDiagram() {
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         className="mx-auto block w-full min-w-[640px] max-w-[980px]"
         role="img"
-        aria-label="Your day in five steps: open the app, see today's jobs, open a job to get the route and items, take a photo and a note if there is a problem, and finish with both of you signing."
+        aria-label="The estimator loop: a new enquiry, a same-day call back, the survey (a home visit or the AI room scan), the quote sent with automatic chases, and acceptance, at which point the office takes over."
       >
         <defs>
-          <marker id="manual-arrow-crew" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <marker
+            id="manual-arrow-estimator"
+            viewBox="0 0 10 10"
+            refX="8"
+            refY="5"
+            markerWidth="7"
+            markerHeight="7"
+            orient="auto-start-reverse"
+          >
             <path d="M0,0 L10,5 L0,10 z" fill={RED} />
           </marker>
         </defs>
@@ -81,7 +90,7 @@ export function CrewDayDiagram() {
             y2={centerY}
             stroke={RED}
             strokeWidth={2.5}
-            markerEnd="url(#manual-arrow-crew)"
+            markerEnd="url(#manual-arrow-estimator)"
           />
         ))}
       </svg>

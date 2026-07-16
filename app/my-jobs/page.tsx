@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { BookOpen, ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { apptWindow } from "@/lib/job-board";
@@ -324,11 +324,22 @@ export default async function MyJobsPage() {
         )}
 
         {/* Device settings — crew have no Settings page, so passkey sign-in,
-            job alerts and the install prompt live here under one heading. */}
-        <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your device</h2>
-        <InstallPrompt />
-        <QuickSigninRow />
-        <NotificationsRow />
+            job alerts, the install prompt and the manual live here under one
+            heading. data-tour anchors the crew tour's alerts/sign-in step. */}
+        <section data-tour="crew-device">
+          <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your device</h2>
+          <InstallPrompt />
+          <QuickSigninRow />
+          <NotificationsRow />
+          <Link
+            href="/my-jobs/manual"
+            className="focus-ring mt-3 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-mist-500 hover:text-foreground"
+          >
+            <BookOpen className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+            User manual — your day, step by step
+            <ChevronRight className="ml-auto size-4 text-mist-400" strokeWidth={1.75} />
+          </Link>
+        </section>
         <PushSwRegister />
         <UpdateBanner />
         <PullToRefresh />

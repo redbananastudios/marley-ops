@@ -1,48 +1,40 @@
 import type { Metadata } from "next";
+import { getSessionProfile } from "@/lib/auth";
 import { PageHeader } from "@/components/page-header";
-import { ManualToc } from "@/components/manual/manual-toc";
-import { JobFlowSection } from "@/components/manual/job-flow-section";
-import { OfficeGuide } from "@/components/manual/office-guide";
-import { CrewGuide } from "@/components/manual/crew-guide";
-import { EmailsTable } from "@/components/manual/emails-table";
-import { SendingEmails } from "@/components/manual/sending-emails";
-import { FaqSection } from "@/components/manual/faq-section";
+import { OfficeManual } from "@/components/manual/office-manual";
+import { EstimatorManual } from "@/components/manual/estimator-manual";
+import { CrewManual } from "@/components/manual/crew-manual";
+import { ManualRoleSwitcher, type ManualView } from "@/components/manual/role-switcher";
 
 export const metadata: Metadata = { title: "User manual" };
 
 /**
- * /manual — the in-app field guide for Marley Moves staff. Office (Connor,
- * Luke, any admin/estimator) and crew workflows, plus the customer email
- * reference. Deliberately short-and-scannable, not exhaustive: numbered
- * steps and small tables over long prose, matching the rest of the panel's
- * white-card / hairline-border look.
+ * /manual — role-rendered training material. Every role reaches the same URL
+ * and gets its own manual: estimators the estimator field guide, admins the
+ * full office manual plus a preview switcher for the other two. Crew never
+ * reach this route (the dashboard layout redirects them to /my-jobs); their
+ * manual lives at /my-jobs/manual inside the crew chrome.
  */
-export default function ManualPage() {
+export default async function ManualPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ view?: string }>;
+}) {
+  const [profile, sp] = await Promise.all([getSessionProfile(), searchParams]);
+  const isAdmin = profile?.role === "admin";
+
+  // Estimators always get their own manual; only admins may preview others.
+  const view: ManualView = !isAdmin
+    ? "estimator"
+    : sp.view === "estimator" || sp.view === "crew"
+      ? sp.view
+      : "office";
+
   return (
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Help" title="User manual" />
-      <p className="mb-6 max-w-2xl text-sm text-mist-500">
-        A quick field guide to Marley Ops — how a job moves from first enquiry to a five-star review, what each
-        page is for, and which emails send themselves.
-      </p>
-
-      <div className="mb-8 max-w-3xl">
-        <ManualToc />
-      </div>
-
-      {/* Full-width so the pipeline diagram gets all the horizontal room it needs. */}
-      <div className="mb-10">
-        <JobFlowSection />
-      </div>
-
-      {/* Everything else is reading-shaped text/tables — capped for a comfortable measure. */}
-      <div className="max-w-3xl space-y-10">
-        <OfficeGuide />
-        <CrewGuide />
-        <EmailsTable />
-        <SendingEmails />
-        <FaqSection />
-      </div>
+      {isAdmin ? <ManualRoleSwitcher active={view} /> : null}
+      {view === "office" ? <OfficeManual /> : view === "estimator" ? <EstimatorManual /> : <CrewManual />}
     </main>
   );
 }

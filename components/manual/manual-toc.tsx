@@ -1,7 +1,6 @@
 const LINKS: { href: string; label: string }[] = [
   { href: "#how-a-job-flows", label: "How a job flows" },
   { href: "#office-guide", label: "Office guide" },
-  { href: "#crew-guide", label: "Crew guide" },
   { href: "#emails", label: "Emails the system sends" },
   { href: "#sending-emails", label: "Sending emails (or texts) from the panel" },
   { href: "#faq", label: "FAQ & gotchas" },
