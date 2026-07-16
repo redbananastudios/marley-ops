@@ -1,6 +1,15 @@
 # Email identity & routing plan — Marley Ops
 
-**Status: PROPOSED (2026-07-16) — awaiting Peter/Connor sign-off before build.**
+**Status: BUILT + LIVE (2026-07-16, commits `7d71cc3` + `297814c`).** Peter approved
+same day: all six mailboxes confirmed on IONOS, reply forwards OWNER-ONLY, review
+requests + deposit chases from the owner, alert split as proposed (system → 
+peter@marleymoves.co.uk). Connor's ops login swapped to connor@marleymoves.co.uk
+(same password/passkey); stale luke@marleymoves.test deactivated. Hardened by a
+27-agent adversarial review — headline fix: ONE canonical owner rule
+(`leadOwnerIdentity` in lib/comms/sender.ts: leads.estimator_id → survey-derived
+estimator → quote creator) now drives the outbound From AND the inbound reply
+forward, so the person fronting a thread always receives its replies. moves@ →
+alias-to-hello@ is a manual IONOS step still open.
 Grounded in a full inventory of all 45 send call sites (4-reader + completeness-critic
 workflow, 0 gaps found). This document is the single reference for *which address every
 email comes from, where replies go, and who gets told* — the v2 answer to the v1

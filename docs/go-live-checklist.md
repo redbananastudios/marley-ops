@@ -30,8 +30,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    and his MMS (merchant management) login. Once received → item C6. (ClickUp 869e58b5v)
 3. ☐ **T&Cs legal review** — customers sign generic-v1 terms on /q today; review
    together before real signatures. (ClickUp 869e35z42)
-4. ☐ **Real email addresses + phone numbers for the team** — Connor (swap
-   connor@marleymoves.test), plus Jack + Rob's actual phones for enrolment day.
+4. ◐ **Real email addresses + phone numbers for the team** — Connor's login
+   SWAPPED to connor@marleymoves.co.uk (16 Jul — same password + passkey; TELL
+   HIM the sign-in email changed); Luke already luke@marleymoves.co.uk (stale
+   .test duplicate deactivated). Remaining: Jack + Rob's phones for enrolment,
+   Bex's address if/when a bex@ mailbox exists.
 5. ☑ **Bank feed — DONE (16 Jul)**: Monzo (already the business bank, already on
    Pro) → Sheets export → 2-min VPS cron → /payments "Bank transfers to confirm"
    with confirm-to-record. Live-verified incl. a real £100 customer deposit
@@ -64,11 +67,17 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 ## C — Cutover day (ordered — from the runbook in go-live-test-plan.md)
 
 1. ☐ Snapshot the DB.
-2. ☐ Team identities: swap `.test` emails → real (Settings → Team); each person
-   signs in on their real device; passkey + push enrolled (Connor's iPhone ☑ 15 Jul;
-   Jack/Rob/Luke ☐ — ClickUp 869e58b5y).
-3. ☐ Env routing: INBOUND_FORWARD_EMAIL → hello@marleymoves.co.uk,
-   OPS_ALERT_EMAIL → the office address; restart; test one inbound reply + one alert.
+2. ◐ Team identities: office logins are REAL (Connor + Luke swapped 16 Jul,
+   Peter already real); remaining = each person signs in on their real device;
+   passkey + push enrolled (Connor's iPhone ☑ 15 Jul; Jack/Rob/Luke ☐ —
+   ClickUp 869e58b5y).
+3. ☑ **Env + identity routing — DONE 16 Jul** (docs/email-identity-plan.md
+   BUILT): INBOUND_FORWARD_EMAIL=hello@ (now only the fallback — replies
+   forward to the LEAD OWNER's own mailbox), OPS_ALERT_EMAIL=hello@,
+   OPS_ALERT_EMAIL_MONEY=accounts@, OPS_ALERT_EMAIL_SYSTEM=peter@marleymoves.co.uk.
+   Quotes/chases send From the owner (luke@/connor@), money emails From
+   accounts@. Remaining smoke: one real inbound reply + eyeball the From on the
+   next quote email (chase 2 on ~19 Jul proves it unattended).
 4. ☐ Comms flags: COMMS_DRYRUN=false confirmed; decide LEAD_AUTOREPLY_ENABLED
    (still gated off — Peter reviewing the template).
 5. ☐ Data reset: `reset-data.mjs` clears test leads/quotes/comms/appointments —
