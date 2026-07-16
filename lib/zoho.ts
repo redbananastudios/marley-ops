@@ -253,12 +253,20 @@ export interface ZohoInvoiceListItem {
  * (Status.Unpaid = sent + viewed + overdue + partially paid). Pages through
  * the list API; capped generously (2000 rows) as a runaway guard.
  */
+export interface ZohoInvoiceList {
+  invoices: ZohoInvoiceListItem[];
+  /** True when the 2,000-row runaway cap cut the result short — money figures
+   *  built from a truncated list must say so rather than silently understate. */
+  truncated: boolean;
+}
+
 export async function listInvoices(input: {
   dateStart?: string;
   dateEnd?: string;
   filterBy?: "Status.Unpaid" | "Status.All";
-}): Promise<ZohoInvoiceListItem[]> {
+}): Promise<ZohoInvoiceList> {
   const out: ZohoInvoiceListItem[] = [];
+  let truncated = false;
   for (let page = 1; page <= 10; page++) {
     const params = new URLSearchParams({
       page: String(page),
@@ -283,8 +291,9 @@ export async function listInvoices(input: {
       });
     }
     if (!res.page_context?.has_more_page) break;
+    if (page === 10) truncated = true; // cap hit with more pages remaining
   }
-  return out;
+  return { invoices: out, truncated };
 }
 
 /** Zoho web-app deep link for an invoice (the OFFICE view, not the customer URL). */

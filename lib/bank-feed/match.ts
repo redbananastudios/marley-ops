@@ -1,17 +1,20 @@
 /**
  * Bank-transaction → open-invoice matcher (pure, no I/O). Conservative by
- * design: a match only ever becomes a SUGGESTION the office confirms — money
- * is never auto-marked. Two confidence tiers:
+ * design: a match only ever becomes a SUGGESTION the office confirms — and a
+ * suggestion REQUIRES the transfer amount to equal the open item's amount to
+ * the penny. Partial payments, overpayments and duplicate transfers must be
+ * handled by a human via Bookings/Zoho, never one-tap recorded (review
+ * 2026-07-16: the paid pipeline records the ITEM's amount, so confirming a
+ * £500 transfer against a £1,100 balance would book £1,100 into the VAT
+ * records off £500 received).
  *
- *   reference — the customer's payment reference contains a quote ref
- *               (MMR001 / MMC001, the legacy MM-YYMMDD-NNN, or a Zoho
- *               -DEP/-BAL reference which embeds the quote ref anyway)
- *   amount    — no usable reference, but EXACTLY ONE open item wants exactly
- *               this amount (ambiguity = no match; people mangle references,
- *               but two £100 deposits outstanding means a human must look)
- *
- * Storage references (MMS-<let8>-<period>) are recognised and tagged but not
- * actionable here — storage payments are recorded from the Storage page.
+ * Result kinds:
+ *   suggestion — quote ref (or unique amount) AND exact amount: confirmable.
+ *   mismatch   — the reference names an open quote but NO open item has this
+ *                exact amount (part-payment / overpayment / duplicate):
+ *                surfaced on /payments as "record manually", never confirmable.
+ *   storage    — MMS-… reference: recorded from the Storage page.
+ *   null       — nothing recognisable.
  */
 
 export interface OpenItem {
@@ -24,12 +27,18 @@ export interface OpenItem {
   kind: "deposit" | "balance";
 }
 
-export interface MatchResult {
-  kind: "deposit" | "balance" | "storage";
-  confidence: "reference" | "amount";
-  quoteId: string | null;
-  quoteRef: string | null;
-}
+export type MatchResult =
+  | {
+      type: "suggestion";
+      kind: "deposit" | "balance";
+      confidence: "reference" | "amount";
+      quoteId: string;
+      quoteRef: string;
+      /** The open item's amount — MUST equal the transfer amount (invariant). */
+      amount: number;
+    }
+  | { type: "mismatch"; kind: "deposit" | "balance"; quoteId: string; quoteRef: string }
+  | { type: "storage" };
 
 /** Quote refs recognisable inside free-text bank references. */
 const REF_PATTERNS = [
@@ -59,35 +68,49 @@ export function matchTransaction(
 ): MatchResult | null {
   const hay = `${norm(tx.reference)} ${norm(tx.description)}`;
 
-  if (STORAGE_REF.test(hay)) {
-    return { kind: "storage", confidence: "reference", quoteId: null, quoteRef: null };
-  }
+  if (STORAGE_REF.test(hay)) return { type: "storage" };
 
   const refs = refsInText(tx.reference, tx.description);
   if (refs.length) {
-    // Zoho invoice references are `<quoteRef>-DEP` / `<quoteRef>-BAL`, so the
-    // suffix (when the customer copied it faithfully) disambiguates the kind.
-    const wantsDep = hay.includes("-DEP");
-    const wantsBal = hay.includes("-BAL");
     const candidates = open.filter((o) => refs.includes(o.quoteRef.toUpperCase()));
-    if (candidates.length) {
+    if (!candidates.length) return null; // names a quote we don't have open — human territory
+
+    // A suggestion requires the EXACT amount. The Zoho -DEP/-BAL suffix picks
+    // between a same-amount deposit and balance on one quote (rare but real).
+    const exact = candidates.filter((o) => pennies(o.amount) === pennies(tx.amount));
+    if (exact.length) {
+      const wantsDep = hay.includes("-DEP");
+      const wantsBal = hay.includes("-BAL");
       const pick =
-        candidates.find((o) => (wantsDep && o.kind === "deposit") || (wantsBal && o.kind === "balance")) ??
-        // Exact amount beats kind guessing; else prefer the deposit (it's
-        // what's requested first in the flow).
-        candidates.find((o) => pennies(o.amount) === pennies(tx.amount)) ??
-        candidates.find((o) => o.kind === "deposit") ??
-        candidates[0];
-      return { kind: pick.kind, confidence: "reference", quoteId: pick.quoteId, quoteRef: pick.quoteRef };
+        exact.find((o) => (wantsDep && o.kind === "deposit") || (wantsBal && o.kind === "balance")) ?? exact[0];
+      return {
+        type: "suggestion",
+        kind: pick.kind,
+        confidence: "reference",
+        quoteId: pick.quoteId,
+        quoteRef: pick.quoteRef,
+        amount: pick.amount,
+      };
     }
-    return null; // names a quote we don't have open — human territory
+
+    // Right quote, wrong amount — part-payment/overpayment/duplicate. Flag it
+    // for a human; the paid pipeline must never run off this transfer.
+    const c = candidates[0];
+    return { type: "mismatch", kind: c.kind, quoteId: c.quoteId, quoteRef: c.quoteRef };
   }
 
   // No reference → amount-only, and only when it's unambiguous.
   const byAmount = open.filter((o) => pennies(o.amount) === pennies(tx.amount));
   if (byAmount.length === 1) {
     const o = byAmount[0];
-    return { kind: o.kind, confidence: "amount", quoteId: o.quoteId, quoteRef: o.quoteRef };
+    return {
+      type: "suggestion",
+      kind: o.kind,
+      confidence: "amount",
+      quoteId: o.quoteId,
+      quoteRef: o.quoteRef,
+      amount: o.amount,
+    };
   }
   return null;
 }

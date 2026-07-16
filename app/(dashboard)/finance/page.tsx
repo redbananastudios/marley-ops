@@ -137,14 +137,20 @@ export default async function FinancePage({
   let mtdInvoices: ZohoInvoiceListItem[] = [];
   let quarterInvoices: ZohoInvoiceListItem[] = [];
   let unpaidInvoices: ZohoInvoiceListItem[] = [];
+  let unpaidTruncated = false;
   let zohoError: string | null = null;
   try {
-    [dayInvoices, mtdInvoices, quarterInvoices, unpaidInvoices] = await Promise.all([
+    const [dayL, mtdL, quarterL, unpaidL] = await Promise.all([
       listInvoices({ dateStart: day, dateEnd: day }),
       listInvoices({ dateStart: monthStart(day), dateEnd: day }),
       listInvoices({ dateStart: quarter.start, dateEnd: day }),
       listInvoices({ filterBy: "Status.Unpaid" }),
     ]);
+    dayInvoices = dayL.invoices;
+    mtdInvoices = mtdL.invoices;
+    quarterInvoices = quarterL.invoices;
+    unpaidInvoices = unpaidL.invoices;
+    unpaidTruncated = unpaidL.truncated;
   } catch (err) {
     zohoError = err instanceof Error ? err.message : "Could not reach Zoho.";
   }
@@ -228,7 +234,11 @@ export default async function FinancePage({
         <Stat
           label="Outstanding"
           value={fmtGBP(owed)}
-          sub={`${owedCount} unpaid invoice${owedCount === 1 ? "" : "s"} across all dates`}
+          sub={
+            unpaidTruncated
+              ? `first 2,000 unpaid only — figure UNDERSTATES, check Zoho`
+              : `${owedCount} unpaid invoice${owedCount === 1 ? "" : "s"} across all dates`
+          }
         />
       </div>
 
@@ -283,7 +293,9 @@ export default async function FinancePage({
                   £2k excepted). Registered with effect from 1 June 2026 (VAT no. 520 2213 58) — earlier
                   invoices sit outside the scheme. Owed figures use invoice dates (basic turnover
                   method); if the accountant files on the cash method the return counts receipts
-                  instead. The return itself stays with Zoho and the accountant.
+                  instead. Each card rounds its own window, so day cards can differ from the month
+                  by a penny — the quarter-to-date figure is the authoritative one. The return
+                  itself stays with Zoho and the accountant.
                 </>
               ) : (
                 <>

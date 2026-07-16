@@ -208,6 +208,7 @@ export default async function PaymentsPage({
   // that match still-open invoices, so the confirm queue isn't day-scoped.
   let bank: {
     suggested: BankFeedTx[];
+    mismatches: BankFeedTx[];
     dayRows: BankFeedTx[];
     lastSync: string | null;
     unmatchedCount: number;
@@ -215,13 +216,22 @@ export default async function PaymentsPage({
   if (bankFeedConfigured()) {
     const TX_COLS =
       "id, tx_date, tx_time, counterparty, amount, reference, status, match_kind, match_confidence, matched_quote_id";
-    const [sugRes, dayRes, unmatchedRes, syncRes] = await Promise.all([
+    const [sugRes, misRes, dayRes, unmatchedRes, syncRes] = await Promise.all([
       sb
         .from("bank_transactions")
         .select(TX_COLS)
         .eq("status", "suggested")
         .order("tx_date", { ascending: false })
         .limit(20),
+      // Mismatches: a transfer that NAMES an open quote at the wrong amount
+      // (part-payment / duplicate) — unmatched status but with a match_kind.
+      sb
+        .from("bank_transactions")
+        .select(TX_COLS)
+        .eq("status", "unmatched")
+        .not("matched_quote_id", "is", null)
+        .order("tx_date", { ascending: false })
+        .limit(10),
       sb
         .from("bank_transactions")
         .select(TX_COLS)
@@ -236,14 +246,29 @@ export default async function PaymentsPage({
         .order("started_at", { ascending: false })
         .limit(1),
     ]);
-    const rows = [...(sugRes.data ?? []), ...(dayRes.data ?? [])];
+    const rows = [...(sugRes.data ?? []), ...(misRes.data ?? []), ...(dayRes.data ?? [])];
     const qIds = [...new Set(rows.map((r) => r.matched_quote_id).filter(Boolean))] as string[];
     const { data: qRows } = qIds.length
-      ? await sb.from("quotes").select("id, quote_ref, customer_name, lead_id").in("id", qIds)
-      : { data: [] as { id: string; quote_ref: string | null; customer_name: string | null; lead_id: string | null }[] };
-    const qById = new Map((qRows ?? []).map((q) => [q.id, q]));
+      ? await sb
+          .from("quotes")
+          .select(
+            "id, quote_ref, customer_name, lead_id, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total",
+          )
+          .in("id", qIds)
+      : { data: [] };
+    const qById = new Map((qRows ?? []).map((q) => [q.id as string, q]));
     const toTx = (r: (typeof rows)[number]): BankFeedTx => {
       const q = r.matched_quote_id ? qById.get(r.matched_quote_id as string) : null;
+      const kind = (r.match_kind as string | null) ?? null;
+      const expectedAmount = q
+        ? kind === "deposit"
+          ? Number(q.deposit_amount) || null
+          : kind === "balance"
+            ? Number(q.balance_invoice_amount) ||
+              Math.max(0, Number(q.agreed_price ?? q.grand_total ?? 0) - Number(q.deposit_amount ?? 0)) ||
+              null
+            : null
+        : null;
       return {
         id: r.id as string,
         txDate: r.tx_date as string,
@@ -252,17 +277,20 @@ export default async function PaymentsPage({
         amount: Number(r.amount),
         reference: (r.reference as string | null) ?? null,
         status: r.status as string,
-        matchKind: (r.match_kind as string | null) ?? null,
+        matchKind: kind,
         matchConfidence: (r.match_confidence as string | null) ?? null,
-        quoteRef: q?.quote_ref ?? null,
-        quoteCustomer: q?.customer_name ?? null,
-        leadId: q?.lead_id ?? null,
+        quoteId: (r.matched_quote_id as string | null) ?? null,
+        quoteRef: (q?.quote_ref as string | null) ?? null,
+        quoteCustomer: (q?.customer_name as string | null) ?? null,
+        leadId: (q?.lead_id as string | null) ?? null,
+        expectedAmount,
       };
     };
     const last = syncRes.data?.[0];
     const lastSync = syncAgeLabel(last?.finished_at as string | null, last?.status === "ok");
     bank = {
       suggested: (sugRes.data ?? []).map(toTx),
+      mismatches: (misRes.data ?? []).map(toTx),
       dayRows: (dayRes.data ?? []).map(toTx),
       lastSync,
       unmatchedCount: unmatchedRes.count ?? 0,
@@ -334,6 +362,7 @@ export default async function PaymentsPage({
       {bank ? (
         <BankFeedSection
           suggested={bank.suggested}
+          mismatches={bank.mismatches}
           dayRows={bank.dayRows}
           dayLabelText={window.isToday ? "so far today" : `on ${dayLabel(window.day, false)}`}
           lastSync={bank.lastSync}

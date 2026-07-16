@@ -2,18 +2,22 @@
 
 /**
  * Bank feed on /payments — the Monzo transactions the 2-minute sync has
- * ingested. Two surfaces:
- *   1. Suggested matches (ANY date): inbound transfers the matcher tied to an
- *      open deposit/balance — Confirm runs the real paid pipeline; Dismiss
- *      removes a false positive. This is where the reconciliation backlog
- *      surfaces, so it isn't limited to the viewed day.
- *   2. The viewed day's inbound bank activity, with status chips.
+ * ingested. Three surfaces:
+ *   1. Suggested matches (ANY date): inbound transfers tied to an open
+ *      deposit/balance at the EXACT amount — Confirm runs the real paid
+ *      pipeline (bound to the precise quote+kind shown here; if the matcher
+ *      re-pointed the row meanwhile, the server refuses and asks for a
+ *      refresh). Dismiss removes a false positive.
+ *   2. Amount mismatches: a transfer that NAMES an open quote but doesn't
+ *      match its amount (part-payment / overpayment / duplicate) — flagged
+ *      for manual recording, deliberately not confirmable.
+ *   3. The viewed day's inbound bank activity, with status chips.
  * Money is never auto-marked: every recorded payment passed a human tap here.
  */
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, Landmark, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Landmark, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -32,9 +36,12 @@ export interface BankFeedTx {
   status: string;
   matchKind: string | null;
   matchConfidence: string | null;
+  quoteId: string | null;
   quoteRef: string | null;
   quoteCustomer: string | null;
   leadId: string | null;
+  /** The open item's amount (for mismatch rows: what the quote actually wants). */
+  expectedAmount: number | null;
 }
 
 const gbp = (n: number): string =>
@@ -55,38 +62,66 @@ const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
   dismissed: { label: "Dismissed", cls: "bg-mist-100 text-mist-400" },
 };
 
+function DismissButton({ txId, busyExternal }: { txId: string; busyExternal?: boolean }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [, start] = useTransition();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setBusy(true);
+        start(async () => {
+          try {
+            const res = await dismissBankTransactionAction(txId);
+            if (!res.ok) toast.error(res.error ?? "Could not dismiss.");
+            else router.refresh();
+          } finally {
+            setBusy(false);
+          }
+        });
+      }}
+      disabled={busy || busyExternal}
+      aria-label="Dismiss"
+      className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-md border border-input bg-card px-2.5 text-sm text-mist-500 transition-colors hover:bg-muted disabled:opacity-60"
+    >
+      {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <X className="size-4" strokeWidth={1.75} />}
+    </button>
+  );
+}
+
 function SuggestedRow({ tx }: { tx: BankFeedTx }) {
   const router = useRouter();
-  const [busy, setBusy] = useState<"confirm" | "dismiss" | null>(null);
+  const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
+  const storage = tx.matchKind === "storage";
+  const confirmable = !storage && tx.quoteId && (tx.matchKind === "deposit" || tx.matchKind === "balance");
 
-  function run(kind: "confirm" | "dismiss") {
-    setBusy(kind);
+  function confirm() {
+    if (!confirmable || !tx.quoteId) return;
+    setBusy(true);
     start(async () => {
       try {
-        const res =
-          kind === "confirm"
-            ? await confirmBankTransactionAction(tx.id)
-            : await dismissBankTransactionAction(tx.id);
+        const res = await confirmBankTransactionAction({
+          txId: tx.id,
+          expectedQuoteId: tx.quoteId!,
+          expectedKind: tx.matchKind as "deposit" | "balance",
+        });
         if (!res.ok) {
-          toast.error(res.error ?? "Could not update the transaction.");
+          toast.error(res.error ?? "Could not record the payment.");
+          router.refresh(); // the suggestion may have changed — show the truth
           return;
         }
-        toast.success(
-          kind === "confirm"
-            ? `Recorded — ${tx.quoteRef ?? "payment"} marked paid (bank transfer).`
-            : "Dismissed.",
-        );
+        toast.success(`Recorded — ${tx.quoteRef ?? "payment"} ${tx.matchKind} marked paid (bank transfer).`);
         router.refresh();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : "Could not update the transaction.");
+        toast.error(err instanceof Error ? err.message : "Could not record the payment.");
       } finally {
-        setBusy(null);
+        setBusy(false);
       }
     });
   }
 
-  const storage = tx.matchKind === "storage";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
@@ -100,7 +135,7 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
             <>storage payment — record it from the Storage page</>
           ) : (
             <>
-              looks like the <span className="font-semibold">{tx.matchKind}</span> for{" "}
+              the <span className="font-semibold">{tx.matchKind}</span> for{" "}
               {tx.leadId ? (
                 <Link href={`/leads/${tx.leadId}`} className="font-semibold text-foreground hover:underline">
                   {tx.quoteRef} · {tx.quoteCustomer ?? "—"}
@@ -114,14 +149,14 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
         </p>
       </div>
       <span className="tabular text-sm font-semibold text-foreground">{gbp(tx.amount)}</span>
-      {!storage ? (
+      {confirmable ? (
         <button
           type="button"
-          onClick={() => run("confirm")}
-          disabled={busy !== null}
+          onClick={confirm}
+          disabled={busy}
           className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-60"
         >
-          {busy === "confirm" ? (
+          {busy ? (
             <Loader2 className="size-4 animate-spin" strokeWidth={2} />
           ) : (
             <Check className="size-4" strokeWidth={2} />
@@ -129,31 +164,49 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
           Confirm — mark paid
         </button>
       ) : null}
-      <button
-        type="button"
-        onClick={() => run("dismiss")}
-        disabled={busy !== null}
-        aria-label="Dismiss"
-        className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-md border border-input bg-card px-2.5 text-sm text-mist-500 transition-colors hover:bg-muted disabled:opacity-60"
-      >
-        {busy === "dismiss" ? (
-          <Loader2 className="size-4 animate-spin" strokeWidth={1.75} />
-        ) : (
-          <X className="size-4" strokeWidth={1.75} />
-        )}
-      </button>
+      <DismissButton txId={tx.id} busyExternal={busy} />
+    </div>
+  );
+}
+
+function MismatchRow({ tx }: { tx: BankFeedTx }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+      <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">
+          {tx.counterparty ?? "—"}
+          <span className="ml-2 text-xs font-normal text-mist-400">“{tx.reference ?? "no reference"}”</span>
+        </p>
+        <p className="text-xs text-warn">
+          references{" "}
+          {tx.leadId ? (
+            <Link href={`/leads/${tx.leadId}`} className="font-semibold hover:underline">
+              {tx.quoteRef}
+            </Link>
+          ) : (
+            <span className="font-semibold">{tx.quoteRef}</span>
+          )}{" "}
+          but the open {tx.matchKind} is {tx.expectedAmount != null ? gbp(tx.expectedAmount) : "a different amount"} —
+          part-payment or duplicate. Record it manually via Bookings/Zoho, then dismiss.
+        </p>
+      </div>
+      <span className="tabular text-sm font-semibold text-warn">{gbp(tx.amount)}</span>
+      <DismissButton txId={tx.id} />
     </div>
   );
 }
 
 export function BankFeedSection({
   suggested,
+  mismatches,
   dayRows,
   dayLabelText,
   lastSync,
   unmatchedCount,
 }: {
   suggested: BankFeedTx[];
+  mismatches: BankFeedTx[];
   dayRows: BankFeedTx[];
   dayLabelText: string;
   /** "3 min ago · ok" style line, or null if the cron has never run. */
@@ -181,6 +234,25 @@ export function BankFeedSection({
         </Card>
       ) : null}
 
+      {mismatches.length ? (
+        <Card className="p-0">
+          <div className="flex items-center gap-2 border-b px-5 py-3.5">
+            <AlertTriangle className="size-4 text-warn" strokeWidth={1.75} />
+            <h2 className="font-display text-lg font-semibold text-foreground">
+              Transfers that need a human
+            </h2>
+            <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-bold tabular text-warn">
+              {mismatches.length}
+            </span>
+          </div>
+          <div className="divide-y">
+            {mismatches.map((tx) => (
+              <MismatchRow key={tx.id} tx={tx} />
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
           <Landmark className="size-4 text-mist-400" strokeWidth={1.75} />
@@ -200,7 +272,10 @@ export function BankFeedSection({
         ) : (
           <div className="divide-y">
             {dayRows.map((tx) => {
-              const chip = STATUS_CHIP[tx.status] ?? { label: tx.status, cls: "bg-mist-100 text-mist-500" };
+              const mismatch = tx.status === "unmatched" && tx.quoteRef;
+              const chip = mismatch
+                ? { label: "Amount differs — needs a human", cls: "bg-warn-bg text-warn" }
+                : (STATUS_CHIP[tx.status] ?? { label: tx.status, cls: "bg-mist-100 text-mist-500" });
               return (
                 <div key={tx.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
                   <span className="tabular w-12 shrink-0 text-xs text-mist-400">

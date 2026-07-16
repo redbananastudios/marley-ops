@@ -37,7 +37,9 @@ export async function markQuoteDepositPaidAction(
   if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
   const { data: q } = await sb.from("quotes").select("lead_id").eq("id", quoteId).single();
   refresh(q?.lead_id, quoteId);
-  return { ok: true as const };
+  // `already` must survive: the bank feed treats an already-recorded item as a
+  // likely DUPLICATE customer payment and refuses to mark its row confirmed.
+  return { ok: true as const, already: res.already === true };
 }
 
 export async function markQuoteBalancePaidAction(
@@ -50,7 +52,7 @@ export async function markQuoteBalancePaidAction(
   if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
   const { data: q } = await sb.from("quotes").select("lead_id").eq("id", quoteId).single();
   refresh(q?.lead_id, quoteId);
-  return { ok: true as const };
+  return { ok: true as const, already: res.already === true };
 }
 
 /** Pause / resume the chase engine for a lead (one tap from the Bookings row). */

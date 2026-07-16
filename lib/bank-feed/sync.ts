@@ -8,7 +8,9 @@ import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
  * Bank-feed sync (cron-driven): read the Monzo→Sheets export, upsert rows by
  * transaction id, and (re)match inbound payments against open deposits and
  * balances. Matching only ever produces SUGGESTIONS — the office confirms on
- * /payments, which runs the existing paid pipeline. Auth is a dedicated
+ * /payments, which runs the existing paid pipeline — and a suggestion always
+ * carries the open item's EXACT amount (partial/over payments surface as
+ * "mismatch" rows a human must record). Auth is a dedicated
  * spreadsheets.readonly refresh token (never the broad RBS token).
  */
 
@@ -45,15 +47,19 @@ async function accessToken(): Promise<string> {
   return tokenCache.token;
 }
 
-async function fetchSheetRows(): Promise<BankTxRow[]> {
+async function fetchSheet() {
   const c = cfg();
   const token = await accessToken();
   const range = encodeURIComponent(`${BANK_FEED_TAB}!A:Q`);
+  // UNFORMATTED_VALUE so amounts arrive as raw numbers, immune to anyone
+  // reformatting the Amount column (a "£1,020.00" display string would
+  // otherwise silently drop exactly the biggest rows). FORMATTED_STRING for
+  // date-times keeps Date as the DD/MM/YYYY string the parser expects.
   const res = await fetch(
-    `https://sheets.googleapis.com/v4/spreadsheets/${c.sheetId}/values/${range}?majorDimension=ROWS`,
+    `https://sheets.googleapis.com/v4/spreadsheets/${c.sheetId}/values/${range}?majorDimension=ROWS&valueRenderOption=UNFORMATTED_VALUE&dateTimeRenderOption=FORMATTED_STRING`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
-  const json = (await res.json().catch(() => ({}))) as { values?: string[][] };
+  const json = (await res.json().catch(() => ({}))) as { values?: (string | number)[][] };
   if (!res.ok) throw new Error(`Bank-feed sheet read failed (${res.status})`);
   return parseSheetRows(json.values ?? []);
 }
@@ -71,14 +77,24 @@ async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
       .order("id")
       .range(f, t),
   );
-  const leadIds = [...new Set((quotes ?? []).map((q) => q.lead_id).filter(Boolean))] as string[];
-  const { data: leads } = leadIds.length
-    ? await sb.from("leads").select("id, balance_paid_at").in("id", leadIds)
-    : { data: [] as { id: string; balance_paid_at: string | null }[] };
-  const balancePaid = new Map((leads ?? []).map((l) => [l.id, l.balance_paid_at]));
+
+  // Balance-paid lookup: only deposit-paid quotes can yield a balance item,
+  // and the .in() must be CHUNKED — a few hundred uuids in one GET blows the
+  // gateway's URL/header limit (the quotes-search 414, session 32d), and the
+  // old silent `const { data } = …` would then treat EVERY balance as open.
+  const leadIds = [
+    ...new Set(quotes.filter((q) => q.deposit_paid_at && q.lead_id).map((q) => q.lead_id as string)),
+  ];
+  const balancePaid = new Map<string, string | null>();
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const chunk = leadIds.slice(i, i + 100);
+    const { data, error } = await sb.from("leads").select("id, balance_paid_at").in("id", chunk);
+    if (error) throw new Error(`bank-feed lead lookup failed: ${error.message}`);
+    for (const l of data ?? []) balancePaid.set(l.id as string, l.balance_paid_at as string | null);
+  }
 
   const items: OpenItem[] = [];
-  for (const q of quotes ?? []) {
+  for (const q of quotes) {
     const base = {
       quoteId: q.id as string,
       quoteRef: (q.quote_ref as string) ?? "",
@@ -103,22 +119,46 @@ async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
 export type BankFeedSyncSummary = {
   disabled?: boolean;
   rowsInSheet: number;
+  /** Rows with a transaction id the parser could not safely ingest. */
+  skippedRows: number;
   upserted: number;
   suggested: number;
+  mismatched: number;
   unmatched: number;
 };
 
+/** Monzo mutates recent rows (settlements, enrichment); older settled rows
+ *  never change. Re-writing all ~1,900 rows every 2 minutes burned WAL and
+ *  updated_at for nothing — only new rows and this window get upserted. */
+const MUTABLE_WINDOW_DAYS = 35;
+
 export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSummary> {
   if (!bankFeedConfigured()) {
-    return { disabled: true, rowsInSheet: 0, upserted: 0, suggested: 0, unmatched: 0 };
+    return { disabled: true, rowsInSheet: 0, skippedRows: 0, upserted: 0, suggested: 0, mismatched: 0, unmatched: 0 };
   }
-  const rows = await fetchSheetRows();
+  const { rows, skipped } = await fetchSheet();
 
-  // Upsert base fields only — status/match columns belong to the matcher and
-  // the office and must survive re-syncs (Monzo mutates recent rows).
+  // What we already hold, and which rows the office has settled — confirmed/
+  // dismissed rows are NEVER rewritten (their amount/reference are part of the
+  // audit trail of what was on screen at confirm time).
+  const existing = await fetchAllRows((f, t) =>
+    sb.from("bank_transactions").select("transaction_id, status").order("id").range(f, t),
+  );
+  const known = new Set(existing.map((r) => r.transaction_id as string));
+  const locked = new Set(
+    existing
+      .filter((r) => r.status === "confirmed" || r.status === "dismissed")
+      .map((r) => r.transaction_id as string),
+  );
+
+  const cutoff = new Date(Date.now() - MUTABLE_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
+  const toUpsert = rows.filter(
+    (r) => !locked.has(r.transactionId) && (!known.has(r.transactionId) || r.txDate >= cutoff),
+  );
+
   let upserted = 0;
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500).map((r) => ({
+  for (let i = 0; i < toUpsert.length; i += 500) {
+    const chunk = toUpsert.slice(i, i + 500).map((r: BankTxRow) => ({
       transaction_id: r.transactionId,
       tx_date: r.txDate,
       tx_time: r.txTime,
@@ -130,21 +170,18 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       description: r.description,
       raw: r.raw as never,
     }));
-    const { data, error } = await sb
+    const { error } = await sb
       .from("bank_transactions")
-      .upsert(chunk as never, { onConflict: "transaction_id", ignoreDuplicates: false })
-      .select("id");
+      .upsert(chunk as never, { onConflict: "transaction_id", ignoreDuplicates: false });
     if (error) throw new Error(`bank_transactions upsert failed: ${error.message}`);
-    upserted += data?.length ?? 0;
+    upserted += chunk.length;
   }
 
   // (Re)match every inbound row the office hasn't dealt with. Suggestions are
   // recomputed each pass so a newly-raised invoice can claim an older unmatched
-  // transfer — but confirmed/dismissed rows are never touched.
+  // transfer — but confirmed/dismissed rows are never touched, and every write
+  // below is status-guarded so a concurrent Confirm/Dismiss always wins.
   const open = await loadOpenItems(sb);
-  // fetchAllRows, not a bare select — PostgREST caps at 1,000 rows and the
-  // history import alone is ~1,900, so a bare select silently skips the
-  // NEWEST rows (they insert last). Bit us on the very first live sync.
   const pending = await fetchAllRows((f, t) =>
     sb
       .from("bank_transactions")
@@ -154,35 +191,66 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       .range(f, t),
   );
 
+  // First-wins per open item within a pass: once a transfer is suggested for
+  // an item, a second transfer (a duplicate payment) can't also be suggested
+  // for it — it falls through to unmatched/mismatch for a human.
+  const remaining = [...open];
+  const consume = (quoteId: string, kind: string) => {
+    const idx = remaining.findIndex((o) => o.quoteId === quoteId && o.kind === kind);
+    if (idx >= 0) remaining.splice(idx, 1);
+  };
+
   let suggested = 0;
+  let mismatched = 0;
   let unmatched = 0;
-  for (const row of pending ?? []) {
+  for (const row of pending) {
     const inbound = isInboundPayment({ amount: Number(row.amount), txType: row.tx_type as string | null });
     if (!inbound) continue; // stays info
     const m = matchTransaction(
-      { amount: Number(row.amount), reference: row.reference as string | null, description: row.description as string | null },
-      open,
+      {
+        amount: Number(row.amount),
+        reference: row.reference as string | null,
+        description: row.description as string | null,
+      },
+      remaining,
     );
-    const next = m
-      ? {
-          status: "suggested",
-          matched_quote_id: m.quoteId,
-          match_kind: m.kind,
-          match_confidence: m.confidence,
-        }
-      : { status: "unmatched", matched_quote_id: null, match_kind: null, match_confidence: null };
-    if (m) suggested++;
-    else unmatched++;
+    let next: {
+      status: string;
+      matched_quote_id: string | null;
+      match_kind: string | null;
+      match_confidence: string | null;
+    };
+    if (m?.type === "suggestion") {
+      next = { status: "suggested", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: m.confidence };
+      consume(m.quoteId, m.kind);
+      suggested++;
+    } else if (m?.type === "mismatch") {
+      // Right quote, wrong amount — visible on /payments, never confirmable.
+      next = { status: "unmatched", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: null };
+      mismatched++;
+    } else if (m?.type === "storage") {
+      next = { status: "suggested", matched_quote_id: null, match_kind: "storage", match_confidence: "reference" };
+      suggested++;
+    } else {
+      next = { status: "unmatched", matched_quote_id: null, match_kind: null, match_confidence: null };
+      unmatched++;
+    }
     const changed =
       next.status !== row.status ||
       next.matched_quote_id !== (row.matched_quote_id ?? null) ||
       next.match_kind !== (row.match_kind ?? null) ||
       next.match_confidence !== (row.match_confidence ?? null);
     if (changed) {
-      const { error } = await sb.from("bank_transactions").update(next as never).eq("id", row.id);
+      // Status guard: if the office confirmed/dismissed this row since our
+      // snapshot, this update matches 0 rows and their action stands.
+      const { error } = await sb
+        .from("bank_transactions")
+        .update(next as never)
+        .eq("id", row.id)
+        .in("status", ["info", "unmatched", "suggested"]);
       if (error) throw new Error(`bank_transactions match update failed: ${error.message}`);
     }
   }
 
-  return { rowsInSheet: rows.length, upserted, suggested, unmatched };
+  return { rowsInSheet: rows.length, skippedRows: skipped, upserted, suggested, mismatched, unmatched };
 }

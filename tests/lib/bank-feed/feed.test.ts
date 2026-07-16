@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isInboundPayment, parseSheetRows, ukDateToIso } from "@/lib/bank-feed/parse";
+import { isInboundPayment, parseAmount, parseSheetRows, ukDateToIso } from "@/lib/bank-feed/parse";
 import { matchTransaction, refsInText, type OpenItem } from "@/lib/bank-feed/match";
 
 /* ------------------------------------------------------------ parse */
@@ -10,7 +10,7 @@ const HEADERS = [
   "Receipt", "Description", "Category split", "Pot name",
 ];
 
-const row = (over: Partial<Record<string, string>>): string[] =>
+const row = (over: Partial<Record<string, string | number>>): (string | number)[] =>
   HEADERS.map((h) =>
     ({
       "Transaction ID": "tx_0000Abc",
@@ -18,7 +18,7 @@ const row = (over: Partial<Record<string, string>>): string[] =>
       Time: "10:15:00",
       Type: "Faster payment",
       Name: "JANE SMITH",
-      Amount: "100.00",
+      Amount: 100,
       Currency: "GBP",
       "Notes and #tags": "MMR001-DEP",
       Description: "JANE SMITH MMR001-DEP",
@@ -27,8 +27,9 @@ const row = (over: Partial<Record<string, string>>): string[] =>
   );
 
 describe("parseSheetRows (Monzo export)", () => {
-  it("maps by header name and converts UK dates", () => {
-    const rows = parseSheetRows([HEADERS, row({})]);
+  it("maps by header name, converts UK dates, handles numeric amounts", () => {
+    const { rows, skipped } = parseSheetRows([HEADERS, row({})]);
+    expect(skipped).toBe(0);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       transactionId: "tx_0000Abc",
@@ -40,26 +41,46 @@ describe("parseSheetRows (Monzo export)", () => {
     });
   });
 
-  it("skips malformed rows (no id / bad date / non-numeric amount)", () => {
-    const rows = parseSheetRows([
+  it("COUNTS rows it can't safely ingest instead of silently dropping them", () => {
+    const { rows, skipped } = parseSheetRows([
       HEADERS,
-      row({ "Transaction ID": "" }),
-      row({ Date: "2026-07-16" }), // ISO in a DD/MM/YYYY column = malformed
+      row({ "Transaction ID": "" }), // blank spacer — not data loss, not counted
+      row({ Date: "2026-07-16" }), // ISO in a DD/MM/YYYY column
       row({ Amount: "one hundred" }),
       row({ "Transaction ID": "tx_ok" }),
     ]);
     expect(rows.map((r) => r.transactionId)).toEqual(["tx_ok"]);
+    expect(skipped).toBe(2);
   });
 
-  it("refuses entirely if the schema drifted (headers missing)", () => {
-    expect(parseSheetRows([["Something", "Else"], ["a", "b"]])).toEqual([]);
+  it("comma/currency-formatted amounts still parse (FORMATTED_VALUE leak-through)", () => {
+    const { rows, skipped } = parseSheetRows([HEADERS, row({ Amount: "£1,020.00" })]);
+    expect(skipped).toBe(0);
+    expect(rows[0].amount).toBe(1020);
   });
 
-  it("ukDateToIso handles boundaries", () => {
+  it("THROWS on schema drift of any load-bearing header (incl. Type and Notes)", () => {
+    const renamed = HEADERS.map((h) => (h === "Type" ? "Kind" : h));
+    expect(() => parseSheetRows([renamed, row({})])).toThrow(/Type/);
+    const noNotes = HEADERS.map((h) => (h === "Notes and #tags" ? "Memo" : h));
+    expect(() => parseSheetRows([noNotes, row({})])).toThrow(/Notes/);
+  });
+
+  it("impossible dates are rejected (Date.parse rolls 31/02 over — round-trip doesn't)", () => {
+    expect(ukDateToIso("31/02/2026")).toBeNull();
+    expect(ukDateToIso("31/06/2026")).toBeNull();
+    expect(ukDateToIso("29/02/2028")).toBe("2028-02-29"); // leap year is real
     expect(ukDateToIso("01/06/2026")).toBe("2026-06-01");
-    expect(ukDateToIso("31/12/2025")).toBe("2025-12-31");
     expect(ukDateToIso("2026-06-01")).toBeNull();
-    expect(ukDateToIso("")).toBeNull();
+  });
+
+  it("parseAmount handles numbers, strings, formatting and garbage", () => {
+    expect(parseAmount(1020.5)).toBe(1020.5);
+    expect(parseAmount("1,020.00")).toBe(1020);
+    expect(parseAmount("£100")).toBe(100);
+    expect(parseAmount("-60.90")).toBe(-60.9);
+    expect(parseAmount("")).toBeNull();
+    expect(parseAmount("n/a")).toBeNull();
   });
 });
 
@@ -90,21 +111,49 @@ const open = (over: Partial<OpenItem>): OpenItem => ({
   ...over,
 });
 
-describe("matchTransaction", () => {
-  it("matches a -DEP reference to the deposit", () => {
+describe("matchTransaction — a suggestion REQUIRES the exact amount", () => {
+  it("reference + exact amount → confirmable suggestion carrying the item amount", () => {
     const m = matchTransaction(
       { amount: 100, reference: "MMR001-DEP", description: null },
       [open({}), open({ quoteId: "q2", quoteRef: "MMR002" })],
     );
-    expect(m).toMatchObject({ kind: "deposit", confidence: "reference", quoteId: "q1" });
+    expect(m).toMatchObject({
+      type: "suggestion",
+      kind: "deposit",
+      confidence: "reference",
+      quoteId: "q1",
+      amount: 100,
+    });
   });
 
-  it("matches a bare quote ref case-insensitively from the description", () => {
+  it("CRITICAL regression: right quote, WRONG amount → mismatch, never a suggestion", () => {
+    // £500 part-payment against the only open item (a £1,100 balance):
     const m = matchTransaction(
-      { amount: 920, reference: null, description: "payment mmc014 balance" },
-      [open({ quoteId: "q3", quoteRef: "MMC014", kind: "balance", amount: 920 })],
+      { amount: 500, reference: "MMR001", description: null },
+      [open({ kind: "balance", amount: 1100 })],
     );
-    expect(m).toMatchObject({ kind: "balance", confidence: "reference", quoteId: "q3" });
+    expect(m).toMatchObject({ type: "mismatch", kind: "balance", quoteId: "q1", quoteRef: "MMR001" });
+    // Even with the -DEP suffix, a duplicate deposit against an open balance
+    // must not be confirmable as the balance:
+    const dup = matchTransaction(
+      { amount: 100, reference: "MMR001-DEP", description: null },
+      [open({ kind: "balance", amount: 1100 })],
+    );
+    expect(dup?.type).toBe("mismatch");
+  });
+
+  it("same quote with deposit AND balance open: exact amount picks; suffix breaks same-amount ties", () => {
+    const items = [
+      open({ kind: "deposit", amount: 100 }),
+      open({ quoteId: "q1b", kind: "balance", amount: 920 }),
+    ];
+    expect(matchTransaction({ amount: 920, reference: "MMR001-BAL", description: null }, items))
+      .toMatchObject({ type: "suggestion", kind: "balance", quoteId: "q1b", amount: 920 });
+    expect(matchTransaction({ amount: 100, reference: "MMR001", description: null }, items))
+      .toMatchObject({ type: "suggestion", kind: "deposit", amount: 100 });
+    // £55 matches neither open amount → mismatch for a human:
+    expect(matchTransaction({ amount: 55, reference: "MMR001", description: null }, items))
+      .toMatchObject({ type: "mismatch" });
   });
 
   it("legacy MM-YYMMDD-NNN refs still match", () => {
@@ -112,20 +161,7 @@ describe("matchTransaction", () => {
       { amount: 100, reference: "MM-260708-009", description: null },
       [open({ quoteRef: "MM-260708-009" })],
     );
-    expect(m).toMatchObject({ kind: "deposit", quoteId: "q1" });
-  });
-
-  it("same quote with deposit AND balance open: suffix picks; else exact amount picks", () => {
-    const items = [
-      open({ kind: "deposit", amount: 100 }),
-      open({ quoteId: "q1b", kind: "balance", amount: 920 }),
-    ];
-    expect(matchTransaction({ amount: 920, reference: "MMR001-BAL", description: null }, items))
-      .toMatchObject({ kind: "balance", quoteId: "q1b" });
-    expect(matchTransaction({ amount: 920, reference: "MMR001", description: null }, items))
-      .toMatchObject({ kind: "balance", quoteId: "q1b" }); // amount disambiguates
-    expect(matchTransaction({ amount: 55, reference: "MMR001", description: null }, items))
-      .toMatchObject({ kind: "deposit" }); // odd amount → deposit preferred
+    expect(m).toMatchObject({ type: "suggestion", quoteId: "q1" });
   });
 
   it("a referenced quote that is NOT open matches nothing (human territory)", () => {
@@ -141,7 +177,7 @@ describe("matchTransaction", () => {
       matchTransaction({ amount: 920, reference: null, description: null }, [
         open({ kind: "balance", amount: 920 }),
       ]),
-    ).toMatchObject({ confidence: "amount", kind: "balance" });
+    ).toMatchObject({ type: "suggestion", confidence: "amount", kind: "balance" });
   });
 
   it("storage references are tagged storage, not quote-matched", () => {
@@ -149,7 +185,7 @@ describe("matchTransaction", () => {
       { amount: 25, reference: "MMS-1A2B3C4D-2026-07", description: null },
       [open({})],
     );
-    expect(m).toMatchObject({ kind: "storage", confidence: "reference", quoteId: null });
+    expect(m).toEqual({ type: "storage" });
   });
 
   it("refsInText dedupes across reference + description", () => {
