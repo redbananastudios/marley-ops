@@ -42,13 +42,22 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 1. ☐ Run the P0 suites: S0 smoke, S1 access, S3 quotes/pricing, S4 accept/deposit,
    S6 booking→job, S13 security, S14 infra.
-2. ☐ Run the P1 suites: S2 intake, S5 chases (START EARLY — d2/d5/d10 timing needs
-   days), S7 crew, S8 storage, S10 AI survey field pass, S11 push, S12 passkeys,
-   S15 device matrix.
-3. ☐ **Backup RESTORE drill** — restore the latest nightly dump into a scratch DB
-   and count rows. Never done = no backup.
-4. ☐ **External uptime monitor** — free pinger on /api/version, alert to Peter.
-   Nothing currently alerts if the box dies out of hours.
+2. ◐ Run the P1 suites: S2 intake, S7 crew, S8 storage, S10 AI survey field pass,
+   S11 push, S12 passkeys, S15 device matrix. **S5 chases RUNNING since 16 Jul**:
+   chase 1 fired live for MM-260714-002 at its natural d2 (template + comms-log +
+   step stamp verified); chase 2 self-fires ~19 Jul (d5), chase 3 ~24 Jul (d10) —
+   check the sink inbox on those days.
+3. ☑ **Backup RESTORE drill — PASSED 16 Jul**: the 02:30 dump restored into a
+   scratch DB on i9; counts reconcile with the snapshot time exactly (only
+   benign Supabase-internal errors: log_min_messages + vault secrets). Note:
+   the dump carries a BOM+CRLF from PowerShell — psql tolerates it; leave the
+   pipeline alone. Repeat on real data in week 1 (D2).
+4. ☑ **External uptime monitor — LIVE 16 Jul**: i9 scheduled task "AIOS Marley
+   Uptime" pings /api/version every 5 min; 2 consecutive failures → SMS Peter
+   via WebEx (60-min cooldown, recovery SMS). Plus: in-app health watchdog
+   (cron freshness + feed staleness, 15-min) and a VPS disk watchdog (hourly,
+   SMS at 85% — currently 32%). Caveat: the i9 monitor runs only while i9 is
+   on — acceptable; revisit a paid pinger post-launch if needed.
 5. ☐ Two-device stale-tab checks (board + lead page open on two devices) — the
    depth review proved this needs eyes on it.
 
