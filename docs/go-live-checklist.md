@@ -21,6 +21,12 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    defaulted to Mar/Jun/Sep/Dec — wrong stagger = wrong quarter-to-date VAT).
    DONE ALREADY: registration date wired in — pre-01-Jun-2026 invoices carry no
    VAT on the Finance page.
+   ALSO ASK THE ACCOUNTANT (same email): (a) confirm the FRS percentage — the
+   system is set to the 10% removals/transport rate (Peter, 16 Jul), but the
+   FIRST-YEAR DISCOUNT would make it 9% until 31 May 2027 if claimed; (b) do
+   they file FRS on invoice dates (basic turnover method) or on receipts (cash
+   method)? Finance displays invoice-basis. Rate + scheme live in Settings →
+   "VAT scheme".
 2. ☐ **takepayments merchant credentials** (from his takepayments onboarding).
    Onboarding choices to make WITH takepayments: branded hosted payment page,
    Apple Pay + Google Pay ON, gateway's own customer receipts OFF (we send ours),
