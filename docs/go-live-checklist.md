@@ -107,7 +107,10 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 - ☐ Staff holiday / vehicle off-road marking → Job Board capacity truthfulness.
 - ☐ Job costing actuals (fuel, agency crew, materials) → real margin per job.
-- ☐ Sign-off exceptions → claims follow-through workflow.
+- ☑ Sign-off exceptions → claims follow-through workflow — SHIPPED 16 Jul (stage 1 call task +
+  stage 2 /claims register with status trail, resolution + amount, insurer evidence pack).
+  Still wanted from Connor: the policy docs (insurer, excess, notification deadline) so the
+  claim page can show the real insurer deadline instead of only the 7-day T&Cs window.
 - ☐ Client merge UI (dedupe tombstones have no writer). (ClickUp 869e378hj)
 - ☐ Customer move-day confirmation comms (crew names + arrival window).
 
