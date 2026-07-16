@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  BANK_FEED_DIGEST_THRESHOLD,
   PUSH_CATEGORIES,
+  bankPaymentPush,
   crewJobPush,
+  decideBankFeedPushes,
   decideEnquiryPushes,
   ENQUIRY_DIGEST_THRESHOLD,
   firstNameOnly,
@@ -10,6 +13,7 @@ import {
   newEnquiryPush,
   paymentPush,
   ukJobDayLabel,
+  type BankFeedArrival,
 } from "@/lib/push/categories";
 import { isAllowedPushRoute } from "@/lib/push/payload";
 
@@ -44,6 +48,11 @@ describe("firstNameOnly", () => {
     expect(firstNameOnly(null)).toBe("A customer");
     expect(firstNameOnly("   ", "Someone")).toBe("Someone");
   });
+
+  it("de-shouts bank-statement ALL-CAPS but leaves mixed case alone", () => {
+    expect(firstNameOnly("JOHN DOE")).toBe("John");
+    expect(firstNameOnly("McDonald")).toBe("McDonald");
+  });
 });
 
 describe("copy builders", () => {
@@ -71,6 +80,65 @@ describe("copy builders", () => {
 
   it("digest copy carries the count", () => {
     expect(newEnquiryDigestPush(7).body).toBe("7 new website enquiries need review.");
+  });
+});
+
+describe("bank-feed arrival pushes", () => {
+  const arrival = (over: Partial<BankFeedArrival>): BankFeedArrival => ({
+    rowId: "tx-row-1",
+    outcome: "suggested",
+    kind: "deposit",
+    name: "Jane Smith",
+    quoteRef: "MMR001",
+    ...over,
+  });
+
+  it("suggested match: first name + ref, deep link to /payments, NO £ amount", () => {
+    const e = bankPaymentPush(arrival({}));
+    expect(e.category).toBe("payment_event");
+    expect(e.title).toBe("Bank payment in");
+    expect(e.body).toBe("Looks like Jane's deposit (MMR001) — one tap to confirm.");
+    expect(e.body).not.toMatch(/£/);
+    expect(e.url).toBe("/payments");
+    expect(isAllowedPushRoute(e.url)).toBe(true);
+  });
+
+  it("one OS tag per transfer, so a later match REPLACES a 'needs matching' alert", () => {
+    const first = bankPaymentPush(arrival({ outcome: "attention", kind: null, quoteRef: null }));
+    const later = bankPaymentPush(arrival({}));
+    expect(first.eventKey).toBe(later.eventKey);
+    expect(first.eventKey).toBe("bank-tx-tx-row-1");
+  });
+
+  it("mismatch (right quote, wrong amount) reads as needs-a-look, never confirmable copy", () => {
+    const e = bankPaymentPush(arrival({ outcome: "attention", kind: "balance" }));
+    expect(e.body).toBe("A payment from Jane doesn't match what's due on MMR001 — needs a look.");
+    expect(e.body).not.toMatch(/confirm/i);
+  });
+
+  it("plain unmatched transfer uses the payer's first name off the statement", () => {
+    const e = bankPaymentPush(arrival({ outcome: "attention", kind: null, name: "JOHN DOE", quoteRef: null }));
+    expect(e.body).toBe("A payment from John needs matching to a job.");
+  });
+
+  it("storage references get storage copy; a missing name reads naturally", () => {
+    expect(bankPaymentPush(arrival({ kind: "storage", quoteRef: null })).body).toBe(
+      "A storage payment has arrived — check it on Payments.",
+    );
+    expect(bankPaymentPush(arrival({ name: null, quoteRef: null })).body).toBe(
+      "Looks like a customer's deposit — one tap to confirm.",
+    );
+  });
+
+  it("a burst collapses into one digest; small batches notify individually", () => {
+    const many = Array.from({ length: BANK_FEED_DIGEST_THRESHOLD + 1 }, (_, i) => arrival({ rowId: `r${i}` }));
+    const digest = decideBankFeedPushes(many);
+    expect(digest).toHaveLength(1);
+    expect(digest[0].body).toBe(`${many.length} bank payments arrived and need checking.`);
+    expect(digest[0].url).toBe("/payments");
+
+    expect(decideBankFeedPushes(many.slice(0, 2))).toHaveLength(2);
+    expect(decideBankFeedPushes([])).toEqual([]);
   });
 });
 

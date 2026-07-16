@@ -92,8 +92,10 @@ export interface PushEvent {
 export function firstNameOnly(name: string | null | undefined, fallback = "A customer"): string {
   const first = (name ?? "").trim().split(/\s+/)[0] ?? "";
   if (!first) return fallback;
-  // Title-case so "freddy" reads as "Freddy" on a lock screen.
-  return first.charAt(0).toUpperCase() + first.slice(1);
+  // Title-case so "freddy" reads as "Freddy" — and bank-statement ALL-CAPS
+  // ("JOHN DOE") stops shouting, while mixed case (McDonald) is left alone.
+  const rest = first === first.toUpperCase() ? first.slice(1).toLowerCase() : first.slice(1);
+  return first.charAt(0).toUpperCase() + rest;
 }
 
 /* ------------------------------------------------------------ copy builders */
@@ -134,6 +136,64 @@ export function paymentPush(opts: {
     body: `${first} has paid their ${opts.kind}.`,
     url: opts.leadId ? `/leads/${opts.leadId}` : "/bookings",
   };
+}
+
+/* ---------------------------------------------- bank-feed arrivals (Monzo) */
+
+/** A transaction the 2-min bank-feed sync just surfaced for the office —
+ *  either an actionable suggestion (one tap to confirm on /payments) or a
+ *  transfer that needs a human (no match / wrong amount). */
+export interface BankFeedArrival {
+  /** bank_transactions row id — one OS tag per transfer, so a later
+   *  "now matched" push REPLACES the earlier "needs matching" one. */
+  rowId: string;
+  outcome: "suggested" | "attention";
+  kind: "deposit" | "balance" | "storage" | null;
+  /** Matched customer when known, else the payer name off the statement. */
+  name: string | null;
+  quoteRef: string | null;
+}
+
+export function bankPaymentPush(a: BankFeedArrival): PushEvent {
+  const first = firstNameOnly(a.name, "a customer");
+  let body: string;
+  if (a.outcome === "suggested") {
+    body =
+      a.kind === "storage"
+        ? "A storage payment has arrived — check it on Payments."
+        : `Looks like ${first}'s ${a.kind ?? "payment"}${a.quoteRef ? ` (${a.quoteRef})` : ""} — one tap to confirm.`;
+  } else {
+    body = a.quoteRef
+      ? `A payment from ${first} doesn't match what's due on ${a.quoteRef} — needs a look.`
+      : `A payment from ${first} needs matching to a job.`;
+  }
+  return {
+    category: "payment_event",
+    eventKey: `bank-tx-${a.rowId}`,
+    title: "Bank payment in",
+    body,
+    url: "/payments",
+  };
+}
+
+export function bankPaymentDigestPush(count: number): PushEvent {
+  return {
+    category: "payment_event",
+    eventKey: "bank-feed-digest",
+    title: "Bank payments in",
+    body: `${count} bank payments arrived and need checking.`,
+    url: "/payments",
+  };
+}
+
+/** Storm guard, same shape as the enquiry one: a burst (a re-pointed sheet,
+ *  a busy Friday) collapses into one digest instead of a phone full of pings. */
+export const BANK_FEED_DIGEST_THRESHOLD = 3;
+
+export function decideBankFeedPushes(arrivals: readonly BankFeedArrival[]): PushEvent[] {
+  if (arrivals.length === 0) return [];
+  if (arrivals.length > BANK_FEED_DIGEST_THRESHOLD) return [bankPaymentDigestPush(arrivals.length)];
+  return arrivals.map(bankPaymentPush);
 }
 
 /** "Sat 19 Jul" in UK time from an ISO timestamp — the only job detail safe

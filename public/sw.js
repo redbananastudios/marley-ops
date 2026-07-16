@@ -20,6 +20,7 @@ const ALLOWED_ROUTE_PREFIXES = [
   "/leads",
   "/quotes",
   "/bookings",
+  "/payments",
   "/follow-ups",
   "/clients",
   "/documents",

@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { BANK_FEED_TAB, isInboundPayment, parseSheetRows, type BankTxRow } from "@/lib/bank-feed/parse";
 import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
+import { decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
+import { sendPushForEvent } from "@/lib/push/send";
 
 /**
  * Bank-feed sync (cron-driven): read the Monzo→Sheets export, upsert rows by
@@ -125,6 +127,8 @@ export type BankFeedSyncSummary = {
   suggested: number;
   mismatched: number;
   unmatched: number;
+  /** Admin push notifications fired for transfers surfaced THIS pass. */
+  notified: number;
 };
 
 /** Monzo mutates recent rows (settlements, enrichment); older settled rows
@@ -134,7 +138,16 @@ const MUTABLE_WINDOW_DAYS = 35;
 
 export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSummary> {
   if (!bankFeedConfigured()) {
-    return { disabled: true, rowsInSheet: 0, skippedRows: 0, upserted: 0, suggested: 0, mismatched: 0, unmatched: 0 };
+    return {
+      disabled: true,
+      rowsInSheet: 0,
+      skippedRows: 0,
+      upserted: 0,
+      suggested: 0,
+      mismatched: 0,
+      unmatched: 0,
+      notified: 0,
+    };
   }
   const { rows, skipped } = await fetchSheet();
 
@@ -185,7 +198,9 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   const pending = await fetchAllRows((f, t) =>
     sb
       .from("bank_transactions")
-      .select("id, amount, tx_type, reference, description, status, matched_quote_id, match_kind, match_confidence")
+      .select(
+        "id, amount, tx_type, counterparty, reference, description, status, matched_quote_id, match_kind, match_confidence",
+      )
       .in("status", ["info", "unmatched", "suggested"])
       .order("id")
       .range(f, t),
@@ -203,6 +218,9 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   let suggested = 0;
   let mismatched = 0;
   let unmatched = 0;
+  // Transfers SURFACED this pass (fresh inbound money, or an old unmatched
+  // transfer a newly-raised invoice just claimed) — these page the admins.
+  const arrivals: BankFeedArrival[] = [];
   for (const row of pending) {
     const inbound = isInboundPayment({ amount: Number(row.amount), txType: row.tx_type as string | null });
     if (!inbound) continue; // stays info
@@ -249,8 +267,46 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
         .eq("id", row.id)
         .in("status", ["info", "unmatched", "suggested"]);
       if (error) throw new Error(`bank_transactions match update failed: ${error.message}`);
+
+      // Push-worthy = a transfer ENTERING the queue: info→suggested/unmatched
+      // (fresh money in) or unmatched→suggested (an invoice claimed it). A
+      // re-pointed suggestion or a mismatch flip on an already-surfaced row
+      // stays silent — it was paged once and is still sitting on /payments.
+      const enteredSuggested = next.status === "suggested" && row.status !== "suggested";
+      const freshUnmatched = next.status === "unmatched" && row.status === "info";
+      if (enteredSuggested || freshUnmatched) {
+        const quoteId = m && m.type !== "storage" ? m.quoteId : null;
+        const item = quoteId ? open.find((o) => o.quoteId === quoteId) : undefined;
+        arrivals.push({
+          rowId: row.id as string,
+          outcome: enteredSuggested ? "suggested" : "attention",
+          kind: (next.match_kind ?? null) as BankFeedArrival["kind"],
+          name: item?.customer ?? (row.counterparty as string | null) ?? null,
+          quoteRef: item?.quoteRef ?? null,
+        });
+      }
     }
   }
 
-  return { rowsInSheet: rows.length, skippedRows: skipped, upserted, suggested, mismatched, unmatched };
+  // Page the ADMINS (Peter + Connor — their explicit ask; estimators keep
+  // getting the post-confirm "Deposit received" push instead). Best-effort:
+  // sendPushForEvent never throws, and the payment_event kill switch applies.
+  const events = decideBankFeedPushes(arrivals);
+  if (events.length > 0) {
+    const { data: admins } = await sb.from("profiles").select("id").eq("role", "admin").eq("active", true);
+    const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
+    for (const event of events) {
+      await sendPushForEvent(event, { recipientUserIds: adminIds });
+    }
+  }
+
+  return {
+    rowsInSheet: rows.length,
+    skippedRows: skipped,
+    upserted,
+    suggested,
+    mismatched,
+    unmatched,
+    notified: events.length,
+  };
 }
