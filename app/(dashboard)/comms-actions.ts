@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
-import { ownerFromFor } from "@/lib/comms/sender";
+import { leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
 import {
@@ -87,19 +87,27 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
   // Sales identity: a lead-linked email with no explicit sender goes out as
   // the lead's OWNER ("Luke at Marley Moves <luke@marleymoves.co.uk>") so the
   // customer sees the person they're dealing with, not a shared mailbox.
-  // Unowned leads / off-domain logins fall back to the house identity
-  // (docs/email-identity-plan.md).
+  // Resolution uses the CANONICAL ownership rule (leads.estimator_id, else the
+  // survey-derived estimator — same as the chase cron and the inbound-reply
+  // forward, so one thread is never fronted by two people); the quote's
+  // creator is only a last resort. Unowned leads / off-domain logins fall back
+  // to the house identity (docs/email-identity-plan.md).
   if (input.channel === "email" && !input.from) {
-    let estimatorId: string | null = null;
-    if (input.leadId) {
-      const { data: l } = await sb.from("leads").select("estimator_id").eq("id", input.leadId).maybeSingle();
-      estimatorId = (l?.estimator_id as string | null) ?? null;
+    let leadId: string | null = input.leadId ?? null;
+    let lastResort: string | null = null;
+    if (input.quoteId) {
+      const { data: q } = await sb
+        .from("quotes")
+        .select("lead_id, estimator_id")
+        .eq("id", input.quoteId)
+        .maybeSingle();
+      leadId = leadId ?? ((q?.lead_id as string | null) ?? null);
+      lastResort = (q?.estimator_id as string | null) ?? null;
     }
-    if (!estimatorId && input.quoteId) {
-      const { data: q } = await sb.from("quotes").select("estimator_id").eq("id", input.quoteId).maybeSingle();
-      estimatorId = (q?.estimator_id as string | null) ?? null;
+    if (leadId || lastResort) {
+      const owner = await leadOwnerIdentity(sb, leadId, lastResort);
+      if (owner.name || owner.email) input = { ...input, from: ownerFrom(owner.name, owner.email) };
     }
-    if (estimatorId) input = { ...input, from: await ownerFromFor(sb, estimatorId) };
   }
 
   const result = await dispatchComm(sb, user?.id ?? null, input);

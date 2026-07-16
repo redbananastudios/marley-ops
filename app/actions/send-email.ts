@@ -73,6 +73,11 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
       .maybeSingle();
     if (q?.accept_token) replyTo = replyAddressFor(q.accept_token);
   }
+  // No relay token → replies go to the composer's own company mailbox (their
+  // From address), keeping the conversation with the person who wrote it.
+  if (!replyTo && office.email?.toLowerCase().endsWith("@marleymoves.co.uk")) {
+    replyTo = office.email;
+  }
 
   const result = await dispatchComm(sb, office.id, {
     channel: "email",

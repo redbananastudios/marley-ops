@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { ownerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
+import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
 
@@ -167,27 +167,36 @@ export async function POST(req: Request) {
 
   // 4. Forward to the LEAD OWNER's own mailbox (owner-only — Peter's explicit
   //    pick 2026-07-16: Connor must not receive Luke's threads; the panel's
-  //    follow-up queue is the shared-visibility net). Unowned lead, inactive
-  //    owner or off-domain login → the front door.
-  const owner = await ownerIdentity(sb, quote.estimator_id);
+  //    follow-up queue is the shared-visibility net). Ownership uses the SAME
+  //    canonical rule as the outbound chase From (leads.estimator_id, else the
+  //    survey-derived estimator, else the quote's creator) — the person whose
+  //    name fronted the email is the person who receives its reply. Unowned /
+  //    inactive / off-domain → the front door. Robot senders (bounces,
+  //    auto-responders) are logged + pause the chase but are NOT forwarded.
+  const owner = await leadOwnerIdentity(sb, quote.lead_id, quote.estimator_id);
   const ownerMailbox =
     owner.email && owner.email.toLowerCase().endsWith("@marleymoves.co.uk") ? owner.email : null;
   const forwardTo = ownerMailbox || process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk";
-  await sendEmail({
-    to: forwardTo,
-    subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
-    html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
-      <p><strong>${quote.customer_name ?? "Customer"}</strong> (${from}) replied about quote <strong>${quote.quote_ref}</strong>. Chasing is paused.</p>
+  const robotSender = !shouldForwardUnmatched(from);
+  if (!robotSender) {
+    await sendEmail({
+      to: forwardTo,
+      subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
+      html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
+      <p><strong>${esc(quote.customer_name ?? "Customer")}</strong> (${esc(from)}) replied about quote <strong>${esc(quote.quote_ref)}</strong>. Chasing is paused.</p>
       <hr style="border:none;border-top:1px solid #e4e4e7;">
       <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
       <hr style="border:none;border-top:1px solid #e4e4e7;">
       <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${esc(from)}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
     </div>`,
-    replyTo: from,
-  });
+      replyTo: from,
+    });
+  }
 
   await sendOpsAlert(`Customer replied — ${quote.quote_ref}`, [
-    `${quote.customer_name ?? from} replied to a chase email (${subject}). Chasing paused; forwarded to ${forwardTo}; follow-up opened.`,
+    robotSender
+      ? `An automated message (${esc(from)}) hit the reply address for ${esc(quote.quote_ref)} — likely a bounce or auto-reply. Chasing paused; check the lead's Comms tab.`
+      : `${esc(quote.customer_name ?? from)} replied to a chase email (${esc(subject)}). Chasing paused; forwarded to ${forwardTo}; follow-up opened.`,
   ]);
 
   return NextResponse.json({ ok: true, matched: true });

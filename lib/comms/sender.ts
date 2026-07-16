@@ -43,6 +43,9 @@ export const capName = (seg: string): string => {
 
 const onDomain = (email: string | null | undefined): string | null => {
   const addr = (email ?? "").trim().toLowerCase();
+  // Reject anything that could smuggle a second address or header syntax into
+  // the From — the address part must be a plain local@domain token.
+  if (!/^[a-z0-9._+-]+@[a-z0-9.-]+$/.test(addr)) return null;
   return addr.endsWith(`@${MARLEY_EMAIL_DOMAIN}`) ? addr : null;
 };
 
@@ -54,7 +57,11 @@ const onDomain = (email: string | null | undefined): string | null => {
  */
 export function ownerFrom(name: string | null | undefined, email: string | null | undefined): string {
   const addr = onDomain(email);
-  const firstWord = (name ?? "").trim().split(/\s+/)[0] ?? "";
+  // Display names come from profiles.full_name (office-editable free text) —
+  // strip header/address syntax so a name can never break out of the display
+  // slot ("Luke <x@y>" stays a name, not a second address).
+  const cleaned = (name ?? "").replace(/[<>"\\;,\r\n]/g, " ").trim();
+  const firstWord = cleaned.split(/\s+/)[0] ?? "";
   const display = firstWord ? capName(firstWord) : addr ? capName(addr.split("@")[0]) : "";
   if (!display) return HELLO_FROM;
   return `${display} at Marley Moves <${addr ?? "hello@marleymoves.co.uk"}>`;
@@ -81,15 +88,21 @@ export function opsAlertRecipient(category: OpsAlertCategory = "business"): stri
 /**
  * The unmatched-inbound catch-all must never forward our own mail back at
  * ourselves (bounce loops) or machine chatter. True = safe to forward to a
- * human mailbox.
+ * human mailbox. Robot detection anchors on the address's LOCAL PART — a real
+ * customer at info@bounce-castles.co.uk or "Jenny Osbounce" must not be
+ * swallowed by a substring match.
  */
 export function shouldForwardUnmatched(fromAddress: string | null | undefined): boolean {
-  const addr = (fromAddress ?? "").toLowerCase();
-  if (!addr.includes("@")) return false;
-  const ours = [`@${MARLEY_EMAIL_DOMAIN}`, `@reply.${MARLEY_EMAIL_DOMAIN}`, "@resend.dev", "@amazonses.com"];
-  if (ours.some((d) => addr.includes(d))) return false;
-  const robots = ["mailer-daemon", "postmaster@", "no-reply", "noreply", "bounce"];
-  return !robots.some((r) => addr.includes(r));
+  const raw = (fromAddress ?? "").toLowerCase();
+  // Pull the bare address out of "Display Name <addr>" or use the string as-is.
+  const addr = (/<([^<>]+)>/.exec(raw)?.[1] ?? raw).trim();
+  const at = addr.lastIndexOf("@");
+  if (at <= 0) return false;
+  const local = addr.slice(0, at);
+  const domain = addr.slice(at + 1);
+  const ours = [MARLEY_EMAIL_DOMAIN, `reply.${MARLEY_EMAIL_DOMAIN}`, "resend.dev", "amazonses.com"];
+  if (ours.some((d) => domain === d || domain.endsWith(`.${d}`))) return false;
+  return !/^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce|bounces)([@+._-]|$)/.test(local);
 }
 
 /* ------------------------------------------------------------- IO helpers */
@@ -101,17 +114,55 @@ export interface OwnerIdentity {
   email: string | null;
 }
 
-/** A lead owner's name + login email — only while they're ACTIVE (a departed
- *  team member's identity must never keep fronting customer email). */
+/** A lead owner's name + login email — only while they're ACTIVE and OFFICE
+ *  (a departed member or a crew login must never front customer email). */
 export async function ownerIdentity(sb: Sb, estimatorId: string | null | undefined): Promise<OwnerIdentity> {
   if (!estimatorId) return { name: null, email: null };
   const { data } = await sb
     .from("profiles")
-    .select("full_name, email, active")
+    .select("full_name, email, role, active")
     .eq("id", estimatorId)
     .maybeSingle();
-  if (!data?.active) return { name: null, email: null };
+  if (!data?.active || (data.role !== "admin" && data.role !== "estimator")) {
+    return { name: null, email: null };
+  }
   return { name: data.full_name ?? null, email: data.email ?? null };
+}
+
+/**
+ * THE canonical "whose lead is this" resolver for email identity — the same
+ * rule as lib/leads/ownership.ts (explicit leads.estimator_id, else whoever is
+ * assigned the earliest non-cancelled survey), so the person FRONTING a thread
+ * and the person RECEIVING its replies can never diverge. `lastResortId`
+ * (typically the quote's creator) is only consulted when the lead rule yields
+ * nobody.
+ */
+export async function leadOwnerIdentity(
+  sb: Sb,
+  leadId: string | null | undefined,
+  lastResortId?: string | null,
+): Promise<OwnerIdentity> {
+  let estimatorId: string | null = null;
+  if (leadId) {
+    const { data: lead } = await sb.from("leads").select("estimator_id").eq("id", leadId).maybeSingle();
+    estimatorId = (lead?.estimator_id as string | null) ?? null;
+    if (!estimatorId) {
+      const { data: appt } = await sb
+        .from("appointments")
+        .select("estimator_id")
+        .eq("lead_id", leadId)
+        .eq("appt_type", "survey")
+        .neq("status", "cancelled")
+        .not("estimator_id", "is", null)
+        .order("starts_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      estimatorId = (appt?.estimator_id as string | null) ?? null;
+    }
+  }
+  const owner = await ownerIdentity(sb, estimatorId);
+  if (owner.name || owner.email) return owner;
+  return lastResortId ? ownerIdentity(sb, lastResortId) : owner;
 }
 
 /** Convenience: the From identity for a lead/quote's owner in one call. */

@@ -175,7 +175,9 @@ export async function GET(req: Request) {
     .select("lead_id, estimator_id, appt_type, status")
     .in("lead_id", leads.map((l) => l.id))
     .eq("appt_type", "survey")
-    .neq("status", "cancelled");
+    .neq("status", "cancelled")
+    .not("estimator_id", "is", null)
+    .order("starts_at", { ascending: true });
   const surveyEstimator = new Map<string, string>();
   for (const a of surveyAppts ?? []) {
     if (a.lead_id && a.estimator_id && !surveyEstimator.has(a.lead_id)) {

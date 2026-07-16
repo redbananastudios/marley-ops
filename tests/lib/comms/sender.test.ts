@@ -49,6 +49,23 @@ describe("ownerFrom — the personal sales identity", () => {
     );
     expect(ownerFrom("LUKE", null)).toBe("Luke at Marley Moves <hello@marleymoves.co.uk>");
   });
+
+  it("header-injection hardening: names lose address syntax; malformed addresses are rejected", () => {
+    // A display name can never smuggle a second address into the From header.
+    expect(ownerFrom('Luke <evil@attacker.com>', "luke@marleymoves.co.uk")).toBe(
+      "Luke at Marley Moves <luke@marleymoves.co.uk>",
+    );
+    expect(ownerFrom('"Luke", CEO\r\nBcc: x', "luke@marleymoves.co.uk")).toBe(
+      "Luke at Marley Moves <luke@marleymoves.co.uk>",
+    );
+    // An email value that isn't a plain local@domain token never becomes the sender.
+    expect(ownerFrom("Luke", "luke@marleymoves.co.uk>bcc:x@y.com")).toBe(
+      "Luke at Marley Moves <hello@marleymoves.co.uk>",
+    );
+    expect(ownerFrom("Luke", "luke smith@marleymoves.co.uk")).toBe(
+      "Luke at Marley Moves <hello@marleymoves.co.uk>",
+    );
+  });
 });
 
 describe("capName", () => {
@@ -98,8 +115,18 @@ describe("shouldForwardUnmatched — the catch-all loop guard", () => {
     expect(shouldForwardUnmatched("MAILER-DAEMON@mx.example.com")).toBe(false);
     expect(shouldForwardUnmatched("postmaster@somewhere.com")).toBe(false);
     expect(shouldForwardUnmatched("no-reply@notifications.example.com")).toBe(false);
+    expect(shouldForwardUnmatched("do-not-reply@service.example.com")).toBe(false);
     expect(shouldForwardUnmatched("bounces@amazonses.com")).toBe(false);
+    expect(shouldForwardUnmatched("bounce+luke=x@mailer.example.com")).toBe(false);
     expect(shouldForwardUnmatched(null)).toBe(false);
     expect(shouldForwardUnmatched("not-an-email")).toBe(false);
+  });
+
+  it("robot check anchors on the LOCAL PART — real people at bounce-ish addresses still forward", () => {
+    expect(shouldForwardUnmatched("info@bounce-castles.co.uk")).toBe(true);
+    expect(shouldForwardUnmatched("jenny.osbounce@gmail.com")).toBe(true);
+    expect(shouldForwardUnmatched('"Bounce Castles Ltd" <sales@partyhire.example.com>')).toBe(true);
+    // ...but a lookalike domain of ours never gets forwarded to
+    expect(shouldForwardUnmatched("x@sub.reply.marleymoves.co.uk")).toBe(false);
   });
 });

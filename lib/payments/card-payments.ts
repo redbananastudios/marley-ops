@@ -20,7 +20,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
-import { accountsFrom } from "@/lib/comms/sender";
+import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
 import {
   buildHostedSaleFields,
@@ -496,8 +496,10 @@ export async function refundCardPayment(
       : `We've refunded ${label} to your card${endsLine}. It normally appears on your statement within 3–5 working days.`;
     await dispatchComm(sb, input.actorId, {
       channel: "email",
-      // Money desk identity (docs/email-identity-plan.md).
+      // Money desk identity (docs/email-identity-plan.md) — refund questions
+      // go back to accounts, like every other money email.
       from: accountsFrom(),
+      replyTo: accountsAddress(),
       to: quote.customer_email,
       subject: voided
         ? `Your ${label} card payment has been cancelled (${quote.quote_ref})`

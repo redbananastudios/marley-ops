@@ -11,7 +11,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { dispatchComm } from "@/lib/comms/dispatch";
 import { buildReviewRequestEmailHtml } from "@/lib/comms/payment-email";
 import { replyAddressFor } from "@/lib/quote/chase";
-import { ownerFromFor } from "@/lib/comms/sender";
+import { leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
 
 type Sb = SupabaseClient<Database>;
 
@@ -71,6 +71,9 @@ export async function sendReviewRequest(
       ? REVIEW_LINKS.checkatrade
       : { platform: "Google", url: googleUrl };
 
+  const owner = await leadOwnerIdentity(sb, leadId, lead.estimator_id);
+  const reviewFrom = ownerFrom(owner.name, owner.email);
+
   // Prefer the published Resend template (copy editable in the dashboard, no
   // deploy); the in-repo HTML is the fallback when the env id isn't set.
   const templateId = process.env.RESEND_TEMPLATE_REVIEW_REQUEST;
@@ -89,8 +92,9 @@ export async function sendReviewRequest(
       : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }) }),
     replyTo: token ? replyAddressFor(token) : undefined,
     // A personal ask converts better — the review request comes from the lead's
-    // owner (falls back to the house identity when unowned).
-    from: await ownerFromFor(sb, lead.estimator_id),
+    // owner via the canonical rule (explicit owner, else the surveying
+    // estimator; house identity when unowned).
+    from: reviewFrom,
     leadId,
     clientId: lead.client_id ?? undefined,
   });
