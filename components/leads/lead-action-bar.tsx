@@ -30,6 +30,7 @@ import {
 import { toast } from "sonner";
 import { ContactAction } from "@/components/ui/contact-action";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
+import { CaptureLauncher } from "@/components/capture/capture-sheet";
 import {
   markLeadContactedAction,
   updateLeadStatusAction,
@@ -121,6 +122,9 @@ export function LeadActionBar({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 px-5 py-4">
+      {/* job content capture — photos/video/voice for records + marketing
+          (estimators shoot survey material; docs/job-content-capture-prd.md) */}
+      <CaptureLauncher anchor={{ leadId }} className={btn} />
       {/* contact — always available. When the lead is still uncontacted the call
           is the primary CTA (deliberate red); otherwise the neutral central
           contact style keeps every contact action uniform across the app. */}

@@ -1802,6 +1802,130 @@ export type Database = {
           },
         ]
       }
+      job_media: {
+        Row: {
+          appointment_id: string | null
+          attached_to: string | null
+          bytes: number | null
+          caption: string
+          captured_by: string | null
+          captured_by_name: string
+          client_id: string | null
+          consent_state: string
+          created_at: string
+          duration_s: number | null
+          id: string
+          kind: string
+          lead_id: string
+          marketing_approved_at: string | null
+          marketing_approved_by: string | null
+          mime: string | null
+          storage_path: string
+          synced_at: string | null
+          tag: string | null
+          transcript: string | null
+          transcript_attempts: number
+          transcript_error: string | null
+          transcript_status: string
+          updated_at: string
+        }
+        Insert: {
+          appointment_id?: string | null
+          attached_to?: string | null
+          bytes?: number | null
+          caption?: string
+          captured_by?: string | null
+          captured_by_name?: string
+          client_id?: string | null
+          consent_state?: string
+          created_at?: string
+          duration_s?: number | null
+          id?: string
+          kind: string
+          lead_id: string
+          marketing_approved_at?: string | null
+          marketing_approved_by?: string | null
+          mime?: string | null
+          storage_path: string
+          synced_at?: string | null
+          tag?: string | null
+          transcript?: string | null
+          transcript_attempts?: number
+          transcript_error?: string | null
+          transcript_status?: string
+          updated_at?: string
+        }
+        Update: {
+          appointment_id?: string | null
+          attached_to?: string | null
+          bytes?: number | null
+          caption?: string
+          captured_by?: string | null
+          captured_by_name?: string
+          client_id?: string | null
+          consent_state?: string
+          created_at?: string
+          duration_s?: number | null
+          id?: string
+          kind?: string
+          lead_id?: string
+          marketing_approved_at?: string | null
+          marketing_approved_by?: string | null
+          mime?: string | null
+          storage_path?: string
+          synced_at?: string | null
+          tag?: string | null
+          transcript?: string | null
+          transcript_attempts?: number
+          transcript_error?: string | null
+          transcript_status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "job_media_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_media_attached_to_fkey"
+            columns: ["attached_to"]
+            isOneToOne: false
+            referencedRelation: "job_media"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_media_captured_by_fkey"
+            columns: ["captured_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_media_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_media_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_media_marketing_approved_by_fkey"
+            columns: ["marketing_approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       job_notes: {
         Row: {
           appointment_id: string | null
@@ -1899,6 +2023,7 @@ export type Database = {
           lost_at: string | null
           lost_note: string | null
           lost_reason: string | null
+          media_consent: string
           msclkid: string | null
           name: string | null
           notes: string | null
@@ -1962,6 +2087,7 @@ export type Database = {
           lost_at?: string | null
           lost_note?: string | null
           lost_reason?: string | null
+          media_consent?: string
           msclkid?: string | null
           name?: string | null
           notes?: string | null
@@ -2025,6 +2151,7 @@ export type Database = {
           lost_at?: string | null
           lost_note?: string | null
           lost_reason?: string | null
+          media_consent?: string
           msclkid?: string | null
           name?: string | null
           notes?: string | null

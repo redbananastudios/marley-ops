@@ -34,6 +34,7 @@ import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { CollectContractButton } from "@/components/crew/collect-contract-button";
 import { CompleteJobButton } from "@/components/crew/complete-job-button";
 import { CrewActionBar } from "@/components/crew/crew-action-bar";
+import { CaptureFab } from "@/components/capture/capture-sheet";
 
 /**
  * /my-jobs/[id] — the job sheet AS A WEB PAGE (Peter, 2026-07-10: "we should
@@ -404,6 +405,9 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
           If anything on this job looks wrong, call the office before setting off.
         </div>
       </main>
+
+      {/* job content capture — floats above the pinned bar (thumb zone) */}
+      <CaptureFab anchor={{ appointmentId: id }} />
 
       {/* one-handed cab actions — pinned so they never scroll away */}
       <CrewActionBar

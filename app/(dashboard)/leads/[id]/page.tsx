@@ -28,6 +28,8 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadJobNotesForLead } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
+import { JobMediaList } from "@/components/content/job-media-list";
+import { loadJobMedia } from "@/lib/content/job-media-load";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -181,7 +183,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Signed paperwork on this enquiry (final-pass audit: the lead page is where
   // the office lands from Leads/Board/Follow-ups — evidence must show here,
   // not just on the quote page).
-  const [{ data: sigRow }, { data: completionRow }, crewNotes] = await Promise.all([
+  const [{ data: sigRow }, { data: completionRow }, crewNotes, jobMedia] = await Promise.all([
     supabase
       .from("signatures")
       .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
@@ -200,6 +202,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .limit(1)
       .maybeSingle(),
     loadJobNotesForLead(createAdminClient(), id),
+    loadJobMedia({ leadId: id, limit: 40 }),
   ]);
 
   let leadCompletion: CompletionView | null = null;
@@ -486,6 +489,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           {crewNotes.length ? (
             <div className="mt-5">
               <CrewNotesCard notes={crewNotes} canDelete />
+            </div>
+          ) : null}
+
+          {jobMedia.length ? (
+            <div className="mt-5 rounded-lg border border-border bg-card">
+              <div className="border-b px-4 py-3">
+                <p className="eyebrow">Job content</p>
+                <p className="mt-0.5 text-xs text-mist-400">
+                  Captured on the job — approve items to make them usable for marketing.
+                </p>
+              </div>
+              <JobMediaList items={jobMedia} />
             </div>
           ) : null}
 

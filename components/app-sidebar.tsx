@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
+  Camera,
   Banknote,
   BarChart3,
   BellRing,
@@ -83,6 +84,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/clients", label: "Clients", icon: Contact },
       { href: "/documents", label: "Documents", icon: FileCheck2 },
+      { href: "/content", label: "Content", icon: Camera },
     ],
   },
   {

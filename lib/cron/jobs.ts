@@ -103,6 +103,15 @@ export const CRON_JOBS: CronJobMeta[] = [
     endpoint: "/api/cron/bank-feed",
   },
   {
+    slug: "job-media-transcribe",
+    label: "Voice-note transcripts",
+    schedule: "*/5 * * * *",
+    cadence: "Every 5 minutes",
+    description: "Transcribes voice notes captured on jobs (Gemini) so the office can read them in the Content queue.",
+    maxAgeMins: 30,
+    endpoint: "/api/cron/job-media-transcribe",
+  },
+  {
     slug: "weekly-digest",
     label: "Weekly owner digest",
     schedule: "0 6 * * 1",
