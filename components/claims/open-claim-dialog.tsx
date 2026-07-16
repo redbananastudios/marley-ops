@@ -37,7 +37,16 @@ export function OpenClaimDialog({ leadId }: { leadId: string }) {
 
   async function submit() {
     setBusy(true);
-    const res = await openClaimAction(leadId, { channel, description });
+    let res: Awaited<ReturnType<typeof openClaimAction>>;
+    try {
+      res = await openClaimAction(leadId, { channel, description });
+    } catch {
+      // A dropped request throws instead of returning ok:false; busy must
+      // reset or every exit from the dialog stays blocked.
+      setBusy(false);
+      toast.error("No signal — try again.");
+      return;
+    }
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not open the claim.");

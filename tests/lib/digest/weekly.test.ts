@@ -71,6 +71,35 @@ describe("buildWeeklyDigest — the numbers", () => {
     expect(d.lastWeek.moneyIn).toBe(0);
   });
 
+  it("a price-revision supersede (deposit copied onto the new quote) counts the deposit once per lead", () => {
+    const q = (over: Record<string, unknown>) => ({
+      lead_id: "l1",
+      quote_ref: "MMR010",
+      customer_name: "Jane Smith",
+      email_sent_at: null,
+      accepted_at: null,
+      deposit_paid_at: "2026-07-14T09:00:00Z",
+      deposit_amount: 100,
+      agreed_price: null,
+      grand_total: null,
+      balance_invoice_amount: null,
+      ...over,
+    });
+    const d = buildWeeklyDigest(
+      emptyInputs({
+        quotes: [
+          q({ agreed_price: 1000 }), // superseded original, deposit fields intact
+          q({ quote_ref: "MMR011", agreed_price: 1200 }), // re-quote carrying the copied deposit
+          // lead-less quotes still count individually
+          q({ lead_id: null, quote_ref: "MMR012", deposit_amount: 50 }),
+          q({ lead_id: null, quote_ref: "MMR013", deposit_amount: 50 }),
+        ],
+      }),
+      SEND,
+    );
+    expect(d.thisWeek.moneyIn).toBe(200); // £100 once for l1 + £50 + £50
+  });
+
   it("wins/sent/lost land in the right week; biggest win is named first-name-only", () => {
     const q = (over: Record<string, unknown>) => ({
       lead_id: null,

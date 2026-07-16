@@ -44,10 +44,14 @@ interface TrayItem {
   key: string;
   kind: JobMediaKind;
   path: string;
+  /** Source bytes retained so a failed upload can retry without re-shooting. */
+  blob: Blob;
   previewUrl: string | null;
   progress: number; // 0-100
   status: "uploading" | "ready" | "failed";
   retry?: () => void;
+  /** Stops the in-flight video transfer (TUS) — removal must not keep uploading. */
+  abort?: () => void;
   mime: string | null;
   bytes: number | null;
   durationS: number | null;
@@ -64,8 +68,33 @@ const TAG_LABELS: Record<JobMediaTag, string> = {
   other: "Other",
 };
 
+/** Some Android camera apps hand back files with an EMPTY type — infer from
+ *  the extension rather than silently dropping the capture. */
+const EXT_MIME: Record<string, string> = {
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  mp4: "video/mp4",
+  m4v: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  "3gp": "video/3gpp",
+};
+
+function resolveMime(file: File, kind: "photo" | "video"): string | null {
+  const prefix = kind === "photo" ? "image/" : "video/";
+  if (file.type.startsWith(prefix)) return file.type;
+  if (file.type) return null;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  const inferred = EXT_MIME[ext];
+  return inferred?.startsWith(prefix) ? inferred : null;
+}
+
 /** ~2000px JPEG downscale so a 12MP HEIC doesn't eat the crew's data plan. */
-async function downscalePhoto(file: File): Promise<{ blob: Blob; mime: string }> {
+async function downscalePhoto(file: File, fallbackMime: string): Promise<{ blob: Blob; mime: string }> {
   try {
     const bitmap = await createImageBitmap(file);
     const max = 2000;
@@ -82,8 +111,11 @@ async function downscalePhoto(file: File): Promise<{ blob: Blob; mime: string }>
   } catch {
     /* HEIC decode can fail — upload the original, the office can still view it */
   }
-  return { blob: file, mime: file.type || "image/jpeg" };
+  return { blob: file, mime: fallbackMime };
 }
+
+/** A retry after a lost response hits "already exists" — the object landed. */
+const uploadAlreadyThere = (message: string) => /already exists/i.test(message);
 
 export function CaptureSheet({
   anchor,
@@ -97,31 +129,48 @@ export function CaptureSheet({
   const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [ctx, setCtx] = useState<{ leadId: string; consent: string } | null>(null);
+  const [ctxError, setCtxError] = useState(false);
+  const [ctxAttempt, setCtxAttempt] = useState(0);
   const [mode, setMode] = useState<JobMediaKind>("photo");
   const [tray, setTray] = useState<TrayItem[]>([]);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [saving, startSaving] = useTransition();
   const [askConsent, setAskConsent] = useState(false);
+  const [recordingLive, setRecordingLive] = useState(false);
   const photoInput = useRef<HTMLInputElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
+
+  // Synchronous mirror of the tray — cap checks and save() must read the LIVE
+  // list; a multi-select loop never re-renders, so render closures go stale.
+  const trayRef = useRef<TrayItem[]>([]);
+  const setTrayTracked = useCallback((updater: (t: TrayItem[]) => TrayItem[]) => {
+    trayRef.current = updater(trayRef.current);
+    setTray(trayRef.current);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    void getCaptureContextAction(anchor).then((res) => {
-      if (cancelled) return;
-      if (!res.ok) {
-        toast.error(res.error);
-        onClose();
-        return;
-      }
-      setCtx({ leadId: res.leadId, consent: res.consent });
-      setAskConsent(res.consent === "unset");
-    });
+    setCtxError(false);
+    void getCaptureContextAction(anchor)
+      .then((res) => {
+        if (cancelled) return;
+        if (!res.ok) {
+          toast.error(res.error);
+          onClose();
+          return;
+        }
+        setCtx({ leadId: res.leadId, consent: res.consent });
+        setAskConsent(res.consent === "unset");
+      })
+      .catch(() => {
+        // Offline open must not strand the sheet on "Loading…" with no way out.
+        if (!cancelled) setCtxError(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [open, anchor, onClose]);
+  }, [open, anchor, onClose, ctxAttempt]);
 
   // Lock body scroll while the sheet is up.
   useEffect(() => {
@@ -133,81 +182,127 @@ export function CaptureSheet({
     };
   }, [open]);
 
-  const upsertTray = useCallback((item: TrayItem) => {
-    setTray((t) => {
-      const idx = t.findIndex((x) => x.key === item.key);
-      if (idx < 0) return [...t, item];
-      const next = [...t];
-      next[idx] = item;
-      return next;
-    });
-  }, []);
+  const patchTray = useCallback(
+    (key: string, patch: Partial<TrayItem>) => {
+      setTrayTracked((t) => t.map((x) => (x.key === key ? { ...x, ...patch } : x)));
+    },
+    [setTrayTracked],
+  );
 
-  const patchTray = useCallback((key: string, patch: Partial<TrayItem>) => {
-    setTray((t) => t.map((x) => (x.key === key ? { ...x, ...patch } : x)));
-  }, []);
+  // The 12-item cap is enforced here against the live tray, never a closure.
+  const admitToTray = useCallback(
+    (item: TrayItem): boolean => {
+      if (trayRef.current.length >= MAX_ITEMS_PER_SAVE) return false;
+      setTrayTracked((t) => [...t, item]);
+      return true;
+    },
+    [setTrayTracked],
+  );
 
   const addPhotos = useCallback(
     async (files: FileList) => {
       if (!ctx) return;
-      const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
-      for (const file of list) {
-        if (tray.length >= MAX_ITEMS_PER_SAVE) {
-          toast.error(`Up to ${MAX_ITEMS_PER_SAVE} items per save — save these first.`);
-          break;
+      const incoming: { file: File; mime: string }[] = [];
+      let unsupported = 0;
+      for (const file of Array.from(files)) {
+        const mime = resolveMime(file, "photo");
+        if (!mime || extForMime(mime) === "bin") {
+          unsupported += 1;
+          continue;
         }
-        const { blob, mime } = await downscalePhoto(file);
+        incoming.push({ file, mime });
+      }
+      if (unsupported > 0) {
+        toast.error(
+          unsupported === 1 ? "That file type isn't supported." : `${unsupported} files aren't a supported type.`,
+        );
+      }
+      let capSkipped = 0;
+      for (const entry of incoming) {
+        if (trayRef.current.length >= MAX_ITEMS_PER_SAVE) {
+          capSkipped += 1;
+          continue;
+        }
+        const { blob, mime } = await downscalePhoto(entry.file, entry.mime);
         const path = `${ctx.leadId}/${crypto.randomUUID()}.${extForMime(mime)}`;
         const key = path;
-        upsertTray({
+        const run = async () => {
+          patchTray(key, { status: "uploading", progress: 30 });
+          try {
+            const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, blob, {
+              contentType: mime,
+              upsert: false,
+            });
+            if (error && !uploadAlreadyThere(error.message)) throw error;
+            patchTray(key, { status: "ready", progress: 100 });
+            buzzOk();
+          } catch {
+            patchTray(key, { status: "failed" });
+            toast.error("Photo upload failed — tap retry when you have signal.");
+          }
+        };
+        const item: TrayItem = {
           key,
           kind: "photo",
           path,
+          blob,
           previewUrl: URL.createObjectURL(blob),
           progress: 30,
           status: "uploading",
+          retry: () => void run(),
           mime,
           bytes: blob.size,
           durationS: null,
           caption: "",
           tag: null,
-        });
-        const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, blob, {
-          contentType: mime,
-          upsert: false,
-        });
-        patchTray(key, error ? { status: "failed" } : { status: "ready", progress: 100 });
-        if (error) toast.error(`Photo upload failed: ${error.message}`);
-        else buzzOk();
+        };
+        if (!admitToTray(item)) {
+          if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+          capSkipped += 1;
+          continue;
+        }
+        await run();
+      }
+      if (capSkipped > 0) {
+        toast.error(
+          `Up to ${MAX_ITEMS_PER_SAVE} items per save — ${capSkipped} photo${capSkipped === 1 ? "" : "s"} skipped. File these first.`,
+        );
       }
     },
-    [ctx, patchTray, supabase, tray.length, upsertTray],
+    [admitToTray, ctx, patchTray, supabase],
   );
 
   const addVideo = useCallback(
     async (file: File) => {
       if (!ctx) return;
-      if (!file.type.startsWith("video/")) return;
+      const mime = resolveMime(file, "video");
+      if (!mime || extForMime(mime) === "bin") {
+        toast.error("That file type isn't supported.");
+        return;
+      }
       if (file.size > MAX_VIDEO_BYTES) {
         toast.error("That video is over 300MB — record a shorter clip.");
         return;
       }
-      const mime = file.type || "video/mp4";
       const path = `${ctx.leadId}/${crypto.randomUUID()}.${extForMime(mime)}`;
       const key = path;
       const run = async () => {
         patchTray(key, { status: "uploading", progress: 0 });
-        const target = await createJobMediaUploadTargetAction(anchor, { path, mime });
-        if (!target.ok) {
-          patchTray(key, { status: "failed" });
-          toast.error(target.error);
-          return;
-        }
         try {
+          // Fresh target every attempt — a retry must never reuse a stale token.
+          const target = await createJobMediaUploadTargetAction(anchor, { path, mime });
+          if (!target.ok) {
+            patchTray(key, { status: "failed" });
+            toast.error(target.error);
+            return;
+          }
           await uploadToMediaTarget({
             target: target.target,
             file,
             onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
+            // pause() aborts the in-flight TUS request — the only abort surface
+            // uploadToMediaTarget exposes; removal relies on it to stop the transfer.
+            onControl: (control) => patchTray(key, { abort: () => control.pause() }),
           });
           patchTray(key, { status: "ready", progress: 100 });
           buzzOk();
@@ -216,10 +311,11 @@ export function CaptureSheet({
           toast.error("Video upload failed — tap retry when you have signal.");
         }
       };
-      upsertTray({
+      const item: TrayItem = {
         key,
         kind: "video",
         path,
+        blob: file,
         previewUrl: URL.createObjectURL(file),
         progress: 0,
         status: "uploading",
@@ -229,10 +325,15 @@ export function CaptureSheet({
         durationS: null,
         caption: "",
         tag: null,
-      });
+      };
+      if (!admitToTray(item)) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        toast.error(`Up to ${MAX_ITEMS_PER_SAVE} items per save — file these first.`);
+        return;
+      }
       void run();
     },
-    [anchor, ctx, patchTray, upsertTray],
+    [admitToTray, anchor, ctx, patchTray],
   );
 
   const addVoice = useCallback(
@@ -240,82 +341,137 @@ export function CaptureSheet({
       if (!ctx) return;
       const path = `${ctx.leadId}/${crypto.randomUUID()}.${extForMime(capture.mime)}`;
       const key = path;
-      upsertTray({
+      const run = async () => {
+        patchTray(key, { status: "uploading", progress: 40 });
+        try {
+          const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, capture.blob, {
+            contentType: capture.mime.split(";")[0],
+            upsert: false,
+          });
+          if (error && !uploadAlreadyThere(error.message)) throw error;
+          patchTray(key, { status: "ready", progress: 100 });
+          buzzOk();
+        } catch {
+          patchTray(key, { status: "failed" });
+          toast.error("Voice note upload failed — tap retry when you have signal.");
+        }
+      };
+      const item: TrayItem = {
         key,
         kind: "audio",
         path,
+        blob: capture.blob,
         previewUrl: URL.createObjectURL(capture.blob),
         progress: 40,
         status: "uploading",
+        retry: () => void run(),
         mime: capture.mime,
         bytes: capture.blob.size,
         durationS: capture.durationS,
         caption: "",
         tag: null,
-      });
-      const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, capture.blob, {
-        contentType: capture.mime.split(";")[0],
-        upsert: false,
-      });
-      patchTray(key, error ? { status: "failed" } : { status: "ready", progress: 100 });
-      if (error) toast.error(`Voice note upload failed: ${error.message}`);
-      else buzzOk();
+      };
+      if (!admitToTray(item)) {
+        if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+        toast.error(`Up to ${MAX_ITEMS_PER_SAVE} items per save — file these first.`);
+        return;
+      }
+      await run();
     },
-    [ctx, patchTray, supabase, upsertTray],
+    [admitToTray, ctx, patchTray, supabase],
   );
 
   const removeItem = useCallback(
     (item: TrayItem) => {
-      setTray((t) => t.filter((x) => x.key !== item.key));
+      if (item.status === "uploading") {
+        // Stop the transfer first — removal must not keep burning the crew's
+        // data or let the object land in storage after the discard below.
+        try {
+          item.abort?.();
+        } catch {
+          /* upload already settled */
+        }
+      }
+      setTrayTracked((t) => t.filter((x) => x.key !== item.key));
       if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-      if (item.status !== "failed") void discardJobMediaUploadAction(anchor, item.path, item.kind);
+      // Discard for every status — a failed TUS upload can still leave partial
+      // bytes server-side, and a missing object is a harmless no-op.
+      discardJobMediaUploadAction(anchor, item.path, item.kind).catch(() => {
+        /* offline — the object is unreferenced either way */
+      });
     },
-    [anchor],
+    [anchor, setTrayTracked],
   );
 
   const save = useCallback(() => {
-    const ready = tray.filter((t) => t.status === "ready");
+    const ready = trayRef.current.filter((t) => t.status === "ready");
     if (ready.length === 0) {
       toast.error("Nothing uploaded yet.");
       return;
     }
     startSaving(async () => {
-      const res = await recordJobMediaAction(
-        anchor,
-        ready.map((t) => ({
-          kind: t.kind,
-          path: t.path,
-          mime: t.mime,
-          bytes: t.bytes,
-          durationS: t.durationS,
-          caption: t.caption,
-          tag: t.tag,
-        })),
-      );
+      let res: Awaited<ReturnType<typeof recordJobMediaAction>>;
+      try {
+        res = await recordJobMediaAction(
+          anchor,
+          ready.map((t) => ({
+            kind: t.kind,
+            path: t.path,
+            mime: t.mime,
+            bytes: t.bytes,
+            durationS: t.durationS,
+            caption: t.caption,
+            tag: t.tag,
+          })),
+        );
+      } catch {
+        // A dropped request must not reach the route error boundary — the tray
+        // is the only copy of these captures. Everything stays "ready", so a
+        // re-tap records without re-uploading.
+        toast.error("No signal — your items are still here, try File again.");
+        return;
+      }
       if (!res.ok) {
         toast.error(res.error);
         return;
       }
-      tray.forEach((t) => t.previewUrl && URL.revokeObjectURL(t.previewUrl));
-      setTray([]);
+      const savedKeys = new Set(ready.map((t) => t.key));
+      trayRef.current.forEach((t) => {
+        if (savedKeys.has(t.key) && t.previewUrl) URL.revokeObjectURL(t.previewUrl);
+      });
+      // Clear ONLY the filed items — failed ones stay visible for retry/remove.
+      setTrayTracked((t) => t.filter((x) => !savedKeys.has(x.key)));
       toast.success(
         res.count === 1 ? "Filed to the job — the office can see it." : `${res.count} items filed to the job.`,
       );
       router.refresh();
-      onClose();
+      const failedLeft = trayRef.current.filter((t) => t.status === "failed").length;
+      if (trayRef.current.length === 0) {
+        onClose();
+      } else if (failedLeft > 0) {
+        toast.warning(
+          failedLeft === 1
+            ? "1 item failed to upload — retry or remove it."
+            : `${failedLeft} items failed to upload — retry or remove them.`,
+        );
+      }
     });
-  }, [anchor, onClose, router, tray]);
+  }, [anchor, onClose, router, setTrayTracked]);
 
   const setConsent = useCallback(
     (state: "granted" | "internal_only") => {
-      void setLeadMediaConsentAction(anchor, state).then((res) => {
-        if (!res.ok) {
-          toast.error(res.error);
-          return;
-        }
-        setCtx((c) => (c ? { ...c, consent: state } : c));
-        setAskConsent(false);
-      });
+      void setLeadMediaConsentAction(anchor, state)
+        .then((res) => {
+          if (!res.ok) {
+            toast.error(res.error);
+            return;
+          }
+          setCtx((c) => (c ? { ...c, consent: state } : c));
+          setAskConsent(false);
+        })
+        .catch(() => {
+          toast.error("No signal — that didn't save. Try again.");
+        });
     },
     [anchor],
   );
@@ -340,18 +496,39 @@ export function CaptureSheet({
                   : "Consent not set yet"}
             </p>
           ) : (
-            <p className="text-xs text-white/50">Loading…</p>
+            <p className="text-xs text-white/50">{ctxError ? "Couldn't load this job" : "Loading…"}</p>
           )}
         </div>
         <button
           type="button"
-          onClick={onClose}
+          onClick={() => {
+            if (recordingLive) {
+              // Closing would silently bin a live voice note — make them decide.
+              toast.info("Recording — stop or discard it first.");
+              return;
+            }
+            onClose();
+          }}
           aria-label="Close"
           className="focus-ring flex size-11 items-center justify-center rounded-full bg-white/10"
         >
           <X className="size-5" strokeWidth={1.75} />
         </button>
       </div>
+
+      {/* context failed to load (no signal) — offer a retry instead of a dead end */}
+      {!ctx && ctxError ? (
+        <div className="mx-4 mt-2 rounded-lg border border-white/15 bg-white/5 p-4 text-sm">
+          <p className="font-medium">No signal — couldn&apos;t load this job.</p>
+          <button
+            type="button"
+            onClick={() => setCtxAttempt((n) => n + 1)}
+            className="focus-ring mt-3 min-h-11 rounded-md bg-mm-red px-4 text-sm font-semibold text-white"
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       {/* consent card (first capture on the job) */}
       {askConsent ? (
@@ -403,7 +580,7 @@ export function CaptureSheet({
             <Video className="size-10" strokeWidth={1.5} />
           </button>
         ) : (
-          <VoiceRecorderLazy disabled={!ctx} onCaptured={addVoice} />
+          <VoiceRecorderLazy disabled={!ctx} onCaptured={addVoice} onRecordingChange={setRecordingLive} />
         )}
         {mode !== "audio" ? (
           <p className="text-sm text-white/60">
@@ -438,7 +615,7 @@ export function CaptureSheet({
                       <span className="block h-full bg-mm-red transition-all" style={{ width: `${item.progress}%` }} />
                     </span>
                   ) : null}
-                  {item.status === "failed" && item.retry ? (
+                  {item.status === "failed" ? (
                     <span className="absolute inset-0 flex items-center justify-center bg-black/60">
                       <RotateCw
                         className="size-6 text-white"
@@ -522,8 +699,10 @@ export function CaptureSheet({
                 type="button"
                 role="tab"
                 aria-selected={mode === key}
+                // A mode switch unmounts the recorder mid-recording — hold the tabs.
+                disabled={recordingLive && key !== mode}
                 onClick={() => setMode(key)}
-                className={`flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors ${
+                className={`flex min-h-11 items-center gap-1.5 rounded-full px-4 text-sm font-medium transition-colors disabled:opacity-40 ${
                   mode === key ? "bg-mm-red text-white" : "text-white/70"
                 }`}
               >

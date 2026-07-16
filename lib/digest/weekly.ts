@@ -135,9 +135,21 @@ function metricsFor(w: WeekWindow, input: DigestInputs): WeekMetrics {
     }
   }
 
-  const deposits = input.quotes
-    .filter((q) => inWindow(q.deposit_paid_at, w))
-    .reduce((sum, q) => sum + num(q.deposit_amount), 0);
+  // One deposit per lead per window: a price-revision supersede copies
+  // deposit_amount + deposit_paid_at onto the newly accepted quote and leaves
+  // them on the superseded one — two rows, one real payment. Lead-less quotes
+  // have nothing to collide on and count individually.
+  const depositByLead = new Map<string, number>();
+  let deposits = 0;
+  for (const q of input.quotes) {
+    if (!inWindow(q.deposit_paid_at, w)) continue;
+    if (q.lead_id) {
+      depositByLead.set(q.lead_id, Math.max(depositByLead.get(q.lead_id) ?? 0, num(q.deposit_amount)));
+    } else {
+      deposits += num(q.deposit_amount);
+    }
+  }
+  for (const amount of depositByLead.values()) deposits += amount;
   const balances = input.leads
     .filter((l) => inWindow(l.balance_paid_at, w))
     .reduce((sum, l) => sum + (balanceByLead.get(l.id) ?? 0), 0);

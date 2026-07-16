@@ -36,9 +36,12 @@ type Phase = "idle" | "recording" | "locked" | "review";
 export function VoiceRecorder({
   disabled,
   onCaptured,
+  onRecordingChange,
 }: {
   disabled?: boolean;
   onCaptured: (capture: { blob: Blob; mime: string; durationS: number }) => void;
+  /** Fires as recording starts/stops — the sheet guards close + mode switch on it. */
+  onRecordingChange?: (recording: boolean) => void;
 }) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [seconds, setSeconds] = useState(0);
@@ -50,10 +53,22 @@ export function VoiceRecorder({
   const startedAtRef = useRef(0);
   const cancelledRef = useRef(false);
   const pointerStartY = useRef(0);
+  // Pointer-down truth for the hold gesture — the first-use permission prompt
+  // makes the finger lift while getUserMedia is still pending.
+  const pointerDownRef = useRef(false);
   const phaseRef = useRef<Phase>("idle");
   useEffect(() => {
     phaseRef.current = phase;
   }, [phase]);
+
+  const recordingLive = phase === "recording" || phase === "locked";
+  useEffect(() => {
+    onRecordingChange?.(recordingLive);
+    return () => {
+      // Unmounting mid-recording must not leave the sheet thinking one is live.
+      if (recordingLive) onRecordingChange?.(false);
+    };
+  }, [recordingLive, onRecordingChange]);
 
   const teardownStream = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -96,6 +111,13 @@ export function VoiceRecorder({
     if (disabled || phaseRef.current !== "idle") return;
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      if (!pointerDownRef.current) {
+        // The finger lifted to answer the permission prompt — the hold gesture
+        // is over, so never leave a recording running unattended.
+        stream.getTracks().forEach((t) => t.stop());
+        toast("Mic enabled — hold the button to record.");
+        return;
+      }
       const mime = pickAudioMime();
       const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
       streamRef.current = stream;
@@ -141,6 +163,7 @@ export function VoiceRecorder({
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
+      pointerDownRef.current = true;
       pointerStartY.current = e.clientY;
       void startRecording();
     },
@@ -156,6 +179,7 @@ export function VoiceRecorder({
   }, []);
 
   const onPointerUp = useCallback(() => {
+    pointerDownRef.current = false;
     // Locked recordings keep going until the stop button; a plain release ends it.
     if (phaseRef.current === "recording") stopRecording(false);
   }, [stopRecording]);
@@ -203,12 +227,10 @@ export function VoiceRecorder({
     );
   }
 
-  const recording = phase === "recording" || phase === "locked";
-
   return (
     <div className="flex w-full flex-col items-center gap-4">
       <div className="flex h-8 items-center gap-2 text-sm text-white/80" aria-live="polite">
-        {recording ? (
+        {recordingLive ? (
           <>
             <span className="inline-block size-2 animate-pulse rounded-full bg-mm-red" />
             <span className="tabular-nums font-medium text-white">{mm}:{ss}</span>
@@ -248,7 +270,7 @@ export function VoiceRecorder({
           aria-label="Hold to record"
           style={{ touchAction: "none" }}
           className={`focus-ring flex size-20 items-center justify-center rounded-full text-white transition-transform disabled:opacity-50 ${
-            recording ? "scale-110 bg-mm-red shadow-[0_0_0_12px_rgba(192,56,56,0.25)]" : "bg-mm-red active:scale-95"
+            recordingLive ? "scale-110 bg-mm-red shadow-[0_0_0_12px_rgba(192,56,56,0.25)]" : "bg-mm-red active:scale-95"
           }`}
         >
           <Mic className="size-8" strokeWidth={1.75} />

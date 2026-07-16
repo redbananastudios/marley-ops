@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { requireOfficeOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { syncBankFeed } from "@/lib/bank-feed/sync";
@@ -16,7 +16,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
-  if (!(await requireUserOrCronSecret(req))) {
+  // Office or cron only — crew are RLS-walled from bank data and must not be
+  // able to trigger sheet reads or read the money-flow summary.
+  if (!(await requireOfficeOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
   const run = await runCron("bank-feed", async () => {

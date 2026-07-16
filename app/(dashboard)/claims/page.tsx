@@ -71,10 +71,16 @@ export default async function ClaimsPage({
   const openCount = all.filter((c) => isOpenClaimStatus(c.status)).length;
 
   const leadIds = [...new Set(claims.map((c) => c.lead_id))];
-  const { data: leadRows } = leadIds.length
-    ? await sb.from("leads").select("id, name").in("id", leadIds)
-    : { data: [] as { id: string; name: string | null }[] };
-  const leadName = new Map((leadRows ?? []).map((l) => [l.id, l.name]));
+  // PostgREST .in() rides the GET query string — past ~200 UUIDs it 414s and
+  // the join silently returns nothing, so the lookup goes in batches of 100.
+  const leadName = new Map<string, string | null>();
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const { data: leadRows } = await sb
+      .from("leads")
+      .select("id, name")
+      .in("id", leadIds.slice(i, i + 100));
+    for (const l of leadRows ?? []) leadName.set(l.id, l.name);
+  }
 
   const now = new Date();
 

@@ -40,7 +40,16 @@ export interface ClaimFormState {
   notes: string;
 }
 
-export function ClaimUpdateForm({ claimId, initial }: { claimId: string; initial: ClaimFormState }) {
+export function ClaimUpdateForm({
+  claimId,
+  updatedAt,
+  initial,
+}: {
+  claimId: string;
+  /** Row's updated_at as loaded — the server rejects saves from a stale tab. */
+  updatedAt: string;
+  initial: ClaimFormState;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<ClaimStatus>(initial.status);
@@ -54,9 +63,10 @@ export function ClaimUpdateForm({ claimId, initial }: { claimId: string; initial
 
   const terminal = !isOpenClaimStatus(status);
   const amountNumber = useMemo(() => {
-    const trimmed = amount.trim();
-    if (!trimmed) return null;
-    const n = Number(trimmed);
+    // Natural UK entry — "£1,200", "1 200" — must parse, not bounce.
+    const cleaned = amount.replace(/[,\s]/g, "").replace(/^£/, "");
+    if (!cleaned) return null;
+    const n = Number(cleaned);
     return Number.isFinite(n) ? n : Number.NaN;
   }, [amount]);
 
@@ -65,19 +75,31 @@ export function ClaimUpdateForm({ claimId, initial }: { claimId: string; initial
       toast.error("Pick how the claim ended before closing it.");
       return;
     }
-    if (amountNumber != null && Number.isNaN(amountNumber)) {
+    // The amount field only exists on terminal statuses; stale hidden state
+    // must never block a non-terminal save (the payload sends null anyway).
+    if (terminal && amountNumber != null && Number.isNaN(amountNumber)) {
       toast.error("The amount doesn't look right — enter pounds, no symbols.");
       return;
     }
     setBusy(true);
-    const res = await updateClaimAction(claimId, {
-      status,
-      resolution: terminal ? resolution : null,
-      resolutionAmount: terminal ? amountNumber : null,
-      insurerRef,
-      insurerNotified,
-      notes,
-    });
+    let res: Awaited<ReturnType<typeof updateClaimAction>>;
+    try {
+      res = await updateClaimAction(claimId, {
+        status,
+        resolution: terminal ? resolution : null,
+        resolutionAmount: terminal ? amountNumber : null,
+        insurerRef,
+        insurerNotified,
+        notes,
+        expectedUpdatedAt: updatedAt,
+      });
+    } catch {
+      // A dropped request throws instead of returning ok:false — the typed
+      // state stays intact for a retry.
+      setBusy(false);
+      toast.error("No signal — your changes are still here, try again.");
+      return;
+    }
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error || "Could not save the claim.");

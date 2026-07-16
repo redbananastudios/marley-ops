@@ -93,7 +93,7 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
   const { data: claim } = await sb
     .from("claims")
     .select(
-      "id, claim_no, lead_id, client_id, completion_id, status, reported_at, reported_channel, description, resolution, resolution_amount, insurer_ref, insurer_notified_at, notes, closed_at",
+      "id, claim_no, lead_id, client_id, completion_id, status, reported_at, reported_channel, description, resolution, resolution_amount, insurer_ref, insurer_notified_at, notes, closed_at, updated_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -247,6 +247,7 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
             <div className="px-5 py-4">
               <ClaimUpdateForm
                 claimId={claim.id}
+                updatedAt={claim.updated_at}
                 initial={{
                   status,
                   resolution: (claim.resolution ?? null) as ClaimResolution | null,

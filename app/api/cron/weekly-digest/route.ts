@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { requireOfficeOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
@@ -13,19 +13,29 @@ import { buildDigestEmailHtml, digestSubject } from "@/lib/digest/email";
  * ADMINS with company-domain logins (today: Connor + Peter — Peter's spec,
  * 2026-07-16). Internal report — direct sendEmail, no Comms log.
  *
- * `?to=<address>` (office session or cron secret) redirects a one-off preview
- * to that address instead of the admins — used to eyeball the layout without
- * emailing the team.
+ * `?to=<address>` (ADMIN session only) redirects a one-off preview to that
+ * address instead of the admins — used to eyeball the layout without emailing
+ * the team.
  */
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
+/** Shared by both quote fetches so the merged rows carry identical columns. */
+const QUOTE_COLS =
+  "id, lead_id, quote_ref, customer_name, email_sent_at, accepted_at, deposit_paid_at, deposit_amount, agreed_price, grand_total, balance_invoice_amount";
+
 export async function GET(req: Request) {
-  if (!(await requireUserOrCronSecret(req))) {
+  const caller = await requireOfficeOrCronSecret(req);
+  if (!caller) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
   const previewTo = new URL(req.url).searchParams.get("to");
+  // ?to= mails the full financial picture to an arbitrary address — admin
+  // sessions only (the crontab call never carries it).
+  if (previewTo && !(caller.via === "session" && caller.role === "admin")) {
+    return NextResponse.json({ error: "Preview requires an admin session" }, { status: 403 });
+  }
 
   const run = await runCron("weekly-digest", async () => {
     const sb = createAdminClient();
@@ -42,9 +52,7 @@ export async function GET(req: Request) {
           .limit(2000),
         sb
           .from("quotes")
-          .select(
-            "lead_id, quote_ref, customer_name, email_sent_at, accepted_at, deposit_paid_at, deposit_amount, agreed_price, grand_total, balance_invoice_amount",
-          )
+          .select(QUOTE_COLS)
           .or(
             `email_sent_at.gte.${since},accepted_at.gte.${since},deposit_paid_at.gte.${since},balance_invoice_amount.gt.0`,
           )
@@ -69,9 +77,31 @@ export async function GET(req: Request) {
           .in("status", ["open", "assessing", "offer_made"]),
       ]);
 
+    // Balance leg the .or() above can miss: on the normal house-move timeline
+    // the quote is sent/accepted and the deposit paid WEEKS before the move,
+    // with no balance invoice — no fetch arm matches, so the balance paid this
+    // window would value at £0. Fetch the paying leads' quotes explicitly and
+    // merge by quote id.
+    type QuoteRow = DigestInputs["quotes"][number] & { id: string };
+    const quoteById = new Map<string, QuoteRow>();
+    for (const q of (quotes.data ?? []) as QuoteRow[]) quoteById.set(q.id, q);
+    const sinceT = lastWeek.start.getTime();
+    const paidLeadIds = [
+      ...new Set(
+        ((leads.data ?? []) as DigestInputs["leads"])
+          .filter((l) => l.balance_paid_at && Date.parse(l.balance_paid_at) >= sinceT)
+          .map((l) => l.id),
+      ),
+    ];
+    // Chunked .in() — hundreds of uuids in one GET blows the gateway URL limit.
+    for (let i = 0; i < paidLeadIds.length; i += 100) {
+      const { data } = await sb.from("quotes").select(QUOTE_COLS).in("lead_id", paidLeadIds.slice(i, i + 100));
+      for (const q of (data ?? []) as QuoteRow[]) quoteById.set(q.id, q);
+    }
+
     const input: DigestInputs = {
       leads: (leads.data ?? []) as DigestInputs["leads"],
-      quotes: (quotes.data ?? []) as DigestInputs["quotes"],
+      quotes: [...quoteById.values()],
       completions: (completions.data ?? []) as DigestInputs["completions"],
       appointments: (appointments.data ?? []) as DigestInputs["appointments"],
       snapshot: {

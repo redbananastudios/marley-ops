@@ -3,7 +3,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { JOB_MEDIA_BUCKET } from "@/lib/job-media";
 import type { JobMediaView } from "@/components/content/job-media-list";
 
-/** Load captured job content with signed URLs (1h) — office review surfaces. */
+/** Load captured job content with signed URLs (24h — a review tab left open
+ *  overnight has no re-sign path, so playback/lightbox links must outlive it;
+ *  office-only surfaces, so the longer TTL is acceptable). */
 export async function loadJobMedia(opts: {
   leadId?: string;
   filter?: "needs-review" | "approved" | "internal";
@@ -29,7 +31,7 @@ export async function loadJobMedia(opts: {
 
   const { data: signed } = await admin.storage
     .from(JOB_MEDIA_BUCKET)
-    .createSignedUrls(rows.map((r) => r.storage_path as string), 3600);
+    .createSignedUrls(rows.map((r) => r.storage_path as string), 86400);
   const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
 
   return rows

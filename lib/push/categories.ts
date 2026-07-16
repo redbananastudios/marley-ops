@@ -190,9 +190,16 @@ export function bankPaymentDigestPush(count: number): PushEvent {
  *  a busy Friday) collapses into one digest instead of a phone full of pings. */
 export const BANK_FEED_DIGEST_THRESHOLD = 3;
 
-export function decideBankFeedPushes(arrivals: readonly BankFeedArrival[]): PushEvent[] {
+export function decideBankFeedPushes(
+  arrivals: readonly BankFeedArrival[],
+  /** Suggested+unmatched rows pending at push time: the constant digest tag
+   *  REPLACES any earlier digest on the phone, so it must show the fuller
+   *  number — never just the latest pass's arrivals. */
+  totalPending = 0,
+): PushEvent[] {
   if (arrivals.length === 0) return [];
-  if (arrivals.length > BANK_FEED_DIGEST_THRESHOLD) return [bankPaymentDigestPush(arrivals.length)];
+  if (arrivals.length > BANK_FEED_DIGEST_THRESHOLD)
+    return [bankPaymentDigestPush(Math.max(arrivals.length, totalPending))];
   return arrivals.map(bankPaymentPush);
 }
 

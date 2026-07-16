@@ -3,8 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { BANK_FEED_TAB, isInboundPayment, parseSheetRows, type BankTxRow } from "@/lib/bank-feed/parse";
 import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
-import { decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
+import { BANK_FEED_DIGEST_THRESHOLD, decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
+import { errorContext, log } from "@/lib/log";
 
 /**
  * Bank-feed sync (cron-driven): read the Monzo→Sheets export, upsert rows by
@@ -136,6 +137,14 @@ export type BankFeedSyncSummary = {
  *  updated_at for nothing — only new rows and this window get upserted. */
 const MUTABLE_WINDOW_DAYS = 35;
 
+/** Distinct from the upsert window above (which governs sheet re-writes):
+ *  only transfers this recent may form a NEW suggestion or page the admins.
+ *  Without it a stale unmatched transfer — pre-feed history, or a £100 the
+ *  office recorded manually without dismissing the row — re-competes every
+ *  pass, hijacks each new sole open deposit and re-pages false "one tap to
+ *  confirm" alerts. Older rows stay visible on /payments as unmatched. */
+const SUGGESTION_FRESH_DAYS = 14;
+
 export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSummary> {
   if (!bankFeedConfigured()) {
     return {
@@ -199,7 +208,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     sb
       .from("bank_transactions")
       .select(
-        "id, amount, tx_type, counterparty, reference, description, status, matched_quote_id, match_kind, match_confidence",
+        "id, tx_date, amount, tx_type, counterparty, reference, description, status, matched_quote_id, match_kind, match_confidence",
       )
       .in("status", ["info", "unmatched", "suggested"])
       .order("id")
@@ -221,17 +230,28 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // Transfers SURFACED this pass (fresh inbound money, or an old unmatched
   // transfer a newly-raised invoice just claimed) — these page the admins.
   const arrivals: BankFeedArrival[] = [];
+  const freshCutoff = new Date(Date.now() - SUGGESTION_FRESH_DAYS * 86_400_000).toISOString().slice(0, 10);
   for (const row of pending) {
     const inbound = isInboundPayment({ amount: Number(row.amount), txType: row.tx_type as string | null });
     if (!inbound) continue; // stays info
-    const m = matchTransaction(
-      {
-        amount: Number(row.amount),
-        reference: row.reference as string | null,
-        description: row.description as string | null,
-      },
-      remaining,
-    );
+    // Stale transfers can't form a NEW suggestion (they'd consume the open
+    // item a fresh transfer is really for); an EXISTING suggestion stays
+    // re-matchable so it keeps tracking its open item until confirmed.
+    const freshTx = (row.tx_date as string) >= freshCutoff;
+    // A stale row already surfaced as unmatched stays exactly as the office
+    // sees it (incl. any mismatch pointer) — no re-match, no rewrite.
+    if (!freshTx && row.status === "unmatched") continue;
+    const m =
+      freshTx || row.status === "suggested"
+        ? matchTransaction(
+            {
+              amount: Number(row.amount),
+              reference: row.reference as string | null,
+              description: row.description as string | null,
+            },
+            remaining,
+          )
+        : null;
     let next: {
       status: string;
       matched_quote_id: string | null;
@@ -260,21 +280,32 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       next.match_confidence !== (row.match_confidence ?? null);
     if (changed) {
       // Status guard: if the office confirmed/dismissed this row since our
-      // snapshot, this update matches 0 rows and their action stands.
-      const { error } = await sb
-        .from("bank_transactions")
-        .update(next as never)
-        .eq("id", row.id)
-        .in("status", ["info", "unmatched", "suggested"]);
-      if (error) throw new Error(`bank_transactions match update failed: ${error.message}`);
+      // snapshot, this update matches 0 rows and their action stands — and a
+      // zero-row claim must never page (the row is no longer pending).
+      let claimed = false;
+      try {
+        const { data, error } = await sb
+          .from("bank_transactions")
+          .update(next as never)
+          .eq("id", row.id)
+          .in("status", ["info", "unmatched", "suggested"])
+          .select("id");
+        if (error) throw new Error(error.message);
+        claimed = (data ?? []).length > 0;
+      } catch (e) {
+        // One failed write must not swallow the pushes for transfers already
+        // transitioned this pass — the untouched row retries next tick.
+        log.error("bank-feed.match-update.failed", { txId: row.id as string, ...errorContext(e) });
+        continue;
+      }
 
-      // Push-worthy = a transfer ENTERING the queue: info→suggested/unmatched
-      // (fresh money in) or unmatched→suggested (an invoice claimed it). A
-      // re-pointed suggestion or a mismatch flip on an already-surfaced row
-      // stays silent — it was paged once and is still sitting on /payments.
+      // Push-worthy = a FRESH transfer ENTERING the queue: info→suggested/
+      // unmatched (fresh money in) or unmatched→suggested (an invoice claimed
+      // it). A re-pointed suggestion, a mismatch flip on an already-surfaced
+      // row, or stale first-sync history transitioning stays silent.
       const enteredSuggested = next.status === "suggested" && row.status !== "suggested";
       const freshUnmatched = next.status === "unmatched" && row.status === "info";
-      if (enteredSuggested || freshUnmatched) {
+      if (claimed && freshTx && (enteredSuggested || freshUnmatched)) {
         const quoteId = m && m.type !== "storage" ? m.quoteId : null;
         const item = quoteId ? open.find((o) => o.quoteId === quoteId) : undefined;
         arrivals.push({
@@ -291,7 +322,17 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // Page the ADMINS (Peter + Connor — their explicit ask; estimators keep
   // getting the post-confirm "Deposit received" push instead). Best-effort:
   // sendPushForEvent never throws, and the payment_event kill switch applies.
-  const events = decideBankFeedPushes(arrivals);
+  // A digest replaces any earlier digest (constant OS tag), so it must carry
+  // the TOTAL still pending — not just this pass's arrivals.
+  let totalPending = 0;
+  if (arrivals.length > BANK_FEED_DIGEST_THRESHOLD) {
+    const { count } = await sb
+      .from("bank_transactions")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["suggested", "unmatched"]);
+    totalPending = count ?? 0;
+  }
+  const events = decideBankFeedPushes(arrivals, totalPending);
   if (events.length > 0) {
     const { data: admins } = await sb.from("profiles").select("id").eq("role", "admin").eq("active", true);
     const adminIds = (admins ?? []).map((a: { id: string }) => a.id);

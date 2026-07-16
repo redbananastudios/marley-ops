@@ -18,7 +18,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
-import { ukTimeAt } from "@/lib/uk-time";
+import { ukParts, ukTimeAt } from "@/lib/uk-time";
 import {
   buildCompletionEmailHtml,
   completionEmailSubject,
@@ -264,14 +264,18 @@ export async function completeJobAction(
           .select("estimator_id")
           .eq("id", appt.lead_id)
           .maybeSingle();
+        // "Next morning" means the morning after the move: a sign-off just
+        // past midnight (late finish on an evening job) belongs to TODAY's
+        // 9am call, not tomorrow's — before 7am UK still counts as last night.
+        const morningsAhead = ukParts().hour < 7 ? 0 : 1;
         await admin.from("follow_ups").insert({
           lead_id: appt.lead_id,
           client_id: lead?.client_id ?? null,
           reason: "custom",
-          due_at: ukTimeAt(9, 0, 1).toISOString(),
+          due_at: ukTimeAt(9, 0, morningsAhead).toISOString(),
           assigned_to: leadRow?.estimator_id ?? null,
           source: "sign_off_exception",
-          notes: `Crew noted exceptions at sign-off — call ${lead?.name ?? "the customer"} tomorrow, agree next steps, and record the outcome. Exceptions: ${exceptionsNote.slice(0, 400)}`,
+          notes: `Crew noted exceptions at sign-off — call ${lead?.name ?? "the customer"} in the morning, agree next steps, and record the outcome. Exceptions: ${exceptionsNote.slice(0, 400)}`,
         } as never);
       }
 
@@ -305,7 +309,7 @@ export async function completeJobAction(
 
       await sendOpsAlert(`Job signed off WITH EXCEPTIONS — ${lead?.name ?? "customer"}`, [
         `The crew recorded exceptions at completion sign-off: <strong>${exceptionsNote.slice(0, 500).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</strong>`,
-        `A call task is due tomorrow morning. Photos/evidence: the job's crew notes + the signed certificate.`,
+        `A call task is due at 9am the next morning. Photos/evidence: the job's crew notes + the signed certificate.`,
         ...(claimLine ? [claimLine] : []),
         `Lead: https://ops.marleymoves.co.uk/leads/${appt.lead_id}`,
       ]);

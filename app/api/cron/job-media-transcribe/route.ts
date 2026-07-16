@@ -12,7 +12,8 @@ import { JOB_MEDIA_BUCKET } from "@/lib/job-media";
  * cubic surveys (0031) and must not be destabilised for pennies-per-note work
  * (PRD v1.0 pressure-test). Claim is a conditional status flip, so concurrent
  * runs never double-transcribe; failures retry up to 3 attempts and then
- * surface in the review UI (no alerts — non-critical).
+ * surface in the review UI (no alerts — non-critical). Rows stranded in
+ * 'running' by a dead runner are reaped to 'failed' at the top of each run.
  */
 
 export const dynamic = "force-dynamic";
@@ -40,7 +41,31 @@ export async function GET(req: Request) {
   }
   const run = await runCron("job-media-transcribe", async () => {
     const admin = createAdminClient();
-    const summary = { claimed: 0, done: 0, failed: 0, inputTokens: 0, outputTokens: 0 };
+    const summary = { reaped: 0, claimed: 0, done: 0, failed: 0, writeErrors: 0, inputTokens: 0, outputTokens: 0 };
+
+    // Reap rows stranded in 'running' by a crashed/restarted run — the claim
+    // refreshes updated_at, so >15 min old means the runner is dead. Flipping
+    // to 'failed' (+1 attempt) puts them back under the normal retry cap.
+    const staleCutoff = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { data: stranded } = await admin
+      .from("job_media")
+      .select("id, transcript_attempts")
+      .eq("kind", "audio")
+      .eq("transcript_status", "running")
+      .lt("updated_at", staleCutoff);
+    for (const s of stranded ?? []) {
+      const { error: reapErr } = await admin
+        .from("job_media")
+        .update({
+          transcript_status: "failed",
+          transcript_error: "stranded — a previous run crashed or timed out",
+          transcript_attempts: s.transcript_attempts + 1,
+        } as never)
+        .eq("id", s.id)
+        .eq("transcript_status", "running");
+      if (reapErr) summary.writeErrors += 1;
+      else summary.reaped += 1;
+    }
 
     const { data: candidates } = await admin
       .from("job_media")
@@ -52,12 +77,16 @@ export async function GET(req: Request) {
       .limit(BATCH);
 
     for (const row of candidates ?? []) {
-      // Claim: only one runner flips it to running (concurrent-cron safe).
+      // Claim: CAS on status AND attempts — a concurrent run that already ran
+      // this row (attempts bumped) can't be re-claimed from a stale snapshot,
+      // and the cap holds even across overlapping runs.
       const { data: claimed } = await admin
         .from("job_media")
         .update({ transcript_status: "running" } as never)
         .eq("id", row.id)
         .in("transcript_status", ["pending", "failed"])
+        .eq("transcript_attempts", row.transcript_attempts)
+        .lt("transcript_attempts", 3)
         .select("id");
       if (!claimed?.length) continue;
       summary.claimed += 1;
@@ -87,7 +116,9 @@ export async function GET(req: Request) {
         });
 
         const transcript = analysis.output.transcript.trim().slice(0, 8000);
-        await admin
+        // A failed terminal write leaves the row 'running' — the reaper above
+        // recovers it next run, so counting the miss is enough here.
+        const { error: doneErr } = await admin
           .from("job_media")
           .update({
             transcript,
@@ -96,11 +127,12 @@ export async function GET(req: Request) {
             transcript_attempts: row.transcript_attempts + 1,
           } as never)
           .eq("id", row.id);
+        if (doneErr) summary.writeErrors += 1;
         summary.done += 1;
         summary.inputTokens += analysis.inputTokens;
         summary.outputTokens += analysis.outputTokens;
       } catch (err) {
-        await admin
+        const { error: failErr } = await admin
           .from("job_media")
           .update({
             transcript_status: "failed",
@@ -108,6 +140,7 @@ export async function GET(req: Request) {
             transcript_attempts: row.transcript_attempts + 1,
           } as never)
           .eq("id", row.id);
+        if (failErr) summary.writeErrors += 1;
         summary.failed += 1;
       }
     }

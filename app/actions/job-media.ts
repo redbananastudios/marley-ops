@@ -122,6 +122,22 @@ export async function recordJobMediaAction(
   const v = validateCaptureItems(items, resolved.leadId);
   if (!v.ok) return v;
 
+  // Rows must point at real objects — a path whose upload never completed
+  // would render nowhere (no signed URL) and be undeletable from /content.
+  const infos = await Promise.all(
+    v.items.map((item) => admin.storage.from(JOB_MEDIA_BUCKET).info(item.path)),
+  );
+  const missing = infos.filter((r) => r.error || !r.data).length;
+  if (missing > 0) {
+    return {
+      ok: false,
+      error:
+        missing === 1
+          ? "A file didn't upload correctly — remove it and try again."
+          : `${missing} files didn't upload correctly — remove them and try again.`,
+    };
+  }
+
   // Prefer the staff record's name (what the office knows them as).
   const { data: staffRow } = await admin
     .from("staff")
@@ -198,12 +214,16 @@ export async function updateJobMediaAction(
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("job_media")
-    .select("id, lead_id, captured_by")
+    .select("id, lead_id, captured_by, marketing_approved_at")
     .eq("id", id)
     .maybeSingle();
   if (!row) return { ok: false, error: "Item not found." };
   if (!isOffice(prof.role) && row.captured_by !== prof.id) {
     return { ok: false, error: "Only the office or the person who captured it can edit." };
+  }
+  // Approval froze the snapshot — only the office may change an approved item.
+  if (row.marketing_approved_at && !isOffice(prof.role)) {
+    return { ok: false, error: "This item is approved for marketing — ask the office to change it." };
   }
   const tag =
     patch.tag === null || patch.tag === undefined
@@ -272,6 +292,18 @@ export async function approveJobMediaAction(
   if (approve && row.consent_state === "internal_only") {
     return { ok: false, error: "This job's content is internal-only — the customer hasn't OK'd marketing use." };
   }
+  // Consent can be revoked AFTER capture — rows keep their birth stamp, so
+  // approval must also honour the lead's CURRENT consent.
+  if (approve) {
+    const { data: lead } = await admin
+      .from("leads")
+      .select("media_consent")
+      .eq("id", row.lead_id)
+      .maybeSingle();
+    if ((lead?.media_consent as string | null) === "internal_only") {
+      return { ok: false, error: "The customer has since set this job to internal-only — no marketing use." };
+    }
+  }
   const { error } = await admin
     .from("job_media")
     .update(
@@ -299,7 +331,12 @@ export async function deleteJobMediaAction(
     .eq("id", id)
     .maybeSingle();
   if (!row) return { ok: true };
-  await admin.storage.from(JOB_MEDIA_BUCKET).remove([row.storage_path]);
+  // The UI promises "The file is removed too" — an already-gone object is
+  // fine, but any other storage failure keeps the row so delete can be retried.
+  const { error: removeErr } = await admin.storage.from(JOB_MEDIA_BUCKET).remove([row.storage_path]);
+  if (removeErr && !/not.?found/i.test(removeErr.message ?? "")) {
+    return { ok: false, error: "Could not remove the file — try again." };
+  }
   const { error } = await admin.from("job_media").delete().eq("id", id);
   if (error) return { ok: false, error: "Could not remove it — try again." };
   revalidatePath(`/leads/${row.lead_id}`);
@@ -348,7 +385,8 @@ export async function createJobMediaUploadTargetAction(
       protocol: "tus",
       objectKey: input.path,
       endpoint: `${base}/storage/v1/upload/resumable`,
-      headers: { Authorization: `Bearer ${session.access_token}`, "x-upsert": "true" },
+      // x-upsert stays false: a replayed path must never overwrite an object.
+      headers: { Authorization: `Bearer ${session.access_token}`, "x-upsert": "false" },
       metadata: {
         bucketName: JOB_MEDIA_BUCKET,
         objectName: input.path,
