@@ -501,7 +501,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             </div>
           ) : null}
 
-          {leadCompletion || leadClaims.length ? (
+          {/* A claim can follow any finished job — including one completed
+              without a panel sign-off (legacy/backfilled moves), so status
+              alone is enough to surface the card. */}
+          {leadCompletion || leadClaims.length || lead.status === "completed" ? (
             <div className="mt-5">
               <LeadClaimsCard leadId={lead.id} claims={leadClaims} />
             </div>
