@@ -103,6 +103,16 @@ export const CRON_JOBS: CronJobMeta[] = [
     endpoint: "/api/cron/bank-feed",
   },
   {
+    slug: "weekly-digest",
+    label: "Weekly owner digest",
+    schedule: "0 6 * * 1",
+    cadence: "Mondays · 06:00 UTC",
+    description:
+      "Emails Connor + Peter a short how-the-week-ran summary (money in, enquiries, wins, jobs done, what's coming) vs the week before.",
+    maxAgeMins: 8 * 24 * 60,
+    endpoint: "/api/cron/weekly-digest",
+  },
+  {
     slug: "health-watchdog",
     label: "Health watchdog",
     schedule: "*/15 * * * *",
