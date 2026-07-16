@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
+import { ukTimeAt } from "@/lib/uk-time";
 import {
   buildCompletionEmailHtml,
   completionEmailSubject,
@@ -237,6 +238,47 @@ export async function completeJobAction(
       summary: "Review request switched off automatically — exceptions recorded at sign-off",
       meta: { appointment_id: appointmentId, completion_id: completion.id, auto: true },
     });
+  }
+
+  // Claims safety net (Peter, 2026-07-16 — stage 1): an exception must never
+  // die silently in the sign-off record. Next-morning call task for the office
+  // + an alert, so the incident-to-resolution trail starts the day after the
+  // move. Fail-soft — never blocks the completion.
+  if (appt.lead_id && exceptionsNote) {
+    try {
+      const { data: openTask } = await admin
+        .from("follow_ups")
+        .select("id")
+        .eq("lead_id", appt.lead_id)
+        .eq("reason", "custom")
+        .eq("source", "sign_off_exception")
+        .eq("status", "open")
+        .limit(1)
+        .maybeSingle();
+      if (!openTask) {
+        const { data: leadRow } = await admin
+          .from("leads")
+          .select("estimator_id")
+          .eq("id", appt.lead_id)
+          .maybeSingle();
+        await admin.from("follow_ups").insert({
+          lead_id: appt.lead_id,
+          client_id: lead?.client_id ?? null,
+          reason: "custom",
+          due_at: ukTimeAt(9, 0, 1).toISOString(),
+          assigned_to: leadRow?.estimator_id ?? null,
+          source: "sign_off_exception",
+          notes: `Crew noted exceptions at sign-off — call ${lead?.name ?? "the customer"} tomorrow, agree next steps, and record the outcome. Exceptions: ${exceptionsNote.slice(0, 400)}`,
+        } as never);
+      }
+      await sendOpsAlert(`Job signed off WITH EXCEPTIONS — ${lead?.name ?? "customer"}`, [
+        `The crew recorded exceptions at completion sign-off: <strong>${exceptionsNote.slice(0, 500).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</strong>`,
+        `A call task is due tomorrow morning. Photos/evidence: the job's crew notes + the signed certificate.`,
+        `Lead: https://ops.marleymoves.co.uk/leads/${appt.lead_id}`,
+      ]);
+    } catch {
+      /* safety net is best-effort — the sign-off itself already carries the evidence */
+    }
   }
 
   // Email the certificate — fail-soft; completion stands regardless.
