@@ -20,6 +20,7 @@ import {
   outstandingTotal,
   summariseRaised,
   ukTodayDate,
+  vatOwed,
   vatQuarterFor,
   vatQuarterLabel,
 } from "@/lib/finance/invoices";
@@ -154,6 +155,14 @@ export default async function FinancePage({
   const owed = outstandingTotal(unpaidInvoices);
   const owedCount = unpaidInvoices.filter((i) => i.balance > 0).length;
 
+  // What's actually OWED to HMRC per window — on the Flat Rate Scheme that's
+  // flatPct × gross turnover, not the 20% charged on the documents.
+  const frs = settings.vatScheme === "flat_rate";
+  const pct = settings.vatFlatRatePct;
+  const dayVat = vatOwed(dayInvoices, settings.vatScheme, pct);
+  const mtdVat = vatOwed(mtdInvoices, settings.vatScheme, pct);
+  const quarterVat = vatOwed(quarterInvoices, settings.vatScheme, pct);
+
   const navBtn =
     "focus-ring inline-flex size-9 items-center justify-center rounded-md border border-input bg-card text-mist-500 hover:bg-muted";
 
@@ -198,19 +207,23 @@ export default async function FinancePage({
           sub={`${daySummary.count} invoice${daySummary.count === 1 ? "" : "s"} raised ${isToday ? "so far today" : "on this day"}`}
         />
         <Stat
-          label="Output VAT"
-          value={fmtGBP(daySummary.vat)}
-          sub={`on ${isToday ? "today's" : "the day's"} invoices · net ${fmtGBP(daySummary.net)}`}
+          label={frs ? `VAT owed (FRS ${pct}%)` : "Output VAT"}
+          value={fmtGBP(dayVat.owed)}
+          sub={
+            frs
+              ? `charged ${fmtGBP(dayVat.charged)} at 20% — the difference stays in the business`
+              : `on ${isToday ? "today's" : "the day's"} invoices · net ${fmtGBP(daySummary.net)}`
+          }
         />
         <Stat
           label="Month so far"
           value={fmtGBP(mtdSummary.gross)}
-          sub={`VAT ${fmtGBP(mtdSummary.vat)} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`}
+          sub={`owed ${fmtGBP(mtdVat.owed)}${frs ? ` (FRS ${pct}%)` : " VAT"} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`}
         />
         <Stat
           label="VAT quarter to date"
-          value={fmtGBP(quarterSummary.vat)}
-          sub={`${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)} · cycle in Settings`}
+          value={fmtGBP(quarterVat.owed)}
+          sub={`${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)}${frs ? ` · FRS ${pct}%` : ""} · cycle in Settings`}
         />
         <Stat
           label="Outstanding"
@@ -261,11 +274,26 @@ export default async function FinancePage({
           <div>
             <p className="text-sm font-semibold text-foreground">How the VAT figures work</p>
             <p className="mt-0.5 text-sm text-mist-400">
-              Every invoice is VAT-inclusive at the standard 20% rate, so VAT is worked out per invoice
-              (gross ÷ 6) exactly as the Zoho documents itemise it. The business is VAT-registered with
-              effect from 1 June 2026 (VAT no. 520 2213 58) — invoices dated before that carry no VAT
-              here. This tracks OUTPUT VAT day to day — VAT on purchases (input VAT) and the quarterly
-              return itself stay with Zoho and the accountant.
+              {frs ? (
+                <>
+                  Customers are charged 20% on every invoice (the per-row figures match the Zoho
+                  documents), but on the <span className="font-medium text-foreground">Flat Rate Scheme</span>{" "}
+                  the business owes HMRC {pct}% of VAT-INCLUSIVE turnover instead — the difference stays
+                  in the business, and input VAT on purchases isn&apos;t reclaimed (capital assets over
+                  £2k excepted). Registered with effect from 1 June 2026 (VAT no. 520 2213 58) — earlier
+                  invoices sit outside the scheme. Owed figures use invoice dates (basic turnover
+                  method); if the accountant files on the cash method the return counts receipts
+                  instead. The return itself stays with Zoho and the accountant.
+                </>
+              ) : (
+                <>
+                  Every invoice is VAT-inclusive at the standard 20% rate, so VAT is worked out per
+                  invoice (gross ÷ 6) exactly as the Zoho documents itemise it. The business is
+                  VAT-registered with effect from 1 June 2026 (VAT no. 520 2213 58) — invoices dated
+                  before that carry no VAT here. This tracks OUTPUT VAT day to day — VAT on purchases
+                  (input VAT) and the quarterly return itself stay with Zoho and the accountant.
+                </>
+              )}
             </p>
           </div>
         </Card>

@@ -76,6 +76,8 @@ const settingsSchema = z.object({
   vatDefault: z.boolean(),
   vatNumber: z.string().trim().max(20),
   vatStaggerGroup: z.coerce.number().int().min(1).max(3),
+  vatScheme: z.enum(["standard", "flat_rate"]),
+  vatFlatRatePct: z.coerce.number().min(1, "FRS % must be 1–16.5").max(16.5, "FRS % must be 1–16.5"),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
   defaultDeposit: num,
   googleReviewUrl: z
@@ -122,6 +124,8 @@ export async function updateSettingsAction(input: SettingsInput) {
       vat_default: v.vatDefault,
       vat_number: (v.vatNumber || null) as never,
       vat_stagger_group: v.vatStaggerGroup as never,
+      vat_scheme: v.vatScheme as never,
+      vat_flat_rate_pct: v.vatFlatRatePct as never,
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
       google_review_url: v.googleReviewUrl,

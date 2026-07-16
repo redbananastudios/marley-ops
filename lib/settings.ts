@@ -26,6 +26,13 @@ export interface BusinessSettings {
   /** HMRC VAT stagger group: 1 = quarters ending Mar/Jun/Sep/Dec, 2 = Apr/Jul/Oct/Jan,
    *  3 = May/Aug/Nov/Feb. Drives the Finance page's quarter-to-date VAT. */
   vatStaggerGroup: 1 | 2 | 3;
+  /** standard = owe the 20% charged (less input VAT, accountant-side);
+   *  flat_rate = Flat Rate Scheme: owe vatFlatRatePct × VAT-inclusive turnover.
+   *  Invoices CHARGE 20% either way — the scheme only changes the liability. */
+  vatScheme: "standard" | "flat_rate";
+  /** FRS percentage (removals/transport sector = 10; first-year discount may
+   *  make it 9 until 31 May 2027 — confirm with the accountant). */
+  vatFlatRatePct: number;
   /** Yard/base location — mileage origin + the clients map "route from base". */
   baseLocation: string;
   /** Standard deposit £ — prefills "Request deposit" on a job (editable per job). */
@@ -63,6 +70,8 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   vatDefault: true,
   vatNumber: "",
   vatStaggerGroup: 1,
+  vatScheme: "flat_rate", // Marley is on the FRS at 10% (Peter, 2026-07-16)
+  vatFlatRatePct: 10,
   baseLocation: DEFAULT_BASE_LOCATION,
   defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
   // Same place id the marleymoves.co.uk site links to.
@@ -97,6 +106,9 @@ export function mapBusinessSettings(data: Record<string, unknown> | null | undef
     vatDefault: typeof data.vat_default === "boolean" ? data.vat_default : DEFAULT_SETTINGS.vatDefault,
     vatNumber: typeof data.vat_number === "string" ? data.vat_number.trim() : "",
     vatStaggerGroup: ([1, 2, 3] as const).find((g) => g === Number(data.vat_stagger_group)) ?? 1,
+    vatScheme: data.vat_scheme === "standard" ? "standard" : DEFAULT_SETTINGS.vatScheme,
+    vatFlatRatePct:
+      Number(data.vat_flat_rate_pct ?? DEFAULT_SETTINGS.vatFlatRatePct) || DEFAULT_SETTINGS.vatFlatRatePct,
     baseLocation: typeof data.base_location === "string" && data.base_location.trim()
       ? data.base_location.trim()
       : DEFAULT_BASE_LOCATION,
@@ -124,7 +136,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
+    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, vat_scheme, vat_flat_rate_pct, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
     .eq("id", true)
     .maybeSingle();
   return mapBusinessSettings(data as Record<string, unknown> | null);

@@ -11,6 +11,7 @@ import {
   summariseRaised,
   ukTodayDate,
   vatFromGross,
+  vatOwed,
   type FinanceInvoice,
   vatQuarterFor,
   vatQuarterLabel,
@@ -98,6 +99,49 @@ describe("summariseRaised", () => {
     // 3 × £0.05 gross: per-invoice VAT rounds to £0.01 each → £0.03.
     const s = summariseRaised([inv({ total: 0.05 }), inv({ total: 0.05 }), inv({ total: 0.05 })]);
     expect(s.vat).toBe(0.03);
+  });
+});
+
+describe("vatOwed — scheme-aware liability", () => {
+  it("flat rate: owes flatPct × gross turnover, while charged stays at 20%", () => {
+    const { charged, owed } = vatOwed([inv({ total: 2979.15 })], "flat_rate", 10);
+    expect(charged).toBe(496.53); // on the invoice document
+    expect(owed).toBe(297.92); // 10% of gross — the FRS liability
+  });
+
+  it("flat rate is computed on the period total, not per invoice", () => {
+    // 3 × £0.04: per-invoice 10% would round to £0.00 each; period total is
+    // £0.12 → £0.01. HMRC applies the rate to period turnover.
+    const { owed } = vatOwed(
+      [inv({ total: 0.04 }), inv({ total: 0.04 }), inv({ total: 0.04 })],
+      "flat_rate",
+      10,
+    );
+    expect(owed).toBe(0.01);
+  });
+
+  it("flat rate excludes voids, drafts and pre-registration invoices", () => {
+    const { owed } = vatOwed(
+      [
+        inv({ total: 1000 }),
+        inv({ total: 500, status: "void" }),
+        inv({ total: 400, status: "draft" }),
+        inv({ total: 600, date: "2026-05-20" }), // pre-registration
+      ],
+      "flat_rate",
+      10,
+    );
+    expect(owed).toBe(100); // 10% of the £1,000 only
+  });
+
+  it("standard scheme: owed equals the VAT charged", () => {
+    const { charged, owed } = vatOwed([inv({ total: 1020 })], "standard", 10);
+    expect(charged).toBe(170);
+    expect(owed).toBe(170);
+  });
+
+  it("first-year discounted rate (9%) applies cleanly", () => {
+    expect(vatOwed([inv({ total: 1000 })], "flat_rate", 9).owed).toBe(90);
   });
 });
 

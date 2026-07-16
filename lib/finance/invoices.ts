@@ -61,6 +61,33 @@ export function summariseRaised(invoices: FinanceInvoice[]): RaisedSummary {
   return { count: live.length, gross, vat, net: round2(gross - vat) };
 }
 
+export type VatScheme = "standard" | "flat_rate";
+
+/**
+ * What the business OWES HMRC for a set of invoices, by scheme.
+ *  standard  → the VAT charged (input VAT netting is the accountant's side).
+ *  flat_rate → flatPct × VAT-INCLUSIVE turnover (that's how the FRS works: you
+ *              still charge 20%, you pay the flat % of gross and keep the
+ *              difference; no input-VAT reclaim except capital assets).
+ * Applied to the PERIOD TOTAL of post-registration turnover — the FRS is
+ * computed on period turnover, not per invoice. Pre-registration invoices are
+ * outside the regime entirely.
+ */
+export function vatOwed(
+  invoices: FinanceInvoice[],
+  scheme: VatScheme,
+  flatPct: number,
+): { charged: number; owed: number } {
+  const charged = summariseRaised(invoices).vat;
+  if (scheme !== "flat_rate") return { charged, owed: charged };
+  const frsGross = round2(
+    invoices
+      .filter((i) => isRaised(i.status) && (!i.date || i.date >= VAT_REGISTERED_FROM))
+      .reduce((s, i) => s + i.total, 0),
+  );
+  return { charged, owed: round2((frsGross * flatPct) / 100) };
+}
+
 /** Money still owed across a set of invoices (issued only). */
 export function outstandingTotal(invoices: FinanceInvoice[]): number {
   return round2(

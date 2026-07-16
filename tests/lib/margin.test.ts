@@ -15,6 +15,8 @@ const RATES: BusinessSettings = {
   vatDefault: true,
   vatNumber: "",
   vatStaggerGroup: 1,
+  vatScheme: "flat_rate",
+  vatFlatRatePct: 10,
   baseLocation: "",
   googleReviewUrl: "",
   defaultDeposit: 0,

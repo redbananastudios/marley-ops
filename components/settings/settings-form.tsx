@@ -35,6 +35,8 @@ type RateSettingKey = Exclude<
   | "vatDefault"
   | "vatNumber"
   | "vatStaggerGroup"
+  | "vatScheme"
+  | "vatFlatRatePct"
   | "baseLocation"
   | "googleReviewUrl"
   | "aiSurveyEnabled"
@@ -103,6 +105,8 @@ export function SettingsForm({
   const [vatDefault, setVatDefault] = useState(initial.vatDefault);
   const [vatNumber, setVatNumber] = useState(initial.vatNumber);
   const [vatStaggerGroup, setVatStaggerGroup] = useState(String(initial.vatStaggerGroup));
+  const [vatScheme, setVatScheme] = useState<"standard" | "flat_rate">(initial.vatScheme);
+  const [vatFlatRatePct, setVatFlatRatePct] = useState(String(initial.vatFlatRatePct));
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(initial.googleReviewUrl);
   const [v, setV] = useState<Record<RateSettingKey, string>>({
@@ -138,6 +142,8 @@ export function SettingsForm({
       vatDefault,
       vatNumber: vatNumber.trim(),
       vatStaggerGroup: Number(vatStaggerGroup),
+      vatScheme,
+      vatFlatRatePct: Number(vatFlatRatePct),
       baseLocation: baseLocation.trim(),
       googleReviewUrl: googleReviewUrl.trim(),
       cubicFillPct: Number(v.cubicFillPct),
@@ -240,6 +246,50 @@ export function SettingsForm({
           className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         <p className="mt-1.5 text-xs text-mist-400">Printed in the quote PDF footer. Required on customer paperwork once VAT registered.</p>
+      </div>
+
+      {/* VAT scheme — drives Finance's "owed to HMRC" figures. Invoices always
+          charge 20%; the Flat Rate Scheme only changes the liability calc. */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-vat-scheme">VAT scheme</Label>
+        <div className="mt-1.5 grid gap-3 sm:grid-cols-[1fr_140px]">
+          <Select
+            value={vatScheme}
+            onValueChange={(v) => setVatScheme(v as "standard" | "flat_rate")}
+            disabled={!canEdit || busy}
+          >
+            <SelectTrigger id="set-vat-scheme" className="h-11 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="flat_rate">Flat Rate Scheme (owe % of gross turnover)</SelectItem>
+              <SelectItem value="standard">Standard (owe the 20% charged)</SelectItem>
+            </SelectContent>
+          </Select>
+          {vatScheme === "flat_rate" ? (
+            <div className="flex h-11 items-center rounded-md border border-input bg-card px-3 focus-within:border-mm-red focus-within:ring-2 focus-within:ring-mm-red/30">
+              <input
+                id="set-vat-flat-rate"
+                type="number"
+                inputMode="decimal"
+                min={1}
+                max={16.5}
+                step="0.5"
+                value={vatFlatRatePct}
+                disabled={!canEdit || busy}
+                onChange={(e) => setVatFlatRatePct(e.target.value)}
+                aria-label="Flat rate percentage"
+                className="tabular h-full w-full bg-transparent text-sm text-foreground focus:outline-none disabled:cursor-not-allowed"
+              />
+              <span className="ml-1 shrink-0 text-sm text-mist-400">%</span>
+            </div>
+          ) : null}
+        </div>
+        <p className="mt-1.5 text-xs text-mist-400">
+          Customers are charged 20% either way — this only changes what&apos;s OWED to HMRC on Finance.
+          Removals/transport FRS rate is 10%; a first-year discount may make it 9% until 31 May 2027 —
+          confirm the rate with the accountant.
+        </p>
       </div>
 
       {/* VAT quarter cycle — drives Finance's quarter-to-date VAT rollup */}
