@@ -65,8 +65,8 @@ export async function assignSegmentAction(
   const { data, error } = await admin.rpc("assign_ai_segment", {
     p_segment_id: id.data,
     p_action: input.data.action,
-    p_room_id: input.data.roomId ?? null,
-    p_new_room: input.data.newRoom ?? null,
+    p_room_id: (input.data.roomId ?? null) as never,
+    p_new_room: (input.data.newRoom ?? null) as never,
     p_actor_id: actor.id,
   });
   if (error || !data || typeof data !== "object" || Array.isArray(data)) {
@@ -96,7 +96,7 @@ export async function resolveDuplicateGroupAction(
   const { data, error } = await createAdminClient().rpc("resolve_ai_duplicate_group", {
     p_detection_ids: ids.data,
     p_choice: input.data.choice,
-    p_qty: input.data.qty ?? null,
+    p_qty: (input.data.qty ?? null) as never,
     p_actor_id: actor.id,
   });
   if (error || !data || typeof data !== "object" || Array.isArray(data)) return { ok: false, error: "Could not resolve this duplicate group." };

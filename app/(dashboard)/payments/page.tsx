@@ -9,6 +9,8 @@ import {
 } from "@/lib/payments/received";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
+import { bankFeedConfigured } from "@/lib/bank-feed/sync";
+import { BankFeedSection, type BankFeedTx } from "@/components/payments/bank-feed-section";
 
 /**
  * Payments — everything that landed on a given UK day, newest first.
@@ -34,6 +36,14 @@ function timeOf(iso: string): string {
     minute: "2-digit",
     timeZone: "Europe/London",
   });
+}
+
+/** "3 min ago" health line for the bank-feed sync (module-level so the render
+ *  stays pure per the react-hooks lint). */
+function syncAgeLabel(finishedAt: string | null | undefined, ok: boolean): string | null {
+  if (!finishedAt) return null;
+  const mins = Math.max(0, Math.round((Date.now() - new Date(finishedAt).getTime()) / 60000));
+  return `${mins} min ago${ok ? "" : " · last run FAILED"}`;
 }
 
 function dayLabel(day: string, isToday: boolean): string {
@@ -193,6 +203,72 @@ export default async function PaymentsPage({
   const cardItems = day.items.filter((i) => i.source === "card");
   const recordedItems = day.items.filter((i) => i.source === "recorded");
 
+  // Bank feed (when configured): the viewed day's inbound transfers + the
+  // suggestion queue across ALL dates — reconciliation surfaces old transfers
+  // that match still-open invoices, so the confirm queue isn't day-scoped.
+  let bank: {
+    suggested: BankFeedTx[];
+    dayRows: BankFeedTx[];
+    lastSync: string | null;
+    unmatchedCount: number;
+  } | null = null;
+  if (bankFeedConfigured()) {
+    const TX_COLS =
+      "id, tx_date, tx_time, counterparty, amount, reference, status, match_kind, match_confidence, matched_quote_id";
+    const [sugRes, dayRes, unmatchedRes, syncRes] = await Promise.all([
+      sb
+        .from("bank_transactions")
+        .select(TX_COLS)
+        .eq("status", "suggested")
+        .order("tx_date", { ascending: false })
+        .limit(20),
+      sb
+        .from("bank_transactions")
+        .select(TX_COLS)
+        .eq("tx_date", window.day)
+        .neq("status", "info") // inbound rows are exactly the non-info ones
+        .order("tx_time", { ascending: false }),
+      sb.from("bank_transactions").select("id", { count: "exact", head: true }).eq("status", "unmatched"),
+      sb
+        .from("cron_runs")
+        .select("finished_at, status")
+        .eq("job", "bank-feed")
+        .order("started_at", { ascending: false })
+        .limit(1),
+    ]);
+    const rows = [...(sugRes.data ?? []), ...(dayRes.data ?? [])];
+    const qIds = [...new Set(rows.map((r) => r.matched_quote_id).filter(Boolean))] as string[];
+    const { data: qRows } = qIds.length
+      ? await sb.from("quotes").select("id, quote_ref, customer_name, lead_id").in("id", qIds)
+      : { data: [] as { id: string; quote_ref: string | null; customer_name: string | null; lead_id: string | null }[] };
+    const qById = new Map((qRows ?? []).map((q) => [q.id, q]));
+    const toTx = (r: (typeof rows)[number]): BankFeedTx => {
+      const q = r.matched_quote_id ? qById.get(r.matched_quote_id as string) : null;
+      return {
+        id: r.id as string,
+        txDate: r.tx_date as string,
+        txTime: (r.tx_time as string | null) ?? null,
+        counterparty: (r.counterparty as string | null) ?? null,
+        amount: Number(r.amount),
+        reference: (r.reference as string | null) ?? null,
+        status: r.status as string,
+        matchKind: (r.match_kind as string | null) ?? null,
+        matchConfidence: (r.match_confidence as string | null) ?? null,
+        quoteRef: q?.quote_ref ?? null,
+        quoteCustomer: q?.customer_name ?? null,
+        leadId: q?.lead_id ?? null,
+      };
+    };
+    const last = syncRes.data?.[0];
+    const lastSync = syncAgeLabel(last?.finished_at as string | null, last?.status === "ok");
+    bank = {
+      suggested: (sugRes.data ?? []).map(toTx),
+      dayRows: (dayRes.data ?? []).map(toTx),
+      lastSync,
+      unmatchedCount: unmatchedRes.count ?? 0,
+    };
+  }
+
   const navBtn =
     "focus-ring inline-flex size-9 items-center justify-center rounded-md border border-input bg-card text-mist-500 hover:bg-muted";
 
@@ -255,16 +331,26 @@ export default async function PaymentsPage({
         ))}
       </Section>
 
-      <Card className="flex items-start gap-3 border-dashed px-5 py-4">
-        <Landmark className="mt-0.5 size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
-        <div>
-          <p className="text-sm font-semibold text-foreground">Bank feed — coming soon</p>
-          <p className="mt-0.5 text-sm text-mist-400">
-            Once the business bank account is connected, inbound transfers will appear here automatically and
-            match to quotes by their payment reference — no more checking the banking app.
-          </p>
-        </div>
-      </Card>
+      {bank ? (
+        <BankFeedSection
+          suggested={bank.suggested}
+          dayRows={bank.dayRows}
+          dayLabelText={window.isToday ? "so far today" : `on ${dayLabel(window.day, false)}`}
+          lastSync={bank.lastSync}
+          unmatchedCount={bank.unmatchedCount}
+        />
+      ) : (
+        <Card className="flex items-start gap-3 border-dashed px-5 py-4">
+          <Landmark className="mt-0.5 size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Bank feed — coming soon</p>
+            <p className="mt-0.5 text-sm text-mist-400">
+              Once the business bank account is connected, inbound transfers will appear here automatically and
+              match to quotes by their payment reference — no more checking the banking app.
+            </p>
+          </div>
+        </Card>
+      )}
     </main>
   );
 }

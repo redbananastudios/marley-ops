@@ -92,6 +92,16 @@ export const CRON_JOBS: CronJobMeta[] = [
     maxAgeMins: 45,
     endpoint: "/api/cron/card-reconcile",
   },
+  {
+    slug: "bank-feed",
+    label: "Bank feed sync",
+    schedule: "*/2 * * * *",
+    cadence: "Every 2 minutes",
+    description:
+      "Reads the Monzo→Google-Sheets export and matches inbound transfers to awaiting deposits/balances for one-tap confirmation on Payments.",
+    maxAgeMins: 15,
+    endpoint: "/api/cron/bank-feed",
+  },
 ];
 
 /** A row from public.cron_runs (what the page + API return). */

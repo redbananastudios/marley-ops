@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -34,87 +34,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      auth_passkeys: {
-        Row: {
-          counter: number
-          created_at: string
-          credential_id: string
-          device_label: string | null
-          id: string
-          last_used_at: string | null
-          public_key: string
-          transports: string | null
-          user_id: string
-        }
-        Insert: {
-          counter?: number
-          created_at?: string
-          credential_id: string
-          device_label?: string | null
-          id?: string
-          last_used_at?: string | null
-          public_key: string
-          transports?: string | null
-          user_id: string
-        }
-        Update: {
-          counter?: number
-          created_at?: string
-          credential_id?: string
-          device_label?: string | null
-          id?: string
-          last_used_at?: string | null
-          public_key?: string
-          transports?: string | null
-          user_id?: string
-        }
-        Relationships: []
-      }
-      auth_passkey_challenges: {
-        Row: {
-          challenge: string
-          created_at: string
-          expires_at: string
-          id: string
-          kind: string
-          user_id: string | null
-        }
-        Insert: {
-          challenge: string
-          created_at?: string
-          expires_at: string
-          id?: string
-          kind: string
-          user_id?: string | null
-        }
-        Update: {
-          challenge?: string
-          created_at?: string
-          expires_at?: string
-          id?: string
-          kind?: string
-          user_id?: string | null
-        }
-        Relationships: []
-      }
-      auth_passkey_attempts: {
-        Row: {
-          created_at: string
-          credential_id: string
-          id: string
-        }
-        Insert: {
-          created_at?: string
-          credential_id: string
-          id?: string
-        }
-        Update: {
-          created_at?: string
-          credential_id?: string
-          id?: string
-        }
-        Relationships: []
-      }
       activities: {
         Row: {
           actor_id: string | null
@@ -471,6 +390,158 @@ export type Database = {
           },
         ]
       }
+      auth_passkey_attempts: {
+        Row: {
+          created_at: string
+          credential_id: string
+          id: string
+        }
+        Insert: {
+          created_at?: string
+          credential_id: string
+          id?: string
+        }
+        Update: {
+          created_at?: string
+          credential_id?: string
+          id?: string
+        }
+        Relationships: []
+      }
+      auth_passkey_challenges: {
+        Row: {
+          challenge: string
+          created_at: string
+          expires_at: string
+          id: string
+          kind: string
+          user_id: string | null
+        }
+        Insert: {
+          challenge: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          kind: string
+          user_id?: string | null
+        }
+        Update: {
+          challenge?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          kind?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      auth_passkeys: {
+        Row: {
+          counter: number
+          created_at: string
+          credential_id: string
+          device_label: string | null
+          id: string
+          last_used_at: string | null
+          public_key: string
+          transports: string | null
+          user_id: string
+        }
+        Insert: {
+          counter?: number
+          created_at?: string
+          credential_id: string
+          device_label?: string | null
+          id?: string
+          last_used_at?: string | null
+          public_key: string
+          transports?: string | null
+          user_id: string
+        }
+        Update: {
+          counter?: number
+          created_at?: string
+          credential_id?: string
+          device_label?: string | null
+          id?: string
+          last_used_at?: string | null
+          public_key?: string
+          transports?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      bank_transactions: {
+        Row: {
+          amount: number
+          confirmed_at: string | null
+          counterparty: string | null
+          created_at: string
+          currency: string | null
+          description: string | null
+          id: string
+          match_confidence: string | null
+          match_kind: string | null
+          matched_quote_id: string | null
+          raw: Json
+          reference: string | null
+          status: string
+          transaction_id: string
+          tx_date: string
+          tx_time: string | null
+          tx_type: string | null
+          updated_at: string
+        }
+        Insert: {
+          amount: number
+          confirmed_at?: string | null
+          counterparty?: string | null
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          match_confidence?: string | null
+          match_kind?: string | null
+          matched_quote_id?: string | null
+          raw?: Json
+          reference?: string | null
+          status?: string
+          transaction_id: string
+          tx_date: string
+          tx_time?: string | null
+          tx_type?: string | null
+          updated_at?: string
+        }
+        Update: {
+          amount?: number
+          confirmed_at?: string | null
+          counterparty?: string | null
+          created_at?: string
+          currency?: string | null
+          description?: string | null
+          id?: string
+          match_confidence?: string | null
+          match_kind?: string | null
+          matched_quote_id?: string | null
+          raw?: Json
+          reference?: string | null
+          status?: string
+          transaction_id?: string
+          tx_date?: string
+          tx_time?: string | null
+          tx_type?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bank_transactions_matched_quote_id_fkey"
+            columns: ["matched_quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       business_settings: {
         Row: {
           ai_grounded_replay_enabled: boolean
@@ -505,7 +576,10 @@ export type Database = {
           push_payment_event_enabled: boolean
           updated_at: string
           vat_default: boolean
+          vat_flat_rate_pct: number
           vat_number: string | null
+          vat_scheme: string
+          vat_stagger_group: number
         }
         Insert: {
           ai_grounded_replay_enabled?: boolean
@@ -540,7 +614,10 @@ export type Database = {
           push_payment_event_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
+          vat_flat_rate_pct?: number
           vat_number?: string | null
+          vat_scheme?: string
+          vat_stagger_group?: number
         }
         Update: {
           ai_grounded_replay_enabled?: boolean
@@ -575,7 +652,10 @@ export type Database = {
           push_payment_event_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
+          vat_flat_rate_pct?: number
           vat_number?: string | null
+          vat_scheme?: string
+          vat_stagger_group?: number
         }
         Relationships: []
       }
@@ -875,6 +955,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      cron_runs: {
+        Row: {
+          created_at: string
+          duration_ms: number | null
+          error: string | null
+          finished_at: string
+          id: string
+          job: string
+          started_at: string
+          status: string
+          summary: Json
+        }
+        Insert: {
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string
+          id?: string
+          job: string
+          started_at: string
+          status: string
+          summary?: Json
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number | null
+          error?: string | null
+          finished_at?: string
+          id?: string
+          job?: string
+          started_at?: string
+          status?: string
+          summary?: Json
+        }
+        Relationships: []
       }
       cubic_ai_detections: {
         Row: {
@@ -1560,6 +1676,36 @@ export type Database = {
           },
         ]
       }
+      growth_artifacts: {
+        Row: {
+          artifact_type: string
+          brand: string
+          generated_at: string | null
+          id: string
+          payload: Json
+          pushed_at: string
+          source_host: string | null
+        }
+        Insert: {
+          artifact_type: string
+          brand: string
+          generated_at?: string | null
+          id?: string
+          payload: Json
+          pushed_at?: string
+          source_host?: string | null
+        }
+        Update: {
+          artifact_type?: string
+          brand?: string
+          generated_at?: string | null
+          id?: string
+          payload?: Json
+          pushed_at?: string
+          source_host?: string | null
+        }
+        Relationships: []
+      }
       job_completions: {
         Row: {
           absent_reason: string | null
@@ -1655,72 +1801,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      cron_runs: {
-        Row: {
-          created_at: string
-          duration_ms: number | null
-          error: string | null
-          finished_at: string
-          id: string
-          job: string
-          started_at: string
-          status: string
-          summary: Json
-        }
-        Insert: {
-          created_at?: string
-          duration_ms?: number | null
-          error?: string | null
-          finished_at?: string
-          id?: string
-          job: string
-          started_at: string
-          status: string
-          summary?: Json
-        }
-        Update: {
-          created_at?: string
-          duration_ms?: number | null
-          error?: string | null
-          finished_at?: string
-          id?: string
-          job?: string
-          started_at?: string
-          status?: string
-          summary?: Json
-        }
-        Relationships: []
-      }
-      growth_artifacts: {
-        Row: {
-          artifact_type: string
-          brand: string
-          generated_at: string | null
-          id: string
-          payload: Json
-          pushed_at: string
-          source_host: string | null
-        }
-        Insert: {
-          artifact_type: string
-          brand: string
-          generated_at?: string | null
-          id?: string
-          payload: Json
-          pushed_at?: string
-          source_host?: string | null
-        }
-        Update: {
-          artifact_type?: string
-          brand?: string
-          generated_at?: string | null
-          id?: string
-          payload?: Json
-          pushed_at?: string
-          source_host?: string | null
-        }
-        Relationships: []
       }
       job_notes: {
         Row: {
@@ -2820,8 +2900,8 @@ export type Database = {
         Args: {
           p_action: string
           p_actor_id: string
-          p_new_room: string | null
-          p_room_id: string | null
+          p_new_room: string
+          p_room_id: string
           p_segment_id: string
         }
         Returns: Json
@@ -2869,6 +2949,47 @@ export type Database = {
           p_worker: string
         }
         Returns: boolean
+      }
+      complete_ai_room_manually: {
+        Args: {
+          p_actor_id: string
+          p_base_updated_at: string
+          p_room_id: string
+          p_survey_id: string
+        }
+        Returns: {
+          ai_abandoned_at: string | null
+          ai_consent: Json | null
+          ai_consent_withdrawn_at: string | null
+          ai_consent_withdrawn_by: string | null
+          ai_status: string
+          appointment_id: string | null
+          client_id: string | null
+          contingency_pct: number
+          created_at: string
+          created_by: string | null
+          customer_notes: string
+          id: string
+          items: Json
+          last_ai_user_activity_at: string | null
+          lead_id: string | null
+          legal_hold: boolean
+          media_retention_anchor_at: string | null
+          notes: string
+          planning_ready: boolean
+          room_manifest_complete: boolean
+          share_token: string | null
+          status: string
+          total_ft3: number
+          updated_at: string
+          updated_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "cubic_surveys"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       confirm_ai_room: {
         Args: {
@@ -2987,16 +3108,6 @@ export type Database = {
         Args: { p_job_id: string; p_lease_seconds?: number; p_worker: string }
         Returns: boolean
       }
-      complete_ai_room_manually: {
-        Args: { p_actor_id: string; p_base_updated_at: string; p_room_id: string; p_survey_id: string }
-        Returns: Database["public"]["Tables"]["cubic_surveys"]["Row"]
-        SetofOptions: {
-          from: "*"
-          to: "cubic_surveys"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
       ignore_failed_ai_media: {
         Args: { p_actor_id: string; p_media_id: string }
         Returns: boolean
@@ -3014,20 +3125,6 @@ export type Database = {
         Args: { p_age_minutes?: number }
         Returns: number
       }
-      retry_ai_job: {
-        Args: { p_actor_id: string; p_job_id: string }
-        Returns: Database["public"]["Tables"]["ai_jobs"]["Row"]
-        SetofOptions: {
-          from: "*"
-          to: "ai_jobs"
-          isOneToOne: true
-          isSetofReturn: false
-        }
-      }
-      resolve_ai_duplicate_group: {
-        Args: { p_actor_id: string; p_choice: string; p_detection_ids: string[]; p_qty: number | null }
-        Returns: Json
-      }
       reserve_ai_call: {
         Args: {
           p_attempt_key: string
@@ -3040,6 +3137,43 @@ export type Database = {
           reason: string
           reservation_id: string
         }[]
+      }
+      resolve_ai_duplicate_group: {
+        Args: {
+          p_actor_id: string
+          p_choice: string
+          p_detection_ids: string[]
+          p_qty: number
+        }
+        Returns: Json
+      }
+      retry_ai_job: {
+        Args: { p_actor_id: string; p_job_id: string }
+        Returns: {
+          attempts: number
+          created_at: string
+          error: string | null
+          heartbeat_at: string | null
+          id: string
+          idempotency_key: string
+          kind: string
+          lease_expires_at: string | null
+          locked_at: string | null
+          locked_by: string | null
+          max_attempts: number
+          media_id: string | null
+          next_run_at: string
+          payload: Json
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "ai_jobs"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {
@@ -3076,9 +3210,9 @@ export type Database = {
         | "phone_google"
         | "phone_facebook"
         | "phone_referral"
-        | "checkatrade"
         | "manual"
         | "referral"
+        | "checkatrade"
       lead_status:
         | "website_enquiry"
         | "survey_booked"
@@ -3257,9 +3391,9 @@ export const Constants = {
         "phone_google",
         "phone_facebook",
         "phone_referral",
-        "checkatrade",
         "manual",
         "referral",
+        "checkatrade",
       ],
       lead_status: [
         "website_enquiry",
