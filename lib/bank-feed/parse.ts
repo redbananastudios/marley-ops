@@ -86,10 +86,12 @@ export function parseSheetRows(values: string[][]): BankTxRow[] {
   return out;
 }
 
-/** Inbound customer money = positive faster payment / BACS credit. Pot
- *  transfers, card settlements and outbound payments are bookkeeping noise. */
+/** Inbound customer money = positive faster payment / BACS credit / Monzo-to-
+ *  Monzo transfer (customers who bank with Monzo arrive as that type — proven
+ *  by the very first live test transfer, 2026-07-16). Pot transfers, card
+ *  settlements and outbound payments are bookkeeping noise. */
 export function isInboundPayment(tx: Pick<BankTxRow, "amount" | "txType">): boolean {
   if (tx.amount <= 0) return false;
   const t = (tx.txType ?? "").toLowerCase();
-  return t.includes("faster payment") || t.includes("bacs");
+  return t.includes("faster payment") || t.includes("bacs") || t.includes("monzo-to-monzo");
 }

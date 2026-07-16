@@ -64,9 +64,11 @@ describe("parseSheetRows (Monzo export)", () => {
 });
 
 describe("isInboundPayment", () => {
-  it("positive faster payments and BACS credits are inbound", () => {
+  it("positive faster payments, BACS credits and Monzo-to-Monzo transfers are inbound", () => {
     expect(isInboundPayment({ amount: 100, txType: "Faster payment" })).toBe(true);
     expect(isInboundPayment({ amount: 920, txType: "Bacs (Direct Credit)" })).toBe(true);
+    // Customers who bank with Monzo arrive as this type (live £1 test, 16 Jul).
+    expect(isInboundPayment({ amount: 1, txType: "Monzo-to-Monzo" })).toBe(true);
   });
 
   it("outbound, pot transfers and card activity are not", () => {
