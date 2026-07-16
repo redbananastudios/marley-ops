@@ -102,6 +102,16 @@ export const CRON_JOBS: CronJobMeta[] = [
     maxAgeMins: 15,
     endpoint: "/api/cron/bank-feed",
   },
+  {
+    slug: "health-watchdog",
+    label: "Health watchdog",
+    schedule: "*/15 * * * *",
+    cadence: "Every 15 minutes",
+    description:
+      "Freshness-checks every automation + the bank feed and SMS-alerts the operator (6h cooldown) when something goes quiet.",
+    maxAgeMins: 45,
+    endpoint: "/api/cron/health-watchdog",
+  },
 ];
 
 /** A row from public.cron_runs (what the page + API return). */
