@@ -9,6 +9,7 @@ import {
   ReceiptText,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getBusinessSettings } from "@/lib/settings";
 import { listInvoices, zohoInvoiceAppUrl, type ZohoInvoiceListItem } from "@/lib/zoho";
 import {
   addDaysIso,
@@ -20,6 +21,8 @@ import {
   summariseRaised,
   ukTodayDate,
   vatFromGross,
+  vatQuarterFor,
+  vatQuarterLabel,
 } from "@/lib/finance/invoices";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
@@ -118,14 +121,21 @@ export default async function FinancePage({
   const day = isValidDay(date) && date <= today ? date : today;
   const isToday = day === today;
 
+  // Quarter cycle (HMRC stagger) comes from Settings — quarter-TO-DATE runs to
+  // the viewed day, so browsing history shows the position as it was then.
+  const settings = await getBusinessSettings(sb);
+  const quarter = vatQuarterFor(day, settings.vatStaggerGroup);
+
   let dayInvoices: ZohoInvoiceListItem[] = [];
   let mtdInvoices: ZohoInvoiceListItem[] = [];
+  let quarterInvoices: ZohoInvoiceListItem[] = [];
   let unpaidInvoices: ZohoInvoiceListItem[] = [];
   let zohoError: string | null = null;
   try {
-    [dayInvoices, mtdInvoices, unpaidInvoices] = await Promise.all([
+    [dayInvoices, mtdInvoices, quarterInvoices, unpaidInvoices] = await Promise.all([
       listInvoices({ dateStart: day, dateEnd: day }),
       listInvoices({ dateStart: monthStart(day), dateEnd: day }),
+      listInvoices({ dateStart: quarter.start, dateEnd: day }),
       listInvoices({ filterBy: "Status.Unpaid" }),
     ]);
   } catch (err) {
@@ -134,6 +144,7 @@ export default async function FinancePage({
 
   const daySummary = summariseRaised(dayInvoices);
   const mtdSummary = summariseRaised(mtdInvoices);
+  const quarterSummary = summariseRaised(quarterInvoices);
   const owed = outstandingTotal(unpaidInvoices);
   const owedCount = unpaidInvoices.filter((i) => i.balance > 0).length;
 
@@ -174,7 +185,7 @@ export default async function FinancePage({
         </Card>
       ) : null}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
         <Stat
           label="Invoiced"
           value={fmtGBP(daySummary.gross)}
@@ -189,6 +200,11 @@ export default async function FinancePage({
           label="Month so far"
           value={fmtGBP(mtdSummary.gross)}
           sub={`VAT ${fmtGBP(mtdSummary.vat)} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`}
+        />
+        <Stat
+          label="VAT quarter to date"
+          value={fmtGBP(quarterSummary.vat)}
+          sub={`${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)} · cycle in Settings`}
         />
         <Stat
           label="Outstanding"

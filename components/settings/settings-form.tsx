@@ -13,6 +13,13 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { updateSettingsAction, type SettingsInput } from "@/app/(dashboard)/settings/actions";
 import type { BusinessSettings } from "@/lib/settings";
 
@@ -27,6 +34,7 @@ type RateSettingKey = Exclude<
   keyof BusinessSettings,
   | "vatDefault"
   | "vatNumber"
+  | "vatStaggerGroup"
   | "baseLocation"
   | "googleReviewUrl"
   | "aiSurveyEnabled"
@@ -94,6 +102,7 @@ export function SettingsForm({
   const [busy, setBusy] = useState(false);
   const [vatDefault, setVatDefault] = useState(initial.vatDefault);
   const [vatNumber, setVatNumber] = useState(initial.vatNumber);
+  const [vatStaggerGroup, setVatStaggerGroup] = useState(String(initial.vatStaggerGroup));
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(initial.googleReviewUrl);
   const [v, setV] = useState<Record<RateSettingKey, string>>({
@@ -128,6 +137,7 @@ export function SettingsForm({
       defaultDeposit: Number(v.defaultDeposit),
       vatDefault,
       vatNumber: vatNumber.trim(),
+      vatStaggerGroup: Number(vatStaggerGroup),
       baseLocation: baseLocation.trim(),
       googleReviewUrl: googleReviewUrl.trim(),
       cubicFillPct: Number(v.cubicFillPct),
@@ -230,6 +240,25 @@ export function SettingsForm({
           className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         <p className="mt-1.5 text-xs text-mist-400">Printed in the quote PDF footer. Required on customer paperwork once VAT registered.</p>
+      </div>
+
+      {/* VAT quarter cycle — drives Finance's quarter-to-date VAT rollup */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-vat-stagger">VAT quarter cycle</Label>
+        <Select value={vatStaggerGroup} onValueChange={setVatStaggerGroup} disabled={!canEdit || busy}>
+          <SelectTrigger id="set-vat-stagger" className="mt-1.5 h-11 w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">Quarters ending Mar / Jun / Sep / Dec</SelectItem>
+            <SelectItem value="2">Quarters ending Apr / Jul / Oct / Jan</SelectItem>
+            <SelectItem value="3">Quarters ending May / Aug / Nov / Feb</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="mt-1.5 text-xs text-mist-400">
+          The return periods HMRC assigned on VAT registration (the &quot;stagger&quot;) — it&apos;s on the VAT
+          certificate or any past return. Drives the quarter-to-date VAT figure on Finance → Invoices &amp; VAT.
+        </p>
       </div>
 
       {/* Google review link — the post-move review email sends only when set */}

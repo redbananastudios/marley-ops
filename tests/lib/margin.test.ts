@@ -14,6 +14,7 @@ const RATES: BusinessSettings = {
   costMisc: 30,
   vatDefault: true,
   vatNumber: "",
+  vatStaggerGroup: 1,
   baseLocation: "",
   googleReviewUrl: "",
   defaultDeposit: 0,

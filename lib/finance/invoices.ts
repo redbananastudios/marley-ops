@@ -82,6 +82,48 @@ export function addDaysIso(day: string, n: number): string {
 /** First day of the given day's month. */
 export const monthStart = (day: string): string => `${day.slice(0, 8)}01`;
 
+/* --------------------------------------------------- VAT quarter (stagger) */
+
+/** HMRC stagger group: 1 = quarters ending Mar/Jun/Sep/Dec, 2 = Apr/Jul/Oct/Jan,
+ *  3 = May/Aug/Nov/Feb. Set in Settings from the VAT certificate. */
+export type VatStaggerGroup = 1 | 2 | 3;
+
+/** Months (1-12) that START a quarter, per stagger group. */
+const QUARTER_START_MONTHS: Record<VatStaggerGroup, number[]> = {
+  1: [1, 4, 7, 10], // ends Mar / Jun / Sep / Dec
+  2: [2, 5, 8, 11], // ends Apr / Jul / Oct / Jan
+  3: [3, 6, 9, 12], // ends May / Aug / Nov / Feb
+};
+
+export interface VatQuarter {
+  start: string; // yyyy-mm-01
+  end: string; // yyyy-mm-dd (last day of the quarter)
+}
+
+/** The VAT quarter containing `day` for the given stagger group. */
+export function vatQuarterFor(day: string, group: VatStaggerGroup): VatQuarter {
+  const y = Number(day.slice(0, 4));
+  const m = Number(day.slice(5, 7));
+  const starts = QUARTER_START_MONTHS[group];
+  // Latest quarter-start at or before this month; if none (group 2/3 in the
+  // year's opening months) the quarter began late LAST year.
+  const startMonth = [...starts].reverse().find((s) => s <= m);
+  const startYear = startMonth === undefined ? y - 1 : y;
+  const sm = startMonth ?? starts[starts.length - 1];
+  const start = `${startYear}-${String(sm).padStart(2, "0")}-01`;
+  // Last day of the quarter = the day before the month 3 months on.
+  const end = new Date(Date.UTC(startYear, sm - 1 + 3, 1) - 86_400_000).toISOString().slice(0, 10);
+  return { start, end };
+}
+
+/** "1 Jul – 30 Sep 2026" style label. */
+export function vatQuarterLabel(q: VatQuarter): string {
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", timeZone: "UTC" };
+  const s = new Date(`${q.start}T00:00:00Z`).toLocaleDateString("en-GB", opts);
+  const e = new Date(`${q.end}T00:00:00Z`).toLocaleDateString("en-GB", { ...opts, year: "numeric" });
+  return `${s} – ${e}`;
+}
+
 /** "Tuesday 15 July 2026" style label for the day header. */
 export function dayLabel(day: string): string {
   return new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", {

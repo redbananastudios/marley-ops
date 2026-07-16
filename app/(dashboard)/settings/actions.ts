@@ -75,6 +75,7 @@ const settingsSchema = z.object({
   costMisc: num,
   vatDefault: z.boolean(),
   vatNumber: z.string().trim().max(20),
+  vatStaggerGroup: z.coerce.number().int().min(1).max(3),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
   defaultDeposit: num,
   googleReviewUrl: z
@@ -120,6 +121,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       cost_misc: v.costMisc,
       vat_default: v.vatDefault,
       vat_number: (v.vatNumber || null) as never,
+      vat_stagger_group: v.vatStaggerGroup as never,
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
       google_review_url: v.googleReviewUrl,
@@ -133,6 +135,7 @@ export async function updateSettingsAction(input: SettingsInput) {
 
   revalidatePath("/settings");
   revalidatePath("/performance");
+  revalidatePath("/finance");
   revalidatePath("/");
   return { ok: true as const };
 }

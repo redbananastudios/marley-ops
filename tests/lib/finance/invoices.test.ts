@@ -11,6 +11,8 @@ import {
   ukTodayDate,
   vatFromGross,
   type FinanceInvoice,
+  vatQuarterFor,
+  vatQuarterLabel,
 } from "@/lib/finance/invoices";
 
 const inv = (over: Partial<FinanceInvoice>): FinanceInvoice => ({
@@ -127,5 +129,29 @@ describe("day helpers", () => {
   it("monthStart + dayLabel", () => {
     expect(monthStart("2026-07-16")).toBe("2026-07-01");
     expect(dayLabel("2026-07-16")).toContain("16 July 2026");
+  });
+});
+
+describe("VAT quarter (stagger groups)", () => {
+  it("group 1 (Mar/Jun/Sep/Dec ends): mid-July sits in Jul–Sep", () => {
+    expect(vatQuarterFor("2026-07-16", 1)).toEqual({ start: "2026-07-01", end: "2026-09-30" });
+    expect(vatQuarterFor("2026-01-01", 1)).toEqual({ start: "2026-01-01", end: "2026-03-31" });
+    expect(vatQuarterFor("2026-12-31", 1)).toEqual({ start: "2026-10-01", end: "2026-12-31" });
+  });
+
+  it("group 2 (Apr/Jul/Oct/Jan ends): January belongs to LAST year's Nov–Jan quarter", () => {
+    expect(vatQuarterFor("2026-01-15", 2)).toEqual({ start: "2025-11-01", end: "2026-01-31" });
+    expect(vatQuarterFor("2026-07-16", 2)).toEqual({ start: "2026-05-01", end: "2026-07-31" });
+  });
+
+  it("group 3 (May/Aug/Nov/Feb ends): February wraps the year; quarter ends on the right leap/non-leap day", () => {
+    expect(vatQuarterFor("2026-01-15", 3)).toEqual({ start: "2025-12-01", end: "2026-02-28" });
+    expect(vatQuarterFor("2028-02-10", 3)).toEqual({ start: "2027-12-01", end: "2028-02-29" }); // leap year
+    expect(vatQuarterFor("2026-07-16", 3)).toEqual({ start: "2026-06-01", end: "2026-08-31" });
+  });
+
+  it("labels read naturally (en-GB shortens September to 'Sept')", () => {
+    expect(vatQuarterLabel({ start: "2026-07-01", end: "2026-09-30" })).toBe("1 Jul – 30 Sept 2026");
+    expect(vatQuarterLabel({ start: "2025-11-01", end: "2026-01-31" })).toBe("1 Nov – 31 Jan 2026");
   });
 });
