@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { BANK_FEED_TAB, isInboundPayment, parseSheetRows, type BankTxRow } from "@/lib/bank-feed/parse";
 import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
 
@@ -60,12 +61,16 @@ async function fetchSheetRows(): Promise<BankTxRow[]> {
 /** Open deposits + balances the matcher can suggest against — mirrors the
  *  Bookings page's definitions of "awaiting deposit" and "balance due". */
 async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
-  const { data: quotes } = await sb
-    .from("quotes")
-    .select(
-      "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total",
-    )
-    .eq("status", "accepted");
+  const quotes = await fetchAllRows((f, t) =>
+    sb
+      .from("quotes")
+      .select(
+        "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total",
+      )
+      .eq("status", "accepted")
+      .order("id")
+      .range(f, t),
+  );
   const leadIds = [...new Set((quotes ?? []).map((q) => q.lead_id).filter(Boolean))] as string[];
   const { data: leads } = leadIds.length
     ? await sb.from("leads").select("id, balance_paid_at").in("id", leadIds)
@@ -137,10 +142,17 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // recomputed each pass so a newly-raised invoice can claim an older unmatched
   // transfer — but confirmed/dismissed rows are never touched.
   const open = await loadOpenItems(sb);
-  const { data: pending } = await sb
-    .from("bank_transactions")
-    .select("id, amount, tx_type, reference, description, status, matched_quote_id, match_kind, match_confidence")
-    .in("status", ["info", "unmatched", "suggested"]);
+  // fetchAllRows, not a bare select — PostgREST caps at 1,000 rows and the
+  // history import alone is ~1,900, so a bare select silently skips the
+  // NEWEST rows (they insert last). Bit us on the very first live sync.
+  const pending = await fetchAllRows((f, t) =>
+    sb
+      .from("bank_transactions")
+      .select("id, amount, tx_type, reference, description, status, matched_quote_id, match_kind, match_confidence")
+      .in("status", ["info", "unmatched", "suggested"])
+      .order("id")
+      .range(f, t),
+  );
 
   let suggested = 0;
   let unmatched = 0;
