@@ -10,12 +10,17 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 ## A — Needed FROM CONNOR (nothing goes live without these)
 
-1. ☐ **VAT quarter cycle ("stagger")** — which months his VAT quarters END.
+1. ◐ **VAT quarter cycle ("stagger")** — which months his VAT quarters END.
    One of: Mar/Jun/Sep/Dec · Apr/Jul/Oct/Jan · May/Aug/Nov/Feb.
-   Where he finds it: the VAT registration certificate (VAT4), any submitted VAT
-   return, or HMRC business tax account → VAT → Returns (the period dates).
-   Then: Settings → "VAT quarter cycle" (currently defaulted to Mar/Jun/Sep/Dec —
-   if that's wrong, the Finance page's quarter-to-date VAT figure is wrong).
+   The APPROVAL LETTER (VRT22C, received 16 Jul — confirms VAT no. 520 2213 58,
+   registered with effect from 01 Jun 2026) does NOT state the stagger. It's on:
+   the Business Tax Account → VAT ("check when your first VAT return is due" —
+   the period end IS the stagger), the Certificate of Registration when it
+   appears there, or one email to the AGENT/accountant who filed the VAT1 (they
+   chose or were assigned it). Then: Settings → "VAT quarter cycle" (currently
+   defaulted to Mar/Jun/Sep/Dec — wrong stagger = wrong quarter-to-date VAT).
+   DONE ALREADY: registration date wired in — pre-01-Jun-2026 invoices carry no
+   VAT on the Finance page.
 2. ☐ **takepayments merchant credentials** (from his takepayments onboarding).
    Onboarding choices to make WITH takepayments: branded hosted payment page,
    Apple Pay + Google Pay ON, gateway's own customer receipts OFF (we send ours),
