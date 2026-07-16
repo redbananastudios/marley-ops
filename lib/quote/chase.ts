@@ -14,6 +14,8 @@
  * should read like a genuine follow-up, not a campaign. UK English, no em-dashes.
  */
 
+import { capName, ownerFrom } from "@/lib/comms/sender";
+
 export const QUOTE_CHASE_DAYS = [2, 5, 10] as const;
 export const DEPOSIT_CHASE_DAYS = [1, 3] as const;
 export const DEPOSIT_CALL_DAY = 5;
@@ -74,6 +76,10 @@ export interface ChaseContext {
   expiryLabel: string;
   /** The lead owner (estimator) the chase comes from, e.g. "Luke James". */
   ownerName?: string | null;
+  /** The owner's own @marleymoves.co.uk address — becomes the From address so
+   *  Luke's chases send as luke@, Connor's as connor@ (sender.ts ownerFrom;
+   *  anything off-domain falls back to hello@). */
+  ownerEmail?: string | null;
   /** Deposit, pre-formatted (e.g. "£100"). */
   depositAmount?: string | null;
 }
@@ -87,16 +93,7 @@ export interface ChaseEmail {
   variables: Record<string, string>;
 }
 
-/** Capitalise a name segment that arrives all-lower ("freddy") or all-upper
- *  ("FREDDY") -> "Freddy"; leave intentional mixed case (McDonald, O'Brien) alone. */
-const cap = (seg: string): string => {
-  const letters = seg.replace(/[^A-Za-z]/g, "");
-  if (!letters) return seg;
-  if (letters === letters.toLowerCase() || letters === letters.toUpperCase()) {
-    return seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase();
-  }
-  return seg;
-};
+const cap = capName;
 
 const first = (name: string | null): string => cap((name ?? "").trim().split(/\s+/)[0]) || "there";
 
@@ -104,14 +101,11 @@ const first = (name: string | null): string => cap((name ?? "").trim().split(/\s
 const ownerFirst = (name: string | null | undefined): string =>
   cap((name ?? "").trim().split(/\s+/)[0]) || "The Marley Moves Team";
 
-/** The chase sender: the lead owner at the monitored Marley mailbox when a real
- *  owner name is known, otherwise a generic Marley sender. Never the unmonitored
- *  peter@ box. */
-function chaseFromFor(ownerName: string | null | undefined): string {
-  const owner = (ownerName ?? "").trim().split(/\s+/)[0];
-  return owner
-    ? `${cap(owner)} at Marley Moves <hello@marleymoves.co.uk>`
-    : "Marley Moves <hello@marleymoves.co.uk>";
+/** The chase sender: the lead owner from THEIR OWN mailbox when their login is
+ *  on the company domain ("Luke at Marley Moves <luke@marleymoves.co.uk>"),
+ *  else the owner display name at hello@, else the plain house identity. */
+function chaseFromFor(ownerName: string | null | undefined, ownerEmail?: string | null): string {
+  return ownerFrom(ownerName, ownerEmail);
 }
 
 function vars(c: ChaseContext): Record<string, string> {
@@ -128,7 +122,7 @@ function vars(c: ChaseContext): Record<string, string> {
 export function quoteChaseEmail(step: 1 | 2 | 3, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
   const owner = ownerFirst(c.ownerName);
-  const from = chaseFromFor(c.ownerName);
+  const from = chaseFromFor(c.ownerName, c.ownerEmail);
   if (step === 1) {
     return {
       subject: `Did my quote come through okay, ${name}?`,
@@ -190,7 +184,7 @@ ${owner}`,
 export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
   const name = first(c.firstName);
   const owner = ownerFirst(c.ownerName);
-  const from = chaseFromFor(c.ownerName);
+  const from = chaseFromFor(c.ownerName, c.ownerEmail);
   if (step === 1) {
     return {
       subject: `One last step to secure your booking (${c.quoteRef})`,
@@ -227,19 +221,19 @@ ${owner}`,
   };
 }
 
-const PETER_SIGNATURE_HTML = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360" style="width:100%;max-width:360px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;color:#1F1D1B;mso-line-height-rule:exactly;">
-  <tr><td style="padding:0 0 3px;font-size:20px;line-height:24px;font-weight:700;color:#111111;">Peter Farrell</td></tr>
-  <tr><td style="padding:0 0 12px;font-size:13px;line-height:18px;color:#3A3A3A;">Director <span style="color:#C03838;">|</span> Marley Moves</td></tr>
+const TEAM_SIGNATURE_HTML = `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360" style="width:100%;max-width:360px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;color:#1F1D1B;mso-line-height-rule:exactly;">
+  <tr><td style="padding:0 0 3px;font-size:20px;line-height:24px;font-weight:700;color:#111111;">The Marley Moves Team</td></tr>
+  <tr><td style="padding:0 0 12px;font-size:13px;line-height:18px;color:#3A3A3A;">Removals <span style="color:#C03838;">|</span> Storage <span style="color:#C03838;">|</span> Marley Moves</td></tr>
   <tr><td style="padding:0 0 12px;border-top:2px solid #C03838;font-size:0;line-height:0;">&nbsp;</td></tr>
   <tr><td style="padding:0;">
     <table role="presentation" cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse:collapse;">
       <tr>
         <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/phone.png" width="18" height="18" alt="Telephone" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
-        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="tel:01747637070" style="color:#1F1D1B;text-decoration:none;">01747 637070</a><span style="color:#C03838;"> | </span><a href="tel:07572382366" style="color:#1F1D1B;text-decoration:none;">07572 382 366</a></td>
+        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="tel:01747637070" style="color:#1F1D1B;text-decoration:none;">01747 637070</a></td>
       </tr>
       <tr>
         <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/new-post.png" width="18" height="18" alt="Email" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
-        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="mailto:peter@marleymoves.co.uk" style="color:#1F1D1B;text-decoration:none;">peter@marleymoves.co.uk</a></td>
+        <td valign="top" style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="mailto:hello@marleymoves.co.uk" style="color:#1F1D1B;text-decoration:none;">hello@marleymoves.co.uk</a></td>
       </tr>
       <tr>
         <td width="24" valign="top" style="width:24px;padding:0 6px 9px 0;"><img src="https://img.icons8.com/ios-filled/50/c03838/globe--v1.png" width="18" height="18" alt="Website" border="0" style="display:block;width:18px;height:18px;border:0;"></td>
@@ -265,8 +259,8 @@ const PETER_SIGNATURE_HTML = `<table role="presentation" cellpadding="0" cellspa
   <tr><td style="padding:12px 0 0;font-size:9px;line-height:13px;color:#6A6A6A;">This communication contains information which is confidential and may also be privileged. It is for the exclusive use of the intended recipient. If you are not the intended recipient, please note that any form of distribution, copying or use of this communication or the information contained therein is strictly prohibited and may be unlawful.</td></tr>
 </table>`;
 
-/** Personal HTML fallback when a Resend template id isn't configured. Mirrors
- * the Outlook signature used by Peter, while keeping the message itself typed. */
+/** House HTML fallback when a Resend template id isn't configured. Team-signed
+ * (never a hardcoded individual — the owner voice lives in the message text). */
 export function chaseTextToHtml(text: string): string {
   const body = text.replace(/\nPeter\s*$/, "").trim();
   const esc = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -278,7 +272,7 @@ export function chaseTextToHtml(text: string): string {
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 16px;">${paragraph.replace(/\n/g, "<br>")}</p>`)
     .join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#FFFFFF;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;"><tr><td style="padding:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A1A;line-height:1.7;">${paragraphs}</td></tr><tr><td style="padding:8px 0 0;">${PETER_SIGNATURE_HTML}</td></tr></table></td></tr></table></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#FFFFFF;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;"><tr><td style="padding:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A1A;line-height:1.7;">${paragraphs}</td></tr><tr><td style="padding:8px 0 0;">${TEAM_SIGNATURE_HTML}</td></tr></table></td></tr></table></body></html>`;
 }
 
 /** The per-lead reply address that routes an inbound reply back to its quote

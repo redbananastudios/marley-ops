@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { ownerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
 
@@ -12,7 +13,13 @@ import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
  * recipient maps straight back to the quote/lead:
  *
  *   pause the chase → log the reply in the lead's Comms tab → open a
- *   "customer replied" follow-up → forward the message to hello@ → ops alert.
+ *   "customer replied" follow-up → forward the message to the lead OWNER's
+ *   own mailbox (Luke's replies go to Luke — owner-only per Peter 2026-07-16;
+ *   the follow-up gives the rest of the office visibility) → ops alert.
+ *
+ * Mail to the reply domain that DOESN'T resolve to a quote is no longer
+ * silently dropped — it forwards to the front door (hello@) so a mangled
+ * token or a hand-typed address still reaches a human.
  *
  * Signature: Resend webhooks are svix-signed. Verified manually against
  * RESEND_INBOUND_WEBHOOK_SECRET (whsec_...) — no svix dependency.
@@ -36,6 +43,8 @@ function verifySvix(payload: string, headers: Headers, secret: string): boolean 
     return a.length === b.length && timingSafeEqual(a, b);
   });
 }
+
+const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 /** Full received-email content (webhooks carry metadata only). */
 async function fetchReceivedEmail(emailId: string): Promise<{ text?: string; html?: string } | null> {
@@ -71,15 +80,35 @@ export async function POST(req: Request) {
 
   const to = event.data.to ?? [];
   const token = to.map(tokenFromReplyAddress).find(Boolean) ?? null;
-  if (!token) return NextResponse.json({ ok: true, matched: false }); // not a chase reply — ignore
-
-  const sb = createAdminClient();
-  const quote = await fetchQuoteByToken(sb, token);
-  if (!quote) return NextResponse.json({ ok: true, matched: false });
 
   const from = event.data.from ?? "unknown sender";
   const subject = event.data.subject ?? "(no subject)";
   const emailId = event.data.email_id ?? event.data.id;
+
+  const sb = createAdminClient();
+  const quote = token ? await fetchQuoteByToken(sb, token) : null;
+
+  // Unresolvable inbound (no token / dead token): forward to the front door
+  // instead of vanishing — a real customer can arrive via a mangled address.
+  // Loop-guarded: our own domains and machine senders are dropped.
+  if (!quote) {
+    if (shouldForwardUnmatched(from)) {
+      const content = emailId ? await fetchReceivedEmail(emailId) : null;
+      const bodyText = content?.text?.trim() || "(no message body retrieved)";
+      await sendEmail({
+        to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
+        subject: `Unmatched inbound email — ${subject}`,
+        html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
+          <p>An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.</p>
+          <hr style="border:none;border-top:1px solid #e4e4e7;">
+          <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
+        </div>`,
+        replyTo: from,
+      });
+    }
+    return NextResponse.json({ ok: true, matched: false });
+  }
+
   const content = emailId ? await fetchReceivedEmail(emailId) : null;
   const bodyText = content?.text?.trim() || "(open the forwarded copy for the message)";
 
@@ -136,23 +165,29 @@ export async function POST(req: Request) {
     });
   }
 
-  // 4. Forward to the real mailbox so Connor sees it where he works.
-  //    (INBOUND_FORWARD_EMAIL points at Peter during comms testing.)
+  // 4. Forward to the LEAD OWNER's own mailbox (owner-only — Peter's explicit
+  //    pick 2026-07-16: Connor must not receive Luke's threads; the panel's
+  //    follow-up queue is the shared-visibility net). Unowned lead, inactive
+  //    owner or off-domain login → the front door.
+  const owner = await ownerIdentity(sb, quote.estimator_id);
+  const ownerMailbox =
+    owner.email && owner.email.toLowerCase().endsWith("@marleymoves.co.uk") ? owner.email : null;
+  const forwardTo = ownerMailbox || process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk";
   await sendEmail({
-    to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
+    to: forwardTo,
     subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
       <p><strong>${quote.customer_name ?? "Customer"}</strong> (${from}) replied about quote <strong>${quote.quote_ref}</strong>. Chasing is paused.</p>
       <hr style="border:none;border-top:1px solid #e4e4e7;">
-      <div style="white-space:pre-wrap;">${bodyText.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+      <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
       <hr style="border:none;border-top:1px solid #e4e4e7;">
-      <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${from}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
+      <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${esc(from)}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
     </div>`,
     replyTo: from,
   });
 
   await sendOpsAlert(`Customer replied — ${quote.quote_ref}`, [
-    `${quote.customer_name ?? from} replied to a chase email (${subject}). Chasing paused; forwarded to hello@; follow-up opened.`,
+    `${quote.customer_name ?? from} replied to a chase email (${subject}). Chasing paused; forwarded to ${forwardTo}; follow-up opened.`,
   ]);
 
   return NextResponse.json({ ok: true, matched: true });

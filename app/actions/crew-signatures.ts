@@ -17,6 +17,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
+import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
 import {
   buildCompletionEmailHtml,
   completionEmailSubject,
@@ -271,8 +272,8 @@ export async function completeJobAction(
         : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
       attachmentBase64: v.certificatePdfBase64 ?? undefined,
       attachmentName: v.certificatePdfBase64 ? "marley-moves-completion-certificate.pdf" : undefined,
-      from: "Marley Moves <quotes@marleymoves.co.uk>",
-      replyTo: "hello@marleymoves.co.uk",
+      from: HELLO_FROM,
+      replyTo: await latestReplyAddressForLead(admin, appt.lead_id),
       leadId: appt.lead_id ?? undefined,
       clientId: lead.client_id ?? undefined,
     });
@@ -286,7 +287,7 @@ export async function completeJobAction(
         await sendOpsAlert("Completion certificate email FAILED", [
           `Job completion recorded for <strong>${lead.name ?? "customer"}</strong> but the certificate email failed.`,
           `Check Comms and resend manually.`,
-        ]);
+        ], "system");
       }
     }
   }
@@ -368,8 +369,8 @@ export async function resendCertificateAction(
       : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
     attachmentBase64: pdfB64,
     attachmentName: "marley-moves-completion-certificate.pdf",
-    from: "Marley Moves <quotes@marleymoves.co.uk>",
-    replyTo: "hello@marleymoves.co.uk",
+    from: HELLO_FROM,
+    replyTo: await latestReplyAddressForLead(admin, lead.id),
     leadId: lead.id,
     clientId: lead.client_id ?? undefined,
     override: true,

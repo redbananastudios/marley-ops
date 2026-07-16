@@ -22,6 +22,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { paymentPush } from "@/lib/push/categories";
+import { accountsFrom, ownerIdentity } from "@/lib/comms/sender";
 import { sendPushForEvent } from "@/lib/push/send";
 import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
 import {
@@ -242,7 +243,7 @@ async function supersedeSiblingQuotes(
         await sendOpsAlert(`Void deposit invoice FAILED — ${old.quote_ref}`, [
           `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its unpaid deposit invoice ${old.zoho_deposit_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}.`,
           `Void it manually in Zoho — the new quote raises its own deposit invoice.`,
-        ]);
+        ], "system");
       }
     }
 
@@ -252,7 +253,7 @@ async function supersedeSiblingQuotes(
         await sendOpsAlert(`Superseded quote has a PAID balance — ${old.quote_ref}`, [
           `${old.quote_ref} was superseded by ${quote.quote_ref}, but its balance invoice ${old.zoho_balance_invoice_number ?? ""} is already paid.`,
           `Nothing was changed in Zoho — settle the price difference manually (credit note or extra invoice).`,
-        ]);
+        ], "money");
       } else {
         try {
           await voidInvoice(old.zoho_balance_invoice_id);
@@ -277,7 +278,7 @@ async function supersedeSiblingQuotes(
         } catch (err) {
           await sendOpsAlert(`Void balance invoice FAILED — ${old.quote_ref}`, [
             `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its balance invoice failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
-          ]);
+          ], "system");
         }
       }
     }
@@ -582,15 +583,14 @@ export async function acceptQuoteByStaff(
   // engine's next touch is day 3.
   let emailed = false;
   if (quote.customer_email && token) {
-    const owner = quote.estimator_id
-      ? ((await sb.from("profiles").select("full_name").eq("id", quote.estimator_id).single()).data?.full_name ?? null)
-      : null;
+    const owner = await ownerIdentity(sb, quote.estimator_id);
     const email = depositChaseEmail(1, {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       acceptUrl: acceptUrlFor(token),
       expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
-      ownerName: owner,
+      ownerName: owner.name,
+      ownerEmail: owner.email,
     });
     const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
     const res = await dispatchComm(sb, actorId, {
@@ -764,7 +764,7 @@ export async function reportDepositSent(
   await sendOpsAlert(`Customer says deposit sent — ${quote.quote_ref}`, [
     `<strong>${quote.customer_name ?? "Customer"}</strong> reports the £${deposit.toFixed(2)} deposit for <strong>${quote.quote_ref}</strong> was sent by bank transfer.`,
     `Check the bank, then confirm it in Bookings — reminders are paused meanwhile.`,
-  ]);
+  ], "money");
 
   return { ok: true };
 }
@@ -835,7 +835,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
       `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
       `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
-    ]);
+    ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -909,7 +909,7 @@ export async function markDepositPaid(
       await sendOpsAlert(`Zoho payment record FAILED — ${quote.quote_ref}`, [
         `The deposit for <strong>${quote.quote_ref}</strong> is marked paid in ops, but recording it against ${quote.zoho_deposit_invoice_number ?? "the Zoho invoice"} failed: ${err instanceof Error ? err.message : "unknown"}.`,
         `Record the payment manually in Zoho.`,
-      ]);
+      ], "system");
     }
   }
 
@@ -965,6 +965,9 @@ export async function markDepositPaid(
     const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIVED;
     await dispatchComm(sb, opts.actorId, {
       channel: "email",
+      // Money desk identity — receipts come from accounts@, not the salesperson
+      // (docs/email-identity-plan.md); replies still route via the token relay.
+      from: accountsFrom(),
       to: quote.customer_email,
       subject: `Deposit received — you're booked in (${quote.quote_ref})`,
       bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref}. Your move date is secured.`,
@@ -982,7 +985,7 @@ export async function markDepositPaid(
   await sendOpsAlert(`Deposit paid — ${quote.quote_ref}`, [
     `£${deposit.toFixed(2)} deposit received for <strong>${quote.quote_ref}</strong> (${quote.customer_name ?? "customer"}) via ${opts.method === "card" ? "card" : "bank transfer"}.`,
     `Lead is now Confirmed and the customer has the confirmation email.`,
-  ]);
+  ], "money");
 
   return { ok: true };
 }
@@ -1125,6 +1128,7 @@ export async function createBalanceInvoiceFlow(
       const templateId = process.env.RESEND_TEMPLATE_BALANCE_INVOICE;
       const res = await dispatchComm(sb, actorId, {
         channel: "email",
+        from: accountsFrom(),
         to: quote.customer_email,
         subject: `Your final balance — ${quote.quote_ref} (£${amount.toFixed(2)})`,
         bodyText: `Final balance of £${amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
@@ -1151,7 +1155,7 @@ export async function createBalanceInvoiceFlow(
       .eq("zoho_balance_invoice_id", "pending");
     await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
       `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-    ]);
+    ], "system");
     return { ok: false, error: msg };
   }
 }
@@ -1204,7 +1208,7 @@ export async function markBalancePaid(
       await sendOpsAlert(`Zoho balance payment record FAILED — ${quote.quote_ref}`, [
         `The balance for <strong>${quote.quote_ref}</strong> is marked paid in ops, but recording it against ${quote.zoho_balance_invoice_number ?? "the Zoho invoice"} failed: ${err instanceof Error ? err.message : "unknown"}.`,
         `Record the payment manually in Zoho.`,
-      ]);
+      ], "system");
     }
   }
 
@@ -1244,6 +1248,7 @@ export async function markBalancePaid(
     const templateId = process.env.RESEND_TEMPLATE_BALANCE_RECEIVED;
     await dispatchComm(sb, actorId, {
       channel: "email",
+      from: accountsFrom(),
       to: quote.customer_email,
       subject: `Payment received — all settled (${quote.quote_ref})`,
       bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. Nothing more to pay.`,
@@ -1259,7 +1264,7 @@ export async function markBalancePaid(
 
   await sendOpsAlert(`Balance paid — ${quote.quote_ref}`, [
     `£${amount.toFixed(2)} balance received for <strong>${quote.quote_ref}</strong> (${quote.customer_name ?? "customer"}). Fully settled.`,
-  ]);
+  ], "money");
 
   return { ok: true };
 }

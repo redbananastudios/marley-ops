@@ -98,7 +98,7 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
       const { data: monthSpend } = await admin.from("ai_spend_months").select("spent_usd, reserved_usd, alerted_at").eq("month", month).maybeSingle();
       if (monthSpend && !monthSpend.alerted_at && Number(monthSpend.spent_usd) + Number(monthSpend.reserved_usd) >= gbpToUsd(Number(settings?.ai_monthly_alert_gbp ?? 40))) {
         const { data: claimedAlert } = await admin.from("ai_spend_months").update({ alerted_at: new Date().toISOString() }).eq("month", month).is("alerted_at", null).select("month").maybeSingle();
-        if (claimedAlert) await sendOpsAlert("AI survey monthly spend alert", [`Gemini spend plus live reservations has reached $${(Number(monthSpend.spent_usd) + Number(monthSpend.reserved_usd)).toFixed(2)} this month.`, "Review the AI Survey controls in Marley Ops Settings."]);
+        if (claimedAlert) await sendOpsAlert("AI survey monthly spend alert", [`Gemini spend plus live reservations has reached $${(Number(monthSpend.spent_usd) + Number(monthSpend.reserved_usd)).toFixed(2)} this month.`, "Review the AI Survey controls in Marley Ops Settings."], "system");
       }
 
       const { data: run, error: runError } = await admin
@@ -244,7 +244,7 @@ export function createAiJobRuntime(): AiJobRuntime<Job> {
         p_error: errorMessage(error),
       });
       if (failError) throw failError;
-      if (failedJob?.status === "dead") await sendOpsAlert("AI survey job exhausted retries", [`Job ${failedJob.id} could not process its survey media after ${failedJob.attempts} attempts.`, `Last error: ${errorMessage(error)}`]);
+      if (failedJob?.status === "dead") await sendOpsAlert("AI survey job exhausted retries", [`Job ${failedJob.id} could not process its survey media after ${failedJob.attempts} attempts.`, `Last error: ${errorMessage(error)}`], "system");
     },
   };
 }

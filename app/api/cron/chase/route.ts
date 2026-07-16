@@ -20,6 +20,8 @@ import {
   type ChaseEmail,
 } from "@/lib/quote/chase";
 import { ukTimeAt } from "@/lib/uk-time";
+import { ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
+import { ownerEstimatorId } from "@/lib/leads/ownership";
 
 /**
  * The chase engine (daily Vercel cron, ~10:00 UK). Two cadences:
@@ -127,15 +129,16 @@ export async function GET(req: Request) {
   const sb = createAdminClient();
   const now = new Date();
 
-  // Chases are personal, from the lead's owner (estimator). Resolve + cache names.
-  const ownerNameCache = new Map<string, string | null>();
-  const ownerNameFor = async (estimatorId: string | null): Promise<string | null> => {
-    if (!estimatorId) return null;
-    if (ownerNameCache.has(estimatorId)) return ownerNameCache.get(estimatorId)!;
-    const { data } = await sb.from("profiles").select("full_name").eq("id", estimatorId).single();
-    const name = data?.full_name ?? null;
-    ownerNameCache.set(estimatorId, name);
-    return name;
+  // Chases are personal, from the lead's owner: name for the voice, login email
+  // for the From address (Luke's chases send as luke@ — sender.ts ownerFrom;
+  // inactive owners resolve to the house identity). Cached per run.
+  const ownerCache = new Map<string, OwnerIdentity>();
+  const ownerFor = async (estimatorId: string | null): Promise<OwnerIdentity> => {
+    if (!estimatorId) return { name: null, email: null };
+    if (ownerCache.has(estimatorId)) return ownerCache.get(estimatorId)!;
+    const identity = await ownerIdentity(sb, estimatorId);
+    ownerCache.set(estimatorId, identity);
+    return identity;
   };
 
   const summary = {
@@ -162,6 +165,25 @@ export async function GET(req: Request) {
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
   const allQuotes = (quotes ?? []) as QuoteRow[];
+
+  // Survey-derived owner fallback: a lead with no explicit estimator_id is
+  // owned by whoever is assigned its booked survey — the SAME rule as the
+  // "My day" cockpit and the leads "Mine" preset (lib/leads/ownership.ts),
+  // so the chase voice matches who the customer actually met.
+  const { data: surveyAppts } = await sb
+    .from("appointments")
+    .select("lead_id, estimator_id, appt_type, status")
+    .in("lead_id", leads.map((l) => l.id))
+    .eq("appt_type", "survey")
+    .neq("status", "cancelled");
+  const surveyEstimator = new Map<string, string>();
+  for (const a of surveyAppts ?? []) {
+    if (a.lead_id && a.estimator_id && !surveyEstimator.has(a.lead_id)) {
+      surveyEstimator.set(a.lead_id, a.estimator_id);
+    }
+  }
+  const leadOwner = (lead: LeadRow) =>
+    ownerFor(ownerEstimatorId(lead.estimator_id, surveyEstimator.get(lead.id)));
 
   /** Email chasing can't (or shouldn't) run — hand the lead to a human: one
    *  open call task, chasing paused so this doesn't re-fire every morning. */
@@ -265,12 +287,14 @@ export async function GET(req: Request) {
         }
         const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
         if (!token) continue;
+        const owner = await leadOwner(lead);
         const email = quoteChaseEmail(step as 1 | 2 | 3, {
           firstName: lead.name,
           quoteRef: quote.quote_ref,
           acceptUrl: acceptUrlFor(token),
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
-          ownerName: await ownerNameFor(lead.estimator_id),
+          ownerName: owner.name,
+          ownerEmail: owner.email,
         });
         const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
@@ -330,12 +354,14 @@ export async function GET(req: Request) {
       if (step && lead.email) {
         const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
         if (!token) continue;
+        const owner = await leadOwner(lead);
         const email = depositChaseEmail(step as 1 | 2, {
           firstName: lead.name,
           quoteRef: quote.quote_ref,
           acceptUrl: acceptUrlFor(token),
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
-          ownerName: await ownerNameFor(lead.estimator_id),
+          ownerName: owner.name,
+          ownerEmail: owner.email,
         });
         const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
@@ -424,7 +450,7 @@ export async function GET(req: Request) {
           await sendOpsAlert(`Balance OVERDUE after move day — ${q.quote_ref}`, [
             `<strong>${lead.name ?? "Customer"}</strong> moved but £${outstanding.toFixed(2)} of the balance is unpaid.`,
             `An urgent task is in Follow-ups; the lead stays in Bookings until it's settled.`,
-          ]);
+          ], "money");
           summary.overdueBalances++;
         }
         continue; // never auto-complete with money outstanding
@@ -452,7 +478,7 @@ export async function GET(req: Request) {
   if (summary.errors) {
     await sendOpsAlert("Chase engine finished with errors", [
       `Today's run: ${JSON.stringify(summary)}. Check the Vercel function logs.`,
-    ]);
+    ], "system");
   }
   return summary;
   });

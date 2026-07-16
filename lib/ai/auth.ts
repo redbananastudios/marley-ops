@@ -5,6 +5,9 @@ import { createClient } from "@/lib/supabase/server";
 export interface OfficeProfile {
   id: string;
   fullName: string;
+  /** Login email — doubles as the member's sending identity when it's on the
+   *  company domain (lib/comms/sender.ts ownerFrom). */
+  email: string | null;
   role: "admin" | "estimator";
   accessToken: string;
 }
@@ -19,7 +22,7 @@ export async function requireOfficeProfile(): Promise<OfficeProfile | null> {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("id, full_name, role, active")
+    .select("id, full_name, email, role, active")
     .eq("id", user.id)
     .maybeSingle();
   if (
@@ -37,6 +40,7 @@ export async function requireOfficeProfile(): Promise<OfficeProfile | null> {
   return {
     id: profile.id,
     fullName: profile.full_name,
+    email: profile.email ?? null,
     role: profile.role,
     accessToken: session.access_token,
   };

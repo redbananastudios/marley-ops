@@ -493,7 +493,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
       } catch (err) {
         await sendOpsAlert(`Void on cancel FAILED — ${q.quote_ref}`, [
           `Lead cancelled but voiding deposit invoice ${q.zoho_deposit_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
-        ]);
+        ], "system");
       }
     }
     // Unpaid balance invoice → void.
@@ -512,7 +512,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
       } catch (err) {
         await sendOpsAlert(`Void on cancel FAILED — ${q.quote_ref}`, [
           `Lead cancelled but voiding balance invoice ${q.zoho_balance_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
-        ]);
+        ], "system");
       }
     }
     // Money already taken → a human decides the refund (deposit terms may keep it).
@@ -536,7 +536,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
       await sendOpsAlert(`Cancellation with money taken — ${q.quote_ref}`, [
         `<strong>${current?.name ?? "Customer"}</strong> cancelled with ${paidBits.join(" + ")} already paid.`,
         `A refund-decision task is in Follow-ups. Nothing was changed in Zoho for the paid amounts.`,
-      ]);
+      ], "money");
     }
   }
 

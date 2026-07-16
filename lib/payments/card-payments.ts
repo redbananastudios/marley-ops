@@ -20,6 +20,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+import { accountsFrom } from "@/lib/comms/sender";
 import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
 import {
   buildHostedSaleFields,
@@ -209,7 +210,7 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
       await sendOpsAlert(`Card payment AMOUNT MISMATCH — attempt ${row.id.slice(0, 8)}`, [
         `takepayments reported a successful payment of <strong>${fields.amountReceived ?? "?"}</strong> pence against an attempt for <strong>${row.amount_pence}</strong> pence (quote ${row.quote_id}).`,
         `The attempt is flagged <strong>needs review</strong> and NOT marked paid — check the MMS and reconcile manually.`,
-      ]);
+      ], "money");
     }
     return { ok: false, error: "amount mismatch" };
   }
@@ -273,13 +274,13 @@ async function runPaidPipeline(sb: Sb, row: CardPaymentRow, xref: string | null)
       await sendOpsAlert(`Card paid but pipeline FAILED — attempt ${row.id.slice(0, 8)}`, [
         `takepayments took the deposit for quote ${row.quote_id} but marking it paid failed: ${paid.error ?? "unknown"}.`,
         `Fix manually: the money IS taken (xref ${xref ?? "?"}).`,
-      ]);
+      ], "system");
     }
   } catch (err) {
     await sendOpsAlert(`Card paid but pipeline THREW — attempt ${row.id.slice(0, 8)}`, [
       `takepayments took the deposit for quote ${row.quote_id} (xref ${xref ?? "?"}) but confirming the booking threw: ${err instanceof Error ? err.message : "unknown"}.`,
       `The card row is marked paid; confirm the lead + record the Zoho payment manually.`,
-    ]);
+    ], "system");
   }
 }
 
@@ -300,7 +301,7 @@ async function raiseDoublePaymentAlert(sb: Sb, row: CardPaymentRow): Promise<voi
   await sendOpsAlert(`DOUBLE deposit payment — ${ref}`, [
     `A card payment of £${(row.amount_pence / 100).toFixed(2)} succeeded for <strong>${ref}</strong>, but the deposit was already marked paid another way.`,
     `A refund-decision follow-up has been raised — refund one of the two payments.`,
-  ]);
+  ], "money");
 }
 
 /* ------------------------------------------------------------- verify + settle */
@@ -495,6 +496,8 @@ export async function refundCardPayment(
       : `We've refunded ${label} to your card${endsLine}. It normally appears on your statement within 3–5 working days.`;
     await dispatchComm(sb, input.actorId, {
       channel: "email",
+      // Money desk identity (docs/email-identity-plan.md).
+      from: accountsFrom(),
       to: quote.customer_email,
       subject: voided
         ? `Your ${label} card payment has been cancelled (${quote.quote_ref})`

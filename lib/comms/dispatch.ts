@@ -12,6 +12,7 @@ import { contentHash, normRecipient } from "@/lib/comms/hash";
 import { sendEmail, sendSms } from "@/lib/comms/send";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { log } from "@/lib/log";
+import { opsAlertRecipient, type OpsAlertCategory } from "@/lib/comms/sender";
 
 type Sb = SupabaseClient<Database>;
 
@@ -195,9 +196,16 @@ export async function dispatchComm(
  * Internal ops alert (new acceptance, deposit landed, Zoho failure). Direct
  * Resend send — not customer comms, so it skips the duplicate guard and the
  * communications log. Fail-soft: alerting must never break the main flow.
+ *
+ * Routed by category (docs/email-identity-plan.md): money → the accounts desk,
+ * system failures → the engineer, everything else → the office front door.
  */
-export async function sendOpsAlert(subject: string, lines: string[]): Promise<void> {
-  const to = process.env.OPS_ALERT_EMAIL || "peter@redbananastudios.com";
+export async function sendOpsAlert(
+  subject: string,
+  lines: string[],
+  category: OpsAlertCategory = "business",
+): Promise<void> {
+  const to = opsAlertRecipient(category);
   try {
     await sendEmail({
       to,

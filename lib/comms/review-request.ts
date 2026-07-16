@@ -11,6 +11,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { dispatchComm } from "@/lib/comms/dispatch";
 import { buildReviewRequestEmailHtml } from "@/lib/comms/payment-email";
 import { replyAddressFor } from "@/lib/quote/chase";
+import { ownerFromFor } from "@/lib/comms/sender";
 
 type Sb = SupabaseClient<Database>;
 
@@ -32,7 +33,7 @@ export async function sendReviewRequest(
 
   const { data: lead } = await sb
     .from("leads")
-    .select("id, client_id, name, email, entry_channel, review_requested_at, review_suppressed")
+    .select("id, client_id, estimator_id, name, email, entry_channel, review_requested_at, review_suppressed")
     .eq("id", leadId)
     .maybeSingle();
   if (!lead?.email) return { sent: false, reason: "no email on the lead" };
@@ -87,7 +88,9 @@ export async function sendReviewRequest(
         }
       : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }) }),
     replyTo: token ? replyAddressFor(token) : undefined,
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    // A personal ask converts better — the review request comes from the lead's
+    // owner (falls back to the house identity when unowned).
+    from: await ownerFromFor(sb, lead.estimator_id),
     leadId,
     clientId: lead.client_id ?? undefined,
   });

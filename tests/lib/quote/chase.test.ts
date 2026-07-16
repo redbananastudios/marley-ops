@@ -100,9 +100,24 @@ describe("chase copy (refreshed 2026-07-13)", () => {
     expect(quoteChaseEmail(1, { ...ctx, firstName: "McDonald" }).variables.CUSTOMER_FIRST_NAME).toBe("McDonald");
   });
 
-  it("sends each chase from the lead owner at the monitored hello@ box (never peter@)", () => {
+  it("sends each chase from the owner's OWN company mailbox; hello@ otherwise (never a personal off-domain box)", () => {
+    // Owner with a company-domain login → their own address is the From.
+    const personal = quoteChaseEmail(1, {
+      ...ctx,
+      ownerName: "luke james",
+      ownerEmail: "luke@marleymoves.co.uk",
+    });
+    expect(personal.from).toBe("Luke at Marley Moves <luke@marleymoves.co.uk>");
+    // Owner known but no usable company address → display name at hello@.
     const owned = quoteChaseEmail(1, { ...ctx, ownerName: "luke james" });
     expect(owned.from).toBe("Luke at Marley Moves <hello@marleymoves.co.uk>");
+    // An off-domain login must NEVER become the sender (gmail, .test, etc).
+    const offDomain = depositChaseEmail(1, {
+      ...ctx,
+      ownerName: "Connor",
+      ownerEmail: "connor@marleymoves.test",
+    });
+    expect(offDomain.from).toBe("Connor at Marley Moves <hello@marleymoves.co.uk>");
     // no owner known → generic Marley sender, still the monitored mailbox
     expect(quoteChaseEmail(1, ctx).from).toBe("Marley Moves <hello@marleymoves.co.uk>");
     for (const e of [quoteChaseEmail(1, ctx), depositChaseEmail(1, { ...ctx, ownerName: "LUKE" })]) {
@@ -118,12 +133,16 @@ describe("chase copy (refreshed 2026-07-13)", () => {
     expect(depositChaseEmail(1, ctx).text).toContain("Bank transfer reference: MM-T-9");
   });
 
-  it("fallback HTML escapes and links, then adds Peter's Outlook-style signature", () => {
+  it("fallback HTML escapes and links, then adds the TEAM signature (never a hardcoded individual)", () => {
     const html = chaseTextToHtml("Hi <Jane>,\nhttps://ops.marleymoves.co.uk/q/x");
     expect(html).toContain("&lt;Jane&gt;");
     expect(html).toContain('<a href="https://ops.marleymoves.co.uk/q/x"');
-    expect(html).toContain("Peter Farrell");
-    expect(html).toContain("mailto:peter@marleymoves.co.uk");
+    expect(html).toContain("The Marley Moves Team");
+    expect(html).toContain("mailto:hello@marleymoves.co.uk");
+    // The owner voice lives in the message TEXT; the signature block stays
+    // person-free so a stale name can never front someone else's lead.
+    expect(html).not.toContain("Peter Farrell");
+    expect(html).not.toContain("peter@marleymoves.co.uk");
     expect(html).toContain("Ash Cottage, Sherborne Causeway");
     expect(html).not.toContain('width="600"');
     expect(html).toContain('width="100%"');

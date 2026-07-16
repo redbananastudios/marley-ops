@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
+import { ownerFromFor } from "@/lib/comms/sender";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
 import {
@@ -81,6 +82,24 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
       token = (q?.accept_token as string | null) ?? null;
     }
     if (token) input = { ...input, replyTo: replyAddressFor(token) };
+  }
+
+  // Sales identity: a lead-linked email with no explicit sender goes out as
+  // the lead's OWNER ("Luke at Marley Moves <luke@marleymoves.co.uk>") so the
+  // customer sees the person they're dealing with, not a shared mailbox.
+  // Unowned leads / off-domain logins fall back to the house identity
+  // (docs/email-identity-plan.md).
+  if (input.channel === "email" && !input.from) {
+    let estimatorId: string | null = null;
+    if (input.leadId) {
+      const { data: l } = await sb.from("leads").select("estimator_id").eq("id", input.leadId).maybeSingle();
+      estimatorId = (l?.estimator_id as string | null) ?? null;
+    }
+    if (!estimatorId && input.quoteId) {
+      const { data: q } = await sb.from("quotes").select("estimator_id").eq("id", input.quoteId).maybeSingle();
+      estimatorId = (q?.estimator_id as string | null) ?? null;
+    }
+    if (estimatorId) input = { ...input, from: await ownerFromFor(sb, estimatorId) };
   }
 
   const result = await dispatchComm(sb, user?.id ?? null, input);

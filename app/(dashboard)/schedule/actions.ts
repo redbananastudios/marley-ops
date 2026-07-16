@@ -6,6 +6,7 @@ import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { balanceDueDate } from "@/lib/quote/payments";
 import { ukInstant } from "@/lib/uk-time";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
+import { ownerFrom } from "@/lib/comms/sender";
 import {
   surveyConfirmEmailHtml,
   surveyConfirmEmailText,
@@ -139,13 +140,14 @@ export async function createAppointment(input: CreateAppointmentInput) {
   const comms: { email: ConfirmSendState; sms: ConfirmSendState } = { email: "skipped", sms: "skipped" };
   if (input.apptType === "survey" && lead) {
     const starts = new Date(input.startsAt);
+    const estimator = estimatorId
+      ? (await sb.from("profiles").select("full_name, email, active").eq("id", estimatorId).maybeSingle()).data
+      : null;
     const confirm = {
       customerName: lead.name,
       dateLabel: starts.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
       timeLabel: starts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ }),
-      estimatorName: estimatorId
-        ? (await sb.from("profiles").select("full_name").eq("id", estimatorId).single()).data?.full_name ?? null
-        : null,
+      estimatorName: estimator?.full_name ?? null,
       address: input.location || lead.from_address || lead.from_postcode || null,
     };
     if (lead.email) {
@@ -155,6 +157,10 @@ export async function createAppointment(input: CreateAppointmentInput) {
       const templateId = process.env.RESEND_TEMPLATE_SURVEY_CONFIRMATION;
       const r = await sendCommunication({
         channel: "email",
+        // From the SURVEYING estimator (who the customer will actually meet) —
+        // at booking time the lead often has no explicit owner yet, so the
+        // generic owner injection would miss.
+        from: estimator?.active ? ownerFrom(estimator.full_name, estimator.email) : undefined,
         to: lead.email,
         subject: surveyConfirmSubject(confirm),
         bodyText: surveyConfirmEmailText(confirm),

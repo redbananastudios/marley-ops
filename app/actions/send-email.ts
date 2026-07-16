@@ -14,8 +14,8 @@ import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
-
-const FROM = "Marley Moves <hello@marleymoves.co.uk>";
+import { ownerFrom } from "@/lib/comms/sender";
+import { replyAddressFor } from "@/lib/quote/chase";
 
 const schema = z.object({
   to: z.string().trim().email("Enter a valid email address"),
@@ -57,10 +57,29 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
   });
 
   const sb = await createClient();
+
+  // A composed one-off routes replies back through the panel relay when the
+  // lead has a quote token (chase pause + Comms log), like every other
+  // lead-linked email; without one, replies go to the sender's own mailbox.
+  let replyTo: string | undefined;
+  if (v.leadId) {
+    const { data: q } = await sb
+      .from("quotes")
+      .select("accept_token")
+      .eq("lead_id", v.leadId)
+      .not("accept_token", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (q?.accept_token) replyTo = replyAddressFor(q.accept_token);
+  }
+
   const result = await dispatchComm(sb, office.id, {
     channel: "email",
     to: v.to,
-    from: FROM,
+    // The person writing it signs it — the composer sends as themselves.
+    from: ownerFrom(office.fullName, office.email),
+    replyTo,
     subject: v.subject,
     bodyText: v.message, // drives the duplicate hash + the Comms-tab preview
     bodyHtml,

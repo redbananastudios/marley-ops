@@ -4,6 +4,7 @@ import { runCron } from "@/lib/cron/run-logger";
 import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
+import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import {
   createInvoice,
   findInvoiceByReference,
@@ -168,8 +169,10 @@ export async function GET(req: Request) {
             subject: storageInvoiceSubject(input),
             html: buildStorageInvoiceEmailHtml(input),
             attachments: pdf ? [{ filename: `${ref.invoiceNumber}.pdf`, content: pdf }] : undefined,
-            replyTo: "hello@marleymoves.co.uk",
-            from: "Marley Moves <quotes@marleymoves.co.uk>",
+            // Money desk identity — storage bills have no quote token, so
+            // replies go straight to the accounts mailbox.
+            replyTo: accountsAddress(),
+            from: accountsFrom(),
           });
           if (sent.ok) {
             await admin.from("storage_invoices").update({ emailed_at: new Date().toISOString() } as never).eq("id", claimed.id);
