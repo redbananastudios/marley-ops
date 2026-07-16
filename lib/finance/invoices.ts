@@ -24,11 +24,22 @@ export interface FinanceInvoice {
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+/** MarleyMoves Ltd is VAT-registered with effect from this date (HMRC VRT22C
+ *  approval letter, issued 06 Jun 2026, VAT no. 520 2213 58). Invoices dated
+ *  before it were raised outside the VAT regime and carry NO VAT — without
+ *  this floor, browsing historical days would ascribe VAT to them. */
+export const VAT_REGISTERED_FROM = "2026-06-01";
+
 /** VAT portion of a 20%-inclusive gross (gross − net). £100 → £16.67. */
 export const vatFromGross = (gross: number): number => round2(gross - gross / 1.2);
 
 /** Ex-VAT portion of a 20%-inclusive gross. £100 → £83.33. */
 export const netFromGross = (gross: number): number => round2(gross / 1.2);
+
+/** VAT on ONE invoice, respecting the registration date: zero before
+ *  VAT_REGISTERED_FROM (an undated row is assumed current-era). */
+export const invoiceVat = (inv: Pick<FinanceInvoice, "date" | "total">): number =>
+  inv.date && inv.date < VAT_REGISTERED_FROM ? 0 : vatFromGross(inv.total);
 
 /** Raised = actually issued: drafts aren't out the door and voids never count. */
 export const isRaised = (status: string): boolean => status !== "void" && status !== "draft";
@@ -44,8 +55,9 @@ export interface RaisedSummary {
 export function summariseRaised(invoices: FinanceInvoice[]): RaisedSummary {
   const live = invoices.filter((i) => isRaised(i.status));
   const gross = round2(live.reduce((s, i) => s + i.total, 0));
-  // Per-invoice VAT then sum — matches the invoice documents' own rounding.
-  const vat = round2(live.reduce((s, i) => s + vatFromGross(i.total), 0));
+  // Per-invoice VAT then sum — matches the invoice documents' own rounding —
+  // and zero for anything dated before VAT registration.
+  const vat = round2(live.reduce((s, i) => s + invoiceVat(i), 0));
   return { count: live.length, gross, vat, net: round2(gross - vat) };
 }
 

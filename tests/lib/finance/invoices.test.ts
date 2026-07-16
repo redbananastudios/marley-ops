@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addDaysIso,
   dayLabel,
+  invoiceVat,
   isRaised,
   isValidDay,
   monthStart,
@@ -41,6 +42,28 @@ describe("VAT maths (20% inclusive — matches the Zoho documents)", () => {
   it("handles zero", () => {
     expect(vatFromGross(0)).toBe(0);
     expect(netFromGross(0)).toBe(0);
+  });
+});
+
+describe("VAT registration floor (effective 01 Jun 2026, per the HMRC approval letter)", () => {
+  it("invoices dated before registration carry no VAT", () => {
+    expect(invoiceVat({ date: "2026-05-15", total: 1200 })).toBe(0);
+    expect(invoiceVat({ date: "2026-05-31", total: 100 })).toBe(0);
+  });
+
+  it("registration day itself and after are VATable", () => {
+    expect(invoiceVat({ date: "2026-06-01", total: 100 })).toBe(16.67);
+    expect(invoiceVat({ date: "2026-07-16", total: 1020 })).toBe(170);
+  });
+
+  it("summaries mix pre- and post-registration correctly", () => {
+    const s = summariseRaised([
+      inv({ date: "2026-05-20", total: 600 }), // pre-VAT: gross counts, no VAT
+      inv({ date: "2026-07-16", total: 1020 }),
+    ]);
+    expect(s.gross).toBe(1620);
+    expect(s.vat).toBe(170);
+    expect(s.net).toBe(1450);
   });
 });
 

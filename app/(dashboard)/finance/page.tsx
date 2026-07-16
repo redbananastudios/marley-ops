@@ -14,13 +14,12 @@ import { listInvoices, zohoInvoiceAppUrl, type ZohoInvoiceListItem } from "@/lib
 import {
   addDaysIso,
   dayLabel,
+  invoiceVat,
   isValidDay,
   monthStart,
-  netFromGross,
   outstandingTotal,
   summariseRaised,
   ukTodayDate,
-  vatFromGross,
   vatQuarterFor,
   vatQuarterLabel,
 } from "@/lib/finance/invoices";
@@ -68,6 +67,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 function InvoiceRow({ inv }: { inv: ZohoInvoiceListItem }) {
   const pill = STATUS_PILL[inv.status] ?? { label: inv.status, cls: "bg-mist-100 text-mist-500" };
   const dead = inv.status === "void";
+  const vat = invoiceVat(inv);
   return (
     <div className={`flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5 ${dead ? "opacity-55" : ""}`}>
       <div className="min-w-0 flex-1">
@@ -81,8 +81,14 @@ function InvoiceRow({ inv }: { inv: ZohoInvoiceListItem }) {
       </div>
       <span className={`rounded-pill px-2.5 py-0.5 text-[11px] font-semibold ${pill.cls}`}>{pill.label}</span>
       <div className="tabular text-right text-xs text-mist-400">
-        <p>net {fmtGBP(netFromGross(inv.total))}</p>
-        <p>VAT {fmtGBP(vatFromGross(inv.total))}</p>
+        {vat > 0 ? (
+          <>
+            <p>net {fmtGBP(inv.total - vat)}</p>
+            <p>VAT {fmtGBP(vat)}</p>
+          </>
+        ) : (
+          <p>no VAT — pre-registration</p>
+        )}
       </div>
       <span className={`tabular w-24 text-right text-sm font-semibold ${dead ? "line-through" : "text-foreground"}`}>
         {fmtGBP(inv.total)}
@@ -256,9 +262,10 @@ export default async function FinancePage({
             <p className="text-sm font-semibold text-foreground">How the VAT figures work</p>
             <p className="mt-0.5 text-sm text-mist-400">
               Every invoice is VAT-inclusive at the standard 20% rate, so VAT is worked out per invoice
-              (gross ÷ 6) exactly as the Zoho documents itemise it. This tracks OUTPUT VAT day to day —
-              VAT on purchases (input VAT) and the quarterly return itself stay with Zoho and the
-              accountant.
+              (gross ÷ 6) exactly as the Zoho documents itemise it. The business is VAT-registered with
+              effect from 1 June 2026 (VAT no. 520 2213 58) — invoices dated before that carry no VAT
+              here. This tracks OUTPUT VAT day to day — VAT on purchases (input VAT) and the quarterly
+              return itself stay with Zoho and the accountant.
             </p>
           </div>
         </Card>
