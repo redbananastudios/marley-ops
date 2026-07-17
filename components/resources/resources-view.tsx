@@ -20,8 +20,10 @@ import {
   Plus,
   ShieldAlert,
   ShieldCheck,
+  Trash2,
   Truck,
   UserRound,
+  Wrench,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -46,8 +48,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  deleteVehicleUnavailabilityAction,
   saveStaffAction,
   saveVehicleAction,
+  saveVehicleUnavailabilityAction,
   setStaffActiveAction,
   setVehicleActiveAction,
   type StaffInput,
@@ -75,12 +79,30 @@ export interface VehicleRow {
   mot_due: string | null;
   insurance_renewal: string | null;
   last_service: string | null;
+  service_due: string | null;
   cost_per_month: number | null;
   payment_day: number | null;
   end_of_term: string | null;
   notes: string | null;
   is_active: boolean;
 }
+
+export interface UnavailabilityRow {
+  id: string;
+  vehicle_id: string;
+  start_date: string;
+  end_date: string;
+  reason: string;
+  note: string | null;
+}
+
+const OFFROAD_REASONS = [
+  { value: "service", label: "Service" },
+  { value: "mot", label: "MOT" },
+  { value: "repair", label: "Repair" },
+  { value: "other", label: "Other" },
+] as const;
+const REASON_LABEL = Object.fromEntries(OFFROAD_REASONS.map((r) => [r.value, r.label]));
 
 const STAFF_ROLES = [
   { value: "crew", label: "Crew" },
@@ -101,6 +123,19 @@ function fmtDate(d: string | null): string {
     ? "—"
     : t.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
+
+/** Compact inclusive date range: "20 Jul" / "20–22 Jul" / "28 Jul–2 Aug". */
+function fmtRange(start: string, end: string): string {
+  const s = new Date(`${start.slice(0, 10)}T00:00:00`);
+  const e = new Date(`${end.slice(0, 10)}T00:00:00`);
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short" };
+  if (start.slice(0, 10) === end.slice(0, 10)) return s.toLocaleDateString("en-GB", opts);
+  const sameMonth = s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear();
+  const from = sameMonth ? String(s.getDate()) : s.toLocaleDateString("en-GB", opts);
+  return `${from}–${e.toLocaleDateString("en-GB", opts)}`;
+}
+
+const todayUk = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
 /** Tax / MOT / Insurance chip — the compliance improvement over iMVE. */
 function DocChip({ label, date }: { label: string; date: string | null }) {
@@ -138,15 +173,27 @@ function DocChip({ label, date }: { label: string; date: string | null }) {
 export function ResourcesView({
   staff,
   vehicles,
+  unavailability,
   initialTab,
 }: {
   staff: StaffRow[];
   vehicles: VehicleRow[];
+  unavailability: UnavailabilityRow[];
   initialTab: "staff" | "vehicles";
 }) {
   const [tab, setTab] = useState<"staff" | "vehicles">(initialTab);
   const [staffEdit, setStaffEdit] = useState<StaffRow | "new" | null>(null);
   const [vehicleEdit, setVehicleEdit] = useState<VehicleRow | "new" | null>(null);
+
+  const windowsByVehicle = useMemo(() => {
+    const m = new Map<string, UnavailabilityRow[]>();
+    for (const u of unavailability) {
+      const list = m.get(u.vehicle_id) ?? [];
+      list.push(u);
+      m.set(u.vehicle_id, list);
+    }
+    return m;
+  }, [unavailability]);
 
   const counts = useMemo(
     () => ({
@@ -205,7 +252,12 @@ export function ResourcesView({
       ) : (
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {vehicles.map((v) => (
-            <VehicleCard key={v.id} v={v} onEdit={() => setVehicleEdit(v)} />
+            <VehicleCard
+              key={v.id}
+              v={v}
+              windows={windowsByVehicle.get(v.id) ?? []}
+              onEdit={() => setVehicleEdit(v)}
+            />
           ))}
         </div>
       )}
@@ -214,7 +266,11 @@ export function ResourcesView({
         <StaffDialog row={staffEdit === "new" ? null : staffEdit} onClose={() => setStaffEdit(null)} />
       ) : null}
       {vehicleEdit ? (
-        <VehicleDialog row={vehicleEdit === "new" ? null : vehicleEdit} onClose={() => setVehicleEdit(null)} />
+        <VehicleDialog
+          row={vehicleEdit === "new" ? null : vehicleEdit}
+          windows={vehicleEdit && vehicleEdit !== "new" ? (windowsByVehicle.get(vehicleEdit.id) ?? []) : []}
+          onClose={() => setVehicleEdit(null)}
+        />
       ) : null}
     </div>
   );
@@ -403,9 +459,13 @@ function StaffDialog({ row, onClose }: { row: StaffRow | null; onClose: () => vo
 
 /* --------------------------------------------------------------- vehicles */
 
-function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
+function VehicleCard({ v, windows, onEdit }: { v: VehicleRow; windows: UnavailabilityRow[]; onEdit: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
+  const today = todayUk();
+  const upcoming = windows
+    .filter((w) => w.end_date.slice(0, 10) >= today)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
 
   function toggleActive() {
     start(async () => {
@@ -437,7 +497,23 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
         {VEHICLE_DOCS.map((d) => (
           <DocChip key={d.key} label={d.label} date={v[d.key]} />
         ))}
+        <DocChip label="Service" date={v.service_due} />
       </div>
+
+      {upcoming.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {upcoming.map((w) => (
+            <span
+              key={w.id}
+              className="inline-flex items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium text-mist-500"
+              title={w.note ?? undefined}
+            >
+              <Wrench className="size-3" strokeWidth={1.75} />
+              Off-road {fmtRange(w.start_date, w.end_date)} ({REASON_LABEL[w.reason] ?? "Off-road"})
+            </span>
+          ))}
+        </div>
+      ) : null}
 
       <div className="space-y-1 text-xs text-mist-500">
         <p>Last service: {fmtDate(v.last_service)}</p>
@@ -481,7 +557,15 @@ function VehicleCard({ v, onEdit }: { v: VehicleRow; onEdit: () => void }) {
   );
 }
 
-function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () => void }) {
+function VehicleDialog({
+  row,
+  windows,
+  onClose,
+}: {
+  row: VehicleRow | null;
+  windows: UnavailabilityRow[];
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({
@@ -492,6 +576,7 @@ function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () =
     mot_due: row?.mot_due?.slice(0, 10) ?? "",
     insurance_renewal: row?.insurance_renewal?.slice(0, 10) ?? "",
     last_service: row?.last_service?.slice(0, 10) ?? "",
+    service_due: row?.service_due?.slice(0, 10) ?? "",
     cost_per_month: row?.cost_per_month != null ? String(row.cost_per_month) : "",
     payment_day: row?.payment_day != null ? String(row.payment_day) : "",
     end_of_term: row?.end_of_term?.slice(0, 10) ?? "",
@@ -510,6 +595,7 @@ function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () =
       mot_due: v.mot_due,
       insurance_renewal: v.insurance_renewal,
       last_service: v.last_service,
+      service_due: v.service_due,
       cost_per_month: v.cost_per_month === "" ? "" : Number(v.cost_per_month),
       payment_day: v.payment_day === "" ? "" : Number(v.payment_day),
       end_of_term: v.end_of_term,
@@ -581,6 +667,7 @@ function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () =
             {dateField("tax_due", "Tax due")}
             {dateField("mot_due", "MOT due")}
             {dateField("insurance_renewal", "Insurance renewal")}
+            {dateField("service_due", "Service due")}
             {dateField("last_service", "Last service")}
           </div>
 
@@ -608,6 +695,8 @@ function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () =
               placeholder="Tail lift, dents, keys…"
             />
           </div>
+
+          {row ? <OffRoadManager vehicleId={row.id} windows={windows} /> : null}
         </div>
 
         <DialogFooter>
@@ -621,5 +710,127 @@ function VehicleDialog({ row, onClose }: { row: VehicleRow | null; onClose: () =
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Off-road / garage windows for one vehicle — list + add + remove. Only shown
+ *  when editing an existing vehicle (a window needs the vehicle's id). */
+function OffRoadManager({ vehicleId, windows }: { vehicleId: string; windows: UnavailabilityRow[] }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [reason, setReason] = useState<(typeof OFFROAD_REASONS)[number]["value"]>("service");
+  const [note, setNote] = useState("");
+
+  const sorted = [...windows].sort((a, b) => b.start_date.localeCompare(a.start_date));
+
+  async function add() {
+    if (!start || !end) {
+      toast.error("Pick a start and end date.");
+      return;
+    }
+    setBusy(true);
+    const res = await saveVehicleUnavailabilityAction({
+      vehicle_id: vehicleId,
+      start_date: start,
+      end_date: end,
+      reason,
+      note,
+    });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Off-road window added.");
+    setStart("");
+    setEnd("");
+    setNote("");
+    setReason("service");
+    router.refresh();
+  }
+
+  async function remove(id: string) {
+    const res = await deleteVehicleUnavailabilityAction(id);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Removed.");
+    router.refresh();
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="flex items-center gap-2">
+        <Wrench className="size-4 text-mist-400" strokeWidth={1.75} />
+        <p className="text-sm font-semibold text-foreground">Off-road / garage</p>
+      </div>
+      <p className="mt-0.5 text-xs text-mist-400">
+        Days the van is in the garage or off the road. It drops out of Job Board capacity across these dates.
+      </p>
+
+      {sorted.length > 0 ? (
+        <ul className="mt-3 space-y-1.5">
+          {sorted.map((w) => (
+            <li
+              key={w.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs"
+            >
+              <span className="min-w-0 truncate text-foreground">
+                <span className="font-medium">{fmtRange(w.start_date, w.end_date)}</span>{" "}
+                <span className="text-mist-400">
+                  · {REASON_LABEL[w.reason] ?? "Off-road"}
+                  {w.note ? ` · ${w.note}` : ""}
+                </span>
+              </span>
+              <button
+                type="button"
+                onClick={() => remove(w.id)}
+                aria-label="Remove off-road window"
+                className="focus-ring flex size-7 shrink-0 items-center justify-center rounded text-mist-400 hover:bg-danger-bg hover:text-danger"
+              >
+                <Trash2 className="size-3.5" strokeWidth={1.75} />
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-1">
+          <Label htmlFor="or-start" className="text-xs">From</Label>
+          <Input id="or-start" type="date" className="h-10" value={start} onChange={(e) => setStart(e.target.value)} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="or-end" className="text-xs">To</Label>
+          <Input id="or-end" type="date" className="h-10" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="or-reason" className="text-xs">Reason</Label>
+          <Select value={reason} onValueChange={(val) => setReason(val as typeof reason)}>
+            <SelectTrigger id="or-reason" className="h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {OFFROAD_REASONS.map((r) => (
+                <SelectItem key={r.value} value={r.value}>
+                  {r.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="or-note" className="text-xs">Note (optional)</Label>
+          <Input id="or-note" className="h-10" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Garage, ref…" />
+        </div>
+      </div>
+      <Button type="button" variant="outline" onClick={add} disabled={busy} className="mt-2">
+        {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Plus className="size-4" strokeWidth={1.75} />}
+        Book off-road
+      </Button>
+    </div>
   );
 }

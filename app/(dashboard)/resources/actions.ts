@@ -28,6 +28,7 @@ const vehicleSchema = z.object({
   mot_due: optDate,
   insurance_renewal: optDate,
   last_service: optDate,
+  service_due: optDate,
   cost_per_month: optMoney,
   payment_day: z.union([z.coerce.number().int().min(1).max(31), z.literal("")]).optional(),
   end_of_term: optDate,
@@ -54,6 +55,7 @@ export async function saveVehicleAction(input: VehicleInput) {
     mot_due: v.mot_due || null,
     insurance_renewal: v.insurance_renewal || null,
     last_service: v.last_service || null,
+    service_due: v.service_due || null,
     cost_per_month: v.cost_per_month === "" || v.cost_per_month == null ? null : v.cost_per_month,
     payment_day: v.payment_day === "" || v.payment_day == null ? null : v.payment_day,
     end_of_term: v.end_of_term || null,
@@ -79,6 +81,63 @@ export async function setVehicleActiveAction(id: string, isActive: boolean) {
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
   revalidatePath("/");
+  return { ok: true as const };
+}
+
+/* ------------------------------------------------ vehicle off-road windows */
+
+const unavailSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    vehicle_id: z.string().uuid(),
+    start_date: z.string().trim().min(1, "Start date is required"),
+    end_date: z.string().trim().min(1, "End date is required"),
+    reason: z.enum(["service", "mot", "repair", "other"]),
+    note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .refine((d) => d.end_date >= d.start_date, {
+    message: "End date must be on or after the start date",
+    path: ["end_date"],
+  });
+
+export type VehicleUnavailabilityInput = z.infer<typeof unavailSchema>;
+
+/** Book a van off the road (garage / repair). The Job Board drops it from that
+ *  day's free capacity; the reminder engine is unaffected (dates, not windows). */
+export async function saveVehicleUnavailabilityAction(input: VehicleUnavailabilityInput) {
+  const parsed = unavailSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const u = parsed.data;
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+
+  const row = {
+    vehicle_id: u.vehicle_id,
+    start_date: u.start_date,
+    end_date: u.end_date,
+    reason: u.reason,
+    note: u.note || null,
+    created_by: userId,
+  };
+  const { error } = u.id
+    ? await sb.from("vehicle_unavailability").update(row).eq("id", u.id)
+    : await sb.from("vehicle_unavailability").insert(row);
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/resources");
+  revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
+
+export async function deleteVehicleUnavailabilityAction(id: string) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const { error } = await sb.from("vehicle_unavailability").delete().eq("id", id);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/resources");
+  revalidatePath("/schedule/board");
   return { ok: true as const };
 }
 

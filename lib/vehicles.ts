@@ -84,3 +84,13 @@ export interface VehicleExpiryDates {
   service_due: string | null;
   end_of_term: string | null;
 }
+
+/** True when ANY tracked expiry (incl. Service + Lease) is due within the window
+ *  or overdue — the full reminder scope, used by the dashboard needs-action card.
+ *  (vehicleNeedsAttention stays the legal-3 amber flag for the Job Board.) */
+export function vehicleHasExpiryDue(v: VehicleExpiryDates, today = new Date()): boolean {
+  return VEHICLE_EXPIRIES.some((e) => {
+    const s = docStatus(v[e.key], today);
+    return s.state === "due" || s.state === "overdue";
+  });
+}

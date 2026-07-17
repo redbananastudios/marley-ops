@@ -14,7 +14,7 @@ import {
   type ProgressSets,
 } from "@/lib/dashboard/compute";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
-import { vehicleNeedsAttention } from "@/lib/vehicles";
+import { vehicleHasExpiryDue } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, boxesFromItems } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -185,13 +185,14 @@ export default async function DashboardPage() {
     balanceDue: leads.filter(
       (l) => l.status === "confirmed" && !(l as { balance_paid_at?: string | null }).balance_paid_at,
     ).length,
-    // Fleet compliance: active vehicles with tax/MOT/insurance due ≤30d or overdue.
+    // Fleet compliance: active vehicles with any expiry (MOT/tax/insurance/
+    // service/lease) due ≤30d or overdue — the full fleet-reminder scope.
     ...(await (async () => {
       const { data: vs } = await supabase
         .from("vehicles")
-        .select("tax_due, mot_due, insurance_renewal")
+        .select("tax_due, mot_due, insurance_renewal, service_due, end_of_term")
         .eq("is_active", true);
-      return { fleetDocsDue: (vs ?? []).filter((v) => vehicleNeedsAttention(v)).length };
+      return { fleetDocsDue: (vs ?? []).filter((v) => vehicleHasExpiryDue(v)).length };
     })()),
     ...(await (async () => {
       // Accepted quotes with no contract signature — crew must collect on arrival.

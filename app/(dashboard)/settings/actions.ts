@@ -3,8 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { VEHICLE_KEYS } from "@/lib/quote/constants";
 import { toPricingConfig, type EditablePricing } from "@/lib/quote/pricing-config";
+import { sendEmail } from "@/lib/comms/send";
+import { fleetDigestHtml, fleetDigestSubject, type DigestItem } from "@/lib/fleet/reminder-email";
+import { sendPushForEvent } from "@/lib/push/send";
+import { fleetExpiryDigestPush } from "@/lib/push/categories";
 
 async function requireAdmin() {
   const sb = await createClient();
@@ -92,6 +97,71 @@ const settingsSchema = z.object({
 });
 
 export type SettingsInput = z.infer<typeof settingsSchema>;
+
+/* --------------------------------------------------- fleet reminders (admin) */
+
+const fleetSchema = z.object({
+  enabled: z.boolean(),
+  pushEnabled: z.boolean(),
+  recipients: z.array(z.string().trim().email("One of the addresses is not a valid email")).max(20),
+});
+export type FleetRemindersInput = z.infer<typeof fleetSchema>;
+
+/** Save the fleet-reminder recipients + kill switches (admin only). */
+export async function saveFleetRemindersAction(input: FleetRemindersInput) {
+  const parsed = fleetSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  }
+  const { sb, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+  const v = parsed.data;
+  // Dedupe + lowercase so the list stays clean.
+  const recipients = Array.from(new Set(v.recipients.map((e) => e.toLowerCase())));
+  const { error: dbErr } = await sb
+    .from("business_settings")
+    .update({
+      fleet_reminders_enabled: v.enabled,
+      push_fleet_expiry_enabled: v.pushEnabled,
+      fleet_alert_recipients: recipients as never,
+    })
+    .eq("id", true);
+  if (dbErr) return { ok: false as const, error: dbErr.message };
+  revalidatePath("/settings");
+  return { ok: true as const, recipients };
+}
+
+/** The sink the test alert always uses — never a real customer or an unverified
+ *  teammate address during setup. */
+const FLEET_TEST_SINK = "peter@abacusonline.net";
+
+/** Send a sample fleet reminder (email to the test sink + a self-push) so the
+ *  admin can prove the pipeline before real dates come due. Admin only. */
+export async function sendFleetTestAction() {
+  const { sb, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+
+  const in7 = new Date();
+  in7.setDate(in7.getDate() + 7);
+  const sample: DigestItem[] = [
+    { vehicleName: "Luton 1 (sample)", expiryLabel: "MOT", dueDate: in7.toISOString().slice(0, 10), days: 7 },
+  ];
+  const res = await sendEmail({
+    to: FLEET_TEST_SINK,
+    subject: `[TEST] ${fleetDigestSubject(sample)}`,
+    html: fleetDigestHtml(sample),
+    replyTo: "hello@marleymoves.co.uk",
+  });
+  // Best-effort self-push (respects the global switch, bypasses the category one).
+  if (user?.id) {
+    await sendPushForEvent(fleetExpiryDigestPush(1), { admin: createAdminClient(), onlyUserId: user.id, isTest: true });
+  }
+  if (!res.ok) return { ok: false as const, error: res.error ?? "Email send failed" };
+  return { ok: true as const, sink: FLEET_TEST_SINK };
+}
 
 /** Update the business settings (admin only). RLS also enforces this, but we check
  *  explicitly so a non-admin gets a clear message rather than a silent no-op. */

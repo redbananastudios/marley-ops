@@ -12,6 +12,7 @@ import { AiSettingsCard } from "@/components/settings/ai-settings-card";
 import { QuickSigninCard } from "@/components/settings/quick-signin-card";
 import { NotificationsCard } from "@/components/settings/notifications-card";
 import { CardPaymentsCard } from "@/components/settings/card-payments-card";
+import { FleetRemindersCard } from "@/components/settings/fleet-reminders-card";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -55,6 +56,22 @@ export default async function SettingsPage() {
       ((testFirst ?? candidates?.[0])?.accept_token as string | null) ?? null;
   }
 
+  // Fleet-reminder settings (admin only) — the recipients + kill switches for
+  // the daily fleet-expiry cron.
+  let fleet = { enabled: true, pushEnabled: true, recipients: [] as string[] };
+  if (canEdit) {
+    const { data: fleetRow } = await admin
+      .from("business_settings")
+      .select("fleet_reminders_enabled, push_fleet_expiry_enabled, fleet_alert_recipients")
+      .eq("id", true)
+      .maybeSingle();
+    fleet = {
+      enabled: fleetRow?.fleet_reminders_enabled !== false,
+      pushEnabled: fleetRow?.push_fleet_expiry_enabled !== false,
+      recipients: (fleetRow?.fleet_alert_recipients ?? []).filter((e): e is string => !!e),
+    };
+  }
+
   // Team management is admin-only — estimators don't see the card at all.
   let team: TeamMember[] = [];
   if (canEdit) {
@@ -76,6 +93,7 @@ export default async function SettingsPage() {
     ...(canEdit
       ? [
           { id: "payments", label: "Payments" },
+          { id: "fleet", label: "Fleet" },
           { id: "ai", label: "AI" },
           { id: "pricing", label: "Pricing" },
           { id: "business", label: "Business" },
@@ -116,6 +134,13 @@ export default async function SettingsPage() {
         ) : null}
         {canEdit ? (
           <>
+            <section id="fleet" className={sectionClass}>
+              <FleetRemindersCard
+                enabled={fleet.enabled}
+                pushEnabled={fleet.pushEnabled}
+                recipients={fleet.recipients}
+              />
+            </section>
             <section id="ai" className={sectionClass}>
               <AiSettingsCard settings={settings} spendHistory={(spendHistory ?? []).map((item) => ({ month: item.month, spentUsd: Number(item.spent_usd), reservedUsd: Number(item.reserved_usd), alertedAt: item.alerted_at }))} mediaBytes={(mediaRows ?? []).reduce((sum, row) => sum + Number(row.bytes ?? 0), 0)} mediaCount={(mediaRows ?? []).length} nextRetentionSweep={nextSweep.toISOString()} diskCapacityGb={Number(process.env.AI_MEDIA_DISK_CAPACITY_GB) || null} configured={aiConfigured} canEdit={canEdit} problemJobs={problemJobs ?? []} />
             </section>
