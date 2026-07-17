@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { requireUserOrCronSecret } from "@/lib/api-auth";
+import { requireOfficeOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { log } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { sendEmail } from "@/lib/comms/send";
 import { sendPushForEvent } from "@/lib/push/send";
 import { fleetExpiryDigestPush } from "@/lib/push/categories";
@@ -26,7 +27,10 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
 export async function GET(req: Request) {
-  if (!(await requireUserOrCronSecret(req))) {
+  // Office session or the cron secret — this route runs on the service-role
+  // admin client and sends real emails/pushes, so crew sessions are refused
+  // (matches the finance/digest crons; least privilege).
+  if (!(await requireOfficeOrCronSecret(req))) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   const run = await runCron("fleet-reminders", async () => {
@@ -44,9 +48,12 @@ export async function GET(req: Request) {
       .from("vehicles")
       .select("id, name, tax_due, mot_due, insurance_renewal, service_due, end_of_term")
       .eq("is_active", true);
-    const { data: logRows } = await admin
-      .from("vehicle_reminder_log")
-      .select("vehicle_id, expiry_type, due_date, threshold");
+    // Page the whole ledger — it grows one row per (vehicle, expiry, due_date,
+    // threshold) forever, so an unbounded select would hit PostgREST's 1000-row
+    // cap and silently drop "already sent" rows, re-sending old reminders.
+    const logRows = await fetchAllRows((f, t) =>
+      admin.from("vehicle_reminder_log").select("vehicle_id, expiry_type, due_date, threshold").order("id").range(f, t),
+    );
 
     const fleet: FleetVehicle[] = (vehicles ?? []).map((v) => ({
       id: v.id,

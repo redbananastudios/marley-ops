@@ -553,6 +553,10 @@ function CapacityStrip({
 
   const freeStaff = rows.staff.filter((r) => r.state === "free").length;
   const freeVans = rows.vehicles.filter((r) => r.state === "free").length;
+  // Off-road vans can't be booked, so they leave the USABLE count entirely
+  // (numerator and denominator) — a day with every usable van free reads
+  // "3/3 free" (green), not a misleading amber "3/4".
+  const usableVans = rows.vehicles.filter((r) => r.state !== "offroad").length;
 
   // Traffic-light availability: everyone free = green, some committed = amber,
   // none left = red. Reads at a glance across the whole week.
@@ -577,9 +581,9 @@ function CapacityStrip({
             <UsersRound className="size-3.5" strokeWidth={1.75} />
             {freeStaff}/{staff.length}
           </span>
-          <span className={cn("inline-flex items-center gap-1 tabular", tone(freeVans, vehicles.length))}>
+          <span className={cn("inline-flex items-center gap-1 tabular", tone(freeVans, usableVans))}>
             <Truck className="size-3.5" strokeWidth={1.75} />
-            {freeVans}/{vehicles.length}
+            {freeVans}/{usableVans}
           </span>
           <span className="ml-auto font-medium text-mist-400">free</span>
         </button>
@@ -834,7 +838,9 @@ function AssignDialog({
   clashLabels: (clashes: ApptLite[]) => string[];
   onClose: () => void;
 }) {
-  const apptDay = apptDays(appt)[0] ?? null;
+  // Every day the move spans — warn if the van is off-road on ANY of them,
+  // not just the first (multi-day moves can straddle a garage window).
+  const apptDaysList = apptDays(appt);
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const current = assignments.filter((a) => a.appointment_id === appt.id);
@@ -968,7 +974,7 @@ function AssignDialog({
                     vehicleSel.has(v.id),
                     () => toggle(vehicleSel, v.id, setVehicleSel),
                     vehicleNeedsAttention(v) ||
-                      (apptDay ? vehicleOffRoad(v, unavailByVehicle.get(v.id) ?? [], apptDay).offRoad : false),
+                      apptDaysList.some((day) => vehicleOffRoad(v, unavailByVehicle.get(v.id) ?? [], day).offRoad),
                   ),
                 )
               )}

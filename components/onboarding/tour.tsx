@@ -120,6 +120,12 @@ export function OnboardingTour({
       });
       runningRef.current = true;
       d.drive();
+      // Stamp the account the moment the tour is actually on screen. This also
+      // covers the SPA case where the user navigates away and the component
+      // unmounts before onDestroyed fires (the original "shows every login"
+      // bug). A first-timer who leaves BEFORE it renders is not stamped, so
+      // they still get it next login.
+      markSeen();
     }
 
     function onStartEvent(e: Event) {
@@ -137,14 +143,9 @@ export function OnboardingTour({
       } catch {
         done = false;
       }
-      if (!done) {
-        // Stamp the account the moment the auto-tour is scheduled, so it can
-        // never reappear on a later login even if the user closes the tab
-        // rather than finishing or dismissing it — the "shows every login"
-        // complaint (Peter, 2026-07-17). Manual relaunches are unaffected.
-        markSeen();
-        timer = setTimeout(run, 1200);
-      }
+      // Stamp happens when the tour actually renders (in run), not here — so a
+      // first-timer who leaves inside the 1.2s window still sees it next login.
+      if (!done) timer = setTimeout(run, 1200);
     }
 
     return () => {

@@ -90,8 +90,10 @@ const unavailSchema = z
   .object({
     id: z.string().uuid().optional(),
     vehicle_id: z.string().uuid(),
-    start_date: z.string().trim().min(1, "Start date is required"),
-    end_date: z.string().trim().min(1, "End date is required"),
+    // Real YYYY-MM-DD (the <input type="date"> always is) — reject a crafted
+    // API call cleanly instead of letting a bad string reach the date column.
+    start_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid start date"),
+    end_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid end date"),
     reason: z.enum(["service", "mot", "repair", "other"]),
     note: z.string().trim().max(500).optional().or(z.literal("")),
   })
