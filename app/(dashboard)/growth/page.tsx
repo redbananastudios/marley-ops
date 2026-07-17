@@ -62,6 +62,7 @@ export default async function GrowthPage() {
   const funnel = snapshot.funnel_summary;
   const tracking = snapshot.tracking_summary;
   const ads = snapshot.ads_summary;
+  const adsValidation = snapshot.validation_summary ?? null;
   const validation = validationRow?.payload ?? null;
   const variants = groupLeadsByVariant(variantLeads);
 
@@ -108,13 +109,24 @@ export default async function GrowthPage() {
       ) : null}
 
       {/* summary cards */}
-      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="p-4">
           <p className="text-xs text-mist-400">Tracking validation</p>
           <p className={"mt-1 text-lg font-semibold " + (tracking.status === "pass" ? "text-success" : "text-danger")}>
             {tracking.available ? tracking.status ?? "unknown" : "Missing"}
           </p>
           <p className="mt-1 text-xs text-mist-400">GA4 + PostHog · {tracking.freshness}</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs text-mist-400">Ads validation</p>
+          <p className={"mt-1 text-lg font-semibold " + (adsValidation?.ads_validation_status === "pass" ? "text-success" : "text-danger")}>
+            {adsValidation?.ads_validation_available ? adsValidation.ads_validation_status ?? "unknown" : "Missing"}
+          </p>
+          <p className="mt-1 text-xs text-mist-400">
+            {adsValidation?.ads_validation_available
+              ? `${adsValidation.ads_validation_blocks ?? 0} blocks · judge ${adsValidation.ads_validation_judge_passed === true ? "pass" : adsValidation.ads_validation_judge_passed === false ? "fail" : "pending"} · ${adsValidation.ads_validation_freshness}`
+              : "rules + LLM judge · run the ads validator"}
+          </p>
         </Card>
         <Card className="p-4">
           <p className="text-xs text-mist-400">Funnel (agent-side)</p>

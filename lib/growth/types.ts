@@ -64,6 +64,17 @@ export type OpsSnapshot = {
     chatgpt_status: string | null;
     chatgpt_manual_setup_required: boolean;
   };
+  /** ads_validation verdict summary (optional — absent on pre-2026-07 snapshots). */
+  validation_summary?: {
+    ads_validation_available: boolean;
+    ads_validation_status: string | null;
+    ads_validation_launch_allowed: boolean;
+    ads_validation_blocks: number | null;
+    ads_validation_warns: number | null;
+    ads_validation_judge_passed: boolean | null;
+    ads_validation_freshness: string;
+    ads_validation_is_stale: boolean;
+  };
   blocking_issues: { code: string; kind: string; blocks_paid_launch: boolean; message: string }[];
   warnings: { code: string; kind: string; message: string }[];
   next_actions: string[];
