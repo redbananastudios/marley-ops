@@ -1,0 +1,64 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
+import { createClient } from "@/lib/supabase/server";
+
+const UK = "Europe/London";
+
+const schema = z.object({
+  // The <input>-free UI only ever sends real ISO days; reject anything else
+  // cleanly instead of letting it reach the date column.
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
+  status: z.enum(["available", "unavailable", "clear"]),
+});
+
+export type SetMyAvailabilityInput = z.infer<typeof schema>;
+
+/**
+ * A crew member sets their OWN availability for one date. staff_id is resolved
+ * from the session (never a client param) and re-checked by RLS. 'clear' removes
+ * the override so the day falls back to the Mon–Fri default. Bounded to a
+ * forward window — availability for a past day is meaningless.
+ */
+export async function setMyAvailabilityAction(input: SetMyAvailabilityInput) {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const { date, status } = parsed.data;
+
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not signed in." };
+
+  const { data: staffRow } = await sb
+    .from("staff")
+    .select("id")
+    .eq("profile_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!staffRow) return { ok: false as const, error: "Your login isn’t linked to a crew record yet." };
+
+  // Only today onward, and not absurdly far out (protects the column + the UI).
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: UK });
+  const horizon = new Date(`${today}T00:00:00Z`);
+  horizon.setUTCDate(horizon.getUTCDate() + 400);
+  if (date < today || date > horizon.toISOString().slice(0, 10)) {
+    return { ok: false as const, error: "Pick a date within the next few months." };
+  }
+
+  if (status === "clear") {
+    const { error } = await sb.from("staff_availability").delete().eq("staff_id", staffRow.id).eq("date", date);
+    if (error) return { ok: false as const, error: error.message };
+  } else {
+    const { error } = await sb
+      .from("staff_availability")
+      .upsert({ staff_id: staffRow.id, date, status, note: null, created_by: user.id }, { onConflict: "staff_id,date" });
+    if (error) return { ok: false as const, error: error.message };
+  }
+
+  revalidatePath("/my-jobs/availability");
+  revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
