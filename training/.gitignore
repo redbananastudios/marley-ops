@@ -1,0 +1,14 @@
+# Generated pipeline artifacts — regenerate with `npm run crew:all` (see README.md).
+# Only code + narration + stable brand assets are committed; media regenerates.
+node_modules/
+crew/audio/
+crew/footage/
+crew/out/
+crew/*.log
+video/node_modules/
+video/out/
+# Remotion public/ holds generated COPIES of the audio + footage (via
+# video/sync-assets.mjs) — regenerate, don't commit. brand/ is kept (stable).
+video/public/audio/
+video/public/footage/
+video/public/timeline.json

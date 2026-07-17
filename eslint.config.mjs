@@ -29,6 +29,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Standalone training-video pipeline — its own package.json + deps
+    // (Remotion/Playwright), never part of the Next.js app. Lint it there.
+    "training/**",
   ]),
 ]);
 

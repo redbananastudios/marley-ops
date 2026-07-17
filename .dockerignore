@@ -11,3 +11,6 @@ supabase/volumes
 *.local
 .vercel
 coverage
+# Standalone training-video pipeline (Remotion/Playwright/ElevenLabs) — never
+# shipped in the app image. Its own package.json + generated media artifacts.
+training

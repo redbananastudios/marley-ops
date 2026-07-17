@@ -1,0 +1,20 @@
+{
+  "name": "marley-ops-training",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Training-video pipeline (script -> ElevenLabs TTS -> Playwright footage -> Remotion). Standalone: NOT part of the Next.js app, excluded from app lint/tsc/tests/Docker.",
+  "scripts": {
+    "seed": "node crew/seed-demo.mjs",
+    "seed:cleanup": "node crew/seed-demo.mjs --cleanup",
+    "tts": "node crew/tts.mjs",
+    "record": "tsx crew/record.ts",
+    "render": "npm --prefix video run render",
+    "crew:all": "npm run seed && npm run tts && npm run record && npm run render && npm run seed:cleanup"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.2",
+    "playwright": "^1.57.0",
+    "tsx": "^4.20.0"
+  }
+}
