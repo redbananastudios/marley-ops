@@ -8,6 +8,7 @@ import {
   type BoardAppt,
   type BoardAssignment,
   type BoardStaff,
+  type BoardUnavailability,
   type BoardVehicle,
 } from "@/components/job-board/job-board-view";
 
@@ -21,7 +22,7 @@ export default async function JobBoardPage({
   const { week } = await searchParams;
   const supabase = await createClient();
 
-  const [appts, leads, quotes, { data: staff }, { data: vehicles }, assignments] = await Promise.all([
+  const [appts, leads, quotes, { data: staff }, { data: vehicles }, assignments, unavailability] = await Promise.all([
     fetchAllRows((f, t) =>
       supabase
         .from("appointments")
@@ -39,11 +40,14 @@ export default async function JobBoardPage({
     supabase.from("staff").select("id, full_name, staff_role").eq("is_active", true).order("full_name"),
     supabase
       .from("vehicles")
-      .select("id, name, vehicle_type, registration, tax_due, mot_due, insurance_renewal")
+      .select("id, name, vehicle_type, registration, tax_due, mot_due, insurance_renewal, service_due, end_of_term")
       .eq("is_active", true)
       .order("name"),
     fetchAllRows((f, t) =>
       supabase.from("appointment_assignments").select("id, appointment_id, staff_id, vehicle_id").order("id").range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      supabase.from("vehicle_unavailability").select("vehicle_id, start_date, end_date, reason").order("id").range(f, t),
     ),
   ]);
 
@@ -120,6 +124,7 @@ export default async function JobBoardPage({
         staff={(staff ?? []) as BoardStaff[]}
         vehicles={(vehicles ?? []) as BoardVehicle[]}
         assignments={assignments as BoardAssignment[]}
+        unavailability={unavailability as BoardUnavailability[]}
         thisWeekStart={thisWeekStart}
         initialWeekStart={weekParam ?? thisWeekStart}
         today={ukToday}

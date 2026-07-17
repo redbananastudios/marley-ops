@@ -55,6 +55,18 @@ export const PUSH_CATEGORIES = {
     urgency: "high" as const,
     suppressWhenFocused: false,
   },
+  fleet_expiry: {
+    id: "fleet_expiry" as const,
+    label: "Fleet reminders",
+    description: "A vehicle's MOT, tax, insurance, service or lease is due.",
+    /** Office only — the people who book garage slots and renew documents. */
+    audience: ["admin", "estimator"] as const,
+    defaultEnabled: true,
+    /** A heads-up, not an alarm — a day's shelf life is plenty. */
+    ttlSeconds: 24 * 3600,
+    urgency: "normal" as const,
+    suppressWhenFocused: false,
+  },
 } satisfies Record<string, PushCategory>;
 
 export type PushCategoryId = keyof typeof PUSH_CATEGORIES;
@@ -119,6 +131,18 @@ export function newEnquiryDigestPush(count: number): PushEvent {
     title: "New enquiries",
     body: `${count} new website enquiries need review.`,
     url: "/leads",
+  };
+}
+
+/** One daily digest push when vehicle documents cross a reminder threshold —
+ *  a stable tag so a new day's digest replaces yesterday's unseen one. */
+export function fleetExpiryDigestPush(count: number): PushEvent {
+  return {
+    category: "fleet_expiry",
+    eventKey: "fleet-expiry-digest",
+    title: "Fleet reminders",
+    body: count === 1 ? "A vehicle document needs attention." : `${count} vehicle documents need attention.`,
+    url: "/resources?tab=vehicles",
   };
 }
 

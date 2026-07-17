@@ -53,6 +53,7 @@ import {
   type DayState,
 } from "@/lib/job-board";
 import { vehicleNeedsAttention } from "@/lib/vehicles";
+import { vehicleOffRoad, type UnavailabilityWindow } from "@/lib/fleet/availability";
 import {
   assignResourceAction,
   setAssignmentsAction,
@@ -86,6 +87,8 @@ export interface BoardVehicle {
   tax_due: string | null;
   mot_due: string | null;
   insurance_renewal: string | null;
+  service_due: string | null;
+  end_of_term: string | null;
 }
 
 export interface BoardAssignment {
@@ -93,6 +96,13 @@ export interface BoardAssignment {
   appointment_id: string;
   staff_id: string | null;
   vehicle_id: string | null;
+}
+
+export interface BoardUnavailability {
+  vehicle_id: string;
+  start_date: string;
+  end_date: string;
+  reason: string;
 }
 
 type Resource = { kind: "staff" | "vehicle"; id: string; name: string };
@@ -127,12 +137,17 @@ const STATE_META: Record<DayState, { label: string; cls: string }> = {
   partial: { label: "Part busy", cls: "bg-warn-bg text-warn" },
   booked: { label: "Booked", cls: "bg-danger-bg text-danger" },
 };
+/** A van that can't be used that day (garage window or an overdue legal doc). It
+ *  is NOT counted as free capacity — the popover shows why. */
+const OFFROAD_META = { label: "Off-road", cls: "bg-muted text-mist-500" };
+type CapRow = { id: string; name: string; state: DayState | "offroad"; windows: string[]; offRoadReason: string | null };
 
 export function JobBoardView({
   appts,
   staff,
   vehicles,
   assignments,
+  unavailability,
   thisWeekStart,
   initialWeekStart,
   today,
@@ -141,6 +156,7 @@ export function JobBoardView({
   staff: BoardStaff[];
   vehicles: BoardVehicle[];
   assignments: BoardAssignment[];
+  unavailability: BoardUnavailability[];
   thisWeekStart: string;
   /** Week the board opens on (?week= deep link); "This week" still resets to thisWeekStart. */
   initialWeekStart?: string;
@@ -176,6 +192,15 @@ export function JobBoardView({
     }
     return m;
   }, [assignments]);
+  const unavailByVehicle = useMemo(() => {
+    const m = new Map<string, UnavailabilityWindow[]>();
+    for (const u of unavailability) {
+      const list = m.get(u.vehicle_id) ?? [];
+      list.push({ start_date: u.start_date, end_date: u.end_date, reason: u.reason });
+      m.set(u.vehicle_id, list);
+    }
+    return m;
+  }, [unavailability]);
   const daysByAppt = useMemo(() => new Map(appts.map((a) => [a.id, apptDays(a)])), [appts]);
 
   const cardsForDay = (day: string) =>
@@ -254,6 +279,7 @@ export function JobBoardView({
             vehicles={vehicles}
             assignments={assignments}
             apptById={apptById}
+            unavailByVehicle={unavailByVehicle}
           />
         </div>
 
@@ -403,6 +429,7 @@ export function JobBoardView({
           vehicles={vehicles}
           assignments={assignments}
           apptById={apptById}
+          unavailByVehicle={unavailByVehicle}
           clashLabels={clashLabels}
           onClose={() => setAssignFor(null)}
         />
@@ -487,12 +514,14 @@ function CapacityStrip({
   vehicles,
   assignments,
   apptById,
+  unavailByVehicle,
 }: {
   day: string;
   staff: BoardStaff[];
   vehicles: BoardVehicle[];
   assignments: BoardAssignment[];
   apptById: Map<string, ApptLite>;
+  unavailByVehicle: Map<string, UnavailabilityWindow[]>;
 }) {
   const rows = useMemo(() => {
     const stateOf = (id: string, kind: "staff" | "vehicle") => {
@@ -506,11 +535,21 @@ function CapacityStrip({
       const busyToday = assigned.filter((a) => apptDays(a).includes(day));
       return { state: resourceDayState(day, assigned), windows: busyToday.map(apptWindow) };
     };
-    return {
-      staff: staff.map((s) => ({ id: s.id, name: s.full_name, ...stateOf(s.id, "staff") })),
-      vehicles: vehicles.map((v) => ({ id: v.id, name: v.name, ...stateOf(v.id, "vehicle") })),
-    };
-  }, [day, staff, vehicles, assignments, apptById]);
+    const staffRows: CapRow[] = staff.map((s) => ({
+      id: s.id,
+      name: s.full_name,
+      offRoadReason: null,
+      ...stateOf(s.id, "staff"),
+    }));
+    // Off-road wins over the assignment state: a van in the garage or with an
+    // overdue legal doc is simply not available, and never counts as free.
+    const vehicleRows: CapRow[] = vehicles.map((v) => {
+      const off = vehicleOffRoad(v, unavailByVehicle.get(v.id) ?? [], day);
+      if (off.offRoad) return { id: v.id, name: v.name, state: "offroad", windows: [], offRoadReason: off.reason };
+      return { id: v.id, name: v.name, offRoadReason: null, ...stateOf(v.id, "vehicle") };
+    });
+    return { staff: staffRows, vehicles: vehicleRows };
+  }, [day, staff, vehicles, assignments, apptById, unavailByVehicle]);
 
   const freeStaff = rows.staff.filter((r) => r.state === "free").length;
   const freeVans = rows.vehicles.filter((r) => r.state === "free").length;
@@ -555,9 +594,15 @@ function CapacityStrip({
               rows[group].map((r) => (
                 <div key={r.id} className="flex items-center justify-between gap-2 rounded px-1 py-1">
                   <span className="min-w-0 truncate text-xs text-foreground">{r.name}</span>
-                  <span className={cn("shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-medium", STATE_META[r.state].cls)}>
-                    {r.state === "partial" ? `Busy ${r.windows.join(", ")}` : STATE_META[r.state].label}
-                  </span>
+                  {r.state === "offroad" ? (
+                    <span className={cn("shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-medium", OFFROAD_META.cls)}>
+                      {r.offRoadReason ?? OFFROAD_META.label}
+                    </span>
+                  ) : (
+                    <span className={cn("shrink-0 rounded-pill px-1.5 py-0.5 text-[10px] font-medium", STATE_META[r.state].cls)}>
+                      {r.state === "partial" ? `Busy ${r.windows.join(", ")}` : STATE_META[r.state].label}
+                    </span>
+                  )}
                 </div>
               ))
             )}
@@ -776,6 +821,7 @@ function AssignDialog({
   vehicles,
   assignments,
   apptById,
+  unavailByVehicle,
   clashLabels,
   onClose,
 }: {
@@ -784,9 +830,11 @@ function AssignDialog({
   vehicles: BoardVehicle[];
   assignments: BoardAssignment[];
   apptById: Map<string, ApptLite>;
+  unavailByVehicle: Map<string, UnavailabilityWindow[]>;
   clashLabels: (clashes: ApptLite[]) => string[];
   onClose: () => void;
 }) {
+  const apptDay = apptDays(appt)[0] ?? null;
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const current = assignments.filter((a) => a.appointment_id === appt.id);
@@ -919,7 +967,8 @@ function AssignDialog({
                     "vehicle",
                     vehicleSel.has(v.id),
                     () => toggle(vehicleSel, v.id, setVehicleSel),
-                    vehicleNeedsAttention(v),
+                    vehicleNeedsAttention(v) ||
+                      (apptDay ? vehicleOffRoad(v, unavailByVehicle.get(v.id) ?? [], apptDay).offRoad : false),
                   ),
                 )
               )}

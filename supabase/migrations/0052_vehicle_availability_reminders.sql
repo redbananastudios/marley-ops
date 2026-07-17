@@ -55,6 +55,9 @@ create policy vehicle_reminder_log_read on public.vehicle_reminder_log for selec
 
 -- Reminder settings on the single-row business_settings.
 -- Recipients seeded later (Settings UI / M3) — kept empty here so no email ships from a migration.
+-- push_fleet_expiry_enabled is the per-category push kill switch (mirrors the
+-- other push_*_enabled columns); fleet_reminders_enabled is the master switch.
 alter table public.business_settings
-  add column fleet_reminders_enabled boolean not null default true,
-  add column fleet_alert_recipients  text[]  not null default '{}';
+  add column if not exists fleet_reminders_enabled   boolean not null default true,
+  add column if not exists fleet_alert_recipients    text[]  not null default '{}',
+  add column if not exists push_fleet_expiry_enabled boolean not null default true;

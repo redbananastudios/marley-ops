@@ -567,11 +567,14 @@ export type Database = {
           cubic_transit_ft3: number
           default_deposit: number
           estimator_fee: number
+          fleet_alert_recipients: string[]
+          fleet_reminders_enabled: boolean
           google_review_url: string
           id: boolean
           pricing: Json | null
           push_crew_job_enabled: boolean
           push_enabled: boolean
+          push_fleet_expiry_enabled: boolean
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
           updated_at: string
@@ -605,11 +608,14 @@ export type Database = {
           cubic_transit_ft3?: number
           default_deposit?: number
           estimator_fee?: number
+          fleet_alert_recipients?: string[]
+          fleet_reminders_enabled?: boolean
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
           push_crew_job_enabled?: boolean
           push_enabled?: boolean
+          push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           updated_at?: string
@@ -643,11 +649,14 @@ export type Database = {
           cubic_transit_ft3?: number
           default_deposit?: number
           estimator_fee?: number
+          fleet_alert_recipients?: string[]
+          fleet_reminders_enabled?: boolean
           google_review_url?: string
           id?: boolean
           pricing?: Json | null
           push_crew_job_enabled?: boolean
           push_enabled?: boolean
+          push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           updated_at?: string
@@ -3056,6 +3065,92 @@ export type Database = {
           },
         ]
       }
+      vehicle_reminder_log: {
+        Row: {
+          due_date: string
+          expiry_type: string
+          id: string
+          sent_at: string
+          threshold: string
+          vehicle_id: string
+        }
+        Insert: {
+          due_date: string
+          expiry_type: string
+          id?: string
+          sent_at?: string
+          threshold: string
+          vehicle_id: string
+        }
+        Update: {
+          due_date?: string
+          expiry_type?: string
+          id?: string
+          sent_at?: string
+          threshold?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_reminder_log_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vehicle_unavailability: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          end_date: string
+          id: string
+          note: string | null
+          reason: string
+          start_date: string
+          updated_at: string
+          vehicle_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          end_date: string
+          id?: string
+          note?: string | null
+          reason?: string
+          start_date: string
+          updated_at?: string
+          vehicle_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          end_date?: string
+          id?: string
+          note?: string | null
+          reason?: string
+          start_date?: string
+          updated_at?: string
+          vehicle_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vehicle_unavailability_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vehicle_unavailability_vehicle_id_fkey"
+            columns: ["vehicle_id"]
+            isOneToOne: false
+            referencedRelation: "vehicles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vehicles: {
         Row: {
           cost_per_month: number | null
@@ -3070,6 +3165,7 @@ export type Database = {
           notes: string | null
           payment_day: number | null
           registration: string
+          service_due: string | null
           tax_due: string | null
           updated_at: string
           vehicle_type: string
@@ -3087,6 +3183,7 @@ export type Database = {
           notes?: string | null
           payment_day?: number | null
           registration?: string
+          service_due?: string | null
           tax_due?: string | null
           updated_at?: string
           vehicle_type?: string
@@ -3104,6 +3201,7 @@ export type Database = {
           notes?: string | null
           payment_day?: number | null
           registration?: string
+          service_due?: string | null
           tax_due?: string | null
           updated_at?: string
           vehicle_type?: string
