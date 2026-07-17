@@ -43,6 +43,24 @@ describe("R2 (S3) media store", () => {
     );
   });
 
+  it("honours a bucket override as the key prefix (job-media)", async () => {
+    const store = createS3MediaStore({ environment: R2_ENV, bucket: "job-media" });
+    expect(store.bucket).toBe("job-media");
+    const target = await store.createUploadTarget({
+      objectKey: "lead/uuid.mp4",
+      contentType: "video/mp4",
+      accessToken: "",
+    });
+    if (target.protocol !== "put") throw new Error("expected a put target");
+    expect(target.url).toContain("job-media/lead/uuid.mp4");
+  });
+
+  it("createMediaStore forwards a bucket override to the s3 driver", () => {
+    const store = createMediaStore(R2_ENV, { bucket: "job-media" });
+    expect(store.driver).toBe("s3");
+    expect(store.bucket).toBe("job-media");
+  });
+
   it("mints a presigned PUT target that prefixes the logical bucket into the key", async () => {
     const store = createS3MediaStore({ environment: R2_ENV });
     const target = await store.createUploadTarget({

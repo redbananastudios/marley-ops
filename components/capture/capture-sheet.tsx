@@ -11,16 +11,14 @@
  * metadata (tags/captions are optional, after the fact).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Check, Loader2, Mic, RotateCw, Video, X } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
 import { VoiceRecorder as VoiceRecorderLazy } from "@/components/capture/voice-recorder";
 import { uploadToMediaTarget } from "@/lib/storage/tus-upload";
 import {
   extForMime,
-  JOB_MEDIA_BUCKET,
   JOB_MEDIA_TAGS,
   MAX_ITEMS_PER_SAVE,
   MAX_VIDEO_BYTES,
@@ -114,9 +112,6 @@ async function downscalePhoto(file: File, fallbackMime: string): Promise<{ blob:
   return { blob: file, mime: fallbackMime };
 }
 
-/** A retry after a lost response hits "already exists" — the object landed. */
-const uploadAlreadyThere = (message: string) => /already exists/i.test(message);
-
 export function CaptureSheet({
   anchor,
   open,
@@ -126,7 +121,6 @@ export function CaptureSheet({
   open: boolean;
   onClose: () => void;
 }) {
-  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [ctx, setCtx] = useState<{ leadId: string; consent: string } | null>(null);
   const [ctxError, setCtxError] = useState(false);
@@ -229,11 +223,13 @@ export function CaptureSheet({
         const run = async () => {
           patchTray(key, { status: "uploading", progress: 30 });
           try {
-            const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, blob, {
-              contentType: mime,
-              upsert: false,
+            const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "photo" });
+            if (!target.ok) throw new Error(target.error);
+            await uploadToMediaTarget({
+              target: target.target,
+              file: blob,
+              onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
             });
-            if (error && !uploadAlreadyThere(error.message)) throw error;
             patchTray(key, { status: "ready", progress: 100 });
             buzzOk();
           } catch {
@@ -269,7 +265,7 @@ export function CaptureSheet({
         );
       }
     },
-    [admitToTray, ctx, patchTray, supabase],
+    [admitToTray, anchor, ctx, patchTray],
   );
 
   const addVideo = useCallback(
@@ -290,7 +286,7 @@ export function CaptureSheet({
         patchTray(key, { status: "uploading", progress: 0 });
         try {
           // Fresh target every attempt — a retry must never reuse a stale token.
-          const target = await createJobMediaUploadTargetAction(anchor, { path, mime });
+          const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "video" });
           if (!target.ok) {
             patchTray(key, { status: "failed" });
             toast.error(target.error);
@@ -300,9 +296,9 @@ export function CaptureSheet({
             target: target.target,
             file,
             onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
-            // pause() aborts the in-flight TUS request — the only abort surface
-            // uploadToMediaTarget exposes; removal relies on it to stop the transfer.
-            onControl: (control) => patchTray(key, { abort: () => control.pause() }),
+            // Removal mid-upload hard-stops the transfer (R2 PUT abort / TUS
+            // terminate) so no orphaned object is left behind.
+            onControl: (control) => patchTray(key, { abort: () => control.abort() }),
           });
           patchTray(key, { status: "ready", progress: 100 });
           buzzOk();
@@ -344,11 +340,17 @@ export function CaptureSheet({
       const run = async () => {
         patchTray(key, { status: "uploading", progress: 40 });
         try {
-          const { error } = await supabase.storage.from(JOB_MEDIA_BUCKET).upload(path, capture.blob, {
-            contentType: capture.mime.split(";")[0],
-            upsert: false,
+          const target = await createJobMediaUploadTargetAction(anchor, {
+            path,
+            mime: capture.mime.split(";")[0],
+            kind: "audio",
           });
-          if (error && !uploadAlreadyThere(error.message)) throw error;
+          if (!target.ok) throw new Error(target.error);
+          await uploadToMediaTarget({
+            target: target.target,
+            file: capture.blob,
+            onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
+          });
           patchTray(key, { status: "ready", progress: 100 });
           buzzOk();
         } catch {
@@ -378,7 +380,7 @@ export function CaptureSheet({
       }
       await run();
     },
-    [admitToTray, ctx, patchTray, supabase],
+    [admitToTray, anchor, ctx, patchTray],
   );
 
   const removeItem = useCallback(

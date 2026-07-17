@@ -13,6 +13,8 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import type { MediaUploadTarget } from "@/lib/storage/media-store";
 import {
   captureSummary,
   isValidJobMediaPath,
@@ -20,8 +22,12 @@ import {
   JOB_MEDIA_TAGS,
   validateCaptureItems,
   type CaptureItemInput,
+  type JobMediaKind,
   type JobMediaTag,
 } from "@/lib/job-media";
+
+/** Media store bound to the job-media bucket (its own R2 key prefix). */
+const jobMediaStore = () => createMediaStore(process.env, { bucket: JOB_MEDIA_BUCKET });
 
 const uuid = z.string().uuid();
 
@@ -124,10 +130,16 @@ export async function recordJobMediaAction(
 
   // Rows must point at real objects — a path whose upload never completed
   // would render nowhere (no signed URL) and be undeletable from /content.
-  const infos = await Promise.all(
-    v.items.map((item) => admin.storage.from(JOB_MEDIA_BUCKET).info(item.path)),
+  const store = jobMediaStore();
+  const present = await Promise.all(
+    v.items.map((item) =>
+      store
+        .getObjectMetadata(item.path)
+        .then(() => true)
+        .catch(() => false),
+    ),
   );
-  const missing = infos.filter((r) => r.error || !r.data).length;
+  const missing = present.filter((ok) => !ok).length;
   if (missing > 0) {
     return {
       ok: false,
@@ -200,7 +212,9 @@ export async function discardJobMediaUploadAction(
     .limit(1)
     .maybeSingle();
   if (claimed) return { ok: false }; // recorded rows are managed via delete
-  await admin.storage.from(JOB_MEDIA_BUCKET).remove([path]);
+  await jobMediaStore()
+    .deleteObjects([path])
+    .catch(() => {}); // best-effort bin of an unrecorded object
   return { ok: true };
 }
 
@@ -331,10 +345,12 @@ export async function deleteJobMediaAction(
     .eq("id", id)
     .maybeSingle();
   if (!row) return { ok: true };
-  // The UI promises "The file is removed too" — an already-gone object is
-  // fine, but any other storage failure keeps the row so delete can be retried.
-  const { error: removeErr } = await admin.storage.from(JOB_MEDIA_BUCKET).remove([row.storage_path]);
-  if (removeErr && !/not.?found/i.test(removeErr.message ?? "")) {
+  // The UI promises "The file is removed too". deleteObjects is idempotent (an
+  // already-gone object is fine) and throws only on a real failure — then keep
+  // the row so the delete can be retried.
+  try {
+    await jobMediaStore().deleteObjects([row.storage_path]);
+  } catch {
     return { ok: false, error: "Could not remove the file — try again." };
   }
   const { error } = await admin.from("job_media").delete().eq("id", id);
@@ -344,26 +360,15 @@ export async function deleteJobMediaAction(
   return { ok: true };
 }
 
-/** TUS resumable target for VIDEO (big files survive signal drops) — bucket
- *  job-media, path pre-validated; upload authenticated as the signed-in user
- *  so the bucket's staff RLS applies. */
+/** Upload target for job content (photo / video / audio) via the media-store
+ *  seam — a presigned PUT on R2 in prod, or a Supabase TUS target on the
+ *  supabase driver (dev / rollback). The path is lead-validated per kind; the
+ *  session token keeps the Supabase bucket RLS applying (the R2 driver embeds
+ *  auth in the presigned URL and ignores it). */
 export async function createJobMediaUploadTargetAction(
   anchor: { leadId?: string; appointmentId?: string },
-  input: { path: string; mime: string },
-): Promise<
-  | {
-      ok: true;
-      target: {
-        protocol: "tus";
-        objectKey: string;
-        endpoint: string;
-        headers: Record<string, string>;
-        metadata: Record<string, string>;
-        chunkSizeBytes: number;
-      };
-    }
-  | { ok: false; error: string }
-> {
+  input: { path: string; mime: string; kind: JobMediaKind },
+): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
   const prof = await requireActiveProfile();
   if (!prof) return { ok: false, error: "Not signed in." };
   const sb = await createClient();
@@ -372,27 +377,25 @@ export async function createJobMediaUploadTargetAction(
   } = await sb.auth.getSession();
   if (!session?.access_token) return { ok: false, error: "Session expired — sign in again." };
 
+  const kind = input.kind;
+  if (kind !== "photo" && kind !== "video" && kind !== "audio") {
+    return { ok: false, error: "Invalid upload type." };
+  }
   const admin = createAdminClient();
   const resolved = await resolveAnchor(admin, anchor);
-  if (!resolved || !isValidJobMediaPath(input.path, resolved.leadId, "video")) {
+  if (!resolved || !isValidJobMediaPath(input.path, resolved.leadId, kind)) {
     return { ok: false, error: "Invalid upload path." };
   }
-  const base = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? "").replace(/\/+$/, "");
-  if (!base) return { ok: false, error: "Storage is not configured." };
-  return {
-    ok: true,
-    target: {
-      protocol: "tus",
+  const contentType =
+    input.mime || (kind === "video" ? "video/mp4" : kind === "audio" ? "audio/mp4" : "image/jpeg");
+  try {
+    const target = await jobMediaStore().createUploadTarget({
       objectKey: input.path,
-      endpoint: `${base}/storage/v1/upload/resumable`,
-      // x-upsert stays false: a replayed path must never overwrite an object.
-      headers: { Authorization: `Bearer ${session.access_token}`, "x-upsert": "false" },
-      metadata: {
-        bucketName: JOB_MEDIA_BUCKET,
-        objectName: input.path,
-        contentType: input.mime || "video/mp4",
-      },
-      chunkSizeBytes: 6 * 1024 * 1024,
-    },
-  };
+      contentType,
+      accessToken: session.access_token,
+    });
+    return { ok: true, target };
+  } catch {
+    return { ok: false, error: "Storage is not configured." };
+  }
 }

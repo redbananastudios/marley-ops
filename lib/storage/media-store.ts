@@ -108,12 +108,16 @@ export function assertMediaObjectKey(objectKey: string): string {
 
 export function createMediaStore(
   environment: MediaStoreEnvironment = process.env,
+  options: { bucket?: string } = {},
 ): MediaStore {
   const driver = parseMediaStorageDriver(environment.AI_MEDIA_STORAGE_DRIVER);
 
+  // `bucket` selects the LOGICAL bucket (survey-media, job-media, ...). Both
+  // drivers share one backend (one Supabase instance / one R2 bucket), so the
+  // logical name is a key prefix, not a separate store. Same driver for all.
   if (driver === "supabase") {
-    return createSupabaseMediaStore({ environment });
+    return createSupabaseMediaStore({ environment, bucket: options.bucket });
   }
 
-  return createS3MediaStore({ environment });
+  return createS3MediaStore({ environment, bucket: options.bucket });
 }

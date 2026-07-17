@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
 import { analyseGeminiMedia } from "@/lib/ai/gemini";
 import { JOB_MEDIA_BUCKET } from "@/lib/job-media";
 
@@ -92,21 +93,20 @@ export async function GET(req: Request) {
       summary.claimed += 1;
 
       try {
+        const store = createMediaStore(process.env, { bucket: JOB_MEDIA_BUCKET });
         let bytes = Number(row.bytes);
         if (!Number.isFinite(bytes) || bytes <= 0) {
-          const { data: info } = await admin.storage.from(JOB_MEDIA_BUCKET).info(row.storage_path);
-          bytes = Number(info?.size ?? 0);
+          const info = await store.getObjectMetadata(row.storage_path).catch(() => null);
+          bytes = Number(info?.bytes ?? 0);
         }
         if (!Number.isFinite(bytes) || bytes <= 0) throw new Error("media size unavailable");
 
-        const { data: signed, error: signErr } = await admin.storage
-          .from(JOB_MEDIA_BUCKET)
-          .createSignedUrl(row.storage_path, 3600);
-        if (signErr || !signed?.signedUrl) throw new Error("could not sign the media URL");
+        const signedUrl = await store.createSignedGetUrl(row.storage_path, 3600).catch(() => null);
+        if (!signedUrl) throw new Error("could not sign the media URL");
 
         const mime = (row.mime ?? "audio/mp4").split(";")[0];
         const analysis = await analyseGeminiMedia({
-          sourceUrl: signed.signedUrl,
+          sourceUrl: signedUrl,
           bytes,
           mime,
           displayName: `job-voice-${row.id}`,

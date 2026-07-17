@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
 import { JOB_MEDIA_BUCKET } from "@/lib/job-media";
 import type { JobMediaView } from "@/components/content/job-media-list";
 
@@ -29,10 +30,20 @@ export async function loadJobMedia(opts: {
   const rows = data ?? [];
   if (rows.length === 0) return [];
 
-  const { data: signed } = await admin.storage
-    .from(JOB_MEDIA_BUCKET)
-    .createSignedUrls(rows.map((r) => r.storage_path as string), 86400);
-  const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+  // Sign through the seam (follows the active driver — R2 in prod). One key at
+  // a time; a failed sign drops that one item rather than the whole page.
+  const store = createMediaStore(process.env, { bucket: JOB_MEDIA_BUCKET });
+  const signed = await Promise.all(
+    rows.map(async (r) => {
+      const path = r.storage_path as string;
+      try {
+        return { path, signedUrl: await store.createSignedGetUrl(path, 86400) };
+      } catch {
+        return { path, signedUrl: null as string | null };
+      }
+    }),
+  );
+  const urlByPath = new Map(signed.map((s) => [s.path, s.signedUrl]));
 
   return rows
     .map((r) => ({

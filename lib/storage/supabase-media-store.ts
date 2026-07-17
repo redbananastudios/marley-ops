@@ -18,6 +18,8 @@ type StorageClient = Pick<SupabaseClient, "storage">;
 interface CreateSupabaseMediaStoreOptions {
   environment?: MediaStoreEnvironment;
   client?: StorageClient;
+  /** Logical bucket. Defaults to the AI-media env / survey-media. */
+  bucket?: string;
 }
 
 function requireEnvironmentValue(value: string | undefined, name: string): string {
@@ -56,8 +58,9 @@ function metadataFromProvider(value: {
 export function createSupabaseMediaStore({
   environment = process.env,
   client,
+  bucket: bucketOverride,
 }: CreateSupabaseMediaStoreOptions = {}): MediaStore {
-  const bucket = environment.AI_MEDIA_STORAGE_BUCKET?.trim() || AI_MEDIA_BUCKET_DEFAULT;
+  const bucket = bucketOverride?.trim() || environment.AI_MEDIA_STORAGE_BUCKET?.trim() || AI_MEDIA_BUCKET_DEFAULT;
   const endpoint = storageEndpoint(environment);
   const storageClient = client ?? createAdminClient();
 

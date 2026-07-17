@@ -31,6 +31,8 @@ interface CreateS3MediaStoreOptions {
   environment?: MediaStoreEnvironment;
   /** Injectable for tests; production builds one from the R2 env. */
   client?: Pick<S3Client, "send">;
+  /** Logical bucket = R2 key prefix. Defaults to the AI-media env / survey-media. */
+  bucket?: string;
 }
 
 function required(value: string | undefined, name: string): string {
@@ -54,11 +56,13 @@ async function bodyToBytes(body: MediaObjectBody): Promise<Uint8Array> {
 export function createS3MediaStore({
   environment = process.env,
   client,
+  bucket,
 }: CreateS3MediaStoreOptions = {}): MediaStore {
-  const prefix = (environment.AI_MEDIA_STORAGE_BUCKET?.trim() || AI_MEDIA_BUCKET_DEFAULT).replace(
-    /\/+$/,
-    "",
-  );
+  const prefix = (
+    bucket?.trim() ||
+    environment.AI_MEDIA_STORAGE_BUCKET?.trim() ||
+    AI_MEDIA_BUCKET_DEFAULT
+  ).replace(/\/+$/, "");
   const r2Bucket = required(environment.MARLEY_R2_BUCKET, "MARLEY_R2_BUCKET");
   const endpoint = required(
     environment.MARLEY_R2_ENDPOINT ?? environment.AI_MEDIA_STORAGE_ENDPOINT,

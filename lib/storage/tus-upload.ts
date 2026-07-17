@@ -8,6 +8,10 @@ export interface MediaUploadControl {
   pause: () => void;
   resume: () => void;
   isPaused: () => boolean;
+  /** Hard-stop the transfer (single PUT aborts the request; TUS terminates the
+   *  upload server-side) so removing an item mid-upload leaves no orphan. The
+   *  upload promise rejects with "Upload cancelled." */
+  abort: () => void;
 }
 
 export function uploadToMediaTarget(input: {
@@ -75,7 +79,20 @@ export function uploadToMediaTarget(input: {
       xhr.onerror = () =>
         finish(() => reject(new Error("Upload failed. Check your connection and retry.")));
       xhr.onabort = () => finish(() => reject(new Error("Upload cancelled.")));
-      input.onControl?.({ pause: () => {}, resume: () => {}, isPaused: () => false });
+      input.onControl?.({
+        pause: () => {},
+        resume: () => {},
+        isPaused: () => false,
+        // A single PUT can't pause, but it CAN be aborted (removal mid-upload) —
+        // stops the transfer so no orphaned object is left in R2.
+        abort: () => {
+          try {
+            xhr.abort();
+          } catch {
+            /* already done */
+          }
+        },
+      });
       armWatch();
       xhr.send(input.file);
     });
@@ -84,15 +101,19 @@ export function uploadToMediaTarget(input: {
   if (target.protocol === "multipart") {
     return (async () => {
       let paused = false;
+      let aborted = false;
       let resume: (() => void) | null = null;
       input.onControl?.({
         pause: () => { paused = true; },
         resume: () => { paused = false; resume?.(); resume = null; },
         isPaused: () => paused,
+        abort: () => { aborted = true; resume?.(); resume = null; },
       });
       const completed: { partNumber: number; etag: string }[] = [];
       for (const part of target.parts) {
+        if (aborted) throw new Error("Upload cancelled.");
         if (paused) await new Promise<void>((resolve) => { resume = resolve; });
+        if (aborted) throw new Error("Upload cancelled.");
         const start = (part.partNumber - 1) * target.partSizeBytes;
         const body = input.file.slice(start, start + target.partSizeBytes);
         const response = await fetch(part.url, { method: "PUT", headers: part.headers, body });
@@ -111,7 +132,13 @@ export function uploadToMediaTarget(input: {
 
   return new Promise((resolve, reject) => {
     let paused = false;
+    let done = false;
     let aborting = Promise.resolve();
+    const settle = (fn: () => void) => {
+      if (done) return;
+      done = true;
+      fn();
+    };
     const upload = new Upload(input.file, {
       endpoint: target.endpoint,
       headers: target.headers,
@@ -125,11 +152,11 @@ export function uploadToMediaTarget(input: {
         input.file.size,
         input.file.type,
       ].join("-"),
-      onError: reject,
+      onError: (error) => settle(() => reject(error)),
       onProgress(bytesUploaded, bytesTotal) {
         input.onProgress?.(bytesTotal > 0 ? (bytesUploaded / bytesTotal) * 100 : 0);
       },
-      onSuccess: () => resolve(),
+      onSuccess: () => settle(() => resolve()),
     });
     input.onControl?.({
       pause() {
@@ -143,6 +170,12 @@ export function uploadToMediaTarget(input: {
         void aborting.then(() => upload.start());
       },
       isPaused: () => paused,
+      // Terminate the resumable upload server-side (true) so a removed item
+      // leaves no partial object, then settle the promise.
+      abort: () => {
+        void upload.abort(true).catch(() => {});
+        settle(() => reject(new Error("Upload cancelled.")));
+      },
     });
     upload.findPreviousUploads().then((previous) => {
       if (previous[0]) upload.resumeFromPreviousUpload(previous[0]);
