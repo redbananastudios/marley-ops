@@ -56,3 +56,40 @@ export function staffOffOn(rows: AvailabilityRow[], ukDay: string): StaffOff {
   }
   return defaultWorkingDay(day) ? { off: false, reason: null } : { off: true, reason: "Weekend" };
 }
+
+function addDay(iso: string): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+export interface AvailabilitySegment {
+  start: string;
+  end: string;
+  status: "available" | "unavailable";
+  note: string | null;
+  ids: string[];
+}
+
+/** Collapse per-date availability rows into contiguous runs of the same status
+ *  and note, so a week's holiday reads as one "21–25 Jul" line in the office
+ *  view (and deletes as one). Dates are unique per staff (DB constraint). */
+export function groupAvailabilityRuns(
+  rows: { id: string; date: string; status: string; note: string | null }[],
+): AvailabilitySegment[] {
+  const sorted = [...rows].sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)));
+  const segments: AvailabilitySegment[] = [];
+  for (const r of sorted) {
+    const date = r.date.slice(0, 10);
+    const status: "available" | "unavailable" = r.status === "available" ? "available" : "unavailable";
+    const note = r.note ?? null;
+    const last = segments[segments.length - 1];
+    if (last && last.status === status && (last.note ?? null) === note && addDay(last.end) === date) {
+      last.end = date;
+      last.ids.push(r.id);
+    } else {
+      segments.push({ start: date, end: date, status, note, ids: [r.id] });
+    }
+  }
+  return segments;
+}

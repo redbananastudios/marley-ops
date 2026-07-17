@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import {
   Archive,
   ArchiveRestore,
+  CalendarDays,
   Loader2,
   Pencil,
   Phone,
@@ -48,8 +49,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  deleteStaffAvailabilityAction,
   deleteVehicleUnavailabilityAction,
   saveStaffAction,
+  saveStaffAvailabilityAction,
   saveVehicleAction,
   saveVehicleUnavailabilityAction,
   setStaffActiveAction,
@@ -58,6 +61,7 @@ import {
   type VehicleInput,
 } from "@/app/(dashboard)/resources/actions";
 import { docStatus, VEHICLE_DOCS, VEHICLE_TYPES } from "@/lib/vehicles";
+import { groupAvailabilityRuns, type AvailabilitySegment } from "@/lib/staff/availability";
 
 export interface StaffRow {
   id: string;
@@ -93,6 +97,14 @@ export interface UnavailabilityRow {
   start_date: string;
   end_date: string;
   reason: string;
+  note: string | null;
+}
+
+export interface StaffAvailabilityRow {
+  id: string;
+  staff_id: string;
+  date: string;
+  status: string;
   note: string | null;
 }
 
@@ -137,6 +149,13 @@ function fmtRange(start: string, end: string): string {
 
 const todayUk = () => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
+/** Colour + verb for an availability run — green "Available", neutral "Off". */
+function segMeta(status: string): { verb: string; cls: string } {
+  return status === "available"
+    ? { verb: "Available", cls: "bg-success-bg text-success" }
+    : { verb: "Off", cls: "bg-muted text-mist-500" };
+}
+
 /** Tax / MOT / Insurance chip — the compliance improvement over iMVE. */
 function DocChip({ label, date }: { label: string; date: string | null }) {
   const s = docStatus(date);
@@ -174,11 +193,13 @@ export function ResourcesView({
   staff,
   vehicles,
   unavailability,
+  staffAvailability,
   initialTab,
 }: {
   staff: StaffRow[];
   vehicles: VehicleRow[];
   unavailability: UnavailabilityRow[];
+  staffAvailability: StaffAvailabilityRow[];
   initialTab: "staff" | "vehicles";
 }) {
   const [tab, setTab] = useState<"staff" | "vehicles">(initialTab);
@@ -194,6 +215,20 @@ export function ResourcesView({
     }
     return m;
   }, [unavailability]);
+
+  // Availability collapsed into contiguous runs per staff member (a week's
+  // holiday reads as one "21–25 Jul" line).
+  const segmentsByStaff = useMemo(() => {
+    const byStaff = new Map<string, StaffAvailabilityRow[]>();
+    for (const a of staffAvailability) {
+      const list = byStaff.get(a.staff_id) ?? [];
+      list.push(a);
+      byStaff.set(a.staff_id, list);
+    }
+    const m = new Map<string, AvailabilitySegment[]>();
+    for (const [staffId, rows] of byStaff) m.set(staffId, groupAvailabilityRuns(rows));
+    return m;
+  }, [staffAvailability]);
 
   const counts = useMemo(
     () => ({
@@ -238,7 +273,12 @@ export function ResourcesView({
         ) : (
           <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {staff.map((s) => (
-              <StaffCard key={s.id} s={s} onEdit={() => setStaffEdit(s)} />
+              <StaffCard
+                key={s.id}
+                s={s}
+                segments={segmentsByStaff.get(s.id) ?? []}
+                onEdit={() => setStaffEdit(s)}
+              />
             ))}
           </div>
         )
@@ -263,7 +303,11 @@ export function ResourcesView({
       )}
 
       {staffEdit ? (
-        <StaffDialog row={staffEdit === "new" ? null : staffEdit} onClose={() => setStaffEdit(null)} />
+        <StaffDialog
+          row={staffEdit === "new" ? null : staffEdit}
+          segments={staffEdit && staffEdit !== "new" ? (segmentsByStaff.get(staffEdit.id) ?? []) : []}
+          onClose={() => setStaffEdit(null)}
+        />
       ) : null}
       {vehicleEdit ? (
         <VehicleDialog
@@ -278,7 +322,7 @@ export function ResourcesView({
 
 /* ------------------------------------------------------------------ staff */
 
-function StaffCard({ s, onEdit }: { s: StaffRow; onEdit: () => void }) {
+function StaffCard({ s, segments, onEdit }: { s: StaffRow; segments: AvailabilitySegment[]; onEdit: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -317,6 +361,29 @@ function StaffCard({ s, onEdit }: { s: StaffRow; onEdit: () => void }) {
         <p className="truncate">{s.email || "—"}</p>
       </div>
 
+      {segments.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5">
+          {segments.slice(0, 3).map((seg) => {
+            const m = segMeta(seg.status);
+            return (
+              <span
+                key={seg.ids[0]}
+                className={cn("inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-[11px] font-medium", m.cls)}
+                title={seg.note ?? undefined}
+              >
+                <CalendarDays className="size-3" strokeWidth={1.75} />
+                {m.verb} {fmtRange(seg.start, seg.end)}
+              </span>
+            );
+          })}
+          {segments.length > 3 ? (
+            <span className="inline-flex items-center rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium text-mist-400">
+              +{segments.length - 3} more
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
         <span className="tabular text-xs text-mist-400">{s.day_rate != null ? `${gbp(s.day_rate)}/day` : "no day rate"}</span>
         <div className="flex items-center gap-0.5">
@@ -350,7 +417,15 @@ function StaffCard({ s, onEdit }: { s: StaffRow; onEdit: () => void }) {
   );
 }
 
-function StaffDialog({ row, onClose }: { row: StaffRow | null; onClose: () => void }) {
+function StaffDialog({
+  row,
+  segments,
+  onClose,
+}: {
+  row: StaffRow | null;
+  segments: AvailabilitySegment[];
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({
@@ -386,7 +461,7 @@ function StaffDialog({ row, onClose }: { row: StaffRow | null; onClose: () => vo
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">{row ? "Edit staff" : "Add staff"}</DialogTitle>
           <DialogDescription>
@@ -438,9 +513,11 @@ function StaffDialog({ row, onClose }: { row: StaffRow | null; onClose: () => vo
               value={v.notes}
               onChange={(e) => setV({ ...v, notes: e.target.value })}
               className="focus-ring w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
-              placeholder="Anything useful — licences, availability…"
+              placeholder="Anything useful — licences, notes…"
             />
           </div>
+
+          {row ? <StaffAvailabilityManager staffId={row.id} segments={segments} /> : null}
         </div>
 
         <DialogFooter>
@@ -830,6 +907,140 @@ function OffRoadManager({ vehicleId, windows }: { vehicleId: string; windows: Un
       <Button type="button" variant="outline" onClick={add} disabled={busy} className="mt-2">
         {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Plus className="size-4" strokeWidth={1.75} />}
         Book off-road
+      </Button>
+    </div>
+  );
+}
+
+/** Availability for one crew member — the office view. Lets the office book a day
+ *  off / holiday (a single date or a range) or mark a weekend they can work, on
+ *  behalf of login-less crew or anyone. Same table + defaults as the crew portal;
+ *  feeds the Job Board. Only shown when editing an existing staff member. */
+function StaffAvailabilityManager({ staffId, segments }: { staffId: string; segments: AvailabilitySegment[] }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [status, setStatus] = useState<"unavailable" | "available">("unavailable");
+  const [note, setNote] = useState("");
+
+  async function add() {
+    if (!start) {
+      toast.error("Pick a date.");
+      return;
+    }
+    if (end && end < start) {
+      toast.error("The end date can’t be before the start.");
+      return;
+    }
+    setBusy(true);
+    const res = await saveStaffAvailabilityAction({ staff_id: staffId, start_date: start, end_date: end, status, note });
+    setBusy(false);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success(status === "unavailable" ? "Time off saved." : "Availability saved.");
+    setStart("");
+    setEnd("");
+    setNote("");
+    setStatus("unavailable");
+    router.refresh();
+  }
+
+  async function remove(ids: string[]) {
+    setRemoving(ids[0]);
+    const res = await deleteStaffAvailabilityAction(ids);
+    setRemoving(null);
+    if (!res.ok) {
+      toast.error(res.error);
+      return;
+    }
+    toast.success("Removed.");
+    router.refresh();
+  }
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/30 p-3">
+      <div className="flex items-center gap-2">
+        <CalendarDays className="size-4 text-mist-400" strokeWidth={1.75} />
+        <p className="text-sm font-semibold text-foreground">Availability</p>
+      </div>
+      <p className="mt-0.5 text-xs text-mist-400">
+        Crew work Mon–Fri by default. Book a day off / holiday, or mark a weekend they can work. Feeds the Job Board.
+      </p>
+
+      {segments.length > 0 ? (
+        <ul className="mt-3 space-y-1.5">
+          {segments.map((seg) => {
+            const m = segMeta(seg.status);
+            return (
+              <li
+                key={seg.ids[0]}
+                className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs"
+              >
+                <span className="min-w-0 truncate text-foreground">
+                  <span className={cn("mr-1 rounded-pill px-1.5 py-0.5 text-[10px] font-semibold", m.cls)}>{m.verb}</span>
+                  <span className="font-medium">{fmtRange(seg.start, seg.end)}</span>
+                  {seg.note ? <span className="text-mist-400"> · {seg.note}</span> : null}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => remove(seg.ids)}
+                  disabled={removing === seg.ids[0]}
+                  aria-label="Remove availability"
+                  className="focus-ring flex size-7 shrink-0 items-center justify-center rounded text-mist-400 hover:bg-danger-bg hover:text-danger disabled:opacity-50"
+                >
+                  {removing === seg.ids[0] ? (
+                    <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} />
+                  ) : (
+                    <Trash2 className="size-3.5" strokeWidth={1.75} />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
+
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-1">
+          <Label htmlFor="sa-start" className="text-xs">
+            Date (or from)
+          </Label>
+          <Input id="sa-start" type="date" className="h-10" value={start} onChange={(e) => setStart(e.target.value)} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="sa-end" className="text-xs">
+            To (optional)
+          </Label>
+          <Input id="sa-end" type="date" className="h-10" value={end} onChange={(e) => setEnd(e.target.value)} />
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="sa-status" className="text-xs">
+            Status
+          </Label>
+          <Select value={status} onValueChange={(val) => setStatus(val as typeof status)}>
+            <SelectTrigger id="sa-status" className="h-10 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="unavailable">Off / holiday</SelectItem>
+              <SelectItem value="available">Available (e.g. weekend)</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid gap-1">
+          <Label htmlFor="sa-note" className="text-xs">
+            Note (optional)
+          </Label>
+          <Input id="sa-note" className="h-10" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Holiday, appointment…" />
+        </div>
+      </div>
+      <Button type="button" variant="outline" onClick={add} disabled={busy} className="mt-2">
+        {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Plus className="size-4" strokeWidth={1.75} />}
+        Save availability
       </Button>
     </div>
   );

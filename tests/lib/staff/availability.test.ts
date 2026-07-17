@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   defaultWorkingDay,
   effectiveStatus,
+  groupAvailabilityRuns,
   isWeekend,
   staffOffOn,
   type AvailabilityRow,
@@ -78,5 +79,54 @@ describe("staffOffOn", () => {
   });
   it("a weekend explicitly offered is not off", () => {
     expect(staffOffOn([row(SAT, "available")], SAT)).toEqual({ off: false, reason: null });
+  });
+});
+
+describe("groupAvailabilityRuns", () => {
+  const r = (id: string, date: string, status: "available" | "unavailable", note: string | null = null) => ({
+    id,
+    date,
+    status,
+    note,
+  });
+
+  it("merges a contiguous same-status run into one segment", () => {
+    const segs = groupAvailabilityRuns([
+      r("a", "2026-07-20", "unavailable", "Holiday"),
+      r("b", "2026-07-21", "unavailable", "Holiday"),
+      r("c", "2026-07-22", "unavailable", "Holiday"),
+    ]);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ start: "2026-07-20", end: "2026-07-22", status: "unavailable", note: "Holiday" });
+    expect(segs[0].ids).toEqual(["a", "b", "c"]);
+  });
+
+  it("splits on a gap, a status change, or a note change", () => {
+    const segs = groupAvailabilityRuns([
+      r("a", "2026-07-20", "unavailable"),
+      r("b", "2026-07-22", "unavailable"), // gap (skips 21st)
+      r("c", "2026-07-23", "available"), // status change
+      r("d", "2026-07-24", "available", "AM only"), // note change
+    ]);
+    expect(segs.map((s) => `${s.start}..${s.end}:${s.status}`)).toEqual([
+      "2026-07-20..2026-07-20:unavailable",
+      "2026-07-22..2026-07-22:unavailable",
+      "2026-07-23..2026-07-23:available",
+      "2026-07-24..2026-07-24:available",
+    ]);
+  });
+
+  it("sorts unordered rows before grouping and spans a month boundary", () => {
+    const segs = groupAvailabilityRuns([
+      r("b", "2026-08-01", "unavailable"),
+      r("a", "2026-07-31", "unavailable"),
+    ]);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ start: "2026-07-31", end: "2026-08-01" });
+    expect(segs[0].ids).toEqual(["a", "b"]);
+  });
+
+  it("returns nothing for no rows", () => {
+    expect(groupAvailabilityRuns([])).toEqual([]);
   });
 });

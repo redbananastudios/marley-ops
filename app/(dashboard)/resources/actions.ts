@@ -12,6 +12,12 @@ async function actor() {
   return { sb, userId: user?.id ?? null };
 }
 
+function nextDay(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
 const optDate = z.string().trim().optional().or(z.literal(""));
 // Literal "" FIRST — z.coerce.number() turns "" into 0, so an empty money field
 // would silently store £0 instead of null if the union tried the number branch first.
@@ -192,5 +198,71 @@ export async function setStaffActiveAction(id: string, isActive: boolean) {
   const { error } = await sb.from("staff").update({ is_active: isActive }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
+  return { ok: true as const };
+}
+
+/* ----------------------------------------------- staff availability (office) */
+
+const staffAvailSchema = z
+  .object({
+    staff_id: z.string().uuid(),
+    start_date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid start date"),
+    end_date: z
+      .union([z.literal(""), z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter a valid end date")])
+      .optional(),
+    status: z.enum(["available", "unavailable"]),
+    note: z.string().trim().max(500).optional().or(z.literal("")),
+  })
+  .refine((d) => !d.end_date || d.end_date >= d.start_date, {
+    message: "End date must be on or after the start date",
+    path: ["end_date"],
+  });
+
+export type StaffAvailabilityInput = z.infer<typeof staffAvailSchema>;
+
+const MAX_AVAIL_DAYS = 92;
+
+/** Office sets a staff member's availability across a single date or a range
+ *  (one row per UK day). 'unavailable' books a day off / holiday, 'available'
+ *  offers a weekend. RLS lets office write anyone's; a crew member only their
+ *  own — so the same table serves both the crew portal and this editor. */
+export async function saveStaffAvailabilityAction(input: StaffAvailabilityInput) {
+  const parsed = staffAvailSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const a = parsed.data;
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+
+  const end = a.end_date || a.start_date;
+  const dates: string[] = [];
+  for (let d = a.start_date; d <= end; d = nextDay(d)) {
+    dates.push(d);
+    if (dates.length > MAX_AVAIL_DAYS) return { ok: false as const, error: "Pick a range of 3 months or less." };
+  }
+  const rows = dates.map((date) => ({
+    staff_id: a.staff_id,
+    date,
+    status: a.status,
+    note: a.note || null,
+    created_by: userId,
+  }));
+  const { error } = await sb.from("staff_availability").upsert(rows, { onConflict: "staff_id,date" });
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/resources");
+  revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
+
+/** Remove one or more availability rows — a whole grouped run at once. */
+export async function deleteStaffAvailabilityAction(ids: string[]) {
+  const clean = [...new Set(ids)].filter((id) => typeof id === "string" && id.length > 0);
+  if (!clean.length) return { ok: false as const, error: "Nothing to remove." };
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const { error } = await sb.from("staff_availability").delete().in("id", clean);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/resources");
+  revalidatePath("/schedule/board");
   return { ok: true as const };
 }
