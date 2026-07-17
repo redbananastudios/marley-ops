@@ -14,16 +14,17 @@ export const sections = timelineJson as TtsSection[];
 export const byId = (id: string) => sections.find((s) => s.id === id);
 export const secToFrames = (s: number) => Math.round(s * FPS);
 
-/** The 8 body parts, in order, with their on-screen titles + one-line hint. */
+/** The 9 body parts, in order, with their on-screen titles + one-line hint. */
 export const PARTS: { id: string; n: number; title: string; hint: string; footage: string }[] = [
   { id: "part-1", n: 1, title: "Start your day", hint: "Today is at the top of your list", footage: "footage/part-1.mp4" },
   { id: "part-2", n: 2, title: "Open a job", hint: "Route, crew, van and the item list", footage: "footage/part-2.mp4" },
   { id: "part-3", n: 3, title: "Get there", hint: "One tap opens your maps app", footage: "footage/part-3.mp4" },
   { id: "part-4", n: 4, title: "When you arrive", hint: "Yellow banner? Collect the signature", footage: "footage/part-4.mp4" },
-  { id: "part-5", n: 5, title: "During the move", hint: "The red camera button records problems", footage: "footage/part-5.mp4" },
-  { id: "part-6", n: 6, title: "Finishing the job", hint: "Both of you sign on the screen", footage: "footage/part-6.mp4" },
-  { id: "part-7", n: 7, title: "The job sheet", hint: "One page, no prices, safe in the cab", footage: "footage/part-7.mp4" },
-  { id: "part-8", n: 8, title: "Set up your phone", hint: "Install, alerts and fingerprint sign-in", footage: "footage/part-8.mp4" },
+  { id: "part-5", n: 5, title: "A problem? Write it down", hint: "Crew notes — only the office sees it", footage: "footage/part-5.mp4" },
+  { id: "part-6", n: 6, title: "Get it on camera", hint: "The red camera — ask before shooting inside", footage: "footage/part-6.mp4" },
+  { id: "part-7", n: 7, title: "Finishing the job", hint: "Both of you sign on the screen", footage: "footage/part-7.mp4" },
+  { id: "part-8", n: 8, title: "The job sheet", hint: "One page, no prices, safe in the cab", footage: "footage/part-8.mp4" },
+  { id: "part-9", n: 9, title: "Set up your phone", hint: "Install, alerts and fingerprint sign-in", footage: "footage/part-9.mp4" },
 ];
 
 /** The five-step "how we work" loop shown on the process slide. */
@@ -38,6 +39,10 @@ export const PROCESS_STEPS = [
 const TITLE_SEC = 4;
 const OUTRO_SEC = 4.5;
 const SLIDE_BEAT_SEC = 2.6; // slide intro before each part's footage
+// Hold each section past the end of its narration so the last tap/result
+// registers before the cut — the "pause after the action" half of the pause
+// rule. The footage clip always outlasts this window (record.ts holds longer).
+const SECTION_TAIL_SEC = 1.0;
 
 export type Beat =
   | { kind: "title"; from: number; durF: number }
@@ -62,7 +67,7 @@ export function buildTimeline(): { beats: Beat[]; totalF: number } {
 
   for (const part of PARTS) {
     const audio = byId(part.id)!;
-    const durF = secToFrames(audio.durationSec);
+    const durF = secToFrames(audio.durationSec + SECTION_TAIL_SEC);
     beats.push({
       kind: "section",
       from: cursor,

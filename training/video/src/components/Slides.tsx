@@ -128,12 +128,12 @@ export const ProcessSlide: React.FC = () => {
 /** Per-section slide beat: big number + title + phone glyph. */
 export const SectionSlideBeat: React.FC<{ part: (typeof PARTS)[number] }> = ({ part }) => {
   const frame = useCurrentFrame();
-  const targetRow = Math.min(3, ((part.n - 1) % 3) + (part.n === 5 ? 1 : 0));
+  const targetRow = Math.min(3, (part.n - 1) % 4);
   return (
     <AbsoluteFill style={{ background: COLORS.charcoal }}>
       <div style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", padding: "0 150px", gap: 90 }}>
         <div style={{ flex: 1 }}>
-          <div style={{ ...fadeUp(frame, 2), ...eyebrow }}>Part {part.n} of 8</div>
+          <div style={{ ...fadeUp(frame, 2), ...eyebrow }}>Part {part.n} of 9</div>
           <div
             style={{
               ...fadeUp(frame, 8),

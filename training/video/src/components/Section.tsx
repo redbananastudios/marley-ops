@@ -31,7 +31,7 @@ export const Section: React.FC<{ beat: Extract<Beat, { kind: "section" }> }> = (
         <AbsoluteFill style={{ background: COLORS.charcoal }}>
           <div style={{ display: "flex", width: "100%", height: "100%", alignItems: "center", padding: "40px 140px", gap: 110 }}>
             <div style={{ flexShrink: 0 }}>
-              <PhoneFrame src={part.footage} height={900} trimBefore={0} />
+              <PhoneFrame src={part.footage} height={940} trimBefore={0} />
             </div>
             <div style={{ flex: 1, opacity: panel, translate: interpolate(panel, [0, 1], ["30px 0px", "0px 0px"]) }}>
               <div
@@ -44,7 +44,7 @@ export const Section: React.FC<{ beat: Extract<Beat, { kind: "section" }> }> = (
                   color: COLORS.redBright,
                 }}
               >
-                Part {part.n} of 8
+                Part {part.n} of 9
               </div>
               <div
                 style={{
