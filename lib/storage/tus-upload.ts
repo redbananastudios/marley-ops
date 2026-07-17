@@ -17,6 +17,36 @@ export function uploadToMediaTarget(input: {
   onControl?: (control: MediaUploadControl) => void;
 }): Promise<void> {
   const target = input.target;
+  if (target.protocol === "put") {
+    // Single presigned PUT straight to R2. XHR (not fetch) so the upload
+    // progress bar actually moves; no resume — a drop restarts (the capture
+    // UI already offers a Retry). Pause/resume are no-ops for a single PUT.
+    return new Promise<void>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("PUT", target.url);
+      for (const [name, value] of Object.entries(target.headers)) {
+        xhr.setRequestHeader(name, value);
+      }
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && event.total > 0) {
+          input.onProgress?.((event.loaded / event.total) * 100);
+        }
+      };
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          input.onProgress?.(100);
+          resolve();
+        } else {
+          reject(new Error(`Upload failed (HTTP ${xhr.status}).`));
+        }
+      };
+      xhr.onerror = () => reject(new Error("Upload failed. Check your connection and retry."));
+      xhr.onabort = () => reject(new Error("Upload cancelled."));
+      input.onControl?.({ pause: () => {}, resume: () => {}, isPaused: () => false });
+      xhr.send(input.file);
+    });
+  }
+
   if (target.protocol === "multipart") {
     return (async () => {
       let paused = false;

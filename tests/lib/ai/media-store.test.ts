@@ -28,15 +28,17 @@ function providerClient() {
 describe("AI media storage seam", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("defaults to Supabase and rejects unknown or unavailable drivers", () => {
+  it("defaults to Supabase and rejects unknown drivers", () => {
     expect(parseMediaStorageDriver(undefined)).toBe("supabase");
     expect(parseMediaStorageDriver(" S3 ")).toBe("s3");
     expect(() => parseMediaStorageDriver("filesystem")).toThrow(/unsupported/i);
+    // The s3 (R2) driver is wired now; without R2 config it fails fast with a
+    // clear "required" error rather than the old "not installed" placeholder.
     expect(() =>
       createMediaStore({
         AI_MEDIA_STORAGE_DRIVER: "s3",
       }),
-    ).toThrow(/Cloudflare R2 driver/i);
+    ).toThrow(/required for R2/i);
   });
 
   it("rejects provider-specific or traversing object keys", () => {

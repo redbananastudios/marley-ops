@@ -1,6 +1,7 @@
 import "server-only";
 
 import { createSupabaseMediaStore } from "@/lib/storage/supabase-media-store";
+import { createS3MediaStore } from "@/lib/storage/s3-media-store";
 
 export const AI_MEDIA_STORAGE_DRIVERS = ["supabase", "s3"] as const;
 export type AiMediaStorageDriver = (typeof AI_MEDIA_STORAGE_DRIVERS)[number];
@@ -26,7 +27,20 @@ export interface MultipartMediaUploadTarget {
   complete: { url: string; headers: Record<string, string> };
 }
 
-export type MediaUploadTarget = TusMediaUploadTarget | MultipartMediaUploadTarget;
+/** Single presigned PUT straight to object storage (R2/S3). Simplest upload
+ *  path: the browser PUTs the whole file to `url` sending exactly `headers`
+ *  (the signed content-type). No resumability — a dropped upload restarts. */
+export interface PresignedPutMediaUploadTarget {
+  protocol: "put";
+  objectKey: string;
+  url: string;
+  headers: Record<string, string>;
+}
+
+export type MediaUploadTarget =
+  | TusMediaUploadTarget
+  | MultipartMediaUploadTarget
+  | PresignedPutMediaUploadTarget;
 
 export interface MediaObjectMetadata {
   bytes: number;
@@ -64,6 +78,12 @@ export interface MediaStoreEnvironment {
   AI_MEDIA_STORAGE_ENDPOINT?: string;
   SUPABASE_URL?: string;
   NEXT_PUBLIC_SUPABASE_URL?: string;
+  // Cloudflare R2 connection (shared across every logical bucket — each logical
+  // bucket is a key prefix inside the one R2 bucket).
+  MARLEY_R2_ENDPOINT?: string;
+  MARLEY_R2_BUCKET?: string;
+  MARLEY_R2_ACCESS_KEY_ID?: string;
+  MARLEY_R2_SECRET_ACCESS_KEY?: string;
 }
 
 export function parseMediaStorageDriver(value: string | undefined): AiMediaStorageDriver {
@@ -95,7 +115,5 @@ export function createMediaStore(
     return createSupabaseMediaStore({ environment });
   }
 
-  throw new Error(
-    "AI media storage driver 's3' is not installed. Use 'supabase' until the Cloudflare R2 driver is configured.",
-  );
+  return createS3MediaStore({ environment });
 }
