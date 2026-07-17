@@ -65,6 +65,17 @@ export function OnboardingTour({
   const runningRef = useRef(false);
 
   useEffect(() => {
+    // Mark the tour seen for good — localStorage (this device) + the account
+    // stamp (every device). Idempotent server-side (only the first write lands).
+    function markSeen() {
+      try {
+        localStorage.setItem(tourDoneKey(tour), "1");
+      } catch {
+        /* private mode / storage disabled — non-fatal */
+      }
+      void markTourSeenAction().catch(() => {});
+    }
+
     function run() {
       if (runningRef.current) return;
       const steps = toDriveSteps(TOURS[tour]);
@@ -86,17 +97,25 @@ export function OnboardingTour({
         smoothScroll: true,
         allowClose: true,
         steps,
+        // An explicit "Don't show again" beside the Next/Done controls (Peter,
+        // 2026-07-17) — a clear opt-out so the guide never reappears.
+        onPopoverRender: (popover) => {
+          if (!popover.footerButtons || popover.footerButtons.querySelector(".mm-tour-dismiss")) return;
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.textContent = "Don't show again";
+          btn.className = "mm-tour-dismiss";
+          btn.style.cssText =
+            "margin-right:auto;background:none;border:0;padding:0 4px;color:#6F6A64;font-size:12px;text-decoration:underline;cursor:pointer;";
+          btn.addEventListener("click", () => {
+            markSeen();
+            d.destroy();
+          });
+          popover.footerButtons.prepend(btn);
+        },
         onDestroyed: () => {
           runningRef.current = false;
-          try {
-            localStorage.setItem(tourDoneKey(tour), "1");
-          } catch {
-            /* private mode / storage disabled — non-fatal */
-          }
-          // Account-level stamp — the localStorage flag only protects THIS
-          // device. Fire-and-forget; a failed write just means one more
-          // auto-start on some future device.
-          void markTourSeenAction().catch(() => {});
+          markSeen();
         },
       });
       runningRef.current = true;
@@ -118,7 +137,14 @@ export function OnboardingTour({
       } catch {
         done = false;
       }
-      if (!done) timer = setTimeout(run, 1200);
+      if (!done) {
+        // Stamp the account the moment the auto-tour is scheduled, so it can
+        // never reappear on a later login even if the user closes the tab
+        // rather than finishing or dismissing it — the "shows every login"
+        // complaint (Peter, 2026-07-17). Manual relaunches are unaffected.
+        markSeen();
+        timer = setTimeout(run, 1200);
+      }
     }
 
     return () => {
