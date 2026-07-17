@@ -324,6 +324,8 @@ export async function registerMediaAction(
       objectKey: storagePath,
       contentType: input.data.mime,
       accessToken: actor.accessToken,
+      // Bind the presigned PUT to the reported size (server-side ceiling).
+      sizeBytes: input.data.bytes,
     });
     return { ok: true, mediaId, storagePath, upload };
   } catch {

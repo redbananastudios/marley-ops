@@ -106,11 +106,18 @@ export function createS3MediaStore({
     // Report the logical bucket (prefix) for parity with the Supabase driver.
     bucket: prefix,
 
-    async createUploadTarget({ objectKey, contentType }) {
+    async createUploadTarget({ objectKey, contentType, sizeBytes }) {
       const key = toR2Key(objectKey);
       const url = await getSignedUrl(
         signer,
-        new PutObjectCommand({ Bucket: r2Bucket, Key: key, ContentType: contentType }),
+        new PutObjectCommand({
+          Bucket: r2Bucket,
+          Key: key,
+          ContentType: contentType,
+          // Bind the URL to the exact size when known — R2 rejects any other
+          // Content-Length, so the presign can't be reused to PUT a huge object.
+          ...(typeof sizeBytes === "number" && sizeBytes > 0 ? { ContentLength: sizeBytes } : {}),
+        }),
         { expiresIn: UPLOAD_URL_TTL_SECONDS },
       );
       return {
@@ -148,6 +155,14 @@ export function createS3MediaStore({
         etag: head.ETag ?? null,
         updatedAt: head.LastModified ? head.LastModified.toISOString() : null,
       };
+    },
+
+    async getObject(objectKey): Promise<Uint8Array> {
+      const key = toR2Key(objectKey);
+      const res = await s3.send(new GetObjectCommand({ Bucket: r2Bucket, Key: key }));
+      const bytes = await res.Body?.transformToByteArray();
+      if (!bytes) throw new Error("AI media object has no body");
+      return bytes;
     },
 
     async createSignedGetUrl(objectKey, expiresInSeconds) {

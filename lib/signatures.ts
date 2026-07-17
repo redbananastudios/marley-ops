@@ -13,6 +13,13 @@ export const TERMS_VERSION = "generic-v1-2026-07-10";
 
 export const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
 
+/** Private storage bucket for signed contracts + completion-certificate PDFs.
+ *  Access it ONLY through the media-store seam (createMediaStore(env, { bucket })),
+ *  so it follows the active driver (Cloudflare R2 in prod, Supabase in dev).
+ *  The DB stores the UN-prefixed object key (`completions/{appointmentId}.pdf`);
+ *  the seam adds the bucket prefix internally — never store the prefix. */
+export const JOB_DOCS_BUCKET = "job-docs";
+
 /** The contract acknowledgments — one signature, several protections. Shown
  *  as tick-boxes on /q AND on the in-person crew-tablet flow (identical
  *  record either way). Keys are stored in signatures.acknowledgments. */

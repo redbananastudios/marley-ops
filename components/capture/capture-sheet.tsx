@@ -223,7 +223,7 @@ export function CaptureSheet({
         const run = async () => {
           patchTray(key, { status: "uploading", progress: 30 });
           try {
-            const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "photo" });
+            const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "photo", bytes: blob.size });
             if (!target.ok) throw new Error(target.error);
             await uploadToMediaTarget({
               target: target.target,
@@ -286,7 +286,7 @@ export function CaptureSheet({
         patchTray(key, { status: "uploading", progress: 0 });
         try {
           // Fresh target every attempt — a retry must never reuse a stale token.
-          const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "video" });
+          const target = await createJobMediaUploadTargetAction(anchor, { path, mime, kind: "video", bytes: file.size });
           if (!target.ok) {
             patchTray(key, { status: "failed" });
             toast.error(target.error);
@@ -344,6 +344,7 @@ export function CaptureSheet({
             path,
             mime: capture.mime.split(";")[0],
             kind: "audio",
+            bytes: capture.blob.size,
           });
           if (!target.ok) throw new Error(target.error);
           await uploadToMediaTarget({

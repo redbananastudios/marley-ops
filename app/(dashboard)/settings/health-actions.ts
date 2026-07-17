@@ -8,6 +8,7 @@
 
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseMediaStorageDriver } from "@/lib/storage/media-store";
 import { getTakepaymentsConfig } from "@/lib/payments/takepayments";
 
 export interface HealthCheck {
@@ -40,17 +41,34 @@ async function checkDatabase(): Promise<HealthCheck> {
 }
 
 async function checkStorage(): Promise<HealthCheck> {
+  const name = "Media storage";
   try {
+    // Probe the LIVE object store — R2 on the s3 driver, Supabase otherwise —
+    // so this reflects where media actually lands, not a stale bucket.
+    if (parseMediaStorageDriver(process.env.AI_MEDIA_STORAGE_DRIVER) === "s3") {
+      const endpoint = process.env.MARLEY_R2_ENDPOINT;
+      const bucket = process.env.MARLEY_R2_BUCKET;
+      const accessKeyId = process.env.MARLEY_R2_ACCESS_KEY_ID;
+      const secretAccessKey = process.env.MARLEY_R2_SECRET_ACCESS_KEY;
+      if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) {
+        return { name, status: "fail", detail: "R2 driver active but MARLEY_R2_* not fully configured" };
+      }
+      const { S3Client, ListObjectsV2Command } = await import("@aws-sdk/client-s3");
+      const s3 = new S3Client({ region: "auto", endpoint, credentials: { accessKeyId, secretAccessKey } });
+      // A successful list (even empty) proves reachability + valid credentials.
+      await s3.send(new ListObjectsV2Command({ Bucket: bucket, MaxKeys: 1 }));
+      return { name, status: "ok", detail: `Cloudflare R2 reachable (${bucket})` };
+    }
     const admin = createAdminClient();
     const { data, error } = await admin.storage.getBucket("survey-photos");
-    if (error || !data) return { name: "Survey photo storage", status: "fail", detail: error?.message ?? "Bucket missing" };
+    if (error || !data) return { name, status: "fail", detail: error?.message ?? "Bucket missing" };
     return {
-      name: "Survey photo storage",
+      name,
       status: data.public ? "warn" : "ok",
-      detail: data.public ? "Bucket exists but is PUBLIC — should be private" : "Private bucket present",
+      detail: data.public ? "Bucket exists but is PUBLIC — should be private" : "Supabase private bucket present",
     };
   } catch (e) {
-    return { name: "Survey photo storage", status: "fail", detail: e instanceof Error ? e.message : "Unreachable" };
+    return { name, status: "fail", detail: e instanceof Error ? e.message : "Unreachable" };
   }
 }
 

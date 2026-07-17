@@ -77,6 +77,19 @@ describe("R2 (S3) media store", () => {
     expect(target.url).toMatch(/X-Amz-Signature=/);
   });
 
+  it("binds the presigned PUT to an exact size when sizeBytes is given", async () => {
+    const store = createS3MediaStore({ environment: R2_ENV });
+    const target = await store.createUploadTarget({
+      objectKey: "sid/mid/source.mp4",
+      contentType: "video/mp4",
+      accessToken: "",
+      sizeBytes: 1234,
+    });
+    if (target.protocol !== "put") throw new Error("expected a put target");
+    // content-length becomes a signed header, so R2 rejects any other size.
+    expect(decodeURIComponent(target.url).toLowerCase()).toContain("content-length");
+  });
+
   it("presigns a GET with the prefixed key and the requested expiry", async () => {
     const store = createS3MediaStore({ environment: R2_ENV });
     const url = await store.createSignedGetUrl("sid/mid/source.mp4", 300);
@@ -137,6 +150,18 @@ describe("R2 (S3) media store", () => {
     await expect(
       store.putObject({ objectKey: "a/b.jpg", body: new ArrayBuffer(1), contentType: "image/jpeg" }),
     ).rejects.toThrow(/already exists/i);
+  });
+
+  it("getObject fetches raw bytes at the prefixed key", async () => {
+    const { client, send } = fakeClient({
+      GetObjectCommand: () => ({
+        Body: { transformToByteArray: async () => new Uint8Array([1, 2, 3]) },
+      }),
+    });
+    const store = createS3MediaStore({ environment: R2_ENV, client });
+    const bytes = await store.getObject("a/b.jpg");
+    expect(Array.from(bytes)).toEqual([1, 2, 3]);
+    expect(send.mock.calls[0][0].input.Key).toBe("survey-media/a/b.jpg");
   });
 
   it("maps HeadObject output to MediaObjectMetadata", async () => {

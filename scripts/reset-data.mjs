@@ -40,6 +40,8 @@ const TABLES = [
   { name: "ai_spend_months", key: "month" }, // PK is the month date, not id
   // job execution artefacts
   "job_notes",
+  "job_media",
+  "claims", // references job_completions -> delete before it
   "job_completions",
   "signatures",
   "appointment_assignments",
@@ -74,8 +76,13 @@ for (const entry of TABLES) {
   console.log(`  ${name}: ${count ?? 0} rows deleted`);
 }
 
-// Empty the media buckets (survey photos + AI survey videos/frames).
-for (const bucket of ["survey-photos", "survey-media"]) {
+// All logical media buckets. Objects may live in Supabase Storage (pre-R2-
+// cutover) AND/OR Cloudflare R2 (post-cutover, where each logical bucket is a
+// key prefix inside the one R2 bucket) — clear BOTH so a reset leaves nothing.
+const MEDIA_BUCKETS = ["survey-photos", "survey-media", "job-media", "job-photos", "job-docs"];
+
+// 1) Supabase Storage (lingering pre-cutover objects).
+for (const bucket of MEDIA_BUCKETS) {
   let removed = 0;
   async function emptyPrefix(prefix) {
     const { data: entries } = await sb.storage.from(bucket).list(prefix, { limit: 1000 });
@@ -90,7 +97,40 @@ for (const bucket of ["survey-photos", "survey-media"]) {
     }
   }
   await emptyPrefix("");
-  console.log(`  ${bucket} bucket: ${removed} objects removed`);
+  console.log(`  supabase ${bucket}: ${removed} objects removed`);
+}
+
+// 2) Cloudflare R2 (the live object store post-cutover). Clear each logical
+// bucket's key prefix. Skipped cleanly if R2 isn't configured in this env.
+if (process.env.MARLEY_R2_ENDPOINT && process.env.MARLEY_R2_BUCKET && process.env.MARLEY_R2_ACCESS_KEY_ID) {
+  const { S3Client, ListObjectsV2Command, DeleteObjectsCommand } = await import("@aws-sdk/client-s3");
+  const s3 = new S3Client({
+    region: "auto",
+    endpoint: process.env.MARLEY_R2_ENDPOINT,
+    credentials: {
+      accessKeyId: process.env.MARLEY_R2_ACCESS_KEY_ID,
+      secretAccessKey: process.env.MARLEY_R2_SECRET_ACCESS_KEY,
+    },
+  });
+  const r2Bucket = process.env.MARLEY_R2_BUCKET;
+  for (const prefix of MEDIA_BUCKETS) {
+    let removed = 0;
+    let token;
+    do {
+      const listed = await s3.send(
+        new ListObjectsV2Command({ Bucket: r2Bucket, Prefix: `${prefix}/`, ContinuationToken: token }),
+      );
+      const objects = (listed.Contents ?? []).map((o) => ({ Key: o.Key }));
+      if (objects.length) {
+        await s3.send(new DeleteObjectsCommand({ Bucket: r2Bucket, Delete: { Objects: objects, Quiet: true } }));
+        removed += objects.length;
+      }
+      token = listed.IsTruncated ? listed.NextContinuationToken : undefined;
+    } while (token);
+    console.log(`  R2 ${prefix}/: ${removed} objects removed`);
+  }
+} else {
+  console.log("  R2: not configured (MARLEY_R2_* absent) — skipped");
 }
 
 console.log("\nReset complete. Users, settings, staff/fleet, storage sites/units, cron_runs and growth_artifacts kept.");

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, FileDown, FileText, Phone, MessageCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { Card } from "@/components/ui/card";
 import { BookSurveyButton } from "@/components/clients/book-survey-button";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
@@ -85,10 +86,16 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const certUrl = new Map<string, string>();
   const certPaths = (compDocs ?? []).map((c) => c.certificate_path).filter(Boolean) as string[];
   if (certPaths.length) {
-    const { data: signedUrls } = await createAdminClient()
-      .storage.from("job-docs")
-      .createSignedUrls(certPaths, 3600);
-    for (const s of signedUrls ?? []) if (s.signedUrl && s.path) certUrl.set(s.path, s.signedUrl);
+    const store = createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET });
+    const signed = await Promise.all(
+      certPaths.map((path) =>
+        store.createSignedGetUrl(path, 3600).then(
+          (url) => [path, url] as const,
+          () => null, // drop any path whose sign fails, as before
+        ),
+      ),
+    );
+    for (const s of signed) if (s) certUrl.set(s[0], s[1]);
   }
   const quoteRefById = new Map(quoteRows.map((q) => [q.id, q.quote_ref]));
   const docCount = (sigDocs?.length ?? 0) + (compDocs?.length ?? 0);

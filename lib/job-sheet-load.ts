@@ -9,6 +9,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createMediaStore } from "@/lib/storage/media-store";
+import { SURVEY_PHOTOS_BUCKET } from "@/lib/survey-photos";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
 import {
   computeCubicTotals,
@@ -246,17 +247,18 @@ export async function loadPhotoDataUris(admin: Admin, surveyId: string): Promise
     .order("created_at", { ascending: true })
     .limit(MAX_PHOTOS * 2);
 
+  // Route through the media-store seam so photos follow the active driver (R2
+  // in prod). getObject returns raw bytes; pdfmake needs a base64 data URI.
+  const store = createMediaStore(process.env, { bucket: SURVEY_PHOTOS_BUCKET });
   const out: JobSheetPhoto[] = [];
   for (const row of rows ?? []) {
     if (out.length >= MAX_PHOTOS) break;
     try {
-      const { data: file } = await admin.storage.from("survey-photos").download(row.storage_path);
-      if (!file) continue;
-      const buf = Buffer.from(await file.arrayBuffer());
-      if (buf.byteLength === 0 || buf.byteLength > MAX_PHOTO_BYTES) continue;
+      const bytes = await store.getObject(row.storage_path);
+      if (bytes.byteLength === 0 || bytes.byteLength > MAX_PHOTO_BYTES) continue;
       const mime = row.storage_path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
       out.push({
-        dataUri: `data:${mime};base64,${buf.toString("base64")}`,
+        dataUri: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`,
         label: CATEGORY_LABEL[row.category] ?? row.category,
         caption: (row.caption as string | null) ?? "",
       });
@@ -284,10 +286,20 @@ export async function loadPhotoSignedUrls(admin: Admin, surveyId: string): Promi
     .limit(12);
   if (!rows?.length) return [];
 
-  const { data: signed } = await admin.storage
-    .from("survey-photos")
-    .createSignedUrls(rows.map((r) => r.storage_path), 3600);
-  const urlByPath = new Map((signed ?? []).filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl]));
+  // Sign through the seam (active driver — R2 in prod). One key at a time so a
+  // failed sign drops that photo rather than the whole set (matches the survey
+  // video loader; a direct Supabase batch sign broke under the s3 driver).
+  const store = createMediaStore(process.env, { bucket: SURVEY_PHOTOS_BUCKET });
+  const signed = await Promise.all(
+    rows.map(async (r) => {
+      try {
+        return { path: r.storage_path, signedUrl: await store.createSignedGetUrl(r.storage_path, 3600) };
+      } catch {
+        return { path: r.storage_path, signedUrl: null as string | null };
+      }
+    }),
+  );
+  const urlByPath = new Map(signed.filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl as string]));
 
   return rows
     .map((r) => {

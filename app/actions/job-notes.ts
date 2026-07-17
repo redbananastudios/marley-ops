@@ -13,7 +13,12 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { JOB_PHOTOS_BUCKET, validateJobNote } from "@/lib/job-notes";
+import { createMediaStore } from "@/lib/storage/media-store";
+import type { MediaUploadTarget } from "@/lib/storage/media-store";
+import { isValidJobPhotoPath, JOB_PHOTOS_BUCKET, validateJobNote } from "@/lib/job-notes";
+
+/** Media store bound to the job-photos bucket (its own R2 key prefix). */
+const jobPhotosStore = () => createMediaStore(process.env, { bucket: JOB_PHOTOS_BUCKET });
 
 async function requireActiveProfile() {
   const sb = await createClient();
@@ -114,7 +119,11 @@ export async function discardJobPhotoAction(
     .limit(1)
     .maybeSingle();
   if (claimed) return { ok: false };
-  await admin.storage.from(JOB_PHOTOS_BUCKET).remove([path]);
+  // Best-effort bin of an unattached object (an already-gone object is a
+  // harmless no-op); never fail the discard on a storage hiccup.
+  await jobPhotosStore()
+    .deleteObjects([path])
+    .catch(() => {});
   return { ok: true };
 }
 
@@ -142,7 +151,11 @@ export async function deleteJobNoteAction(
   }
 
   if (note.photo_paths?.length) {
-    await admin.storage.from(JOB_PHOTOS_BUCKET).remove(note.photo_paths);
+    // Photo removal stays best-effort (matches the prior behaviour) so a
+    // storage hiccup can't strand the note row; deleteObjects is idempotent.
+    await jobPhotosStore()
+      .deleteObjects(note.photo_paths)
+      .catch(() => {});
   }
   const { error } = await admin.from("job_notes").delete().eq("id", noteId);
   if (error) return { ok: false, error: "Could not remove the note — try again." };
@@ -150,4 +163,40 @@ export async function deleteJobNoteAction(
   if (note.lead_id) revalidatePath(`/leads/${note.lead_id}`);
   if (note.appointment_id) revalidatePath(`/my-jobs/${note.appointment_id}`);
   return { ok: true };
+}
+
+/** Upload target for a crew-note photo via the media-store seam — a presigned
+ *  PUT on R2 in prod, or a Supabase TUS target on the supabase driver (dev /
+ *  rollback). The path is re-validated against THIS appointment's folder (the
+ *  crew-notes security guard) before a target is minted, and the session token
+ *  keeps the Supabase bucket RLS applying (the R2 driver embeds auth in the
+ *  presigned URL and ignores it). The client then feeds the returned target to
+ *  uploadToMediaTarget. */
+export async function createJobPhotoUploadTargetAction(
+  appointmentId: string,
+  input: { path: string; mime: string },
+): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
+  if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
+  const prof = await requireActiveProfile();
+  if (!prof) return { ok: false, error: "Not signed in." };
+  const sb = await createClient();
+  const {
+    data: { session },
+  } = await sb.auth.getSession();
+  if (!session?.access_token) return { ok: false, error: "Session expired — sign in again." };
+
+  if (!isValidJobPhotoPath(input.path, appointmentId)) {
+    return { ok: false, error: "Invalid upload path." };
+  }
+  const contentType = input.mime?.startsWith("image/") ? input.mime : "image/jpeg";
+  try {
+    const target = await jobPhotosStore().createUploadTarget({
+      objectKey: input.path,
+      contentType,
+      accessToken: session.access_token,
+    });
+    return { ok: true, target };
+  } catch {
+    return { ok: false, error: "Storage is not configured." };
+  }
 }

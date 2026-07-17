@@ -26,7 +26,8 @@ import {
   completionEmailVariables,
   type CompletionEmailInput,
 } from "@/lib/comms/completion-email";
-import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import { allAcksConfirmed, isValidSignatureDataUri, JOB_DOCS_BUCKET, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import { createMediaStore } from "@/lib/storage/media-store";
 import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
 import { claimRef } from "@/lib/claims";
 
@@ -203,10 +204,15 @@ export async function completeJobAction(
       const buf = Buffer.from(v.certificatePdfBase64, "base64");
       if (buf.length > 0 && buf.subarray(0, 5).toString() === "%PDF-") {
         certPath = `completions/${appointmentId}.pdf`;
-        const { error: upErr } = await admin.storage
-          .from("job-docs")
-          .upload(certPath, buf, { contentType: "application/pdf", upsert: true });
-        if (upErr) certPath = null;
+        // Via the media-store seam (R2 in prod). putObject throws on failure —
+        // the outer catch nulls certPath, matching the original upErr guard.
+        // upsert:true keeps the "overwrite an existing cert" behaviour.
+        await createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET }).putObject({
+          objectKey: certPath,
+          body: new Blob([buf], { type: "application/pdf" }),
+          contentType: "application/pdf",
+          upsert: true,
+        });
       }
     } catch {
       certPath = null;
@@ -411,9 +417,17 @@ export async function resendCertificateAction(
     : { data: null };
   if (!lead?.email) return { ok: false, error: "No email address on the customer's record." };
 
-  const { data: file, error: dlErr } = await admin.storage.from("job-docs").download(comp.certificate_path);
-  if (dlErr || !file) return { ok: false, error: "Could not read the stored certificate." };
-  const pdfB64 = Buffer.from(await file.arrayBuffer()).toString("base64");
+  // Read the stored PDF through the seam — getObject returns raw bytes, which
+  // we re-encode to base64 for the email attachment (identical to before).
+  let pdfB64: string;
+  try {
+    const bytes = await createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET }).getObject(
+      comp.certificate_path,
+    );
+    pdfB64 = Buffer.from(bytes).toString("base64");
+  } catch {
+    return { ok: false, error: "Could not read the stored certificate." };
+  }
 
   const { data: appt } = await admin
     .from("appointments")

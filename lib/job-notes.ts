@@ -68,14 +68,25 @@ interface JobNoteRow {
 
 const NOTE_COLUMNS = "id, appointment_id, author_id, author_name, body, photo_paths, created_at";
 
-async function withSignedUrls(admin: Admin, rows: JobNoteRow[]): Promise<JobNoteView[]> {
-  const allPaths = rows.flatMap((r) => r.photo_paths ?? []);
+async function withSignedUrls(rows: JobNoteRow[]): Promise<JobNoteView[]> {
+  const allPaths = [...new Set(rows.flatMap((r) => r.photo_paths ?? []))];
   const urlByPath = new Map<string, string>();
   if (allPaths.length) {
-    const { data } = await admin.storage.from(JOB_PHOTOS_BUCKET).createSignedUrls(allPaths, 3600);
-    for (const item of data ?? []) {
-      if (item.signedUrl && item.path) urlByPath.set(item.path, item.signedUrl);
-    }
+    // Sign each path through the media-store seam (R2 in prod, Supabase on the
+    // supabase driver). A failed sign drops that one photo (filtered out below).
+    // Lazy import: this module holds client-safe validators too and is imported
+    // by client components, so the server-only seam must not load at module top.
+    const { createMediaStore } = await import("@/lib/storage/media-store");
+    const store = createMediaStore(process.env, { bucket: JOB_PHOTOS_BUCKET });
+    await Promise.all(
+      allPaths.map(async (path) => {
+        try {
+          urlByPath.set(path, await store.createSignedGetUrl(path, 3600));
+        } catch {
+          /* leave unsigned — the photo is dropped from the view below */
+        }
+      }),
+    );
   }
   return rows.map((r) => ({
     id: r.id,
@@ -97,7 +108,7 @@ export async function loadJobNotesForAppointment(admin: Admin, appointmentId: st
     .select(NOTE_COLUMNS)
     .eq("appointment_id", appointmentId)
     .order("created_at", { ascending: true });
-  return withSignedUrls(admin, (data ?? []) as JobNoteRow[]);
+  return withSignedUrls((data ?? []) as JobNoteRow[]);
 }
 
 /** Every crew note on a lead (office view), newest first. */
@@ -107,5 +118,5 @@ export async function loadJobNotesForLead(admin: Admin, leadId: string): Promise
     .select(NOTE_COLUMNS)
     .eq("lead_id", leadId)
     .order("created_at", { ascending: false });
-  return withSignedUrls(admin, (data ?? []) as JobNoteRow[]);
+  return withSignedUrls((data ?? []) as JobNoteRow[]);
 }

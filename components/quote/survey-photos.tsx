@@ -3,23 +3,26 @@
 /**
  * Survey photo capture for one category (access | large_items), used inside the
  * quote builder so the in-person survey lives with the quote. Self-contained:
- * loads existing photos for the lead on mount, uploads to the private
- * `survey-photos` bucket, and records/deletes rows via the survey actions.
- * Photos hang off the lead's survey row (created lazily) — they are not part of
- * the priced quote, just the visit evidence attached to it.
+ * loads existing photos for the lead on mount, uploads via the media-store seam
+ * (Cloudflare R2 in prod, Supabase in dev — the server mints the target), and
+ * records/deletes rows via the survey actions. Photos hang off the lead's
+ * survey row (created lazily) — they are not part of the priced quote, just the
+ * visit evidence attached to it.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Camera, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
-import { createClient } from "@/lib/supabase/client";
+import { uploadToMediaTarget } from "@/lib/storage/tus-upload";
 import {
   ensureSurveyForLead,
   recordSurveyPhoto,
   deleteSurveyPhoto,
   loadSurveyPhotos,
+  createSurveyPhotoUploadTargetAction,
+  signSurveyPhotoUrls,
 } from "@/app/(dashboard)/leads/[id]/survey-actions";
 
 type PhotoCategory = "access" | "large_items" | "cubic";
@@ -31,8 +34,6 @@ interface PhotoState {
   url?: string;
 }
 
-const BUCKET = "survey-photos";
-
 export function SurveyPhotos({
   leadId,
   category,
@@ -42,7 +43,6 @@ export function SurveyPhotos({
   category: PhotoCategory;
   label: string;
 }) {
-  const supabase = useMemo(() => createClient(), []);
   const [photos, setPhotos] = useState<PhotoState[]>([]);
   const [uploading, setUploading] = useState(0);
   const [dragOver, setDragOver] = useState(false);
@@ -61,25 +61,18 @@ export function SurveyPhotos({
     return res.surveyId;
   }, [leadId]);
 
-  const hydrateUrls = useCallback(
-    async (rows: PhotoState[]) => {
-      const needs = rows.filter((r) => !r.url);
-      if (needs.length === 0) return;
-      const results = await Promise.all(
-        needs.map(async (r) => {
-          const { data } = await supabase.storage.from(BUCKET).createSignedUrl(r.storage_path, 3600);
-          return { id: r.id, url: data?.signedUrl };
-        }),
-      );
-      setPhotos((prev) =>
-        prev.map((p) => {
-          const hit = results.find((x) => x.id === p.id);
-          return hit?.url ? { ...p, url: hit.url } : p;
-        }),
-      );
-    },
-    [supabase],
-  );
+  const hydrateUrls = useCallback(async (rows: PhotoState[]) => {
+    const needs = rows.filter((r) => !r.url);
+    if (needs.length === 0) return;
+    const res = await signSurveyPhotoUrls(needs.map((r) => r.storage_path));
+    if (!res.ok) return;
+    setPhotos((prev) =>
+      prev.map((p) => {
+        const url = res.urls[p.storage_path];
+        return !p.url && url ? { ...p, url } : p;
+      }),
+    );
+  }, []);
 
   // Load existing photos for this lead + category on mount.
   useEffect(() => {
@@ -111,20 +104,26 @@ export function SurveyPhotos({
         try {
           const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
           const path = `${id}/${category}/${crypto.randomUUID()}.${ext}`;
-          const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false });
-          if (upErr) {
-            toast.error(`Upload failed: ${upErr.message}`);
+          // Server mints the seam target (validates the path + keeps RLS on the
+          // supabase driver); the browser then PUTs the file to it.
+          const target = await createSurveyPhotoUploadTargetAction(id, category, {
+            path,
+            mime: file.type,
+          });
+          if (!target.ok) {
+            toast.error(`Upload failed: ${target.error}`);
             continue;
           }
+          await uploadToMediaTarget({ target: target.target, file });
           const rec = await recordSurveyPhoto(id, leadId, category, path);
           if (!rec?.ok) {
             toast.error("Photo saved to storage but not recorded.");
             continue;
           }
-          const { data: signed } = await supabase.storage.from(BUCKET).createSignedUrl(path, 3600);
+          const signed = await signSurveyPhotoUrls([path]);
           setPhotos((prev) => [
             ...prev,
-            { id: crypto.randomUUID(), category, storage_path: path, url: signed?.signedUrl },
+            { id: crypto.randomUUID(), category, storage_path: path, url: signed.ok ? signed.urls[path] : undefined },
           ]);
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "Upload error.");
@@ -133,7 +132,7 @@ export function SurveyPhotos({
         }
       }
     },
-    [ensureSurvey, leadId, category, supabase],
+    [ensureSurvey, leadId, category],
   );
 
   const removePhoto = useCallback(

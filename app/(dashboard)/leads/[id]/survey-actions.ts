@@ -3,6 +3,18 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import type { MediaUploadTarget } from "@/lib/storage/media-store";
+import {
+  SURVEY_PHOTOS_BUCKET,
+  isSurveyPhotoCategory,
+  isValidSurveyPhotoPath,
+  type SurveyPhotoCategory,
+} from "@/lib/survey-photos";
+
+/** Media store bound to the survey-photos logical bucket — its own R2 key
+ *  prefix (or the Supabase survey-photos bucket on the supabase driver). */
+const surveyPhotoStore = () => createMediaStore(process.env, { bucket: SURVEY_PHOTOS_BUCKET });
 
 async function ctx() {
   const sb = await createClient();
@@ -100,9 +112,85 @@ export async function deleteSurveyPhoto(photoId: string, storagePath: string, le
   const { userId } = await ctx();
   if (!userId) return { ok: false as const, error: "Not signed in." };
   const admin = createAdminClient();
-  await admin.storage.from("survey-photos").remove([storagePath]);
+  // Best-effort object bin through the seam (follows the active driver — R2 in
+  // prod). deleteObjects is idempotent (a missing object is a no-op) and throws
+  // only on a real failure; the row still deletes either way, preserving the
+  // original remove-and-don't-block behaviour.
+  await surveyPhotoStore()
+    .deleteObjects([storagePath])
+    .catch(() => {});
   const { error } = await admin.from("survey_photos").delete().eq("id", photoId);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath(`/leads/${leadId}`);
   return { ok: true as const };
+}
+
+/** Mint a seam upload target for one survey photo (presigned PUT on R2 in prod,
+ *  a Supabase TUS target on the supabase driver). The path is survey-anchored
+ *  and re-validated here; the session token keeps the Supabase bucket's
+ *  is_staff() RLS applying (the R2 driver embeds auth in the presigned URL and
+ *  ignores it). Client then PUTs via uploadToMediaTarget. */
+export async function createSurveyPhotoUploadTargetAction(
+  surveyId: string,
+  category: SurveyPhotoCategory,
+  input: { path: string; mime: string },
+): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { ok: false, error: "Not signed in." };
+  const {
+    data: { session },
+  } = await sb.auth.getSession();
+  if (!session?.access_token) return { ok: false, error: "Session expired — sign in again." };
+
+  if (!isSurveyPhotoCategory(category)) return { ok: false, error: "Invalid photo category." };
+  if (!isValidSurveyPhotoPath(input.path, surveyId, category)) {
+    return { ok: false, error: "Invalid upload path." };
+  }
+  // The survey must exist and be visible to this login (RLS-scoped read) before
+  // a target is minted — a path can't point at a survey the caller can't reach.
+  const { data: survey } = await sb.from("surveys").select("id").eq("id", surveyId).maybeSingle();
+  if (!survey) return { ok: false, error: "Survey not found." };
+
+  const contentType = input.mime && input.mime.startsWith("image/") ? input.mime : "image/jpeg";
+  try {
+    const target = await surveyPhotoStore().createUploadTarget({
+      objectKey: input.path,
+      contentType,
+      accessToken: session.access_token,
+    });
+    return { ok: true, target };
+  } catch {
+    return { ok: false, error: "Storage is not configured." };
+  }
+}
+
+/** Short-lived (1h) signed read URLs for survey photos, keyed by storage path.
+ *  Replaces the old client-side createSignedUrl — signing must be server-side
+ *  now the store lives behind the seam. Any signed-in staff may sign (mirrors
+ *  the survey-photos is_staff() read policy — all staff see all survey photos);
+ *  a failed sign drops that one path rather than the whole set. */
+export async function signSurveyPhotoUrls(
+  storagePaths: string[],
+): Promise<{ ok: true; urls: Record<string, string> } | { ok: false; error: string }> {
+  const { userId } = await ctx();
+  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const paths = [...new Set(storagePaths)]
+    .filter((p): p is string => typeof p === "string" && p.length > 0)
+    .slice(0, 100);
+  const store = surveyPhotoStore();
+  const entries = await Promise.all(
+    paths.map(async (p) => {
+      try {
+        return [p, await store.createSignedGetUrl(p, 3600)] as const;
+      } catch {
+        return [p, null] as const;
+      }
+    }),
+  );
+  const urls: Record<string, string> = {};
+  for (const [p, url] of entries) if (url) urls[p] = url;
+  return { ok: true as const, urls };
 }

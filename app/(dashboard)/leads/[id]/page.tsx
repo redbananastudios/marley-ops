@@ -26,6 +26,8 @@ import {
   type ContractSignatureView,
 } from "@/components/quote/signature-cards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { loadJobNotesForLead } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { LeadClaimsCard } from "@/components/claims/lead-claims-card";
@@ -224,10 +226,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   if (completionRow) {
     let certificateUrl: string | null = null;
     if (completionRow.certificate_path) {
-      const { data: signedCert } = await createAdminClient()
-        .storage.from("job-docs")
-        .createSignedUrl(completionRow.certificate_path, 3600);
-      certificateUrl = signedCert?.signedUrl ?? null;
+      certificateUrl = await createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET })
+        .createSignedGetUrl(completionRow.certificate_path, 3600)
+        .catch(() => null);
     }
     const { certificate_path, ...rest } = completionRow;
     leadCompletion = { ...rest, certificateUrl, hasStoredCertificate: !!certificate_path };

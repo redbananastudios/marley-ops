@@ -10,19 +10,19 @@
  * remove their own notes; the office sees everything on the lead page.
  */
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Camera, Loader2, NotebookPen, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
-import { createClient } from "@/lib/supabase/client";
+import { uploadToMediaTarget } from "@/lib/storage/tus-upload";
 import type { JobNoteView } from "@/lib/job-notes";
 import {
   addJobNoteAction,
+  createJobPhotoUploadTargetAction,
   deleteJobNoteAction,
   discardJobPhotoAction,
 } from "@/app/actions/job-notes";
 
-const BUCKET = "job-photos";
 const MAX_PHOTOS = 8;
 
 interface PendingPhoto {
@@ -48,7 +48,6 @@ export function JobNotes({
   notes: JobNoteView[];
   currentProfileId: string;
 }) {
-  const supabase = useMemo(() => createClient(), []);
   const router = useRouter();
   const [body, setBody] = useState("");
   const [pending, setPending] = useState<PendingPhoto[]>([]);
@@ -70,11 +69,18 @@ export function JobNotes({
           const rawExt = (file.name.split(".").pop() || "jpg").toLowerCase();
           const ext = ["jpg", "jpeg", "png", "webp", "heic", "heif"].includes(rawExt) ? rawExt : "jpg";
           const path = `${appointmentId}/${crypto.randomUUID()}.${ext}`;
-          const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: false });
-          if (error) {
-            toast.error(`Upload failed: ${error.message}`);
+          // Mint a seam upload target server-side (path re-validated against the
+          // appointment there), then push the file to the active driver (R2 in
+          // prod, Supabase on the supabase driver).
+          const target = await createJobPhotoUploadTargetAction(appointmentId, {
+            path,
+            mime: file.type || "image/jpeg",
+          });
+          if (!target.ok) {
+            toast.error(target.error);
             continue;
           }
+          await uploadToMediaTarget({ target: target.target, file });
           setPending((p) => [...p, { path, previewUrl: URL.createObjectURL(file) }]);
         } catch (e) {
           toast.error(e instanceof Error ? e.message : "Upload error.");
@@ -83,7 +89,7 @@ export function JobNotes({
         }
       }
     },
-    [appointmentId, pending.length, supabase],
+    [appointmentId, pending.length],
   );
 
   const removePending = useCallback(

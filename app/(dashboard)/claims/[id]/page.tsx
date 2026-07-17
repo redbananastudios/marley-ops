@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { Camera, FileDown, FileText, NotebookPen, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { ClaimStatusPill } from "@/components/claims/claim-status-pill";
@@ -99,7 +100,6 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
     .maybeSingle();
   if (!claim) notFound();
 
-  const admin = createAdminClient();
   const [{ data: lead }, { data: completion }, notesCount, mediaCount, { data: acceptedQuote }, { data: contractSig }] =
     await Promise.all([
       sb.from("leads").select("id, name, client_id").eq("id", claim.lead_id).maybeSingle(),
@@ -140,10 +140,9 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
 
   let certificateUrl: string | null = null;
   if (completion?.certificate_path) {
-    const { data: signed } = await admin.storage
-      .from("job-docs")
-      .createSignedUrl(completion.certificate_path, 3600);
-    certificateUrl = signed?.signedUrl ?? null;
+    certificateUrl = await createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET })
+      .createSignedGetUrl(completion.certificate_path, 3600)
+      .catch(() => null);
   }
 
   const ref = claimRef(claim.claim_no);

@@ -20,6 +20,8 @@ import {
   type ContractSignatureView,
 } from "@/components/quote/signature-cards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
+import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
@@ -157,10 +159,9 @@ export default async function QuoteDetailPage({
     if (comp) {
       let certificateUrl: string | null = null;
       if (comp.certificate_path) {
-        const { data: signed } = await createAdminClient()
-          .storage.from("job-docs")
-          .createSignedUrl(comp.certificate_path, 3600);
-        certificateUrl = signed?.signedUrl ?? null;
+        certificateUrl = await createMediaStore(process.env, { bucket: JOB_DOCS_BUCKET })
+          .createSignedGetUrl(comp.certificate_path, 3600)
+          .catch(() => null);
       }
       const { certificate_path, ...rest } = comp;
       completion = { ...rest, certificateUrl, hasStoredCertificate: !!certificate_path };

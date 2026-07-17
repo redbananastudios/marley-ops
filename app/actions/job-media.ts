@@ -367,7 +367,7 @@ export async function deleteJobMediaAction(
  *  auth in the presigned URL and ignores it). */
 export async function createJobMediaUploadTargetAction(
   anchor: { leadId?: string; appointmentId?: string },
-  input: { path: string; mime: string; kind: JobMediaKind },
+  input: { path: string; mime: string; kind: JobMediaKind; bytes?: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
   const prof = await requireActiveProfile();
   if (!prof) return { ok: false, error: "Not signed in." };
@@ -393,6 +393,7 @@ export async function createJobMediaUploadTargetAction(
       objectKey: input.path,
       contentType,
       accessToken: session.access_token,
+      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
     });
     return { ok: true, target };
   } catch {

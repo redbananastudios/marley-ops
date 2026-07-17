@@ -107,6 +107,15 @@ export function createSupabaseMediaStore({
       return metadataFromProvider(data);
     },
 
+    async getObject(objectKey) {
+      const key = assertMediaObjectKey(objectKey);
+      const { data, error } = await storageClient.storage.from(bucket).download(key);
+      if (error || !data) {
+        throw new Error(`AI media download failed: ${error?.message ?? "not found"}`);
+      }
+      return new Uint8Array(await data.arrayBuffer());
+    },
+
     async createSignedGetUrl(objectKey, expiresInSeconds) {
       const key = assertMediaObjectKey(objectKey);
       if (!Number.isInteger(expiresInSeconds) || expiresInSeconds < 1) {

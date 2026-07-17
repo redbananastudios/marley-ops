@@ -57,6 +57,10 @@ export interface MediaStore {
     objectKey: string;
     contentType: string;
     accessToken: string;
+    /** Exact byte size of the upload. When set, the R2 presigned PUT is bound to
+     *  it (R2 rejects any other Content-Length), a hard server-side size ceiling.
+     *  Must equal the bytes the client actually PUTs. Ignored by the TUS driver. */
+    sizeBytes?: number;
   }): Promise<MediaUploadTarget>;
 
   putObject(input: {
@@ -67,6 +71,8 @@ export interface MediaStore {
   }): Promise<MediaObjectMetadata>;
 
   getObjectMetadata(objectKey: string): Promise<MediaObjectMetadata>;
+  /** Fetch the raw object bytes (server-side use: embedding in a PDF, re-send). */
+  getObject(objectKey: string): Promise<Uint8Array>;
   createSignedGetUrl(objectKey: string, expiresInSeconds: number): Promise<string>;
   deleteObjects(objectKeys: string[]): Promise<void>;
 }
