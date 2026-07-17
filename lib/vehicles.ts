@@ -57,3 +57,30 @@ export function vehicleNeedsAttention(v: VehicleDocDates, today = new Date()): b
     return s.state === "due" || s.state === "overdue";
   });
 }
+
+/**
+ * The full set of expiry dates the fleet-reminder engine tracks — a superset of
+ * VEHICLE_DOCS that adds Service (routine) and Lease end. `autoOffRoad` marks the
+ * ones that make a van legally un-driveable when overdue (MOT / Tax / Insurance):
+ * those drop it from Job Board capacity. Service + Lease are reminder-only. The
+ * list is the single source both the reminder cron and the off-road check read,
+ * so adding tacho/tail-lift later (if a 7.5t ever joins) is a one-line change.
+ */
+export const VEHICLE_EXPIRIES = [
+  { key: "tax_due", label: "Tax", autoOffRoad: true },
+  { key: "mot_due", label: "MOT", autoOffRoad: true },
+  { key: "insurance_renewal", label: "Insurance", autoOffRoad: true },
+  { key: "service_due", label: "Service", autoOffRoad: false },
+  { key: "end_of_term", label: "Lease end", autoOffRoad: false },
+] as const;
+
+export type VehicleExpiryKey = (typeof VEHICLE_EXPIRIES)[number]["key"];
+
+/** The five expiry dates on a vehicle row that the fleet engine reads. */
+export interface VehicleExpiryDates {
+  tax_due: string | null;
+  mot_due: string | null;
+  insurance_renewal: string | null;
+  service_due: string | null;
+  end_of_term: string | null;
+}
