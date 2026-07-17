@@ -9,7 +9,8 @@ const NODES: FlowNode[] = [
   { lines: ["Open the app"] },
   { lines: ["See today's", "jobs"] },
   { lines: ["Open a job:", "route + items"] },
-  { lines: ["Problem?", "Photo + note"] },
+  { lines: ["Problem?", "Save a note"] },
+  { lines: ["Good moment?", "Red camera"] },
   { lines: ["Finish:", "both sign"] },
 ];
 
@@ -62,7 +63,7 @@ export function CrewDayDiagram() {
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         className="mx-auto block w-full min-w-[640px] max-w-[980px]"
         role="img"
-        aria-label="Your day in five steps: open the app, see today's jobs, open a job to get the route and items, take a photo and a note if there is a problem, and finish with both of you signing."
+        aria-label="Your day in six steps: open the app, see today's jobs, open a job to get the route and items, save a note if there is a problem, use the red camera for a good moment, and finish with both of you signing."
       >
         <defs>
           <marker id="manual-arrow-crew" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

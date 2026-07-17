@@ -214,6 +214,34 @@ export function IlluSignature() {
   );
 }
 
+export function IlluNotes() {
+  return (
+    <PhoneSvg ariaLabel="Phone screen showing the Crew notes and photos card: a box to type what is wrong, an Add photos button, and a red ring around the Save note button">
+      <text x={20} y={84} fontSize={9} fontWeight={700} letterSpacing={0.8} fill="#9aa0a8" fontFamily={FONT}>
+        CREW NOTES &amp; PHOTOS
+      </text>
+      <rect x={20} y={94} width={180} height={62} rx={10} fill="#ffffff" stroke={EDGE} />
+      <TextLines x={32} y={108} widths={[152, 118, 88]} gap={12} h={5.5} fill="#d5d7da" />
+      <rect x={20} y={166} width={42} height={42} rx={8} fill={BLOCK_SOFT} stroke={EDGE} />
+      <rect x={68} y={166} width={42} height={42} rx={8} fill={BLOCK_SOFT} stroke={EDGE} />
+      <rect x={20} y={226} width={94} height={30} rx={8} fill="#ffffff" stroke={CHARCOAL} />
+      <rect x={33} y={235} width={16} height={12} rx={3} fill="none" stroke={INK} strokeWidth={1.8} />
+      <circle cx={41} cy={241} r={3} fill="none" stroke={INK} strokeWidth={1.8} />
+      <text x={80} y={245} textAnchor="middle" fontSize={8.5} fontWeight={600} fill={CHARCOAL} fontFamily={FONT}>
+        Add photos
+      </text>
+      <rect x={122} y={226} width={78} height={30} rx={8} fill={RED} />
+      <text x={161} y={245} textAnchor="middle" fontSize={9} fontWeight={700} fill="#ffffff" fontFamily={FONT}>
+        Save note
+      </text>
+      <TapRing cx={161} cy={241} r={26} />
+      <text x={110} y={300} textAnchor="middle" fontSize={9} fontWeight={600} fill={INK} fontFamily={FONT}>
+        Only the office sees this
+      </text>
+    </PhoneSvg>
+  );
+}
+
 export function IlluCapture() {
   return (
     <PhoneSvg ariaLabel="Phone screen with the Photo, Video and Voice buttons and a red ring around the round red camera button in the bottom corner">

@@ -7,6 +7,7 @@ import {
   IlluDirections,
   IlluJobPage,
   IlluJobSheet,
+  IlluNotes,
   IlluSignOff,
   IlluSignature,
 } from "@/components/manual/phone-frames";
@@ -58,7 +59,7 @@ function CrewSection({
     >
       <div className="grid gap-6 sm:grid-cols-[1fr_170px]">
         <div className="min-w-0">
-          <p className="eyebrow">Part {n} of 8</p>
+          <p className="eyebrow">Part {n} of 9</p>
           <h2 className="mt-1 font-display text-2xl font-semibold tracking-[-0.02em] text-foreground">{title}</h2>
           <div className="mt-4">{children}</div>
         </div>
@@ -88,7 +89,7 @@ export function CrewManual() {
         Your day, step by step
       </h1>
       <p className="mt-2 text-[15px] leading-7 text-mist-500">
-        This is how your day works. Eight short parts. Read them in order. The pictures show where to tap.
+        This is how your day works. Nine short parts. Read them in order. The pictures show where to tap.
       </p>
 
       <div className="mt-6 print:break-inside-avoid">
@@ -156,21 +157,67 @@ export function CrewManual() {
           <p className="mt-3 text-[15px] leading-7 text-mist-500">No yellow banner? Good. It is already signed. Start the job.</p>
         </CrewSection>
 
-        <CrewSection n={5} title="During the move" illustration={<IlluCapture />} caption="The red camera button, on every job">
-          <BigSteps
-            items={[
-              "See damage? Trouble getting in? Tap the red camera button.",
-              "Take a photo or a video.",
-              <>
-                Or hold <strong>Voice</strong> and say what happened. Let go when you finish.
-              </>,
-              "Add a short note if you can. The office sees it straight away.",
-            ]}
-          />
-          <CrewNote>Never argue on site. Record it, then call the office. They will sort it out.</CrewNote>
+        <CrewSection
+          n={5}
+          title="A problem? Write it down"
+          illustration={<IlluNotes />}
+          caption="Crew notes — only the office sees this"
+        >
+          <p className="text-[15px] leading-7 text-mist-500">
+            Something wrong? Damage, or you cannot get in? This goes in <strong>Crew notes &amp; photos</strong> on
+            the job.
+          </p>
+          <div className="mt-3">
+            <BigSteps
+              items={[
+                <>
+                  Tap <strong>Add photos</strong> and take a picture of the problem.
+                </>,
+                "Write a short note. Say what is wrong.",
+                <>
+                  Tap <strong>Save note</strong>. The office sees it straight away.
+                </>,
+              ]}
+            />
+          </div>
+          <CrewNote>
+            This is private. The customer never sees it. Never argue on site — save a note, then call the office.
+            They will sort it out.
+          </CrewNote>
         </CrewSection>
 
-        <CrewSection n={6} title="Finishing the job" illustration={<IlluSignOff />} caption="You both sign on your screen">
+        <CrewSection
+          n={6}
+          title="A good moment? Get it on camera"
+          illustration={<IlluCapture />}
+          caption="The red camera button, on every job"
+        >
+          <p className="text-[15px] leading-7 text-mist-500">
+            A tidy load, a before-and-after, the team working hard? We use pictures like these for our adverts and
+            posts. This is a <strong>different</strong> button — the round <strong>red camera</strong>.
+          </p>
+          <div className="mt-3">
+            <BigSteps
+              items={[
+                "Tap the red camera button.",
+                <>
+                  Choose <strong>Photo</strong>, <strong>Video</strong> or <strong>Voice</strong>. The van, the
+                  outside and the team are always fine to shoot.
+                </>,
+                <>
+                  Taking pictures <strong>inside</strong> their home? Ask the customer first. Then tap{" "}
+                  <strong>Customer&apos;s OK&apos;d it</strong>. Not sure? Tap <strong>Keep internal-only</strong>.
+                </>,
+              ]}
+            />
+          </div>
+          <CrewNote>
+            If in doubt, ask, or keep it internal-only. The office picks the best bits — nothing is ever posted
+            without a check.
+          </CrewNote>
+        </CrewSection>
+
+        <CrewSection n={7} title="Finishing the job" illustration={<IlluSignOff />} caption="You both sign on your screen">
           <BigSteps
             items={[
               <>
@@ -186,7 +233,7 @@ export function CrewManual() {
           </p>
         </CrewSection>
 
-        <CrewSection n={7} title="The job sheet" illustration={<IlluJobSheet />} caption="A one-page brief you can print">
+        <CrewSection n={8} title="The job sheet" illustration={<IlluJobSheet />} caption="A one-page brief you can print">
           <BigSteps
             items={[
               <>
@@ -199,7 +246,7 @@ export function CrewManual() {
         </CrewSection>
 
         <CrewSection
-          n={8}
+          n={9}
           title="Set up your phone"
           illustration={<IlluDeviceSetup />}
           caption="Under Your device, on the My jobs page"
