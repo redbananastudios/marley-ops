@@ -98,7 +98,8 @@ export function AvailabilityEditor({
     const def: EffectiveStatus = defaultWorkingDay(date) ? "available" : "unavailable";
     const clearing = desired === def;
 
-    const prev = overrides;
+    const hadPrev = overrides.has(date);
+    const prevVal = overrides.get(date);
     setOverrides((m) => {
       const next = new Map(m);
       if (clearing) next.delete(date);
@@ -113,7 +114,15 @@ export function AvailabilityEditor({
       return n;
     });
     if (!r.ok) {
-      setOverrides(prev);
+      // Revert THIS day only — a whole-map snapshot would clobber a concurrent
+      // tap on another day that succeeded while this one was in flight (crew on
+      // a flaky phone signal tapping several days quickly).
+      setOverrides((m) => {
+        const next = new Map(m);
+        if (hadPrev) next.set(date, prevVal!);
+        else next.delete(date);
+        return next;
+      });
       toast.error(r.error);
     }
   }

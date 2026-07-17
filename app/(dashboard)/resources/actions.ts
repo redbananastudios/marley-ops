@@ -233,12 +233,18 @@ export async function saveStaffAvailabilityAction(input: StaffAvailabilityInput)
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
 
+  // Forward-only: the Resources view lists availability from today on, so a
+  // past-dated row would be an orphan it can never delete. Drop past days;
+  // reject a range that is entirely in the past.
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
   const end = a.end_date || a.start_date;
   const dates: string[] = [];
+  let iterations = 0;
   for (let d = a.start_date; d <= end; d = nextDay(d)) {
-    dates.push(d);
-    if (dates.length > MAX_AVAIL_DAYS) return { ok: false as const, error: "Pick a range of 3 months or less." };
+    if (++iterations > MAX_AVAIL_DAYS) return { ok: false as const, error: "Pick a range of 3 months or less." };
+    if (d >= today) dates.push(d);
   }
+  if (!dates.length) return { ok: false as const, error: "Those dates are in the past." };
   const rows = dates.map((date) => ({
     staff_id: a.staff_id,
     date,
