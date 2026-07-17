@@ -8,6 +8,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createMediaStore } from "@/lib/storage/media-store";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
 import {
   computeCubicTotals,
@@ -28,7 +29,6 @@ const CATEGORY_LABEL: Record<string, string> = {
   cubic: "Volume survey",
 };
 
-const SURVEY_MEDIA_BUCKET = "survey-media";
 const SURVEY_VIDEO_KINDS = ["room_video", "import_video"] as const;
 // Crew can watch any footage that finished uploading — the walkthrough is
 // useful to them regardless of whether the AI analysis is still running or
@@ -326,10 +326,21 @@ export async function loadSurveyVideoSignedUrls(admin: Admin, cubicSurveyId: str
     : { data: [] as { id: string; name: string }[] };
   const roomName = new Map((roomRows ?? []).map((r) => [r.id, r.name]));
 
-  const { data: signed } = await admin.storage
-    .from(SURVEY_MEDIA_BUCKET)
-    .createSignedUrls(rows.map((r) => r.storage_path), 3600);
-  const urlByPath = new Map((signed ?? []).filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl]));
+  // Route through the media-store seam so this follows the active storage driver
+  // (R2 in prod). The seam signs one key at a time; a failed sign drops that one
+  // video rather than the whole set. (Was a direct Supabase batch sign, which
+  // broke under the s3 driver — objects live in R2, not Supabase.)
+  const store = createMediaStore();
+  const signed = await Promise.all(
+    rows.map(async (r) => {
+      try {
+        return { path: r.storage_path, signedUrl: await store.createSignedGetUrl(r.storage_path, 3600) };
+      } catch {
+        return { path: r.storage_path, signedUrl: null as string | null };
+      }
+    }),
+  );
+  const urlByPath = new Map(signed.filter((s) => s.signedUrl).map((s) => [s.path, s.signedUrl as string]));
 
   return rows
     .map((r) => {

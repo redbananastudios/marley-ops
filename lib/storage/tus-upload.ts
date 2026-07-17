@@ -23,26 +23,60 @@ export function uploadToMediaTarget(input: {
     // UI already offers a Retry). Pause/resume are no-ops for a single PUT.
     return new Promise<void>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
+      let settled = false;
+      // Stall watchdog: a silently half-open mobile connection can leave the
+      // upload pending forever with the bar frozen. Abort if no progress for
+      // STALL_MS so it fails fast + retryable, never hangs (standing lesson:
+      // browser media waits must always be bounded). Reset on every progress
+      // tick, so a slow-but-moving upload is never wrongly killed.
+      const STALL_MS = 45_000;
+      let watchdog: ReturnType<typeof setTimeout> | undefined;
+      const clearWatch = () => {
+        if (watchdog) clearTimeout(watchdog);
+      };
+      const finish = (fn: () => void) => {
+        if (settled) return;
+        settled = true;
+        clearWatch();
+        fn();
+      };
+      const armWatch = () => {
+        clearWatch();
+        watchdog = setTimeout(() => {
+          finish(() => {
+            try {
+              xhr.abort();
+            } catch {
+              /* already done */
+            }
+            reject(new Error("Upload stalled. Check your connection and retry."));
+          });
+        }, STALL_MS);
+      };
       xhr.open("PUT", target.url);
       for (const [name, value] of Object.entries(target.headers)) {
         xhr.setRequestHeader(name, value);
       }
       xhr.upload.onprogress = (event) => {
+        armWatch();
         if (event.lengthComputable && event.total > 0) {
           input.onProgress?.((event.loaded / event.total) * 100);
         }
       };
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          input.onProgress?.(100);
-          resolve();
-        } else {
-          reject(new Error(`Upload failed (HTTP ${xhr.status}).`));
-        }
-      };
-      xhr.onerror = () => reject(new Error("Upload failed. Check your connection and retry."));
-      xhr.onabort = () => reject(new Error("Upload cancelled."));
+      xhr.onload = () =>
+        finish(() => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            input.onProgress?.(100);
+            resolve();
+          } else {
+            reject(new Error(`Upload failed (HTTP ${xhr.status}).`));
+          }
+        });
+      xhr.onerror = () =>
+        finish(() => reject(new Error("Upload failed. Check your connection and retry.")));
+      xhr.onabort = () => finish(() => reject(new Error("Upload cancelled.")));
       input.onControl?.({ pause: () => {}, resume: () => {}, isPaused: () => false });
+      armWatch();
       xhr.send(input.file);
     });
   }

@@ -18,8 +18,12 @@ import {
   type MediaStoreEnvironment,
 } from "@/lib/storage/media-store";
 
-// How long a client has to start a presigned upload after we mint the target.
-const UPLOAD_URL_TTL_SECONDS = 60 * 30;
+// How long a client has to start (and finish) a presigned upload after we mint
+// the target. Generous (2h) because the capture UI's Retry reuses the same
+// target, so the window must outlast a walk-to-signal retry. Proper fix for a
+// retry beyond this window = re-mint the target (deferred with the multipart /
+// large-import fast-follow); at that point this can drop back to ~30m.
+const UPLOAD_URL_TTL_SECONDS = 60 * 120;
 // DeleteObjects accepts at most 1000 keys per request.
 const DELETE_BATCH = 1000;
 
@@ -156,12 +160,23 @@ export function createS3MediaStore({
       const keys = [...new Set(objectKeys.map(toR2Key))];
       for (let i = 0; i < keys.length; i += DELETE_BATCH) {
         const batch = keys.slice(i, i + DELETE_BATCH);
-        await s3.send(
+        const result = await s3.send(
           new DeleteObjectsCommand({
             Bucket: r2Bucket,
             Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
           }),
         );
+        // DeleteObjects returns HTTP 200 even when individual keys fail; the
+        // per-key failures come back in Errors (deleting a missing key is NOT
+        // an error — S3/R2 delete is idempotent). Throw so callers — above all
+        // GDPR retention — never record a deletion that did not actually happen.
+        const errors = result.Errors ?? [];
+        if (errors.length > 0) {
+          const first = errors[0];
+          throw new Error(
+            `AI media delete failed for ${errors.length} object(s): ${first.Key ?? "?"} (${first.Code ?? "?"}: ${first.Message ?? "unknown"})`,
+          );
+        }
       }
     },
   };

@@ -157,4 +157,16 @@ describe("R2 (S3) media store", () => {
       Quiet: true,
     });
   });
+
+  it("throws when DeleteObjects reports per-key errors (never a silent under-delete)", async () => {
+    // DeleteObjects returns HTTP 200 with per-key failures in Errors; retention
+    // relies on this throwing so it can't record a deletion that didn't happen.
+    const { client } = fakeClient({
+      DeleteObjectsCommand: () => ({
+        Errors: [{ Key: "survey-media/a/b.mp4", Code: "AccessDenied", Message: "denied" }],
+      }),
+    });
+    const store = createS3MediaStore({ environment: R2_ENV, client });
+    await expect(store.deleteObjects(["a/b.mp4"])).rejects.toThrow(/delete failed/i);
+  });
 });
