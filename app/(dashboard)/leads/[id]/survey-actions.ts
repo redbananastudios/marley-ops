@@ -24,6 +24,19 @@ async function ctx() {
   return { sb, userId: user?.id ?? null };
 }
 
+/** Signed-in AND active — the is_staff() bar for the service-role / seam paths
+ *  that bypass RLS (deleteSurveyPhoto, signSurveyPhotoUrls). A deactivated
+ *  account with a still-valid session must not read or delete survey photos. */
+async function activeUserId(): Promise<string | null> {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return null;
+  const { data: prof } = await sb.from("profiles").select("active").eq("id", user.id).maybeSingle();
+  return prof?.active ? user.id : null;
+}
+
 /** Find the lead's latest survey, or create one. Returns the survey id. */
 export async function ensureSurveyForLead(leadId: string) {
   const { sb, userId } = await ctx();
@@ -108,8 +121,9 @@ export async function recordSurveyPhoto(
 
 /** Remove a photo (DB row + storage object). Uses the service role so any staff can tidy up. */
 export async function deleteSurveyPhoto(photoId: string, storagePath: string, leadId: string) {
-  // Service-role path — must not be callable anonymously (review, 2026-07-10).
-  const { userId } = await ctx();
+  // Service-role path — must not be callable anonymously OR by a deactivated
+  // account (review, 2026-07-10 + R2 migration review).
+  const userId = await activeUserId();
   if (!userId) return { ok: false as const, error: "Not signed in." };
   const admin = createAdminClient();
   // Best-effort object bin through the seam (follows the active driver — R2 in
@@ -175,7 +189,9 @@ export async function createSurveyPhotoUploadTargetAction(
 export async function signSurveyPhotoUrls(
   storagePaths: string[],
 ): Promise<{ ok: true; urls: Record<string, string> } | { ok: false; error: string }> {
-  const { userId } = await ctx();
+  // Active-profile gate = the is_staff() read bar the old client-side RLS
+  // enforced; a deactivated session must not mint survey-photo read URLs.
+  const userId = await activeUserId();
   if (!userId) return { ok: false as const, error: "Not signed in." };
   const paths = [...new Set(storagePaths)]
     .filter((p): p is string => typeof p === "string" && p.length > 0)
