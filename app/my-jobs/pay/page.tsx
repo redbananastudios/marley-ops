@@ -52,11 +52,19 @@ export default async function CrewPayPage() {
     if (byEmail) await sb.from("staff").update({ profile_id: profile.id }).eq("id", byEmail.id);
   }
 
-  let statements: { id: string; ref: string; status: string; period_start: string; period_end: string; total: number }[] = [];
+  let statements: {
+    id: string;
+    ref: string;
+    status: string;
+    period_start: string;
+    period_end: string;
+    total: number;
+    return_reason: string | null;
+  }[] = [];
   if (staffRow && enabled) {
     const { data } = await sb
       .from("staff_statements")
-      .select("id, ref, status, period_start, period_end, total")
+      .select("id, ref, status, period_start, period_end, total, return_reason")
       .order("period_start", { ascending: false });
     statements = data ?? [];
   }
@@ -126,9 +134,13 @@ export default async function CrewPayPage() {
                       <p className="text-xs text-mist-400">Ref {s.ref}</p>
                     </div>
                     <span className="text-sm font-semibold tabular text-foreground">{gbp(s.total)}</span>
-                    <span className={cn("rounded-pill px-2.5 py-1 text-[11px] font-semibold capitalize", STATUS_META[s.status] ?? "bg-muted text-mist-500")}>
-                      {s.status}
-                    </span>
+                    {s.status === "draft" && s.return_reason ? (
+                      <span className="rounded-pill bg-warn-bg px-2.5 py-1 text-[11px] font-semibold text-warn">Changes requested</span>
+                    ) : (
+                      <span className={cn("rounded-pill px-2.5 py-1 text-[11px] font-semibold capitalize", STATUS_META[s.status] ?? "bg-muted text-mist-500")}>
+                        {s.status}
+                      </span>
+                    )}
                     <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
                   </Link>
                 ))}

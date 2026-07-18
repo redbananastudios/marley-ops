@@ -23,7 +23,7 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
   // RLS scopes this to the caller's own statement.
   const { data: stmt } = await sb
     .from("staff_statements")
-    .select("id, ref, status, period_start, period_end, total, note, submitted_at, created_at, staff_id")
+    .select("id, ref, status, period_start, period_end, total, note, return_reason, submitted_at, created_at, staff_id")
     .eq("id", id)
     .maybeSingle();
   if (!stmt) notFound();
@@ -34,7 +34,7 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
       .select("id, description, work_date, quantity, unit_amount, amount, source")
       .eq("statement_id", stmt.id)
       .order("sort_index"),
-    sb.from("staff").select("full_name").eq("id", stmt.staff_id).maybeSingle(),
+    sb.from("staff").select("full_name, day_rate").eq("id", stmt.staff_id).maybeSingle(),
   ]);
 
   const staffName = staffRow?.full_name ?? profile.full_name ?? "";
@@ -101,9 +101,11 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
               period_end: stmt.period_end,
               total: Number(stmt.total),
               note: stmt.note,
+              return_reason: stmt.return_reason,
             }}
             lines={lineRows}
             pdfData={pdfData}
+            dayRate={staffRow?.day_rate == null ? null : Number(staffRow.day_rate)}
           />
         </div>
       </main>

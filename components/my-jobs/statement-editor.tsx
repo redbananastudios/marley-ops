@@ -40,6 +40,7 @@ interface StatementHead {
   period_end: string;
   total: number;
   note: string | null;
+  return_reason: string | null;
 }
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -48,10 +49,12 @@ export function StatementEditor({
   statement,
   lines,
   pdfData,
+  dayRate,
 }: {
   statement: StatementHead;
   lines: Line[];
   pdfData: StatementPdfData;
+  dayRate: number | null;
 }) {
   const router = useRouter();
   const editable = statement.status === "draft";
@@ -90,6 +93,14 @@ export function StatementEditor({
         </div>
         <p className="mt-1 text-[11px] text-mist-400">No VAT — you&apos;re not VAT registered, so this is a plain payment statement.</p>
       </div>
+
+      {editable && statement.return_reason ? (
+        <div className="mt-4 rounded-xl border border-warn/40 bg-warn-bg px-4 py-3">
+          <p className="text-sm font-semibold text-warn">The office asked for a change</p>
+          <p className="mt-0.5 text-sm text-warn/90">{statement.return_reason}</p>
+          <p className="mt-1 text-xs text-warn/80">Fix it below, then submit again.</p>
+        </div>
+      ) : null}
 
       {editable ? (
         <button
@@ -188,6 +199,7 @@ export function StatementEditor({
         <LineSheet
           line={sheet === "new" ? null : sheet}
           statementId={statement.id}
+          dayRate={dayRate}
           onClose={() => setSheet(null)}
           onSaved={() => {
             setSheet(null);
@@ -248,11 +260,13 @@ function StatusPill({ status }: { status: StatementStatus }) {
 function LineSheet({
   line,
   statementId,
+  dayRate,
   onClose,
   onSaved,
 }: {
   line: Line | null;
   statementId: string;
+  dayRate: number | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -321,6 +335,16 @@ function LineSheet({
             />
           </div>
         </div>
+
+        {dayRate != null && dayRate > 0 ? (
+          <button
+            type="button"
+            onClick={() => setAmount(String(dayRate))}
+            className="focus-ring mt-2.5 inline-flex items-center rounded-full border border-input bg-card px-3 py-1.5 text-xs font-medium text-mist-500 hover:bg-muted"
+          >
+            Use day rate {gbp(dayRate)}
+          </button>
+        ) : null}
 
         <div className="mt-4 flex gap-2">
           <button

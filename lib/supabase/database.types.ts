@@ -2819,6 +2819,8 @@ export type Database = {
           period_end: string
           period_start: string
           ref: string
+          return_reason: string | null
+          returned_at: string | null
           staff_id: string
           status: string
           submitted_at: string | null
@@ -2837,6 +2839,8 @@ export type Database = {
           period_end: string
           period_start: string
           ref: string
+          return_reason?: string | null
+          returned_at?: string | null
           staff_id: string
           status?: string
           submitted_at?: string | null
@@ -2855,6 +2859,8 @@ export type Database = {
           period_end?: string
           period_start?: string
           ref?: string
+          return_reason?: string | null
+          returned_at?: string | null
           staff_id?: string
           status?: string
           submitted_at?: string | null

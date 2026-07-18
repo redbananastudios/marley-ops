@@ -45,6 +45,40 @@ export async function markStatementPaidAction(input: z.infer<typeof paidSchema>)
   return { ok: true as const };
 }
 
+const returnSchema = z.object({
+  id: z.string().uuid(),
+  reason: z.string().trim().min(1, "Give the crew a reason.").max(500),
+});
+
+/** Return a SUBMITTED statement to the crew for changes, with a reason. Self-
+ *  billing hinges on the crew generating + CONFIRMING their own pay (the IR35
+ *  mitigation), so the office never silently rewrites a submitted statement — it
+ *  hands it back as a draft and the crew fix + re-submit. The `.eq('submitted')`
+ *  guard keeps it idempotent; clearing submitted_at makes it read as a fresh
+ *  draft again. RLS already permits the office update. */
+export async function returnStatementToCrewAction(input: z.infer<typeof returnSchema>) {
+  const parsed = returnSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const ctx = await requireOffice();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
+  const a = parsed.data;
+
+  const { data, error } = await sb
+    .from("staff_statements")
+    .update({ status: "draft", return_reason: a.reason, returned_at: new Date().toISOString(), submitted_at: null })
+    .eq("id", a.id)
+    .eq("status", "submitted")
+    .select("id");
+  if (error) return { ok: false as const, error: error.message };
+  if (!data?.length) return { ok: false as const, error: "Only a submitted statement can be returned." };
+
+  revalidatePath("/finance/statements");
+  revalidatePath("/my-jobs/pay");
+  revalidatePath(`/my-jobs/pay/${a.id}`);
+  return { ok: true as const };
+}
+
 /** Void a draft/submitted statement (e.g. raised in error). A paid statement is
  *  left alone — reverse the payment in the books first. */
 export async function voidStatementAction(input: { id: string }) {
