@@ -577,6 +577,7 @@ export type Database = {
           push_fleet_expiry_enabled: boolean
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
+          self_billing_enabled: boolean
           updated_at: string
           vat_default: boolean
           vat_flat_rate_pct: number
@@ -618,6 +619,7 @@ export type Database = {
           push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
+          self_billing_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
           vat_flat_rate_pct?: number
@@ -659,6 +661,7 @@ export type Database = {
           push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
+          self_billing_enabled?: boolean
           updated_at?: string
           vat_default?: boolean
           vat_flat_rate_pct?: number
@@ -2715,6 +2718,7 @@ export type Database = {
           profile_id: string | null
           staff_role: string
           updated_at: string
+          working_days: number[]
         }
         Insert: {
           created_at?: string
@@ -2728,6 +2732,7 @@ export type Database = {
           profile_id?: string | null
           staff_role?: string
           updated_at?: string
+          working_days?: number[]
         }
         Update: {
           created_at?: string
@@ -2741,6 +2746,7 @@ export type Database = {
           profile_id?: string | null
           staff_role?: string
           updated_at?: string
+          working_days?: number[]
         }
         Relationships: [
           {
@@ -2796,6 +2802,138 @@ export type Database = {
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_statements: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          note: string | null
+          paid_at: string | null
+          paid_method: string | null
+          paid_ref: string | null
+          pdf_path: string | null
+          period_end: string
+          period_start: string
+          ref: string
+          staff_id: string
+          status: string
+          submitted_at: string | null
+          total: number
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note?: string | null
+          paid_at?: string | null
+          paid_method?: string | null
+          paid_ref?: string | null
+          pdf_path?: string | null
+          period_end: string
+          period_start: string
+          ref: string
+          staff_id: string
+          status?: string
+          submitted_at?: string | null
+          total?: number
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note?: string | null
+          paid_at?: string | null
+          paid_method?: string | null
+          paid_ref?: string | null
+          pdf_path?: string | null
+          period_end?: string
+          period_start?: string
+          ref?: string
+          staff_id?: string
+          status?: string
+          submitted_at?: string | null
+          total?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_statements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_statements_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_statement_lines: {
+        Row: {
+          amount: number
+          appointment_id: string | null
+          created_at: string
+          description: string
+          id: string
+          quantity: number | null
+          sort_index: number
+          source: string
+          statement_id: string
+          unit_amount: number | null
+          updated_at: string
+          work_date: string | null
+        }
+        Insert: {
+          amount?: number
+          appointment_id?: string | null
+          created_at?: string
+          description: string
+          id?: string
+          quantity?: number | null
+          sort_index?: number
+          source?: string
+          statement_id: string
+          unit_amount?: number | null
+          updated_at?: string
+          work_date?: string | null
+        }
+        Update: {
+          amount?: number
+          appointment_id?: string | null
+          created_at?: string
+          description?: string
+          id?: string
+          quantity?: number | null
+          sort_index?: number
+          source?: string
+          statement_id?: string
+          unit_amount?: number | null
+          updated_at?: string
+          work_date?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_statement_lines_appointment_id_fkey"
+            columns: ["appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_statement_lines_statement_id_fkey"
+            columns: ["statement_id"]
+            isOneToOne: false
+            referencedRelation: "staff_statements"
             referencedColumns: ["id"]
           },
         ]
@@ -3481,6 +3619,7 @@ export type Database = {
       is_office: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
       next_quote_ref: { Args: { kind: string }; Returns: string }
+      next_statement_ref: { Args: Record<PropertyKey, never>; Returns: string }
       recompute_ai_room_state: {
         Args: { p_room_id: string }
         Returns: undefined

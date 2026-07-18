@@ -3,16 +3,23 @@ import {
   defaultWorkingDay,
   effectiveStatus,
   groupAvailabilityRuns,
+  isoWeekday,
   isWeekend,
+  normalizeWorkingDays,
+  patternLabel,
   staffOffOn,
   type AvailabilityRow,
 } from "@/lib/staff/availability";
 
-// Fixed reference days (UK): 20 Jul 2026 = Mon, 24 Jul = Fri, 18 Jul = Sat, 19 Jul = Sun.
+// Fixed reference days (UK): 20 Jul 2026 = Mon, 21 = Tue, 23 = Thu, 24 = Fri,
+// 25 = Sat, 18 Jul = Sat, 19 Jul = Sun.
 const MON = "2026-07-20";
+const TUE = "2026-07-21";
+const THU = "2026-07-23";
 const FRI = "2026-07-24";
 const SAT = "2026-07-18";
 const SUN = "2026-07-19";
+const SAT2 = "2026-07-25";
 
 const row = (date: string, status: "available" | "unavailable", note?: string): AvailabilityRow => ({
   date,
@@ -128,5 +135,67 @@ describe("groupAvailabilityRuns", () => {
 
   it("returns nothing for no rows", () => {
     expect(groupAvailabilityRuns([])).toEqual([]);
+  });
+});
+
+describe("isoWeekday", () => {
+  it("maps 1=Mon … 7=Sun (UK calendar)", () => {
+    expect(isoWeekday(MON)).toBe(1);
+    expect(isoWeekday(TUE)).toBe(2);
+    expect(isoWeekday(FRI)).toBe(5);
+    expect(isoWeekday(SAT)).toBe(6);
+    expect(isoWeekday(SUN)).toBe(7);
+  });
+});
+
+describe("per-staff working pattern", () => {
+  it("defaultWorkingDay follows a custom pattern, not just Mon–Fri", () => {
+    // Casual: Mon–Wed only.
+    expect(defaultWorkingDay(MON, [1, 2, 3])).toBe(true);
+    expect(defaultWorkingDay(THU, [1, 2, 3])).toBe(false); // Thu is now a rest day
+    // Weekend worker: includes Saturday.
+    expect(defaultWorkingDay(SAT, [1, 2, 3, 4, 5, 6])).toBe(true);
+  });
+
+  it("effectiveStatus respects the pattern for a bare day", () => {
+    expect(effectiveStatus([], THU, [1, 2, 3])).toBe("unavailable"); // outside pattern
+    expect(effectiveStatus([], SAT, [1, 2, 3, 4, 5, 6])).toBe("available"); // Sat in pattern
+  });
+
+  it("staffOffOn labels a non-pattern weekday as a Rest day, a weekend as Weekend", () => {
+    expect(staffOffOn([], THU, [1, 2, 3])).toEqual({ off: true, reason: "Rest day" });
+    expect(staffOffOn([], SAT, [1, 2, 3, 4, 5])).toEqual({ off: true, reason: "Weekend" });
+    expect(staffOffOn([], SAT2, [1, 2, 3, 4, 5, 6])).toEqual({ off: false, reason: null }); // Sat worker
+  });
+
+  it("an override still wins over the pattern", () => {
+    // Casual offered a Thursday they don't normally do.
+    expect(staffOffOn([row(THU, "available")], THU, [1, 2, 3])).toEqual({ off: false, reason: null });
+    // A pattern day booked off.
+    expect(staffOffOn([row(MON, "unavailable", "Sick")], MON, [1, 2, 3])).toEqual({ off: true, reason: "Sick" });
+  });
+});
+
+describe("normalizeWorkingDays", () => {
+  it("dedupes, drops invalid values and sorts ascending", () => {
+    expect(normalizeWorkingDays([3, 1, 1, 9, 2, 0, 5.5])).toEqual([1, 2, 3]);
+  });
+  it("allows an empty pattern (fully-casual worker)", () => {
+    expect(normalizeWorkingDays([])).toEqual([]);
+  });
+});
+
+describe("patternLabel", () => {
+  it("renders a contiguous run as a range", () => {
+    expect(patternLabel([1, 2, 3, 4, 5])).toBe("Mon–Fri");
+    expect(patternLabel([1, 2, 3])).toBe("Mon–Wed");
+  });
+  it("lists a short or gappy pattern", () => {
+    expect(patternLabel([1, 2])).toBe("Mon, Tue");
+    expect(patternLabel([1, 3, 5])).toBe("Mon, Wed, Fri");
+  });
+  it("handles the edges", () => {
+    expect(patternLabel([1, 2, 3, 4, 5, 6, 7])).toBe("Every day");
+    expect(patternLabel([])).toBe("No set days");
   });
 });

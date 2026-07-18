@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { normalizeWorkingDays } from "@/lib/staff/availability";
 
 const UK = "Europe/London";
 
@@ -60,5 +62,50 @@ export async function setMyAvailabilityAction(input: SetMyAvailabilityInput) {
 
   revalidatePath("/my-jobs/availability");
   revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
+
+const workingDaysSchema = z.object({
+  working_days: z.array(z.number().int().min(1).max(7)).max(7),
+});
+
+export type SetMyWorkingDaysInput = z.infer<typeof workingDaysSchema>;
+
+/**
+ * A crew member sets their OWN weekly working pattern (which weekdays they're
+ * normally expected). staff_id is resolved from the session and the row is
+ * confirmed to be theirs via an RLS-scoped read before writing. The write itself
+ * goes through the service role and touches `working_days` ONLY — never
+ * profile_id — because the 0054 staff `with check` requires an email match a
+ * profile-id-linked crew member may not have, and we must not weaken that guard.
+ */
+export async function setMyWorkingDaysAction(input: SetMyWorkingDaysInput) {
+  const parsed = workingDaysSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: "Invalid pattern." };
+  const days = normalizeWorkingDays(parsed.data.working_days);
+
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not signed in." };
+
+  // Ownership check via RLS-scoped read: a crew login can only see their own
+  // active staff row (is_staff read policy resolves it by profile_id).
+  const { data: staffRow } = await sb
+    .from("staff")
+    .select("id")
+    .eq("profile_id", user.id)
+    .eq("is_active", true)
+    .maybeSingle();
+  if (!staffRow) return { ok: false as const, error: "Your login isn’t linked to a crew record yet." };
+
+  const admin = createAdminClient();
+  const { error } = await admin.from("staff").update({ working_days: days }).eq("id", staffRow.id);
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/my-jobs/availability");
+  revalidatePath("/schedule/board");
+  revalidatePath("/resources");
   return { ok: true as const };
 }

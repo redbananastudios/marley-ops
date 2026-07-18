@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
+import { normalizeWorkingDays } from "@/lib/staff/availability";
 
 async function actor() {
   const sb = await createClient();
@@ -10,6 +12,18 @@ async function actor() {
     data: { user },
   } = await sb.auth.getUser();
   return { sb, userId: user?.id ?? null };
+}
+
+/** Staff & Fleet writes are an OFFICE surface. This gates them at the app layer
+ *  in addition to RLS — without it a crew login could call e.g. saveStaffAction
+ *  directly to self-set their own day_rate (their staff_update RLS permits their
+ *  own row, and the 0054 with-check only pins profile_id/email, not day_rate). */
+async function requireOfficeActor() {
+  const profile = await getSessionProfile();
+  if (!profile) return { error: "Not signed in." as const };
+  if (profile.role !== "admin" && profile.role !== "estimator") return { error: "Office only." as const };
+  const sb = await createClient();
+  return { sb, userId: profile.id };
 }
 
 function nextDay(iso: string): string {
@@ -158,6 +172,9 @@ const staffSchema = z.object({
   phone: z.string().trim().max(20).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   day_rate: optMoney,
+  // The crew member's normal weekly pattern (ISO weekday numbers 1=Mon…7=Sun).
+  // Undefined = leave unchanged (a caller that doesn't manage the pattern).
+  working_days: z.array(z.number().int().min(1).max(7)).max(7).optional(),
   notes: z.string().trim().max(2000).optional().or(z.literal("")),
   is_active: z.boolean(),
 });
@@ -170,8 +187,9 @@ export async function saveStaffAction(input: StaffInput) {
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const v = parsed.data;
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireOfficeActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
 
   const row = {
     full_name: v.full_name,
@@ -181,6 +199,9 @@ export async function saveStaffAction(input: StaffInput) {
     day_rate: v.day_rate === "" || v.day_rate == null ? null : v.day_rate,
     notes: v.notes || null,
     is_active: v.is_active,
+    // Only touch the pattern when the caller manages it — an insert without it
+    // falls back to the '{1,2,3,4,5}' column default (Mon–Fri).
+    ...(v.working_days !== undefined ? { working_days: normalizeWorkingDays(v.working_days) } : {}),
   };
 
   const { error } = v.id
@@ -189,12 +210,14 @@ export async function saveStaffAction(input: StaffInput) {
   if (error) return { ok: false as const, error: error.message };
 
   revalidatePath("/resources");
+  revalidatePath("/schedule/board");
   return { ok: true as const };
 }
 
 export async function setStaffActiveAction(id: string, isActive: boolean) {
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireOfficeActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
   const { error } = await sb.from("staff").update({ is_active: isActive }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
@@ -230,8 +253,9 @@ export async function saveStaffAvailabilityAction(input: StaffAvailabilityInput)
   const parsed = staffAvailSchema.safeParse(input);
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const a = parsed.data;
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireOfficeActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb, userId } = ctx;
 
   // Forward-only: the Resources view lists availability from today on, so a
   // past-dated row would be an orphan it can never delete. Drop past days;
@@ -264,10 +288,52 @@ export async function saveStaffAvailabilityAction(input: StaffAvailabilityInput)
 export async function deleteStaffAvailabilityAction(ids: string[]) {
   const clean = [...new Set(ids)].filter((id) => typeof id === "string" && id.length > 0);
   if (!clean.length) return { ok: false as const, error: "Nothing to remove." };
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireOfficeActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
   const { error } = await sb.from("staff_availability").delete().in("id", clean);
   if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/resources");
+  revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
+
+const cellSchema = z.object({
+  staff_id: z.string().uuid(),
+  date: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date"),
+  status: z.enum(["available", "unavailable", "clear"]),
+  note: z.string().trim().max(500).optional().or(z.literal("")),
+});
+
+export type SetStaffAvailabilityCellInput = z.infer<typeof cellSchema>;
+
+/** Office amends ONE crew member's availability for ONE day from the wall chart:
+ *  upsert an override or clear it back to the pattern default. Forward-only to
+ *  match the forward-only view (a past day off is history). RLS: is_office(). */
+export async function setStaffAvailabilityCellAction(input: SetStaffAvailabilityCellInput) {
+  const parsed = cellSchema.safeParse(input);
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const a = parsed.data;
+  const ctx = await requireOfficeActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb, userId } = ctx;
+
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+  if (a.date < today) return { ok: false as const, error: "That day has already passed." };
+
+  if (a.status === "clear") {
+    const { error } = await sb.from("staff_availability").delete().eq("staff_id", a.staff_id).eq("date", a.date);
+    if (error) return { ok: false as const, error: error.message };
+  } else {
+    const { error } = await sb
+      .from("staff_availability")
+      .upsert(
+        { staff_id: a.staff_id, date: a.date, status: a.status, note: a.note || null, created_by: userId },
+        { onConflict: "staff_id,date" },
+      );
+    if (error) return { ok: false as const, error: error.message };
+  }
+
   revalidatePath("/resources");
   revalidatePath("/schedule/board");
   return { ok: true as const };

@@ -42,7 +42,8 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
         vehicles={(vehicles ?? []) as VehicleRow[]}
         unavailability={(unavailability ?? []) as UnavailabilityRow[]}
         staffAvailability={(staffAvailability ?? []) as StaffAvailabilityRow[]}
-        initialTab={sp.tab === "vehicles" ? "vehicles" : "staff"}
+        today={today}
+        initialTab={sp.tab === "vehicles" ? "vehicles" : sp.tab === "availability" ? "availability" : "staff"}
       />
     </main>
   );

@@ -133,6 +133,23 @@ export async function saveFleetRemindersAction(input: FleetRemindersInput) {
 
 /** The sink the test alert always uses — never a real customer or an unverified
  *  teammate address during setup. */
+/** Master switch for crew self-billing (admin only). Off by default — the signed
+ *  self-billing agreement is the go-live gate; while off, the crew /my-jobs "My
+ *  pay" surface stays hidden and all pay actions reject. */
+export async function setSelfBillingEnabledAction(enabled: boolean) {
+  const { sb, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+  const { error: dbErr } = await sb
+    .from("business_settings")
+    .update({ self_billing_enabled: !!enabled })
+    .eq("id", true);
+  if (dbErr) return { ok: false as const, error: dbErr.message };
+  revalidatePath("/settings");
+  revalidatePath("/finance/statements");
+  revalidatePath("/my-jobs");
+  return { ok: true as const };
+}
+
 const FLEET_TEST_SINK = "peter@abacusonline.net";
 
 /** Send a sample fleet reminder (email to the test sink + a self-push) so the

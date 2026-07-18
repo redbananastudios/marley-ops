@@ -13,6 +13,7 @@ import { QuickSigninCard } from "@/components/settings/quick-signin-card";
 import { NotificationsCard } from "@/components/settings/notifications-card";
 import { CardPaymentsCard } from "@/components/settings/card-payments-card";
 import { FleetRemindersCard } from "@/components/settings/fleet-reminders-card";
+import { SelfBillingCard } from "@/components/settings/self-billing-card";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -59,10 +60,11 @@ export default async function SettingsPage() {
   // Fleet-reminder settings (admin only) — the recipients + kill switches for
   // the daily fleet-expiry cron.
   let fleet = { enabled: true, pushEnabled: true, recipients: [] as string[] };
+  let selfBillingEnabled = false;
   if (canEdit) {
     const { data: fleetRow } = await admin
       .from("business_settings")
-      .select("fleet_reminders_enabled, push_fleet_expiry_enabled, fleet_alert_recipients")
+      .select("fleet_reminders_enabled, push_fleet_expiry_enabled, fleet_alert_recipients, self_billing_enabled")
       .eq("id", true)
       .maybeSingle();
     fleet = {
@@ -70,6 +72,7 @@ export default async function SettingsPage() {
       pushEnabled: fleetRow?.push_fleet_expiry_enabled !== false,
       recipients: (fleetRow?.fleet_alert_recipients ?? []).filter((e): e is string => !!e),
     };
+    selfBillingEnabled = fleetRow?.self_billing_enabled === true;
   }
 
   // Team management is admin-only — estimators don't see the card at all.
@@ -93,6 +96,7 @@ export default async function SettingsPage() {
     ...(canEdit
       ? [
           { id: "payments", label: "Payments" },
+          { id: "self-billing", label: "Self-billing" },
           { id: "fleet", label: "Fleet" },
           { id: "ai", label: "AI" },
           { id: "pricing", label: "Pricing" },
@@ -130,6 +134,11 @@ export default async function SettingsPage() {
         {canEdit ? (
           <section id="payments" className={sectionClass}>
             <CardPaymentsCard testToken={cardTestToken} />
+          </section>
+        ) : null}
+        {canEdit ? (
+          <section id="self-billing" className={sectionClass}>
+            <SelfBillingCard enabled={selfBillingEnabled} />
           </section>
         ) : null}
         {canEdit ? (

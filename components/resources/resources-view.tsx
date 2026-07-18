@@ -61,7 +61,8 @@ import {
   type VehicleInput,
 } from "@/app/(dashboard)/resources/actions";
 import { docStatus, VEHICLE_DOCS, VEHICLE_TYPES } from "@/lib/vehicles";
-import { groupAvailabilityRuns, type AvailabilitySegment } from "@/lib/staff/availability";
+import { groupAvailabilityRuns, patternLabel, type AvailabilitySegment } from "@/lib/staff/availability";
+import { StaffWallChart } from "@/components/resources/staff-wall-chart";
 
 export interface StaffRow {
   id: string;
@@ -70,9 +71,20 @@ export interface StaffRow {
   phone: string | null;
   email: string | null;
   day_rate: number | null;
+  working_days: number[] | null;
   notes: string | null;
   is_active: boolean;
 }
+
+const PATTERN_CHIPS: { iw: number; l: string }[] = [
+  { iw: 1, l: "Mon" },
+  { iw: 2, l: "Tue" },
+  { iw: 3, l: "Wed" },
+  { iw: 4, l: "Thu" },
+  { iw: 5, l: "Fri" },
+  { iw: 6, l: "Sat" },
+  { iw: 7, l: "Sun" },
+];
 
 export interface VehicleRow {
   id: string;
@@ -194,15 +206,17 @@ export function ResourcesView({
   vehicles,
   unavailability,
   staffAvailability,
+  today,
   initialTab,
 }: {
   staff: StaffRow[];
   vehicles: VehicleRow[];
   unavailability: UnavailabilityRow[];
   staffAvailability: StaffAvailabilityRow[];
-  initialTab: "staff" | "vehicles";
+  today: string;
+  initialTab: "staff" | "vehicles" | "availability";
 }) {
-  const [tab, setTab] = useState<"staff" | "vehicles">(initialTab);
+  const [tab, setTab] = useState<"staff" | "vehicles" | "availability">(initialTab);
   const [staffEdit, setStaffEdit] = useState<StaffRow | "new" | null>(null);
   const [vehicleEdit, setVehicleEdit] = useState<VehicleRow | "new" | null>(null);
 
@@ -238,11 +252,18 @@ export function ResourcesView({
     [staff, vehicles],
   );
 
-  const tabBtn = (key: "staff" | "vehicles", Icon: typeof UserRound, label: string, count: number) => (
+  const activeStaff = useMemo(() => staff.filter((s) => s.is_active), [staff]);
+
+  const tabBtn = (
+    key: "staff" | "vehicles" | "availability",
+    Icon: typeof UserRound,
+    label: string,
+    count: number | null,
+  ) => (
     <button type="button" onClick={() => setTab(key)} aria-pressed={tab === key} className={segmentedItemClass(tab === key)}>
       <Icon className="size-4" strokeWidth={1.75} />
       {label}
-      <span className={segmentedCountClass(tab === key)}>{count}</span>
+      {count !== null ? <span className={segmentedCountClass(tab === key)}>{count}</span> : null}
     </button>
   );
 
@@ -250,17 +271,41 @@ export function ResourcesView({
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <div className={segmentedTrackClass} role="group" aria-label="Resource type">
+          {tabBtn("availability", CalendarDays, "Availability", null)}
           {tabBtn("staff", UserRound, "Staff", counts.staff)}
           {tabBtn("vehicles", Truck, "Vehicles", counts.vehicles)}
         </div>
-        <Button
-          className="ml-auto"
-          onClick={() => (tab === "staff" ? setStaffEdit("new") : setVehicleEdit("new"))}
-        >
-          <Plus strokeWidth={1.75} />
-          {tab === "staff" ? "Add staff" : "Add vehicle"}
-        </Button>
+        {tab !== "availability" ? (
+          <Button
+            className="ml-auto"
+            onClick={() => (tab === "staff" ? setStaffEdit("new") : setVehicleEdit("new"))}
+          >
+            <Plus strokeWidth={1.75} />
+            {tab === "staff" ? "Add staff" : "Add vehicle"}
+          </Button>
+        ) : null}
       </div>
+
+      {tab === "availability" ? (
+        activeStaff.length === 0 ? (
+          <EmptyState
+            icon={CalendarDays}
+            title="No crew yet"
+            hint="Add crew under the Staff tab, then their availability shows here as a wall chart."
+            className="mt-4 rounded-lg border border-border bg-card"
+          />
+        ) : (
+          <StaffWallChart
+            staff={activeStaff}
+            staffAvailability={staffAvailability}
+            today={today}
+            onEditStaff={(id) => {
+              const s = staff.find((x) => x.id === id);
+              if (s) setStaffEdit(s);
+            }}
+          />
+        )
+      ) : null}
 
       {tab === "staff" ? (
         staff.length === 0 ? (
@@ -282,25 +327,27 @@ export function ResourcesView({
             ))}
           </div>
         )
-      ) : vehicles.length === 0 ? (
-        <EmptyState
-          icon={Truck}
-          title="No vehicles yet"
-          hint="Add the fleet to track MOT, tax and insurance — use Add vehicle above."
-          className="mt-4 rounded-lg border border-border bg-card"
-        />
-      ) : (
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {vehicles.map((v) => (
-            <VehicleCard
-              key={v.id}
-              v={v}
-              windows={windowsByVehicle.get(v.id) ?? []}
-              onEdit={() => setVehicleEdit(v)}
-            />
-          ))}
-        </div>
-      )}
+      ) : tab === "vehicles" ? (
+        vehicles.length === 0 ? (
+          <EmptyState
+            icon={Truck}
+            title="No vehicles yet"
+            hint="Add the fleet to track MOT, tax and insurance — use Add vehicle above."
+            className="mt-4 rounded-lg border border-border bg-card"
+          />
+        ) : (
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {vehicles.map((v) => (
+              <VehicleCard
+                key={v.id}
+                v={v}
+                windows={windowsByVehicle.get(v.id) ?? []}
+                onEdit={() => setVehicleEdit(v)}
+              />
+            ))}
+          </div>
+        )
+      ) : null}
 
       {staffEdit ? (
         <StaffDialog
@@ -436,6 +483,7 @@ function StaffDialog({
     day_rate: row?.day_rate != null ? String(row.day_rate) : "",
     notes: row?.notes ?? "",
   });
+  const [pattern, setPattern] = useState<number[]>(() => row?.working_days ?? [1, 2, 3, 4, 5]);
 
   async function save() {
     setBusy(true);
@@ -446,6 +494,7 @@ function StaffDialog({
       phone: v.phone,
       email: v.email,
       day_rate: v.day_rate === "" ? "" : Number(v.day_rate),
+      working_days: pattern,
       notes: v.notes,
       is_active: row?.is_active ?? true,
     });
@@ -505,6 +554,35 @@ function StaffDialog({
               <Input id="st-email" type="email" inputMode="email" className="h-11" value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} placeholder="name@example.com" />
             </div>
           </div>
+          <div className="grid gap-1.5">
+            <Label>Normal working days</Label>
+            <div className="grid grid-cols-7 gap-1.5">
+              {PATTERN_CHIPS.map((c) => {
+                const on = pattern.includes(c.iw);
+                return (
+                  <button
+                    key={c.iw}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() =>
+                      setPattern((p) => (on ? p.filter((x) => x !== c.iw) : [...p, c.iw].sort((a, b) => a - b)))
+                    }
+                    className={cn(
+                      "focus-ring flex h-10 items-center justify-center rounded-md border text-xs font-semibold transition-colors",
+                      on ? "border-mm-red bg-mm-red text-white" : "border-input bg-card text-mist-400 hover:bg-muted",
+                    )}
+                  >
+                    {c.l}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-xs text-mist-400">
+              {patternLabel(pattern)} · retained crew are Mon–Fri; a casual gets just the days they do. Weekends they can
+              work are offered per date.
+            </p>
+          </div>
+
           <div className="grid gap-1.5">
             <Label htmlFor="st-notes">Notes</Label>
             <textarea

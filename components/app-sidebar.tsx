@@ -16,6 +16,7 @@ import {
   FileCheck2,
   FileText,
   Gauge,
+  HandCoins,
   History,
   KanbanSquare,
   LayoutDashboard,
@@ -69,6 +70,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/payments", label: "Payments", icon: Banknote },
       { href: "/finance", label: "Invoices & VAT", icon: ReceiptText },
+      { href: "/finance/statements", label: "Crew pay", icon: HandCoins },
     ],
   },
   {

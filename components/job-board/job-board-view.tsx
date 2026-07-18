@@ -78,6 +78,7 @@ export interface BoardStaff {
   id: string;
   full_name: string;
   staff_role: string;
+  working_days: number[] | null;
 }
 
 export interface BoardVehicle {
@@ -569,7 +570,7 @@ function CapacityStrip({
     // member off that day — a booked day off, or a weekend they haven't offered
     // — is simply not available and never counts as free.
     const staffRows: CapRow[] = staff.map((s) => {
-      const off = staffOffOn(availByStaff.get(s.id) ?? [], day);
+      const off = staffOffOn(availByStaff.get(s.id) ?? [], day, s.working_days ?? undefined);
       if (off.off) return { id: s.id, name: s.full_name, state: "unavailable", windows: [], unavailReason: off.reason };
       return { id: s.id, name: s.full_name, unavailReason: null, ...stateOf(s.id, "staff") };
     });
@@ -992,7 +993,7 @@ function AssignDialog({
                     "staff",
                     staffSel.has(s.id),
                     () => toggle(staffSel, s.id, setStaffSel),
-                    apptDaysList.some((day) => staffOffOn(availByStaff.get(s.id) ?? [], day).off),
+                    apptDaysList.some((day) => staffOffOn(availByStaff.get(s.id) ?? [], day, s.working_days ?? undefined).off),
                   ),
                 )
               )}

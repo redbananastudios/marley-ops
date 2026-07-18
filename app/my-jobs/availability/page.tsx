@@ -28,14 +28,14 @@ export default async function CrewAvailabilityPage() {
   // (same resolution as /my-jobs, so the link is consistent).
   let { data: staffRow } = await sb
     .from("staff")
-    .select("id, full_name")
+    .select("id, full_name, working_days")
     .eq("profile_id", profile.id)
     .eq("is_active", true)
     .maybeSingle();
   if (!staffRow && profile.email) {
     const { data: byEmail } = await sb
       .from("staff")
-      .select("id, full_name")
+      .select("id, full_name, working_days")
       .ilike("email", profile.email)
       .eq("is_active", true)
       .maybeSingle();
@@ -87,7 +87,12 @@ export default async function CrewAvailabilityPage() {
           </div>
         ) : (
           <div className="mt-5">
-            <AvailabilityEditor initial={rows} today={today} weeks={WEEKS} />
+            <AvailabilityEditor
+              initial={rows}
+              today={today}
+              weeks={WEEKS}
+              workingDays={(staffRow.working_days as number[] | null) ?? [1, 2, 3, 4, 5]}
+            />
           </div>
         )}
       </main>

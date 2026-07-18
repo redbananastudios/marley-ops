@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BookOpen, CalendarCheck, ChevronRight, MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { BookOpen, CalendarCheck, ChevronRight, HandCoins, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
+import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
 import { apptWindow } from "@/lib/job-board";
 import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
@@ -56,6 +57,8 @@ export default async function MyJobsPage() {
     // Persist the discovered link so the next visit is a single lookup.
     if (byEmail) await sb.from("staff").update({ profile_id: profile.id }).eq("id", byEmail.id);
   }
+
+  const selfBillingOn = await isSelfBillingEnabled();
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: UK });
 
@@ -235,6 +238,22 @@ export default async function MyJobsPage() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-foreground">My availability</span>
               <span className="block text-xs text-mist-400">Book a day off, or tell us which weekends you can work</span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+          </Link>
+        ) : null}
+
+        {staffRow && selfBillingOn ? (
+          <Link
+            href="/my-jobs/pay"
+            className="focus-ring mt-3 flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 hover:border-mm-red/40"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mm-red/10 text-mm-red">
+              <HandCoins className="size-5" strokeWidth={1.75} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-foreground">My pay</span>
+              <span className="block text-xs text-mist-400">Build and submit your payment statement</span>
             </span>
             <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
           </Link>
