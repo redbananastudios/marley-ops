@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
@@ -9,12 +9,13 @@ import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { StartStatement } from "@/components/my-jobs/start-statement";
 import { periodLabel, previousWeekPeriod, weekPeriodOf } from "@/lib/staff/statements";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
+import { hasSignedCurrentAgreement } from "@/lib/contractor/status";
 
 /**
- * /my-jobs/pay — the crew self-billing surface. Crew build a payment statement
- * for a week, add lines (free description — worked days, retainer, extras) and
- * submit. Dark until business_settings.self_billing_enabled is on (the signed
- * self-billing agreement is the go-live gate).
+ * /my-jobs/pay — the crew contractor-invoicing surface. Crew build their own
+ * invoice for a week, add lines (free description — worked days, retainer,
+ * extras) and submit. Dark until business_settings.self_billing_enabled is on;
+ * each contractor also signs the contractor agreement once (their per-user gate).
  */
 
 export const dynamic = "force-dynamic";
@@ -52,6 +53,8 @@ export default async function CrewPayPage() {
     if (byEmail) await sb.from("staff").update({ profile_id: profile.id }).eq("id", byEmail.id);
   }
 
+  const signedAgreement = staffRow && enabled ? await hasSignedCurrentAgreement(sb, profile.id) : false;
+
   let statements: {
     id: string;
     ref: string;
@@ -61,7 +64,7 @@ export default async function CrewPayPage() {
     total: number;
     return_reason: string | null;
   }[] = [];
-  if (staffRow && enabled) {
+  if (staffRow && enabled && signedAgreement) {
     const { data } = await sb
       .from("staff_statements")
       .select("id, ref, status, period_start, period_end, total, return_reason")
@@ -96,7 +99,7 @@ export default async function CrewPayPage() {
           My jobs
         </Link>
         <p className="eyebrow mt-3">Your pay</p>
-        <h1 className="mt-1 font-display text-3xl font-bold text-foreground">My statements</h1>
+        <h1 className="mt-1 font-display text-3xl font-bold text-foreground">My invoices</h1>
 
         {!staffRow ? (
           <div className="mt-6 rounded-lg border border-border bg-card px-5 py-10 text-center text-sm text-mist-500">
@@ -105,18 +108,34 @@ export default async function CrewPayPage() {
           </div>
         ) : !enabled ? (
           <div className="mt-6 rounded-lg border border-border bg-card px-5 py-10 text-center text-sm text-mist-500">
-            Self-billing isn&apos;t switched on yet. The office will turn it on once the self-billing agreement is in place.
+            Contractor invoicing isn&apos;t switched on yet. The office will turn it on once the contractor agreement is in
+            place.
           </div>
+        ) : !signedAgreement ? (
+          <Link
+            href="/my-jobs/agreement"
+            className="focus-ring mt-6 flex items-start gap-3 rounded-xl border border-mm-red/40 bg-mm-red/5 px-5 py-4 text-left hover:bg-mm-red/10"
+          >
+            <FileSignature className="mt-0.5 size-6 shrink-0 text-mm-red" strokeWidth={1.75} />
+            <span>
+              <span className="block text-sm font-semibold text-foreground">Sign your contractor agreement first</span>
+              <span className="mt-0.5 block text-sm text-mist-500">
+                A one-time signature confirms you work with us as a self-employed contractor. Once it&apos;s signed you can build
+                and submit invoices.
+              </span>
+              <span className="mt-2 inline-block text-sm font-semibold text-mm-red">Read and sign →</span>
+            </span>
+          </Link>
         ) : (
           <>
             <p className="mt-4 text-sm text-mist-500">
-              Build a statement for what you&apos;re owed, then submit it. No VAT — you&apos;re not VAT registered.
+              Build an invoice for what you&apos;re owed, then submit it. No VAT — you&apos;re not VAT registered.
             </p>
             <div className="mt-4">
               <StartStatement periods={periods} />
             </div>
 
-            <h2 className="mb-2 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your statements</h2>
+            <h2 className="mb-2 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your invoices</h2>
             {statements.length === 0 ? (
               <div className="rounded-lg border border-border bg-card px-5 py-8 text-center text-sm text-mist-500">
                 Nothing yet. Start one above for the week you want to bill.

@@ -39,7 +39,7 @@ export function StartStatement({
             {busy === p.key ? <Loader2 className="size-5 animate-spin" strokeWidth={1.75} /> : <Plus className="size-5" strokeWidth={1.75} />}
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-foreground">Start a statement</span>
+            <span className="block text-sm font-semibold text-foreground">Start an invoice</span>
             <span className="block text-xs text-mist-400">{p.label}</span>
           </span>
         </button>

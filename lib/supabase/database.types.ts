@@ -2806,6 +2806,66 @@ export type Database = {
           },
         ]
       }
+      contractor_agreements: {
+        Row: {
+          acknowledgments: Json
+          agreement_version: string
+          created_at: string
+          id: string
+          ip: string | null
+          profile_id: string
+          role: string
+          signature_data: string | null
+          signed_at: string
+          signer_name: string
+          staff_id: string | null
+          user_agent: string | null
+        }
+        Insert: {
+          acknowledgments?: Json
+          agreement_version: string
+          created_at?: string
+          id?: string
+          ip?: string | null
+          profile_id: string
+          role: string
+          signature_data?: string | null
+          signed_at?: string
+          signer_name: string
+          staff_id?: string | null
+          user_agent?: string | null
+        }
+        Update: {
+          acknowledgments?: Json
+          agreement_version?: string
+          created_at?: string
+          id?: string
+          ip?: string | null
+          profile_id?: string
+          role?: string
+          signature_data?: string | null
+          signed_at?: string
+          signer_name?: string
+          staff_id?: string | null
+          user_agent?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "contractor_agreements_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_agreements_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       staff_statements: {
         Row: {
           created_at: string

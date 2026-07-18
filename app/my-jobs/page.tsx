@@ -253,7 +253,7 @@ export default async function MyJobsPage() {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-foreground">My pay</span>
-              <span className="block text-xs text-mist-400">Build and submit your payment statement</span>
+              <span className="block text-xs text-mist-400">Build and submit your contractor invoice</span>
             </span>
             <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
           </Link>

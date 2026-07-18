@@ -14,6 +14,8 @@ import { NotificationsCard } from "@/components/settings/notifications-card";
 import { CardPaymentsCard } from "@/components/settings/card-payments-card";
 import { FleetRemindersCard } from "@/components/settings/fleet-reminders-card";
 import { SelfBillingCard } from "@/components/settings/self-billing-card";
+import { ContractorAgreementCard } from "@/components/settings/contractor-agreement-card";
+import { CONTRACTOR_AGREEMENT_VERSION } from "@/lib/contractor/agreement";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -85,18 +87,35 @@ export default async function SettingsPage() {
     team = (data ?? []) as TeamMember[];
   }
 
+  // Estimators are self-employed contractors too — they sign the same one-time
+  // contractor agreement here (crew sign it from their /my-jobs portal). Admins
+  // are the payer, not a contractor, so they don't see it.
+  const isContractor = profile?.role === "estimator";
+  let contractorSignedAt: string | null = null;
+  if (isContractor && profile) {
+    const { data: sig } = await sb
+      .from("contractor_agreements")
+      .select("signed_at")
+      .eq("profile_id", profile.id)
+      .eq("agreement_version", CONTRACTOR_AGREEMENT_VERSION)
+      .maybeSingle();
+    contractorSignedAt = sig?.signed_at ?? null;
+  }
+
   // Pills follow the sections' DOM order below (Team → AI → Pricing → Business →
   // Margin → Health) so the active marker tracks scroll monotonically. Estimators
   // get a personal-device page only — Quick sign-in (passkeys) + Notifications
-  // (push); the business/money/system cards are admin surfaces.
+  // (push) + their contractor agreement; the business/money/system cards are
+  // admin surfaces.
   const sections: SettingsSection[] = [
     ...(canEdit ? [{ id: "team", label: "Team" }] : []),
     { id: "quick-signin", label: "Quick sign-in" },
     { id: "notifications", label: "Notifications" },
+    ...(isContractor ? [{ id: "contractor-agreement", label: "Contractor agreement" }] : []),
     ...(canEdit
       ? [
           { id: "payments", label: "Payments" },
-          { id: "self-billing", label: "Self-billing" },
+          { id: "self-billing", label: "Contractor invoicing" },
           { id: "fleet", label: "Fleet" },
           { id: "ai", label: "AI" },
           { id: "pricing", label: "Pricing" },
@@ -131,6 +150,11 @@ export default async function SettingsPage() {
         <section id="notifications" className={sectionClass}>
           <NotificationsCard isAdmin={canEdit} />
         </section>
+        {isContractor ? (
+          <section id="contractor-agreement" className={sectionClass}>
+            <ContractorAgreementCard signedAt={contractorSignedAt} />
+          </section>
+        ) : null}
         {canEdit ? (
           <section id="payments" className={sectionClass}>
             <CardPaymentsCard testToken={cardTestToken} />

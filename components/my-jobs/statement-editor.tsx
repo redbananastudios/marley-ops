@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * Crew payment-statement editor — phone-first. The crew build their own lines,
+ * Crew contractor-invoice editor — phone-first. The crew build their own lines,
  * each with a FREE DESCRIPTION (worked day, retainer day, extra), because pay is
  * not derived from jobs (retainers). "Add my jobs" seeds suggested lines from
  * the week's assignments; everything stays editable. Submit is the crew's own
- * confirm — both the timesheet and the self-billing action.
+ * confirm — both the timesheet and the contractor's own act of invoicing.
  */
 
 import { useState } from "react";
@@ -91,7 +91,7 @@ export function StatementEditor({
           <span className="text-xs uppercase tracking-wide text-mist-400">Total</span>
           <span className="font-display text-2xl font-bold tabular text-foreground">{gbp(total)}</span>
         </div>
-        <p className="mt-1 text-[11px] text-mist-400">No VAT — you&apos;re not VAT registered, so this is a plain payment statement.</p>
+        <p className="mt-1 text-[11px] text-mist-400">No VAT — you&apos;re not VAT registered, so this is a plain contractor invoice.</p>
       </div>
 
       {editable && statement.return_reason ? (
@@ -188,7 +188,7 @@ export function StatementEditor({
             className="focus-ring ml-auto inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-50"
           >
             <Send className="size-4" strokeWidth={1.75} />
-            Submit statement
+            Submit invoice
           </button>
         ) : (
           <span className="ml-auto text-sm text-mist-400">Submitted — the office will pay this and mark it off.</span>
@@ -212,7 +212,7 @@ export function StatementEditor({
         <div className="fixed inset-0 z-50">
           <button type="button" aria-label="Close" onClick={() => setConfirmSubmit(false)} className="absolute inset-0 bg-black/45" />
           <div className="absolute left-1/2 top-1/2 w-[min(92vw,24rem)] -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-border bg-card p-5 shadow-xl">
-            <h3 className="font-display text-xl font-semibold text-foreground">Submit this statement?</h3>
+            <h3 className="font-display text-xl font-semibold text-foreground">Submit this invoice?</h3>
             <p className="mt-1 text-sm text-mist-400">
               You&apos;re submitting <span className="font-semibold text-foreground">{gbp(total)}</span> for{" "}
               {periodLabel(statement.period_start, statement.period_end)}. You can&apos;t edit it after this — ask the office if
@@ -230,7 +230,7 @@ export function StatementEditor({
                 type="button"
                 disabled={busy === "submit"}
                 onClick={async () => {
-                  const ok = await run("submit", () => submitMyStatementAction({ statement_id: statement.id }), "Statement submitted.");
+                  const ok = await run("submit", () => submitMyStatementAction({ statement_id: statement.id }), "Invoice submitted.");
                   if (ok) setConfirmSubmit(false);
                 }}
                 className="focus-ring inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-mm-red text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-60"

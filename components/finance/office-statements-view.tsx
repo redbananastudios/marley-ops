@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * Office view of crew payment statements (Finance › Crew pay). Submitted
- * statements are the ones needing action — expand to see the lines, then mark
+ * Office view of crew contractor invoices (Finance › Crew pay). Submitted
+ * invoices are the ones needing action — expand to see the lines, then mark
  * paid (BACS / cash), RETURN to the crew for a fix, or void a mistake.
- * Everything is downloadable as the branded no-VAT PDF. Self-billing hinges on
- * the crew confirming their own pay, so we never silently edit their lines — a
- * correction goes back to them via Return.
+ * Everything is downloadable as the branded no-VAT PDF. Contractor invoicing
+ * hinges on the crew confirming their own pay, so we never silently edit their
+ * lines — a correction goes back to them via Return.
  */
 
 import { useMemo, useState } from "react";
@@ -88,7 +88,7 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
       toast.error(r.error);
       return;
     }
-    toast.success("Statement voided.");
+    toast.success("Invoice voided.");
     router.refresh();
   }
 
@@ -96,8 +96,8 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
     <div>
       {!enabled ? (
         <div className="mb-4 rounded-lg border border-warn/30 bg-warn-bg px-4 py-3 text-sm text-warn">
-          Self-billing is switched off — crew can&apos;t build new statements. Turn it on in Settings › Self-billing once
-          the agreement is signed.
+          Contractor invoicing is switched off — crew can&apos;t build new invoices. Turn it on in Settings › Contractor
+          invoicing once each contractor has signed the agreement.
         </div>
       ) : null}
 
@@ -121,14 +121,14 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
         {counts.submitted > 0 ? (
           <p className="text-sm text-mist-500">
             <span className="font-semibold text-foreground">{gbp(toPayTotal)}</span> to pay across {counts.submitted}{" "}
-            {counts.submitted === 1 ? "statement" : "statements"}
+            {counts.submitted === 1 ? "invoice" : "invoices"}
           </p>
         ) : null}
       </div>
 
       {shown.length === 0 ? (
         <div className="rounded-lg border border-border bg-card px-5 py-12 text-center text-sm text-mist-500">
-          {filter === "submitted" ? "Nothing waiting to be paid." : "No statements here yet."}
+          {filter === "submitted" ? "Nothing waiting to be paid." : "No invoices here yet."}
         </div>
       ) : (
         <div className="space-y-2">
@@ -194,7 +194,7 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
                 {isOpen ? (
                   <div className="border-t border-border px-4 py-3">
                     {s.pdf.lines.length === 0 ? (
-                      <p className="text-sm text-mist-400">No lines on this statement.</p>
+                      <p className="text-sm text-mist-400">No lines on this invoice.</p>
                     ) : (
                       <ul className="space-y-1.5">
                         {s.pdf.lines.map((l, i) => (
@@ -279,7 +279,7 @@ function ReturnDialog({
         <p className="text-xs font-semibold uppercase tracking-wide text-mist-400">{statement.staffName}</p>
         <h3 className="mt-0.5 font-display text-xl font-semibold text-foreground">Return {statement.ref} for changes</h3>
         <p className="mt-1 text-sm text-mist-400">
-          This hands the statement back so {statement.staffName.split(" ")[0]} can fix it and re-submit — they confirm their
+          This hands the invoice back so {statement.staffName.split(" ")[0]} can fix it and re-submit — they confirm their
           own pay. Tell them what needs changing.
         </p>
 

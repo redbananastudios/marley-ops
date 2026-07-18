@@ -86,9 +86,9 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
           className="focus-ring -ml-1 inline-flex items-center gap-1 rounded-md py-1 pr-2 text-sm font-medium text-mist-500 hover:text-foreground"
         >
           <ChevronLeft className="size-4" strokeWidth={1.75} />
-          My statements
+          My invoices
         </Link>
-        <p className="eyebrow mt-3">Payment statement</p>
+        <p className="eyebrow mt-3">Contractor invoice</p>
         <h1 className="mt-1 font-display text-3xl font-bold text-foreground">What you&apos;re owed</h1>
 
         <div className="mt-5">

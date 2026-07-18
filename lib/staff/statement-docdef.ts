@@ -1,11 +1,12 @@
 /**
- * Crew payment-statement PDF (pure doc-def, browser-rendered via window.pdfMake —
+ * Contractor invoice PDF (pure doc-def, browser-rendered via window.pdfMake —
  * same pipeline as the quote / job-sheet PDFs). ONE page A4.
  *
- * This is a self-employed crew member's PAYMENT STATEMENT — explicitly NOT a VAT
- * invoice: crew are not VAT-registered, so there is NO VAT line, NO VAT number,
- * and the document states "No VAT is chargeable". Kept pure so a test can walk
- * the doc-def without a browser.
+ * This is a self-employed contractor's INVOICE to Marley Moves — the contractor
+ * generates + confirms it themselves (kept clear of HMRC "self-billing"). They
+ * are NOT VAT-registered, so there is NO VAT line, NO VAT number, and the
+ * document states "No VAT is chargeable". Kept pure so a test can walk the
+ * doc-def without a browser.
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -73,7 +74,7 @@ export function buildStatementDocDef(d: StatementPdfData): any {
       {
         width: "*",
         stack: [
-          { text: "Payment Statement", bold: true, fontSize: 22, color: C.ink, alignment: "right", margin: [0, 4, 0, 12] },
+          { text: "Contractor Invoice", bold: true, fontSize: 22, color: C.ink, alignment: "right", margin: [0, 4, 0, 12] },
           {
             columns: [
               { width: "*", text: "" },
@@ -81,7 +82,7 @@ export function buildStatementDocDef(d: StatementPdfData): any {
                 width: 210,
                 stack: [
                   metaRow("Reference:", d.ref, C.red),
-                  metaRow("Pay period:", d.periodLabel),
+                  metaRow("Period:", d.periodLabel),
                   metaRow("Issued:", d.issuedDate),
                   metaRow("Status:", d.status.charAt(0).toUpperCase() + d.status.slice(1)),
                 ],
@@ -102,10 +103,10 @@ export function buildStatementDocDef(d: StatementPdfData): any {
   // ── Parties ──────────────────────────────────────────────────────────
   content.push({
     columns: [
-      { width: "*", stack: [label("PAID TO"), { text: d.staffName || "—", bold: true, fontSize: 11, color: C.ink }] },
+      { width: "*", stack: [label("FROM (CONTRACTOR)"), { text: d.staffName || "—", bold: true, fontSize: 11, color: C.ink }] },
       {
         width: "*",
-        stack: [label("PAID BY"), { text: "Marley Moves Ltd", bold: true, fontSize: 11, color: C.ink, alignment: "right" }],
+        stack: [label("BILL TO"), { text: "Marley Moves Ltd", bold: true, fontSize: 11, color: C.ink, alignment: "right" }],
       },
     ],
     margin: [0, 0, 0, 14],
@@ -182,7 +183,7 @@ export function buildStatementDocDef(d: StatementPdfData): any {
           {
             stack: [
               {
-                text: "This is a self-billed payment statement, not a VAT invoice. No VAT is chargeable.",
+                text: "Contractor invoice from a self-employed worker who is not VAT registered. No VAT is chargeable.",
                 bold: true,
                 fontSize: 8.4,
                 color: C.ink,
@@ -210,7 +211,7 @@ export function buildStatementDocDef(d: StatementPdfData): any {
   });
 
   return {
-    info: { title: `Marley Moves Payment Statement ${d.ref}`, author: "Marley Moves Ltd", subject: "Crew payment statement", creator: "Marley Ops" },
+    info: { title: `Marley Moves Contractor Invoice ${d.ref}`, author: "Marley Moves Ltd", subject: "Contractor invoice", creator: "Marley Ops" },
     images: { marleyLogo: logo || "" },
     pageSize: "A4",
     pageMargins: [38, 32, 38, 52],

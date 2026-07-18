@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Settings › Self-billing (admin). Master switch for the crew payment-statement
- * surface (/my-jobs "My pay"). OFF by default — turn it on only once the signed
- * self-billing agreement is in place (the go-live gate). While off, the crew
- * surface is hidden and every pay action rejects.
+ * Settings › Contractor invoicing (admin). Master switch for the crew invoicing
+ * surface (/my-jobs "My pay"). OFF by default. Each contractor also signs the
+ * contractor agreement once in their own portal before they can invoice (their
+ * per-user gate); this switch is the global one. While off, the crew surface is
+ * hidden and every invoice action rejects.
  */
 
 import { useState } from "react";
@@ -27,7 +28,7 @@ export function SelfBillingCard({ enabled: initial }: { enabled: boolean }) {
       toast.error(res.error);
       return;
     }
-    toast.success(next ? "Self-billing is on." : "Self-billing is off.");
+    toast.success(next ? "Contractor invoicing is on." : "Contractor invoicing is off.");
   }
 
   return (
@@ -35,10 +36,10 @@ export function SelfBillingCard({ enabled: initial }: { enabled: boolean }) {
       <div className="flex items-center gap-3 border-b px-5 py-3.5">
         <HandCoins className="size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
         <div>
-          <h2 className="font-display text-lg font-semibold text-foreground">Self-billing</h2>
+          <h2 className="font-display text-lg font-semibold text-foreground">Contractor invoicing</h2>
           <p className="mt-0.5 text-xs text-mist-400">
-            Lets crew build + submit their own payment statements (no VAT). Turn on once the self-billing agreement is
-            signed.
+            Lets self-employed crew build + submit their own invoices (no VAT). Each contractor signs the contractor
+            agreement once in their portal before they can invoice.
           </p>
         </div>
       </div>
@@ -46,10 +47,10 @@ export function SelfBillingCard({ enabled: initial }: { enabled: boolean }) {
       <div className="p-5">
         <div className="flex items-center justify-between gap-4">
           <div>
-            <p className="text-sm font-medium text-foreground">Crew self-billing</p>
+            <p className="text-sm font-medium text-foreground">Crew contractor invoicing</p>
             <p className="text-xs text-mist-400">
               {enabled
-                ? "Crew can build statements from “My pay”. Submitted statements show under Finance › Crew pay."
+                ? "Crew can build invoices from “My pay”. Submitted invoices show under Finance › Crew pay."
                 : "Hidden from crew until switched on."}
             </p>
           </div>
@@ -58,7 +59,7 @@ export function SelfBillingCard({ enabled: initial }: { enabled: boolean }) {
             checked={enabled}
             disabled={busy}
             onChange={(e) => toggle(e.target.checked)}
-            aria-label="Enable crew self-billing"
+            aria-label="Enable contractor invoicing"
             className="size-6 shrink-0 accent-mm-red disabled:opacity-50"
           />
         </div>

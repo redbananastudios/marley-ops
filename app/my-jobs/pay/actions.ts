@@ -5,6 +5,7 @@ import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { computeLineAmount, seedLinesFromDays, type SeedDay } from "@/lib/staff/statements";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
+import { hasSignedCurrentAgreement } from "@/lib/contractor/status";
 
 const UK = "Europe/London";
 const isoDate = z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/, "Invalid date");
@@ -18,7 +19,7 @@ async function meAsStaff() {
   } = await sb.auth.getUser();
   if (!user) return { error: "Not signed in." as const };
 
-  if (!(await isSelfBillingEnabled())) return { error: "Self-billing isn't switched on yet." as const };
+  if (!(await isSelfBillingEnabled())) return { error: "Contractor invoicing isn't switched on yet." as const };
 
   const { data: staffRow } = await sb
     .from("staff")
@@ -27,6 +28,11 @@ async function meAsStaff() {
     .eq("is_active", true)
     .maybeSingle();
   if (!staffRow) return { error: "Your login isn’t linked to a crew record yet." as const };
+
+  // Per-user gate: the contractor agreement must be signed before any invoicing.
+  if (!(await hasSignedCurrentAgreement(sb, user.id))) {
+    return { error: "Sign your contractor agreement first." as const };
+  }
 
   return { sb, userId: user.id, staff: staffRow };
 }

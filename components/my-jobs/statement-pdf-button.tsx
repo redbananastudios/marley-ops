@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Download a crew payment statement as a branded PDF — same browser pdfMake
+ * Download a crew contractor invoice as a branded PDF — same browser pdfMake
  * pipeline as the quote / job-sheet PDFs. Data is passed in from the server
  * (already RLS-scoped); the logo is fetched + cached client-side.
  */
@@ -57,14 +57,14 @@ export function StatementPdfButton({ data, className }: { data: StatementPdfData
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `payment-statement-${data.ref}.pdf`;
+      a.download = `contractor-invoice-${data.ref}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
-      toast.success("Statement downloaded.");
+      toast.success("Invoice downloaded.");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not build the statement.");
+      toast.error(e instanceof Error ? e.message : "Could not build the invoice.");
     } finally {
       setBusy(false);
     }

@@ -63,8 +63,20 @@ export default async function DocumentsPage({
 }) {
   const sp = await searchParams;
   const q = (sp.q ?? "").trim().toLowerCase();
-  const tab = sp.tab === "unsigned" ? "unsigned" : "all";
+  const tab =
+    sp.tab === "unsigned" ? "unsigned" : sp.tab === "contractors" ? "contractors" : "all";
   const sb = await createClient();
+
+  // Contractor agreements (office reads all via RLS) — filed here as the
+  // record that each self-employed worker signed their one-time agreement.
+  const { data: agreements } = await sb
+    .from("contractor_agreements")
+    .select("id, signer_name, role, agreement_version, signed_at")
+    .order("signed_at", { ascending: false })
+    .limit(400);
+  const agreementRows = (agreements ?? []).filter(
+    (a) => !q || a.signer_name.toLowerCase().includes(q) || (a.role ?? "").toLowerCase().includes(q),
+  );
 
   const [{ data: sigs }, { data: comps }, { data: acceptedQuotes }] = await Promise.all([
     sb
@@ -177,7 +189,7 @@ export default async function DocumentsPage({
     completion: { label: "Completion certificate", cls: "bg-success-bg text-success" },
   };
 
-  const tabLink = (t: string) => `/documents?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(t === "unsigned" ? { tab: "unsigned" } : {}) })}`;
+  const tabLink = (t: string) => `/documents?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(t !== "all" ? { tab: t } : {}) })}`;
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -189,6 +201,7 @@ export default async function DocumentsPage({
             [
               ["all", `All documents (${rows.length})`],
               ["unsigned", `Unsigned contracts (${unsigned.length})`],
+              ["contractors", `Contractor agreements (${agreementRows.length})`],
             ] as const
           ).map(([t, label]) => (
             <Link key={t} href={tabLink(t)} aria-current={tab === t ? "page" : undefined} className={segmentedItemClass(tab === t)}>
@@ -197,7 +210,7 @@ export default async function DocumentsPage({
           ))}
         </div>
         <form method="GET" className="flex items-center gap-2">
-          {tab === "unsigned" ? <input type="hidden" name="tab" value="unsigned" /> : null}
+          {tab !== "all" ? <input type="hidden" name="tab" value={tab} /> : null}
           <input
             type="search"
             name="q"
@@ -245,6 +258,37 @@ export default async function DocumentsPage({
                       <FileText className="size-3.5" strokeWidth={1.75} />
                       Open quote
                     </Link>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      ) : tab === "contractors" ? (
+        <Card className="p-0">
+          {agreementRows.length === 0 ? (
+            <EmptyState
+              icon={PenLine}
+              title={q ? "No agreements match" : "No contractor agreements yet"}
+              hint={
+                q
+                  ? "Try a different search, or clear it."
+                  : "When a crew member or estimator signs their one-time contractor agreement, it's filed here."
+              }
+            />
+          ) : (
+            <ul className="divide-y">
+              {agreementRows.map((a) => (
+                <li key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+                  <span className="shrink-0 rounded-pill border border-mm-red/45 bg-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
+                    Contractor agreement
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">{a.signer_name}</p>
+                    <p className="text-xs text-mist-400">
+                      {a.role === "estimator" ? "Estimator" : a.role === "crew" ? "Crew" : a.role} · version{" "}
+                      {a.agreement_version} · signed {fmtAt(a.signed_at)}
+                    </p>
                   </div>
                 </li>
               ))}
