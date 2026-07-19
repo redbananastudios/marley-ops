@@ -131,13 +131,20 @@ export function JobNotes({
   const removeNote = useCallback(
     async (noteId: string) => {
       setRemovingId(noteId);
-      const res = await deleteJobNoteAction(noteId);
-      setRemovingId(null);
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
+      // try/finally so a rejected delete (flaky signal) still clears the spinner
+      // instead of leaving the trash button disabled forever with no toast.
+      try {
+        const res = await deleteJobNoteAction(noteId);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        router.refresh();
+      } catch {
+        toast.error("Couldn't remove the note — try again.");
+      } finally {
+        setRemovingId(null);
       }
-      router.refresh();
     },
     [router],
   );

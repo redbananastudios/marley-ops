@@ -226,7 +226,12 @@ export async function saveStaffAction(input: StaffInput) {
     const { error: payErr } = await sb
       .from("staff_pay")
       .upsert({ staff_id: staffId, hourly_rate: hourly, weekly_guarantee: guarantee }, { onConflict: "staff_id" });
-    if (payErr) return { ok: false as const, error: payErr.message };
+    if (payErr) {
+      // New staff + pay write failed → delete the orphan staff row so a retry
+      // doesn't create a duplicate crew member (the two writes aren't one txn).
+      if (!v.id) await sb.from("staff").delete().eq("id", staffId);
+      return { ok: false as const, error: payErr.message };
+    }
   }
 
   revalidatePath("/resources");

@@ -64,15 +64,24 @@ export function StatementEditor({
 
   async function run(key: string, fn: () => Promise<{ ok: boolean; error?: string }>, okMsg?: string) {
     setBusy(key);
-    const r = await fn();
-    setBusy(null);
-    if (!r.ok) {
-      toast.error(r.error ?? "Something went wrong.");
+    // try/finally: a rejected server action (dropped mobile signal, stale action
+    // id after a deploy) must still clear busy — otherwise Submit / Add-my-jobs
+    // stay disabled + spinning forever on a screen that pays people.
+    try {
+      const r = await fn();
+      if (!r.ok) {
+        toast.error(r.error ?? "Something went wrong.");
+        return false;
+      }
+      if (okMsg) toast.success(okMsg);
+      router.refresh();
+      return true;
+    } catch {
+      toast.error("Couldn't reach the server — check your connection and try again.");
       return false;
+    } finally {
+      setBusy(null);
     }
-    if (okMsg) toast.success(okMsg);
-    router.refresh();
-    return true;
   }
 
   const total = lines.reduce((s, l) => s + Number(l.amount ?? 0), 0);
@@ -150,15 +159,16 @@ export function StatementEditor({
                 <div className="flex shrink-0 items-center">
                   <button
                     type="button"
+                    disabled={busy !== null}
                     onClick={() => setSheet(l)}
                     aria-label="Edit line"
-                    className="focus-ring flex size-8 items-center justify-center rounded text-mist-400 hover:bg-muted hover:text-foreground"
+                    className="focus-ring flex size-8 items-center justify-center rounded text-mist-400 hover:bg-muted hover:text-foreground disabled:opacity-50"
                   >
                     <Pencil className="size-4" strokeWidth={1.75} />
                   </button>
                   <button
                     type="button"
-                    disabled={busy === `del-${l.id}`}
+                    disabled={busy !== null}
                     onClick={() => run(`del-${l.id}`, () => deleteMyStatementLineAction({ id: l.id, statement_id: statement.id }))}
                     aria-label="Remove line"
                     className="focus-ring flex size-8 items-center justify-center rounded text-mist-400 hover:bg-danger-bg hover:text-danger disabled:opacity-50"
@@ -175,8 +185,9 @@ export function StatementEditor({
       {editable ? (
         <button
           type="button"
+          disabled={busy !== null}
           onClick={() => setSheet("new")}
-          className="focus-ring mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-input bg-card text-sm font-semibold text-foreground hover:bg-muted"
+          className="focus-ring mt-3 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-input bg-card text-sm font-semibold text-foreground hover:bg-muted disabled:opacity-50"
         >
           <Plus className="size-4" strokeWidth={1.75} />
           Add a line
@@ -295,23 +306,38 @@ function LineSheet({
       toast.error("Add a description.");
       return;
     }
-    setBusy(true);
-    const r = await upsertMyStatementLineAction({
-      id: line?.id,
-      statement_id: statementId,
-      description: description.trim(),
-      // Amount is derived server-side from hours × rate.
-      quantity: hours === "" ? "" : Number(hours),
-      unit_amount: rate === "" ? "" : Number(rate),
-      amount: "",
-      work_date: workDate || "",
-    });
-    setBusy(false);
-    if (!r.ok) {
-      toast.error(r.error);
+    // Require positive hours + rate so a line can't silently post £0 — e.g. hours
+    // cleared on an edit, or a blank rate when no rate was pre-filled.
+    if (hours === "" || !(Number(hours) > 0)) {
+      toast.error("Enter the hours worked.");
       return;
     }
-    onSaved();
+    if (rate === "" || !(Number(rate) > 0)) {
+      toast.error("Enter your rate (£/hr).");
+      return;
+    }
+    setBusy(true);
+    try {
+      const r = await upsertMyStatementLineAction({
+        id: line?.id,
+        statement_id: statementId,
+        description: description.trim(),
+        // Amount is derived server-side from hours × rate.
+        quantity: hours === "" ? "" : Number(hours),
+        unit_amount: rate === "" ? "" : Number(rate),
+        amount: "",
+        work_date: workDate || "",
+      });
+      if (!r.ok) {
+        toast.error(r.error);
+        return;
+      }
+      onSaved();
+    } catch {
+      toast.error("Couldn't save — check your connection and try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (

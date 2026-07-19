@@ -52,6 +52,12 @@ async function meAsStaff() {
   const hourlyRate = pay?.hourly_rate == null ? null : Number(pay.hourly_rate);
   const weeklyGuarantee = pay?.weekly_guarantee == null ? null : Number(pay.weekly_guarantee);
 
+  // No pay basis set → block invoicing rather than let them post silent £0 lines
+  // (hours × a blank rate = £0). The office must set a rate (or a guarantee) first.
+  if (hourlyRate == null && weeklyGuarantee == null) {
+    return { error: "Your pay rate isn’t set yet — ask the office to add it before you invoice." as const };
+  }
+
   return { sb, userId: user.id, staff: staffRow, hourlyRate, weeklyGuarantee };
 }
 
@@ -109,7 +115,7 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
   if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   const ctx = await meAsStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
-  const { sb, userId, staff } = ctx;
+  const { sb, userId, staff, weeklyGuarantee } = ctx;
   const { period_start, period_end } = parsed.data;
 
   // One live statement per period (0057 backs this at the DB). Reuse an existing
@@ -123,7 +129,12 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
     .neq("status", "void")
     .maybeSingle();
   if (existing) {
-    if (existing.status === "draft") return { ok: true as const, id: existing.id };
+    if (existing.status === "draft") {
+      // Reconcile the guarantee line so a guaranteed crew member sees (and can
+      // submit) their weekly minimum even with no lines added yet.
+      await recomputeTotal(sb, existing.id, weeklyGuarantee);
+      return { ok: true as const, id: existing.id };
+    }
     return { ok: false as const, error: "You've already submitted a statement for that week." };
   }
 
@@ -136,6 +147,11 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
     .select("id")
     .single();
   if (error || !created) return { ok: false as const, error: error?.message ?? "Could not create the statement." };
+
+  // Materialise the weekly-guarantee line up front so a guaranteed crew member's
+  // empty week already shows (and can submit) their minimum — the whole point of
+  // "paid whether there's work or not". A no-op for pure-hourly crew.
+  await recomputeTotal(sb, created.id, weeklyGuarantee);
 
   revalidatePath("/my-jobs/pay");
   return { ok: true as const, id: created.id };

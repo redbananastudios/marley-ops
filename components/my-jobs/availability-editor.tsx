@@ -121,11 +121,20 @@ export function AvailabilityEditor({
     const prev = pattern;
     setPattern(next);
     setPatPending(iw);
-    const r = await setMyWorkingDaysAction({ working_days: next });
-    setPatPending(null);
-    if (!r.ok) {
+    // try/finally: a rejected server action (flaky mobile signal, or a stale
+    // action id after a deploy) must still clear the pending flag — otherwise the
+    // whole "normal week" row stays disabled forever with no toast (freeze).
+    try {
+      const r = await setMyWorkingDaysAction({ working_days: next });
+      if (!r.ok) {
+        setPattern(prev);
+        toast.error(r.error);
+      }
+    } catch {
       setPattern(prev);
-      toast.error(r.error);
+      toast.error("Couldn't save — check your connection and try again.");
+    } finally {
+      setPatPending(null);
     }
   }
 
@@ -140,21 +149,31 @@ export function AvailabilityEditor({
       return n;
     });
     setPending((s) => new Set(s).add(iso));
-    const r = await setMyAvailabilityAction({ date: iso, status });
-    setPending((s) => {
-      const n = new Set(s);
-      n.delete(iso);
-      return n;
-    });
-    if (!r.ok) {
-      // Revert THIS day only.
+    // Revert THIS day only (per-item, never a whole-collection snapshot).
+    const revertThisDay = () =>
       setOverrides((m) => {
         const n = new Map(m);
         if (hadPrev) n.set(iso, prevVal!);
         else n.delete(iso);
         return n;
       });
-      toast.error(r.error);
+    // try/finally so a rejected action always clears the day's pending flag —
+    // else the cell stays disabled and its sheet can't be reopened (freeze).
+    try {
+      const r = await setMyAvailabilityAction({ date: iso, status });
+      if (!r.ok) {
+        revertThisDay();
+        toast.error(r.error);
+      }
+    } catch {
+      revertThisDay();
+      toast.error("Couldn't save — check your connection and try again.");
+    } finally {
+      setPending((s) => {
+        const n = new Set(s);
+        n.delete(iso);
+        return n;
+      });
     }
   }
 

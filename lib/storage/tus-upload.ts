@@ -116,7 +116,14 @@ export function uploadToMediaTarget(input: {
         if (aborted) throw new Error("Upload cancelled.");
         const start = (part.partNumber - 1) * target.partSizeBytes;
         const body = input.file.slice(start, start + target.partSizeBytes);
-        const response = await fetch(part.url, { method: "PUT", headers: part.headers, body });
+        // Bound each request — a half-open mobile socket would otherwise hang this
+        // fetch forever (the "media waits must always be bounded" lesson).
+        const response = await fetch(part.url, {
+          method: "PUT",
+          headers: part.headers,
+          body,
+          signal: AbortSignal.timeout(120_000),
+        });
         if (!response.ok) throw new Error(`Multipart upload part ${part.partNumber} failed.`);
         completed.push({ partNumber: part.partNumber, etag: response.headers.get("etag") ?? "" });
         input.onProgress?.((Math.min(input.file.size, start + body.size) / input.file.size) * 100);
@@ -125,6 +132,7 @@ export function uploadToMediaTarget(input: {
         method: "POST",
         headers: { "content-type": "application/json", ...target.complete.headers },
         body: JSON.stringify({ parts: completed }),
+        signal: AbortSignal.timeout(120_000),
       });
       if (!response.ok) throw new Error("Multipart upload completion failed.");
     })();
