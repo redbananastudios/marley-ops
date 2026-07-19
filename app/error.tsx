@@ -7,9 +7,10 @@
  * server-component throw was a dead end on an iPad mid-job).
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { RotateCcw, TriangleAlert } from "lucide-react";
+import { reloadOnceForChunkError } from "@/lib/chunk-reload";
 
 export default function RouteError({
   error,
@@ -18,10 +19,26 @@ export default function RouteError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const [updating, setUpdating] = useState(false);
+
   useEffect(() => {
+    // A stale-chunk failure after a deploy self-heals by reloading onto the new
+    // build (guarded against loops); everything else shows the recover screen.
+    if (reloadOnceForChunkError(error)) {
+      setUpdating(true);
+      return;
+    }
     // Server logs carry the real stack; the digest ties this render to it.
     console.error("route-error", error.digest ?? "", error.message);
   }, [error]);
+
+  if (updating) {
+    return (
+      <main className="flex min-h-[60vh] flex-1 items-center justify-center p-6">
+        <p className="text-sm text-mist-500">Updating to the latest version…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="flex min-h-[60vh] flex-1 items-center justify-center p-6">

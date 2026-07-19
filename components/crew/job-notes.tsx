@@ -15,6 +15,7 @@ import { useRouter } from "next/navigation";
 import { Camera, Loader2, NotebookPen, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { uploadToMediaTarget } from "@/lib/storage/tus-upload";
+import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
 import type { JobNoteView } from "@/lib/job-notes";
 import {
   addJobNoteAction,
@@ -57,7 +58,10 @@ export function JobNotes({
 
   const uploadFiles = useCallback(
     async (files: FileList) => {
-      const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (!imgs.length) return;
+      const list = imgs.filter((f) => f.size <= MAX_IMAGE_UPLOAD_BYTES);
+      if (list.length < imgs.length) toast.error(`Photos over ${MAX_IMAGE_UPLOAD_LABEL} were skipped.`);
       if (!list.length) return;
       if (pending.length + list.length > MAX_PHOTOS) {
         toast.error(`Up to ${MAX_PHOTOS} photos per note.`);
@@ -75,6 +79,7 @@ export function JobNotes({
           const target = await createJobPhotoUploadTargetAction(appointmentId, {
             path,
             mime: file.type || "image/jpeg",
+            bytes: file.size,
           });
           if (!target.ok) {
             toast.error(target.error);

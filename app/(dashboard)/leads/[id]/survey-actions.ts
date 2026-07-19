@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createMediaStore } from "@/lib/storage/media-store";
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
+import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
 import {
   SURVEY_PHOTOS_BUCKET,
   isSurveyPhotoCategory,
@@ -147,7 +148,7 @@ export async function deleteSurveyPhoto(photoId: string, storagePath: string, le
 export async function createSurveyPhotoUploadTargetAction(
   surveyId: string,
   category: SurveyPhotoCategory,
-  input: { path: string; mime: string },
+  input: { path: string; mime: string; bytes?: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
   const sb = await createClient();
   const {
@@ -163,6 +164,11 @@ export async function createSurveyPhotoUploadTargetAction(
   if (!isValidSurveyPhotoPath(input.path, surveyId, category)) {
     return { ok: false, error: "Invalid upload path." };
   }
+  // Size ceiling: reject an over-cap declared size, and bind the presigned PUT to
+  // it (R2 rejects any other Content-Length) so the browser can't exceed it.
+  if (typeof input.bytes === "number" && (input.bytes <= 0 || input.bytes > MAX_IMAGE_UPLOAD_BYTES)) {
+    return { ok: false, error: `That photo is too large — keep it under ${MAX_IMAGE_UPLOAD_LABEL}.` };
+  }
   // The survey must exist and be visible to this login (RLS-scoped read) before
   // a target is minted — a path can't point at a survey the caller can't reach.
   const { data: survey } = await sb.from("surveys").select("id").eq("id", surveyId).maybeSingle();
@@ -174,6 +180,7 @@ export async function createSurveyPhotoUploadTargetAction(
       objectKey: input.path,
       contentType,
       accessToken: session.access_token,
+      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
     });
     return { ok: true, target };
   } catch {

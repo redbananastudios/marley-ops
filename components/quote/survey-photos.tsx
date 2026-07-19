@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 import { uploadToMediaTarget } from "@/lib/storage/tus-upload";
+import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
 import {
   ensureSurveyForLead,
   recordSurveyPhoto,
@@ -95,7 +96,10 @@ export function SurveyPhotos({
 
   const uploadFiles = useCallback(
     async (files: FileList | File[]) => {
-      const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      const imgs = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (imgs.length === 0) return;
+      const list = imgs.filter((f) => f.size <= MAX_IMAGE_UPLOAD_BYTES);
+      if (list.length < imgs.length) toast.error(`Photos over ${MAX_IMAGE_UPLOAD_LABEL} were skipped.`);
       if (list.length === 0) return;
       const id = await ensureSurvey();
       if (!id) return;
@@ -109,6 +113,7 @@ export function SurveyPhotos({
           const target = await createSurveyPhotoUploadTargetAction(id, category, {
             path,
             mime: file.type,
+            bytes: file.size,
           });
           if (!target.ok) {
             toast.error(`Upload failed: ${target.error}`);

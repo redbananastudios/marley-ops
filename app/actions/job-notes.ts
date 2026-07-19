@@ -15,6 +15,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createMediaStore } from "@/lib/storage/media-store";
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
+import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
 import { isValidJobPhotoPath, JOB_PHOTOS_BUCKET, validateJobNote } from "@/lib/job-notes";
 
 /** Media store bound to the job-photos bucket (its own R2 key prefix). */
@@ -174,7 +175,7 @@ export async function deleteJobNoteAction(
  *  uploadToMediaTarget. */
 export async function createJobPhotoUploadTargetAction(
   appointmentId: string,
-  input: { path: string; mime: string },
+  input: { path: string; mime: string; bytes?: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
   const prof = await requireActiveProfile();
@@ -188,12 +189,18 @@ export async function createJobPhotoUploadTargetAction(
   if (!isValidJobPhotoPath(input.path, appointmentId)) {
     return { ok: false, error: "Invalid upload path." };
   }
+  // Size ceiling: reject an over-cap declared size, and bind the presigned PUT to
+  // it (R2 then rejects any other Content-Length) so the browser can't exceed it.
+  if (typeof input.bytes === "number" && (input.bytes <= 0 || input.bytes > MAX_IMAGE_UPLOAD_BYTES)) {
+    return { ok: false, error: `That photo is too large — keep it under ${MAX_IMAGE_UPLOAD_LABEL}.` };
+  }
   const contentType = input.mime?.startsWith("image/") ? input.mime : "image/jpeg";
   try {
     const target = await jobPhotosStore().createUploadTarget({
       objectKey: input.path,
       contentType,
       accessToken: session.access_token,
+      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
     });
     return { ok: true, target };
   } catch {
