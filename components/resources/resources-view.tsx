@@ -209,6 +209,7 @@ export function ResourcesView({
   unavailability,
   staffAvailability,
   today,
+  isAdmin,
   initialTab,
 }: {
   staff: StaffRow[];
@@ -216,6 +217,7 @@ export function ResourcesView({
   unavailability: UnavailabilityRow[];
   staffAvailability: StaffAvailabilityRow[];
   today: string;
+  isAdmin: boolean;
   initialTab: "staff" | "vehicles" | "availability";
 }) {
   const [tab, setTab] = useState<"staff" | "vehicles" | "availability">(initialTab);
@@ -324,6 +326,7 @@ export function ResourcesView({
                 key={s.id}
                 s={s}
                 segments={segmentsByStaff.get(s.id) ?? []}
+                isAdmin={isAdmin}
                 onEdit={() => setStaffEdit(s)}
               />
             ))}
@@ -355,6 +358,7 @@ export function ResourcesView({
         <StaffDialog
           row={staffEdit === "new" ? null : staffEdit}
           segments={staffEdit && staffEdit !== "new" ? (segmentsByStaff.get(staffEdit.id) ?? []) : []}
+          isAdmin={isAdmin}
           onClose={() => setStaffEdit(null)}
         />
       ) : null}
@@ -371,7 +375,7 @@ export function ResourcesView({
 
 /* ------------------------------------------------------------------ staff */
 
-function StaffCard({ s, segments, onEdit }: { s: StaffRow; segments: AvailabilitySegment[]; onEdit: () => void }) {
+function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: AvailabilitySegment[]; isAdmin: boolean; onEdit: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
 
@@ -434,10 +438,14 @@ function StaffCard({ s, segments, onEdit }: { s: StaffRow; segments: Availabilit
       ) : null}
 
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
-        <span className="tabular text-xs text-mist-400">
-          {s.hourly_rate != null ? `${gbp(s.hourly_rate)}/hr` : "no rate set"}
-          {s.weekly_guarantee != null ? ` · ${gbp(s.weekly_guarantee)}/wk min` : ""}
-        </span>
+        {isAdmin ? (
+          <span className="tabular text-xs text-mist-400">
+            {s.hourly_rate != null ? `${gbp(s.hourly_rate)}/hr` : "no rate set"}
+            {s.weekly_guarantee != null ? ` · ${gbp(s.weekly_guarantee)}/wk min` : ""}
+          </span>
+        ) : (
+          <span />
+        )}
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -472,10 +480,12 @@ function StaffCard({ s, segments, onEdit }: { s: StaffRow; segments: Availabilit
 function StaffDialog({
   row,
   segments,
+  isAdmin,
   onClose,
 }: {
   row: StaffRow | null;
   segments: AvailabilitySegment[];
+  isAdmin: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -530,7 +540,7 @@ function StaffDialog({
             <Label htmlFor="st-name">Name</Label>
             <Input id="st-name" className="h-11" value={v.full_name} onChange={(e) => setV({ ...v, full_name: e.target.value })} placeholder="e.g. Jack" />
           </div>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={cn("grid gap-4", isAdmin && "sm:grid-cols-2")}>
             <div className="grid gap-1.5">
               <Label htmlFor="st-role">Role</Label>
               <Select value={v.staff_role} onValueChange={(val) => setV({ ...v, staff_role: val as StaffInput["staff_role"] })}>
@@ -546,19 +556,23 @@ function StaffDialog({
                 </SelectContent>
               </Select>
             </div>
+            {isAdmin ? (
+              <div className="grid gap-1.5">
+                <Label htmlFor="st-rate">Hourly rate (£/hr)</Label>
+                <Input id="st-rate" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.hourly_rate} onChange={(e) => setV({ ...v, hourly_rate: e.target.value })} placeholder="15" />
+              </div>
+            ) : null}
+          </div>
+          {isAdmin ? (
             <div className="grid gap-1.5">
-              <Label htmlFor="st-rate">Hourly rate (£/hr)</Label>
-              <Input id="st-rate" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.hourly_rate} onChange={(e) => setV({ ...v, hourly_rate: e.target.value })} placeholder="15" />
+              <Label htmlFor="st-guarantee">Weekly guarantee (£, optional)</Label>
+              <Input id="st-guarantee" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.weekly_guarantee} onChange={(e) => setV({ ...v, weekly_guarantee: e.target.value })} placeholder="e.g. 600" />
+              <p className="text-xs text-mist-400">
+                Paid this minimum each week even with no work (a retained crew member). Leave blank for pure hourly — paid
+                only for hours worked. Rates are admin-only: estimators and crew never see them.
+              </p>
             </div>
-          </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="st-guarantee">Weekly guarantee (£, optional)</Label>
-            <Input id="st-guarantee" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.weekly_guarantee} onChange={(e) => setV({ ...v, weekly_guarantee: e.target.value })} placeholder="e.g. 600" />
-            <p className="text-xs text-mist-400">
-              Paid this minimum each week even with no work (a retained crew member). Leave blank for pure hourly — paid only
-              for hours worked. Rates are private: crew never see a colleague&apos;s.
-            </p>
-          </div>
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">
               <Label htmlFor="st-phone">Phone</Label>

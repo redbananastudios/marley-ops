@@ -24,7 +24,7 @@ async function requireOfficeActor() {
   if (!profile) return { error: "Not signed in." as const };
   if (profile.role !== "admin" && profile.role !== "estimator") return { error: "Office only." as const };
   const sb = await createClient();
-  return { sb, userId: profile.id };
+  return { sb, userId: profile.id, role: profile.role };
 }
 
 function nextDay(iso: string): string {
@@ -193,7 +193,7 @@ export async function saveStaffAction(input: StaffInput) {
   const v = parsed.data;
   const ctx = await requireOfficeActor();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
-  const { sb } = ctx;
+  const { sb, role } = ctx;
 
   const row = {
     full_name: v.full_name,
@@ -217,10 +217,10 @@ export async function saveStaffAction(input: StaffInput) {
     staffId = created.id;
   }
 
-  // Pay lives in the office-scoped staff_pay table (a crew member can't read a
-  // colleague's rate or self-set their own). Upsert the hourly rate + optional
-  // weekly guarantee.
-  if (staffId) {
+  // Pay lives in the admin-scoped staff_pay table (crew can't read a colleague's
+  // rate; estimators can't see rates at all). Only an ADMIN writes rates — an
+  // estimator saving a staff record leaves pay untouched (and never sends it).
+  if (staffId && role === "admin") {
     const hourly = v.hourly_rate === "" || v.hourly_rate == null ? null : v.hourly_rate;
     const guarantee = v.weekly_guarantee === "" || v.weekly_guarantee == null ? null : v.weekly_guarantee;
     const { error: payErr } = await sb

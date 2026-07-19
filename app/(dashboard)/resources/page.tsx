@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -16,6 +17,10 @@ type SearchParams = { tab?: string };
 export default async function ResourcesPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   const supabase = await createClient();
+  // Crew pay rates are admin-only. RLS already returns no staff_pay rows to an
+  // estimator; this flag also hides the rate UI (card line + form fields).
+  const profile = await getSessionProfile();
+  const isAdmin = profile?.role === "admin";
 
   // Availability is shown/edited forward only — a past day off is history.
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -57,6 +62,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
         unavailability={(unavailability ?? []) as UnavailabilityRow[]}
         staffAvailability={(staffAvailability ?? []) as StaffAvailabilityRow[]}
         today={today}
+        isAdmin={isAdmin}
         initialTab={sp.tab === "vehicles" ? "vehicles" : sp.tab === "availability" ? "availability" : "staff"}
       />
     </main>
