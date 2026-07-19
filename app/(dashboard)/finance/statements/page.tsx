@@ -53,7 +53,7 @@ export default async function ContractorPayPage() {
   }
 
   const rows: OfficeStatement[] = statements.map((s) => {
-    const staffName = nameById.get(s.staff_id) ?? "Crew";
+    const staffName = nameById.get(s.staff_id) ?? "Contractor";
     const myLines = (linesByStmt.get(s.id) ?? []).map((l) => ({
       description: l.description,
       work_date: l.work_date,

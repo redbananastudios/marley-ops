@@ -203,10 +203,18 @@ export async function seedMyEstimatorWorkAction(input: { statement_id: string })
   }
   const completionLeadIds = [...completionByLead.keys()];
 
-  // Batch the enrichment reads for both phone-quote and commission candidates.
-  const allLeadIds = [...new Set([...phoneCandidateLeadIds, ...completionLeadIds])];
+  // Batch the enrichment reads. Survey leads are folded in too so a survey line
+  // always resolves the customer NAME (not "Customer") even when that lead had no
+  // quote sent / job completed this week — this prints on a paid document.
+  const surveyLeadIds = surveyRows.map((a) => a.lead_id).filter(Boolean) as string[];
+  const allLeadIds = [...new Set([...surveyLeadIds, ...phoneCandidateLeadIds, ...completionLeadIds])];
   if (!allLeadIds.length && !surveyRows.length) {
-    return { ok: false as const, error: "No survey visits, phone quotes or completed jobs found for this week." };
+    // Nothing to bill this week. Clear any previously-seeded computed lines (a
+    // source may have been cancelled since a prior seed) and keep manual lines.
+    await sb.from("staff_statement_lines").delete().eq("statement_id", stmt.id).in("source", [...ESTIMATOR_SOURCES]);
+    await recomputeEstimatorTotal(sb, stmt.id);
+    revalidatePath(`/estimator/pay/${stmt.id}`);
+    return { ok: true as const, added: 0 };
   }
 
   const [{ data: leadRows }, { data: leadSurveyAppts }, { data: allQuotes }] = await Promise.all([

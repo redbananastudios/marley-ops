@@ -202,8 +202,8 @@ export async function updateSettingsAction(input: SettingsInput) {
     .from("business_settings")
     .update({
       estimator_fee: v.estimatorFee,
-      estimator_phone_quote_fee: v.estimatorPhoneQuoteFee as never,
-      estimator_commission_pct: v.estimatorCommissionPct as never,
+      estimator_phone_quote_fee: v.estimatorPhoneQuoteFee,
+      estimator_commission_pct: v.estimatorCommissionPct,
       cost_fuel_per_mile: v.costFuelPerMile,
       cost_fuel_75_per_mile: v.costFuel75PerMile,
       cost_labour_per_day: v.costLabourPerDay,

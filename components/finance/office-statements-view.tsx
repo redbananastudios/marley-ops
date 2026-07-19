@@ -1,12 +1,12 @@
 "use client";
 
 /**
- * Office view of crew contractor invoices (Finance › Crew pay). Submitted
- * invoices are the ones needing action — expand to see the lines, then mark
- * paid (BACS / cash), RETURN to the crew for a fix, or void a mistake.
- * Everything is downloadable as the branded no-VAT PDF. Contractor invoicing
- * hinges on the crew confirming their own pay, so we never silently edit their
- * lines — a correction goes back to them via Return.
+ * Office view of contractor invoices (Finance › Contractor pay) — crew AND
+ * estimators. Submitted invoices are the ones needing action: expand to see the
+ * lines, then mark paid (BACS / cash), RETURN to the contractor for a fix, or
+ * void a mistake. Everything is downloadable as the branded no-VAT PDF.
+ * Contractor invoicing hinges on the contractor confirming their own pay, so we
+ * never silently edit their lines — a correction goes back to them via Return.
  */
 
 import { useMemo, useState } from "react";
@@ -303,7 +303,7 @@ function ReturnDialog({
             className="focus-ring inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md bg-mm-red text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-60"
           >
             {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <CornerUpLeft className="size-4" strokeWidth={1.75} />}
-            Return to crew
+            Return for changes
           </button>
         </div>
       </div>

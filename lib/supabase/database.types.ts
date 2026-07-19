@@ -566,7 +566,9 @@ export type Database = {
           cubic_luton_ft3: number
           cubic_transit_ft3: number
           default_deposit: number
+          estimator_commission_pct: number
           estimator_fee: number
+          estimator_phone_quote_fee: number
           fleet_alert_recipients: string[]
           fleet_reminders_enabled: boolean
           google_review_url: string
@@ -608,7 +610,9 @@ export type Database = {
           cubic_luton_ft3?: number
           cubic_transit_ft3?: number
           default_deposit?: number
+          estimator_commission_pct?: number
           estimator_fee?: number
+          estimator_phone_quote_fee?: number
           fleet_alert_recipients?: string[]
           fleet_reminders_enabled?: boolean
           google_review_url?: string
@@ -650,7 +654,9 @@ export type Database = {
           cubic_luton_ft3?: number
           cubic_transit_ft3?: number
           default_deposit?: number
+          estimator_commission_pct?: number
           estimator_fee?: number
+          estimator_phone_quote_fee?: number
           fleet_alert_recipients?: string[]
           fleet_reminders_enabled?: boolean
           google_review_url?: string

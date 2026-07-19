@@ -89,6 +89,25 @@ export function EstimatorStatementEditor({
     }
   }
 
+  // Seeding has its own handler (not run()) so the toast reflects the count — a
+  // week with genuinely no work is a normal empty state, not an error.
+  async function seed() {
+    setBusy("seed");
+    try {
+      const r = await seedMyEstimatorWorkAction({ statement_id: statement.id });
+      if (!r.ok) {
+        toast.error(r.error ?? "Something went wrong.");
+        return;
+      }
+      toast.success(r.added ? `Added ${r.added} line${r.added === 1 ? "" : "s"}.` : "No new work to add for this week.");
+      router.refresh();
+    } catch {
+      toast.error("Couldn't reach the server — check your connection and try again.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const total = lines.reduce((s, l) => s + Number(l.amount ?? 0), 0);
 
   return (
@@ -120,7 +139,7 @@ export function EstimatorStatementEditor({
         <button
           type="button"
           disabled={busy !== null}
-          onClick={() => run("seed", () => seedMyEstimatorWorkAction({ statement_id: statement.id }), "Added your work.")}
+          onClick={seed}
           className="focus-ring mt-4 flex w-full items-center gap-3 rounded-xl border border-dashed border-mm-red/40 bg-mm-red/5 px-4 py-3 text-left hover:bg-mm-red/10 disabled:opacity-60"
         >
           <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mm-red/10 text-mm-red">
