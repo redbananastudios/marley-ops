@@ -96,8 +96,8 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
     <div>
       {!enabled ? (
         <div className="mb-4 rounded-lg border border-warn/30 bg-warn-bg px-4 py-3 text-sm text-warn">
-          Contractor invoicing is switched off — crew can&apos;t build new invoices. Turn it on in Settings › Contractor
-          invoicing once each contractor has signed the agreement.
+          Contractor invoicing is switched off — contractors can&apos;t build new invoices. Turn it on in Settings ›
+          Contractor invoicing once each contractor has signed the agreement.
         </div>
       ) : null}
 
@@ -218,7 +218,7 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
                     )}
                     {s.pdf.note ? (
                       <p className="mt-3 rounded-md bg-muted px-3 py-2 text-xs text-mist-500">
-                        <span className="font-semibold text-mist-400">Crew note:</span> {s.pdf.note}
+                        <span className="font-semibold text-mist-400">Note:</span> {s.pdf.note}
                       </p>
                     ) : null}
                   </div>
@@ -258,7 +258,7 @@ function ReturnDialog({
 
   async function submit() {
     if (!reason.trim()) {
-      toast.error("Give the crew a reason.");
+      toast.error("Give a reason for the change.");
       return;
     }
     setBusy(true);

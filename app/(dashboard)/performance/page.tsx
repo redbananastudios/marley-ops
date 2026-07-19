@@ -10,7 +10,6 @@ import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
 import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
-import { MarkPaidButton } from "@/components/performance/mark-paid-button";
 import { SalesTab } from "@/components/performance/sales-tab";
 import { StorageTab, type CurrentLetRow } from "@/components/performance/storage-tab";
 import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
@@ -204,7 +203,6 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Month boundaries as UK-midnight instants (the panel runs on UK time).
   const monthStart = ukInstant(year, month0 + 1, 1);
   const monthEnd = ukInstant(year, month0 + 2, 1);
-  const periodMonth = `${year}-${pad(month0 + 1)}-01`;
   const prev = new Date(Date.UTC(year, month0 - 1, 1));
   const next = new Date(Date.UTC(year, month0 + 1, 1));
   const prevHref = `/performance?month=${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}`;
@@ -212,7 +210,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UK_TZ });
 
   const sb = await createClient();
-  const [{ data: appts }, { data: profiles }, { data: leads }, { data: quotes }, { data: payouts }] =
+  const [{ data: appts }, { data: profiles }, { data: leads }, { data: quotes }] =
     await Promise.all([
       sb
         .from("appointments")
@@ -224,7 +222,6 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       sb.from("profiles").select("id, full_name"),
       sb.from("leads").select("id, name, status"),
       sb.from("quotes").select("lead_id, status, agreed_price, grand_total"),
-      sb.from("estimator_payouts").select("estimator_id, paid_at").eq("period_month", periodMonth),
     ]);
 
   // Accepted quotes in this month = the booked jobs we score margin on.
@@ -262,8 +259,6 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       wonLeadIds.add(q.lead_id);
     }
   }
-  const paidBy = new Map((payouts ?? []).map((p) => [p.estimator_id, !!p.paid_at]));
-
   const visits: EstimatorVisit[] = (appts ?? [])
     .filter((a) => a.estimator_id)
     .map((a) => ({
@@ -348,8 +343,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                   <th className="eyebrow px-2 py-3 text-right font-semibold">Won</th>
                   <th className="eyebrow px-2 py-3 text-right font-semibold">Win rate</th>
                   <th className="eyebrow px-2 py-3 text-right font-semibold">£ Won</th>
-                  <th className="eyebrow px-2 py-3 text-right font-semibold">Fee owed</th>
-                  <th className="eyebrow px-5 py-3 text-right font-semibold">Payroll</th>
+                  <th className="eyebrow px-5 py-3 text-right font-semibold">Fee owed</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -360,16 +354,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                     <td className="tabular px-2 py-3 text-right text-foreground">{e.won}</td>
                     <td className="tabular px-2 py-3 text-right text-mist-500">{e.winRate}%</td>
                     <td className="tabular px-2 py-3 text-right text-foreground">{e.wonValue > 0 ? gbp(e.wonValue) : "—"}</td>
-                    <td className="tabular px-2 py-3 text-right font-semibold text-foreground">{gbp(e.fee)}</td>
-                    <td className="px-5 py-3 text-right">
-                      <MarkPaidButton
-                        estimatorId={e.id}
-                        periodMonth={periodMonth}
-                        visits={e.visits}
-                        amount={e.fee}
-                        paid={paidBy.get(e.id) ?? false}
-                      />
-                    </td>
+                    <td className="tabular px-5 py-3 text-right font-semibold text-foreground">{gbp(e.fee)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -378,14 +363,17 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                   <td className="px-5 py-3 text-sm font-semibold text-foreground" colSpan={5}>
                     Total fees
                   </td>
-                  <td className="tabular px-2 py-3 text-right font-display text-base font-bold text-foreground">{gbp(totalFee)}</td>
-                  <td />
+                  <td className="tabular px-5 py-3 text-right font-display text-base font-bold text-foreground">{gbp(totalFee)}</td>
                 </tr>
               </tfoot>
             </table>
           </div>
         )}
       </Card>
+      <p className="mt-2 text-xs text-mist-400">
+        This is a reporting view. Estimators are paid through their own weekly contractor invoices (Finance → Contractor pay),
+        which also cover telephone quotes and completion commission.
+      </p>
 
       {/* itemised visits */}
       {visits.length > 0 ? (

@@ -37,6 +37,7 @@ type RateSettingKey = Exclude<
   | "vatStaggerGroup"
   | "vatScheme"
   | "vatFlatRatePct"
+  | "estimatorCommissionPct"
   | "baseLocation"
   | "googleReviewUrl"
   | "aiSurveyEnabled"
@@ -49,7 +50,8 @@ type RateSettingKey = Exclude<
 >;
 
 const FIELDS: FieldDef[] = [
-  { key: "estimatorFee", label: "Estimator fee per visit", hint: "Paid per attended survey. Drives Performance + the dashboard.", unit: "£" },
+  { key: "estimatorFee", label: "Estimator fee per visit", hint: "Paid per attended survey. Drives Performance + the estimator's invoice.", unit: "£" },
+  { key: "estimatorPhoneQuoteFee", label: "Estimator phone-quote fee", hint: "Paid per telephone quote where the estimator doesn't attend a survey.", unit: "£" },
   { key: "costFuelPerMile", label: "Luton fuel cost per mile", hint: "Per mile, per Luton van. Fuel scales with vans.", unit: "£/mile" },
   { key: "costFuel75PerMile", label: "7.5t fuel cost per mile", hint: "Per mile, per 7.5t lorry.", unit: "£/mile" },
   { key: "costLabourPerDay", label: "Labour day rate (per man)", hint: "Per man per day. Bills the full crew: vans + 1, plus each 7.5t's crew.", unit: "£/day" },
@@ -109,8 +111,10 @@ export function SettingsForm({
   const [vatFlatRatePct, setVatFlatRatePct] = useState(String(initial.vatFlatRatePct));
   const [baseLocation, setBaseLocation] = useState(initial.baseLocation);
   const [googleReviewUrl, setGoogleReviewUrl] = useState(initial.googleReviewUrl);
+  const [estimatorCommissionPct, setEstimatorCommissionPct] = useState(String(initial.estimatorCommissionPct));
   const [v, setV] = useState<Record<RateSettingKey, string>>({
     estimatorFee: String(initial.estimatorFee),
+    estimatorPhoneQuoteFee: String(initial.estimatorPhoneQuoteFee),
     costFuelPerMile: String(initial.costFuelPerMile),
     costFuel75PerMile: String(initial.costFuel75PerMile),
     costLabourPerDay: String(initial.costLabourPerDay),
@@ -130,6 +134,8 @@ export function SettingsForm({
     setBusy(true);
     const payload = {
       estimatorFee: Number(v.estimatorFee),
+      estimatorPhoneQuoteFee: Number(v.estimatorPhoneQuoteFee),
+      estimatorCommissionPct: Number(estimatorCommissionPct),
       costFuelPerMile: Number(v.costFuelPerMile),
       costFuel75PerMile: Number(v.costFuel75PerMile),
       costLabourPerDay: Number(v.costLabourPerDay),
@@ -180,6 +186,30 @@ export function SettingsForm({
             <p className="text-xs text-mist-400">{f.hint}</p>
           </div>
         ))}
+      </div>
+
+      {/* Estimator completion commission — % of the ex-VAT job value, on completion */}
+      <div className="border-t px-5 py-4">
+        <Label htmlFor="set-estimator-commission">Estimator completion commission</Label>
+        <div className="mt-1.5 flex h-11 w-40 items-center rounded-md border border-input bg-card px-3 focus-within:border-mm-red focus-within:ring-2 focus-within:ring-mm-red/30 has-disabled:opacity-60">
+          <input
+            id="set-estimator-commission"
+            type="number"
+            inputMode="decimal"
+            min={0}
+            max={100}
+            step="0.5"
+            value={estimatorCommissionPct}
+            disabled={!canEdit || busy}
+            onChange={(e) => setEstimatorCommissionPct(e.target.value)}
+            className="tabular h-full w-full bg-transparent text-sm text-foreground focus:outline-none disabled:cursor-not-allowed"
+          />
+          <span className="ml-1 shrink-0 text-sm text-mist-400">%</span>
+        </div>
+        <p className="mt-1.5 text-xs text-mist-400">
+          Paid to the estimator on a job&apos;s completion, as a % of the ex-VAT job value (Luke = 7.5%). Appears on their weekly
+          invoice for jobs that completed that week.
+        </p>
       </div>
 
       {/* Cubic survey van planning — feeds the volume→van recommendation */}

@@ -70,6 +70,8 @@ const num = z.coerce.number().nonnegative("Must be 0 or more");
 
 const settingsSchema = z.object({
   estimatorFee: num,
+  estimatorPhoneQuoteFee: num,
+  estimatorCommissionPct: z.coerce.number().min(0, "Commission % must be 0–100").max(100, "Commission % must be 0–100"),
   costFuelPerMile: num,
   costFuel75PerMile: num,
   costLabourPerDay: num,
@@ -200,6 +202,8 @@ export async function updateSettingsAction(input: SettingsInput) {
     .from("business_settings")
     .update({
       estimator_fee: v.estimatorFee,
+      estimator_phone_quote_fee: v.estimatorPhoneQuoteFee as never,
+      estimator_commission_pct: v.estimatorCommissionPct as never,
       cost_fuel_per_mile: v.costFuelPerMile,
       cost_fuel_75_per_mile: v.costFuel75PerMile,
       cost_labour_per_day: v.costLabourPerDay,

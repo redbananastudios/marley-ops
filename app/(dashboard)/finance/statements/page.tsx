@@ -9,10 +9,14 @@ import type { StatementPdfData } from "@/lib/staff/statement-docdef";
 
 export const dynamic = "force-dynamic";
 
-export default async function CrewPayPage() {
+export default async function ContractorPayPage() {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
-  if (profile.role !== "admin" && profile.role !== "estimator") redirect("/my-jobs");
+  // Admin-only: this reviews + pays EVERY contractor (crew + estimators). An
+  // estimator must never see crew pay or reach the pay/return controls for their
+  // own invoice — they manage only their own at /estimator/pay.
+  if (profile.role === "estimator") redirect("/estimator/pay");
+  if (profile.role !== "admin") redirect("/my-jobs");
 
   const sb = await createClient();
   const { data: settings } = await sb.from("business_settings").select("self_billing_enabled").maybeSingle();
@@ -88,7 +92,7 @@ export default async function CrewPayPage() {
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Finance" title="Crew pay" />
+      <PageHeader eyebrow="Finance" title="Contractor pay" />
       <OfficeStatementsView statements={rows} enabled={!!settings?.self_billing_enabled} />
     </main>
   );

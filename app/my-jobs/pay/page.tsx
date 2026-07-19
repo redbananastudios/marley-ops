@@ -32,6 +32,9 @@ const STATUS_META: Record<string, string> = {
 export default async function CrewPayPage() {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
+  // Crew-only surface. Estimators invoice at /estimator/pay; admins manage all pay
+  // at /finance/statements. Keeps the two contractor-invoice surfaces from mixing.
+  if (profile.role !== "crew") redirect(profile.role === "admin" ? "/finance/statements" : "/estimator/pay");
   const sb = await createClient();
 
   const enabled = await isSelfBillingEnabled();

@@ -8,6 +8,10 @@ import { DEFAULT_AI_MODEL, isApprovedAiModelId, type AiModelId } from "@/lib/ai/
  */
 export interface BusinessSettings {
   estimatorFee: number;
+  /** £ per over-the-phone quote where the estimator did NOT attend a survey. */
+  estimatorPhoneQuoteFee: number;
+  /** % of the ex-VAT job value paid to the estimator on completion (Luke = 7.5). */
+  estimatorCommissionPct: number;
   /** Luton van fuel cost per mile (billed per Luton). */
   costFuelPerMile: number;
   /** 7.5t lorry fuel cost per mile (billed per lorry). */
@@ -59,6 +63,8 @@ export const DEFAULT_BASE_LOCATION = "Ash Cottage, Sherborne Causeway, Shaftesbu
 
 export const DEFAULT_SETTINGS: BusinessSettings = {
   estimatorFee: 50,
+  estimatorPhoneQuoteFee: 10,
+  estimatorCommissionPct: 7.5,
   costFuelPerMile: 0.5,
   costFuel75PerMile: 0.5,
   costLabourPerDay: 120,
@@ -95,6 +101,8 @@ export function mapBusinessSettings(data: Record<string, unknown> | null | undef
   const modelEscalation = data.ai_model_escalation;
   return {
     estimatorFee: Number(data.estimator_fee ?? DEFAULT_SETTINGS.estimatorFee),
+    estimatorPhoneQuoteFee: Number(data.estimator_phone_quote_fee ?? DEFAULT_SETTINGS.estimatorPhoneQuoteFee),
+    estimatorCommissionPct: Number(data.estimator_commission_pct ?? DEFAULT_SETTINGS.estimatorCommissionPct),
     costFuelPerMile: Number(data.cost_fuel_per_mile ?? DEFAULT_SETTINGS.costFuelPerMile),
     costFuel75PerMile: Number(data.cost_fuel_75_per_mile ?? DEFAULT_SETTINGS.costFuel75PerMile),
     costLabourPerDay: Number(data.cost_labour_per_day ?? DEFAULT_SETTINGS.costLabourPerDay),
@@ -136,7 +144,7 @@ export async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, vat_scheme, vat_flat_rate_pct, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
+    .select("estimator_fee, estimator_phone_quote_fee, estimator_commission_pct, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, vat_scheme, vat_flat_rate_pct, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
     .eq("id", true)
     .maybeSingle();
   return mapBusinessSettings(data as Record<string, unknown> | null);

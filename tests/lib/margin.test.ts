@@ -4,6 +4,8 @@ import type { BusinessSettings } from "@/lib/settings";
 
 const RATES: BusinessSettings = {
   estimatorFee: 50,
+  estimatorPhoneQuoteFee: 10,
+  estimatorCommissionPct: 7.5,
   costFuelPerMile: 0.5,
   costFuel75PerMile: 0.5,
   costLabourPerDay: 120,

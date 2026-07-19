@@ -70,7 +70,7 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/payments", label: "Payments", icon: Banknote },
       { href: "/finance", label: "Invoices & VAT", icon: ReceiptText },
-      { href: "/finance/statements", label: "Crew pay", icon: HandCoins },
+      { href: "/finance/statements", label: "Contractor pay", icon: HandCoins },
     ],
   },
   {
@@ -135,6 +135,10 @@ const ESTIMATOR_NAV: NavGroup[] = [
       { href: "/bookings", label: "Bookings", icon: ClipboardCheck },
       { href: "/payments", label: "Payments", icon: Banknote },
     ],
+  },
+  {
+    group: "Your pay",
+    items: [{ href: "/estimator/pay", label: "My invoices", icon: HandCoins }],
   },
   {
     group: "System",

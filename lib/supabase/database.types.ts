@@ -2983,6 +2983,7 @@ export type Database = {
           created_at: string
           description: string
           id: string
+          lead_id: string | null
           quantity: number | null
           sort_index: number
           source: string
@@ -2997,6 +2998,7 @@ export type Database = {
           created_at?: string
           description: string
           id?: string
+          lead_id?: string | null
           quantity?: number | null
           sort_index?: number
           source?: string
@@ -3011,6 +3013,7 @@ export type Database = {
           created_at?: string
           description?: string
           id?: string
+          lead_id?: string | null
           quantity?: number | null
           sort_index?: number
           source?: string

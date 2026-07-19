@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import {
   computeLineAmount,
   seedLinesFromDays,
@@ -28,6 +29,13 @@ async function meAsStaff() {
     data: { user },
   } = await sb.auth.getUser();
   if (!user) return { error: "Not signed in." as const };
+
+  // CREW ONLY. Estimators invoice via /estimator/pay against the SAME staff_id +
+  // period keyspace — without this gate an estimator could reuse their own draft
+  // through the crew path, and crew recomputeTotal would fold estimator lines +
+  // a weekly-guarantee floor into it and corrupt the total.
+  const profile = await getSessionProfile();
+  if (!profile || profile.role !== "crew") return { error: "This is the crew pay page." as const };
 
   if (!(await isSelfBillingEnabled())) return { error: "Contractor invoicing isn't switched on yet." as const };
 

@@ -16,6 +16,7 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
   const { id } = await params;
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
+  if (profile.role !== "crew") redirect(profile.role === "admin" ? "/finance/statements" : "/estimator/pay");
   const sb = await createClient();
 
   if (!(await isSelfBillingEnabled())) redirect("/my-jobs/pay");
