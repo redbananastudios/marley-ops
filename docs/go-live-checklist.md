@@ -10,17 +10,19 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 ## Pre-cutover BUILD (us) — must land before cutover
 
-1. ☐ **Crew pay model → hourly rates + weekly timesheets** (Connor+Leanne, 19 Jul).
-   Move crew off flat `staff.day_rate` onto an **hourly rate** + optional **weekly
-   guarantee**: Rob £15/hr floored at £600/wk (paid whether there's work or not);
-   Jack £15, Charlie £13.50, Oscar £10 — pure hourly, paid on days worked. Crew "My
-   pay" gains a Mon–Sun **timesheet** (hours/day, seeded from assignments) → the
-   contractor-invoice total is Σ(hours×rate), floored at the guarantee for Rob;
-   job-costing/margin read hours, not days. Design + rates + open clarifications in
-   memory [[marley-crew-pay-model]]. **Gate: Rob's £600-regardless + hourly pay +
-   timesheets sharpen the employment-status question — the accountant's IR35 ruling
-   is required before the first real pay run** (pairs with F IR35 + the agreement
-   wording review).
+1. ☑ **Crew pay model → hourly rates (SHIPPED `86f68a8`, 19 Jul)** — migrations
+   0061+0062 live prod+dev. Crew off flat day-rate onto an **hourly rate** + optional
+   **weekly guarantee** (Rob £15/hr, £600/wk floor; Jack £15, Charlie £13.50, Oscar
+   £10; Charlie newly created; Crew Test £15). Crew invoice = hours × their pre-filled
+   own rate; a guaranteed crew member gets a top-up line to the floor (materialised at
+   creation, so an empty guaranteed week still invoices £600). **Rates private**
+   (office-scoped `staff_pay`; a crew member reads only their own, can't self-set).
+   Two opus code reviews' findings all fixed. Design + rates in [[marley-crew-pay-model]].
+   **Gate still open: the accountant's IR35 ruling before the FIRST REAL pay run**
+   (Rob's £600-regardless + hourly + we-price-the-hours all lean employee — pairs with
+   F IR35 + the agreement-wording review). Two follow-up decisions for Peter: whether a
+   guaranteed crew member's expense lines pay on top of the £600 (today absorbed), and
+   whether estimators (contractors themselves) should see crew rates.
 
 ---
 
