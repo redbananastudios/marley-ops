@@ -204,7 +204,7 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
                               {(() => {
                                 const meta = [
                                   dayLabel(l.work_date),
-                                  l.quantity != null && l.unit_amount != null ? `${l.quantity} × ${gbp(l.unit_amount)}` : null,
+                                  l.quantity != null && l.unit_amount != null ? `${l.quantity} hrs × ${gbp(l.unit_amount)}` : null,
                                 ]
                                   .filter(Boolean)
                                   .join(" · ");

@@ -49,12 +49,12 @@ export function StatementEditor({
   statement,
   lines,
   pdfData,
-  dayRate,
+  hourlyRate,
 }: {
   statement: StatementHead;
   lines: Line[];
   pdfData: StatementPdfData;
-  dayRate: number | null;
+  hourlyRate: number | null;
 }) {
   const router = useRouter();
   const editable = statement.status === "draft";
@@ -134,14 +134,19 @@ export function StatementEditor({
                 <p className="text-xs text-mist-400">
                   {[
                     l.work_date ? new Date(`${l.work_date}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : null,
-                    l.quantity != null && l.unit_amount != null ? `${l.quantity} × ${gbp(l.unit_amount)}` : null,
+                    l.quantity != null && l.unit_amount != null ? `${l.quantity} hrs × ${gbp(l.unit_amount)}` : null,
                   ]
                     .filter(Boolean)
-                    .join(" · ") || (l.source === "job" ? "From your jobs" : "Added by hand")}
+                    .join(" · ") ||
+                    (l.source === "guarantee"
+                      ? "Automatic — tops you up to your weekly minimum"
+                      : l.source === "job"
+                        ? "From your jobs"
+                        : "Added by hand")}
                 </p>
               </div>
               <span className="shrink-0 text-sm font-semibold tabular text-foreground">{gbp(l.amount)}</span>
-              {editable ? (
+              {editable && l.source !== "guarantee" ? (
                 <div className="flex shrink-0 items-center">
                   <button
                     type="button"
@@ -199,7 +204,7 @@ export function StatementEditor({
         <LineSheet
           line={sheet === "new" ? null : sheet}
           statementId={statement.id}
-          dayRate={dayRate}
+          hourlyRate={hourlyRate}
           onClose={() => setSheet(null)}
           onSaved={() => {
             setSheet(null);
@@ -260,20 +265,30 @@ function StatusPill({ status }: { status: StatementStatus }) {
 function LineSheet({
   line,
   statementId,
-  dayRate,
+  hourlyRate,
   onClose,
   onSaved,
 }: {
   line: Line | null;
   statementId: string;
-  dayRate: number | null;
+  hourlyRate: number | null;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [description, setDescription] = useState(line?.description ?? "");
-  const [amount, setAmount] = useState(line?.amount != null ? String(line.amount) : "");
+  // Hours × rate. New lines pre-fill the rate with the crew member's own rate so
+  // they only type hours; existing lines keep their stored rate.
+  const [hours, setHours] = useState(line?.quantity != null ? String(line.quantity) : "");
+  const [rate, setRate] = useState(
+    line?.unit_amount != null ? String(line.unit_amount) : hourlyRate != null ? String(hourlyRate) : "",
+  );
   const [workDate, setWorkDate] = useState(line?.work_date ?? "");
   const [busy, setBusy] = useState(false);
+
+  const hoursNum = hours === "" ? null : Number(hours);
+  const rateNum = rate === "" ? null : Number(rate);
+  const lineTotal =
+    hoursNum != null && rateNum != null && !isNaN(hoursNum) && !isNaN(rateNum) ? Math.max(0, hoursNum * rateNum) : 0;
 
   async function save() {
     if (!description.trim()) {
@@ -285,7 +300,10 @@ function LineSheet({
       id: line?.id,
       statement_id: statementId,
       description: description.trim(),
-      amount: amount === "" ? "" : Number(amount),
+      // Amount is derived server-side from hours × rate.
+      quantity: hours === "" ? "" : Number(hours),
+      unit_amount: rate === "" ? "" : Number(rate),
+      amount: "",
       work_date: workDate || "",
     });
     setBusy(false);
@@ -307,24 +325,40 @@ function LineSheet({
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="e.g. Retainer day, extra load, worked Sat…"
+          placeholder="e.g. Worked Tue, extra load, worked Sat…"
           className="focus-ring mt-1 h-12 w-full rounded-md border border-input bg-card px-3 text-base"
         />
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-mist-500">Amount (£)</label>
+            <label className="block text-xs font-medium text-mist-500">Hours</label>
             <input
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              value={hours}
+              onChange={(e) => setHours(e.target.value)}
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.25"
+              placeholder="8"
+              className="focus-ring mt-1 h-12 w-full rounded-md border border-input bg-card px-3 text-base"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-mist-500">Rate (£/hr)</label>
+            <input
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
               type="number"
               inputMode="decimal"
               min={0}
               step="0.01"
-              placeholder="120"
+              placeholder="15"
               className="focus-ring mt-1 h-12 w-full rounded-md border border-input bg-card px-3 text-base"
             />
           </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-mist-500">Date (optional)</label>
             <input
@@ -334,17 +368,13 @@ function LineSheet({
               className="focus-ring mt-1 h-12 w-full rounded-md border border-input bg-card px-3 text-base"
             />
           </div>
+          <div className="flex flex-col justify-end">
+            <span className="block text-xs font-medium text-mist-500">Line total</span>
+            <span className="mt-1 flex h-12 items-center rounded-md bg-muted px-3 text-base font-semibold tabular text-foreground">
+              {gbp(lineTotal)}
+            </span>
+          </div>
         </div>
-
-        {dayRate != null && dayRate > 0 ? (
-          <button
-            type="button"
-            onClick={() => setAmount(String(dayRate))}
-            className="focus-ring mt-2.5 inline-flex items-center rounded-full border border-input bg-card px-3 py-1.5 text-xs font-medium text-mist-500 hover:bg-muted"
-          >
-            Use day rate {gbp(dayRate)}
-          </button>
-        ) : null}
 
         <div className="mt-4 flex gap-2">
           <button

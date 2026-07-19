@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   computeLineAmount,
+  DEFAULT_DAY_HOURS,
+  guaranteeTopUp,
   periodLabel,
   previousWeekPeriod,
   round2,
@@ -69,21 +71,51 @@ describe("periodLabel", () => {
 });
 
 describe("seedLinesFromDays", () => {
-  it("makes one deduped, date-sorted line per day at the day rate", () => {
+  it("makes one deduped, date-sorted line per day at hours × the hourly rate", () => {
     const lines = seedLinesFromDays(
       [
         { date: "2026-07-22", label: "Move — Smith" },
         { date: "2026-07-20" },
         { date: "2026-07-20" }, // duplicate day collapses
       ],
-      120,
+      15, // £15/hr
     );
     expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatchObject({ work_date: "2026-07-20", amount: 120, source: "job", description: "Worked Mon 20 Jul" });
+    // default 8-hour day → 8 × £15 = £120, hours in quantity, rate in unit_amount
+    expect(lines[0]).toMatchObject({
+      work_date: "2026-07-20",
+      quantity: DEFAULT_DAY_HOURS,
+      unit_amount: 15,
+      amount: 120,
+      source: "job",
+      description: "Worked Mon 20 Jul",
+    });
     expect(lines[1].description).toBe("Worked Wed 22 Jul — Move — Smith");
   });
-  it("uses 0 when no day rate is set (crew fill it in)", () => {
+  it("honours an explicit day length", () => {
+    const lines = seedLinesFromDays([{ date: "2026-07-20" }], 13.5, 10);
+    expect(lines[0]).toMatchObject({ quantity: 10, unit_amount: 13.5, amount: 135 });
+  });
+  it("uses a 0 amount when no rate is set (crew fill it in)", () => {
     const lines = seedLinesFromDays([{ date: "2026-07-20" }], null);
-    expect(lines[0]).toMatchObject({ amount: 0, unit_amount: null });
+    expect(lines[0]).toMatchObject({ amount: 0, unit_amount: null, quantity: DEFAULT_DAY_HOURS });
+  });
+});
+
+describe("guaranteeTopUp", () => {
+  it("tops a light week up to the weekly guarantee", () => {
+    expect(guaranteeTopUp(450, 600)).toBe(150); // Rob's hours earned £450 → +£150 to reach £600
+  });
+  it("is zero when hours already meet or beat the guarantee (a floor, not a cap)", () => {
+    expect(guaranteeTopUp(600, 600)).toBe(0);
+    expect(guaranteeTopUp(720, 600)).toBe(0); // a busy week keeps the higher figure
+  });
+  it("is zero when there is no guarantee", () => {
+    expect(guaranteeTopUp(300, null)).toBe(0);
+    expect(guaranteeTopUp(300, 0)).toBe(0);
+  });
+  it("rounds to the penny", () => {
+    expect(guaranteeTopUp(575.5, 600)).toBe(24.5);
+    expect(guaranteeTopUp(599.999, 600)).toBe(0);
   });
 });

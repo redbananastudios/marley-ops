@@ -8,6 +8,22 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 ---
 
+## Pre-cutover BUILD (us) — must land before cutover
+
+1. ☐ **Crew pay model → hourly rates + weekly timesheets** (Connor+Leanne, 19 Jul).
+   Move crew off flat `staff.day_rate` onto an **hourly rate** + optional **weekly
+   guarantee**: Rob £15/hr floored at £600/wk (paid whether there's work or not);
+   Jack £15, Charlie £13.50, Oscar £10 — pure hourly, paid on days worked. Crew "My
+   pay" gains a Mon–Sun **timesheet** (hours/day, seeded from assignments) → the
+   contractor-invoice total is Σ(hours×rate), floored at the guarantee for Rob;
+   job-costing/margin read hours, not days. Design + rates + open clarifications in
+   memory [[marley-crew-pay-model]]. **Gate: Rob's £600-regardless + hourly pay +
+   timesheets sharpen the employment-status question — the accountant's IR35 ruling
+   is required before the first real pay run** (pairs with F IR35 + the agreement
+   wording review).
+
+---
+
 ## A — Needed FROM CONNOR (nothing goes live without these)
 
 1. ◐ **VAT quarter cycle ("stagger")** — which months his VAT quarters END.

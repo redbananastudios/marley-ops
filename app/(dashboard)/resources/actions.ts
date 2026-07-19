@@ -15,9 +15,10 @@ async function actor() {
 }
 
 /** Staff & Fleet writes are an OFFICE surface. This gates them at the app layer
- *  in addition to RLS — without it a crew login could call e.g. saveStaffAction
- *  directly to self-set their own day_rate (their staff_update RLS permits their
- *  own row, and the 0054 with-check only pins profile_id/email, not day_rate). */
+ *  in addition to RLS — a crew login could otherwise call saveStaffAction to edit
+ *  their own staff row (their staff_update RLS permits it). Pay is now separate:
+ *  staff_pay is office-write-only at the RLS layer, so rates can't be self-set
+ *  even via the raw API. */
 async function requireOfficeActor() {
   const profile = await getSessionProfile();
   if (!profile) return { error: "Not signed in." as const };
@@ -171,7 +172,10 @@ const staffSchema = z.object({
   staff_role: z.enum(["crew", "driver", "estimator", "admin"]),
   phone: z.string().trim().max(20).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
-  day_rate: optMoney,
+  // Pay: hourly rate + optional weekly guarantee (Rob: £600/wk floor). Stored in
+  // the office-scoped staff_pay table, not on the crew-readable staff row.
+  hourly_rate: optMoney,
+  weekly_guarantee: optMoney,
   // The crew member's normal weekly pattern (ISO weekday numbers 1=Mon…7=Sun).
   // Undefined = leave unchanged (a caller that doesn't manage the pattern).
   working_days: z.array(z.number().int().min(1).max(7)).max(7).optional(),
@@ -196,7 +200,6 @@ export async function saveStaffAction(input: StaffInput) {
     staff_role: v.staff_role,
     phone: v.phone || null,
     email: v.email || null,
-    day_rate: v.day_rate === "" || v.day_rate == null ? null : v.day_rate,
     notes: v.notes || null,
     is_active: v.is_active,
     // Only touch the pattern when the caller manages it — an insert without it
@@ -204,10 +207,27 @@ export async function saveStaffAction(input: StaffInput) {
     ...(v.working_days !== undefined ? { working_days: normalizeWorkingDays(v.working_days) } : {}),
   };
 
-  const { error } = v.id
-    ? await sb.from("staff").update(row).eq("id", v.id)
-    : await sb.from("staff").insert(row);
-  if (error) return { ok: false as const, error: error.message };
+  let staffId = v.id ?? null;
+  if (v.id) {
+    const { error } = await sb.from("staff").update(row).eq("id", v.id);
+    if (error) return { ok: false as const, error: error.message };
+  } else {
+    const { data: created, error } = await sb.from("staff").insert(row).select("id").single();
+    if (error || !created) return { ok: false as const, error: error?.message ?? "Could not save the crew member." };
+    staffId = created.id;
+  }
+
+  // Pay lives in the office-scoped staff_pay table (a crew member can't read a
+  // colleague's rate or self-set their own). Upsert the hourly rate + optional
+  // weekly guarantee.
+  if (staffId) {
+    const hourly = v.hourly_rate === "" || v.hourly_rate == null ? null : v.hourly_rate;
+    const guarantee = v.weekly_guarantee === "" || v.weekly_guarantee == null ? null : v.weekly_guarantee;
+    const { error: payErr } = await sb
+      .from("staff_pay")
+      .upsert({ staff_id: staffId, hourly_rate: hourly, weekly_guarantee: guarantee }, { onConflict: "staff_id" });
+    if (payErr) return { ok: false as const, error: payErr.message };
+  }
 
   revalidatePath("/resources");
   revalidatePath("/schedule/board");

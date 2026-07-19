@@ -48,15 +48,22 @@ async function ensureUser(email, full_name, role) {
 
 async function ensureStaff(full_name, email) {
   const { data: existing } = await sb.from("staff").select("id").eq("email", email).maybeSingle();
-  if (existing) return existing.id;
-  const { data, error } = await sb
-    .from("staff")
-    .insert({ full_name, staff_role: "crew", email, is_active: true, day_rate: 120 })
-    .select("id")
-    .single();
-  if (error) throw error;
-  console.log("created staff", full_name);
-  return data.id;
+  let id = existing?.id;
+  if (!id) {
+    const { data, error } = await sb
+      .from("staff")
+      .insert({ full_name, staff_role: "crew", email, is_active: true })
+      .select("id")
+      .single();
+    if (error) throw error;
+    id = data.id;
+    console.log("created staff", full_name);
+  }
+  // Dev pay lives in staff_pay now: £15/hr, no guarantee — so the crew invoice
+  // pre-fills a rate to test hours × rate.
+  const { error: payErr } = await sb.from("staff_pay").upsert({ staff_id: id, hourly_rate: 15 }, { onConflict: "staff_id" });
+  if (payErr) throw payErr;
+  return id;
 }
 
 async function ensureVehicle(name) {

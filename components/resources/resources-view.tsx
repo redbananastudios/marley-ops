@@ -70,7 +70,9 @@ export interface StaffRow {
   staff_role: string;
   phone: string | null;
   email: string | null;
-  day_rate: number | null;
+  // Pay — merged in from the office-scoped staff_pay table (not on the staff row).
+  hourly_rate: number | null;
+  weekly_guarantee: number | null;
   working_days: number[] | null;
   notes: string | null;
   is_active: boolean;
@@ -432,7 +434,10 @@ function StaffCard({ s, segments, onEdit }: { s: StaffRow; segments: Availabilit
       ) : null}
 
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
-        <span className="tabular text-xs text-mist-400">{s.day_rate != null ? `${gbp(s.day_rate)}/day` : "no day rate"}</span>
+        <span className="tabular text-xs text-mist-400">
+          {s.hourly_rate != null ? `${gbp(s.hourly_rate)}/hr` : "no rate set"}
+          {s.weekly_guarantee != null ? ` · ${gbp(s.weekly_guarantee)}/wk min` : ""}
+        </span>
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -480,7 +485,8 @@ function StaffDialog({
     staff_role: (row?.staff_role ?? "crew") as StaffInput["staff_role"],
     phone: row?.phone ?? "",
     email: row?.email ?? "",
-    day_rate: row?.day_rate != null ? String(row.day_rate) : "",
+    hourly_rate: row?.hourly_rate != null ? String(row.hourly_rate) : "",
+    weekly_guarantee: row?.weekly_guarantee != null ? String(row.weekly_guarantee) : "",
     notes: row?.notes ?? "",
   });
   const [pattern, setPattern] = useState<number[]>(() => row?.working_days ?? [1, 2, 3, 4, 5]);
@@ -493,7 +499,8 @@ function StaffDialog({
       staff_role: v.staff_role,
       phone: v.phone,
       email: v.email,
-      day_rate: v.day_rate === "" ? "" : Number(v.day_rate),
+      hourly_rate: v.hourly_rate === "" ? "" : Number(v.hourly_rate),
+      weekly_guarantee: v.weekly_guarantee === "" ? "" : Number(v.weekly_guarantee),
       working_days: pattern,
       notes: v.notes,
       is_active: row?.is_active ?? true,
@@ -540,9 +547,17 @@ function StaffDialog({
               </Select>
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor="st-rate">Day rate (£)</Label>
-              <Input id="st-rate" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.day_rate} onChange={(e) => setV({ ...v, day_rate: e.target.value })} placeholder="120" />
+              <Label htmlFor="st-rate">Hourly rate (£/hr)</Label>
+              <Input id="st-rate" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.hourly_rate} onChange={(e) => setV({ ...v, hourly_rate: e.target.value })} placeholder="15" />
             </div>
+          </div>
+          <div className="grid gap-1.5">
+            <Label htmlFor="st-guarantee">Weekly guarantee (£, optional)</Label>
+            <Input id="st-guarantee" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.weekly_guarantee} onChange={(e) => setV({ ...v, weekly_guarantee: e.target.value })} placeholder="e.g. 600" />
+            <p className="text-xs text-mist-400">
+              Paid this minimum each week even with no work (a retained crew member). Leave blank for pure hourly — paid only
+              for hours worked. Rates are private: crew never see a colleague&apos;s.
+            </p>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-1.5">

@@ -125,7 +125,7 @@ export function buildStatementDocDef(d: StatementPdfData): any {
   });
   const zebra = d.lines.length >= 5;
   const body = [
-    [hc("DESCRIPTION"), hc("DATE", "center"), hc("QTY", "center"), hc("RATE", "right"), hc("AMOUNT", "right")],
+    [hc("DESCRIPTION"), hc("DATE", "center"), hc("HOURS", "center"), hc("RATE", "right"), hc("AMOUNT", "right")],
     ...d.lines.map((l, i) => {
       const fill = zebra && i % 2 === 1 ? C.rowAlt : C.white;
       return [

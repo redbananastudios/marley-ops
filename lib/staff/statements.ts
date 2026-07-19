@@ -1,13 +1,19 @@
 /**
- * Staff self-billing / payment statements (pure) — the money maths for the crew
- * pay ledger. NO VAT anywhere: crew are self-employed and not VAT-registered, so
- * a statement is a plain payment record, never a VAT self-bill.
+ * Crew contractor-invoice / timesheet maths (pure). NO VAT anywhere: crew are
+ * self-employed and not VAT-registered, so an invoice is a plain payment record,
+ * never a VAT self-bill.
  *
- * Pay is NOT derived from jobs or availability (retainers mean crew get paid on
- * days with no work), so the crew build their own lines with a free description.
- * `seedLinesFromDays` only SUGGESTS lines from the days they were assigned — a
- * convenience starting point; every line stays editable.
+ * Pay is HOURS × the crew member's hourly rate (Connor + Leanne, 2026-07-19).
+ * `seedLinesFromDays` SUGGESTS one line per assigned day at the standard day
+ * length × their rate; every line stays editable (they log actual hours). A
+ * guaranteed crew member (Rob: £600/week whether there's work or not) gets a
+ * `guaranteeTopUp` added as a system line so a light week reaches the floor.
  */
+
+/** Standard working day, in hours — seeds a day's hours on the timesheet
+ *  (Peter, 2026-07-19: "a day is 8 hours typically"). The crew edit the actual
+ *  hours per line. */
+export const DEFAULT_DAY_HOURS = 8;
 
 export type StatementStatus = "draft" | "submitted" | "paid" | "void";
 
@@ -30,6 +36,15 @@ export function computeLineAmount(
 /** Statement total = sum of line amounts, to the penny. */
 export function statementTotal(lines: { amount: number | null }[]): number {
   return round2(lines.reduce((s, l) => s + (l.amount ?? 0), 0));
+}
+
+/** Weekly-guarantee top-up: the amount to add so a guaranteed crew member's week
+ *  reaches the floor (Rob: £600 whether there's work or not). Zero when there is
+ *  no guarantee, or when the hours already earn at or above it (they keep the
+ *  higher figure — the guarantee is a floor, not a cap). */
+export function guaranteeTopUp(linesTotal: number, weeklyGuarantee: number | null): number {
+  if (weeklyGuarantee == null || weeklyGuarantee <= 0) return 0;
+  return round2(Math.max(0, weeklyGuarantee - linesTotal));
 }
 
 function addDaysIso(iso: string, n: number): string {
@@ -84,15 +99,21 @@ export interface NewStatementLine {
   quantity: number | null;
   unit_amount: number | null;
   amount: number;
-  source: "manual" | "job" | "retainer";
+  source: "manual" | "job" | "retainer" | "guarantee";
 }
 
 /** Suggest draft lines from the days a crew member was assigned — ONE line per
- *  DAY (pay is per day, not per job), amount = their day rate. Deduped and
- *  date-sorted. Retainer / extra days are added by hand afterwards. */
-export function seedLinesFromDays(days: SeedDay[], dayRate: number | null): NewStatementLine[] {
+ *  DAY at `dayHours` × their hourly rate (they then edit the actual hours).
+ *  Deduped and date-sorted; extra/retainer lines are added by hand afterwards. */
+export function seedLinesFromDays(
+  days: SeedDay[],
+  hourlyRate: number | null,
+  dayHours: number = DEFAULT_DAY_HOURS,
+): NewStatementLine[] {
   const seen = new Set<string>();
   const out: NewStatementLine[] = [];
+  const rate = hourlyRate == null ? null : Math.max(0, hourlyRate);
+  const hours = Math.max(0, dayHours);
   for (const d of [...days].sort((a, b) => a.date.slice(0, 10).localeCompare(b.date.slice(0, 10)))) {
     const key = d.date.slice(0, 10);
     if (seen.has(key)) continue;
@@ -107,9 +128,9 @@ export function seedLinesFromDays(days: SeedDay[], dayRate: number | null): NewS
     out.push({
       description: d.label ? `Worked ${dayName} — ${d.label}` : `Worked ${dayName}`,
       work_date: key,
-      quantity: 1,
-      unit_amount: dayRate,
-      amount: round2(Math.max(0, dayRate ?? 0)),
+      quantity: hours,
+      unit_amount: rate,
+      amount: round2(rate == null ? 0 : hours * rate),
       source: "job",
     });
   }

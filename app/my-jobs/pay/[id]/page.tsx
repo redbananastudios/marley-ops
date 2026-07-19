@@ -28,13 +28,15 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
     .maybeSingle();
   if (!stmt) notFound();
 
-  const [{ data: lines }, { data: staffRow }] = await Promise.all([
+  const [{ data: lines }, { data: staffRow }, { data: payRow }] = await Promise.all([
     sb
       .from("staff_statement_lines")
       .select("id, description, work_date, quantity, unit_amount, amount, source")
       .eq("statement_id", stmt.id)
       .order("sort_index"),
-    sb.from("staff").select("full_name, day_rate").eq("id", stmt.staff_id).maybeSingle(),
+    sb.from("staff").select("full_name").eq("id", stmt.staff_id).maybeSingle(),
+    // The crew member's own rate (RLS: they can read only their own staff_pay row).
+    sb.from("staff_pay").select("hourly_rate").eq("staff_id", stmt.staff_id).maybeSingle(),
   ]);
 
   const staffName = staffRow?.full_name ?? profile.full_name ?? "";
@@ -105,7 +107,7 @@ export default async function CrewStatementPage({ params }: { params: Promise<{ 
             }}
             lines={lineRows}
             pdfData={pdfData}
-            dayRate={staffRow?.day_rate == null ? null : Number(staffRow.day_rate)}
+            hourlyRate={payRow?.hourly_rate == null ? null : Number(payRow.hourly_rate)}
           />
         </div>
       </main>

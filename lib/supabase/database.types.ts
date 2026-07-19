@@ -2806,6 +2806,38 @@ export type Database = {
           },
         ]
       }
+      staff_pay: {
+        Row: {
+          created_at: string
+          hourly_rate: number | null
+          staff_id: string
+          updated_at: string
+          weekly_guarantee: number | null
+        }
+        Insert: {
+          created_at?: string
+          hourly_rate?: number | null
+          staff_id: string
+          updated_at?: string
+          weekly_guarantee?: number | null
+        }
+        Update: {
+          created_at?: string
+          hourly_rate?: number | null
+          staff_id?: string
+          updated_at?: string
+          weekly_guarantee?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_pay_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: true
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contractor_agreements: {
         Row: {
           acknowledgments: Json
