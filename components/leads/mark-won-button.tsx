@@ -90,32 +90,43 @@ export function MarkWonButton({
       return;
     }
     setBusy(true);
-    const res = await acceptQuote(selected.id, value);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not mark won.");
-      return;
+    try {
+      const res = await acceptQuote(selected.id, value);
+      if (!res.ok) {
+        toast.error(res.error || "Could not mark won.");
+        return;
+      }
+      toast.success(
+        `Won — ${gbp(value)} booked. ${
+          res.emailed ? "Deposit payment email sent." : "No email on file — send the payment link from Bookings."
+        }`,
+      );
+      setOpen(false);
+      router.refresh();
+    } catch {
+      // acceptQuote is never-create-twice guarded, so retrying is safe.
+      toast.error("Couldn't reach the server — check Bookings before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success(
-      `Won — ${gbp(value)} booked. ${
-        res.emailed ? "Deposit payment email sent." : "No email on file — send the payment link from Bookings."
-      }`,
-    );
-    setOpen(false);
-    router.refresh();
   }
 
   async function winWithoutValue() {
     setBusy(true);
-    const res = await updateLeadStatusAction(leadId, "confirmed");
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not mark won.");
-      return;
+    try {
+      const res = await updateLeadStatusAction(leadId, "confirmed");
+      if (!res.ok) {
+        toast.error(res.error || "Could not mark won.");
+        return;
+      }
+      toast.success("Marked won (no value recorded).");
+      setOpen(false);
+      router.refresh();
+    } catch {
+      toast.error("Couldn't reach the server — check the lead before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success("Marked won (no value recorded).");
-    setOpen(false);
-    router.refresh();
   }
 
   const hasQuote = acceptable.length > 0;

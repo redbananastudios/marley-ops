@@ -125,15 +125,23 @@ function RefundDialog({ row, remaining }: { row: CardPaymentRow; remaining: numb
       return;
     }
     setBusy(true);
-    const res = await refundCardPaymentAction({ paymentId: row.id, amountPence: pence, reason: reason.trim() });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Refund failed.");
-      return;
+    // try/finally: a rejected action (network drop / stale action id after a
+    // deploy) must clear busy — otherwise the onOpenChange close-guard traps the
+    // dialog spinning with no way out but a reload, on a screen that moves money.
+    try {
+      const res = await refundCardPaymentAction({ paymentId: row.id, amountPence: pence, reason: reason.trim() });
+      if (!res.ok) {
+        toast.error(res.error || "Refund failed.");
+        return;
+      }
+      toast.success("Refund sent — the customer's card will show it in 3–5 working days.");
+      setOpen(false);
+      startRefresh(() => router.refresh());
+    } catch {
+      toast.error("Couldn't reach the payment service — check the payment status before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success("Refund sent — the customer's card will show it in 3–5 working days.");
-    setOpen(false);
-    startRefresh(() => router.refresh());
   }
 
   return (

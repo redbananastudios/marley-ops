@@ -21,6 +21,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
+import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
 import { accountsFrom, ownerIdentity } from "@/lib/comms/sender";
 import { sendPushForEvent } from "@/lib/push/send";
@@ -431,7 +432,7 @@ export async function acceptQuoteOnline(
   if (!carriedDeposit) await ensureDepositInvoice(sb, quote.id);
 
   await sendOpsAlert(`Quote ${quote.quote_ref} accepted online`, [
-    `<strong>${quote.customer_name ?? "Customer"}</strong> accepted quote <strong>${quote.quote_ref}</strong> (signed "${name}").`,
+    `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> accepted quote <strong>${quote.quote_ref}</strong> (signed "${escapeHtml(name)}").`,
     carriedDeposit
       ? `Agreed £${agreed.toFixed(2)} — their paid deposit was carried over from the superseded quote.`
       : `Agreed £${agreed.toFixed(2)} — £${deposit.toFixed(2)} deposit now requested.`,
@@ -687,8 +688,8 @@ export async function declineQuoteOnline(
   }
 
   await sendOpsAlert(`Quote ${quote.quote_ref} declined online`, [
-    `<strong>${quote.customer_name ?? "Customer"}</strong> declined quote <strong>${quote.quote_ref}</strong>.`,
-    `Reason: ${lostReason.replace(/_/g, " ")}${note?.trim() ? ` — "${note.trim()}"` : ""}.`,
+    `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> declined quote <strong>${quote.quote_ref}</strong>.`,
+    `Reason: ${lostReason.replace(/_/g, " ")}${note?.trim() ? ` — "${escapeHtml(note.trim())}"` : ""}.`,
     `Chasing stopped; the lead is marked lost with their reason.`,
   ]);
 
@@ -762,7 +763,7 @@ export async function reportDepositSent(
   }
 
   await sendOpsAlert(`Customer says deposit sent — ${quote.quote_ref}`, [
-    `<strong>${quote.customer_name ?? "Customer"}</strong> reports the £${deposit.toFixed(2)} deposit for <strong>${quote.quote_ref}</strong> was sent by bank transfer.`,
+    `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> reports the £${deposit.toFixed(2)} deposit for <strong>${quote.quote_ref}</strong> was sent by bank transfer.`,
     `Check the bank, then confirm it in Bookings — reminders are paused meanwhile.`,
   ], "money");
 

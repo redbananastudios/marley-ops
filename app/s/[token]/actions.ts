@@ -10,6 +10,7 @@ import {
   TERMS_VERSION,
 } from "@/lib/signatures";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { escapeHtml } from "@/lib/comms/escape-html";
 
 /** PUBLIC — the customer signs their storage agreement at /s/<token>. The
  *  unguessable token is the credential; one signature per let (unique index),
@@ -56,7 +57,7 @@ export async function signStorageAgreementRemoteAction(
 
   if (!error) {
     await sendOpsAlert("Storage agreement signed online", [
-      `<strong>${name}</strong> signed their storage agreement remotely.`,
+      `<strong>${escapeHtml(name)}</strong> signed their storage agreement remotely.`,
       `The Documents register and the unit's card now show it.`,
     ]);
   }

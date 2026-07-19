@@ -428,7 +428,11 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     .eq("id", leadId)
     .single();
 
-  const { error } = await sb
+  // Single-winner transition (mirrors updateLeadStatusAction's CAS): a concurrent
+  // double-fire — two tabs, or a board-drag racing the mark-lost dialog — flips 0
+  // rows and returns WITHOUT re-running the money unwind below (which would insert
+  // duplicate refund tasks + money alerts and re-void an already-void invoice).
+  const { data: flipped, error } = await sb
     .from("leads")
     .update({
       status: "declined",
@@ -437,8 +441,16 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
       lost_at: new Date().toISOString(),
       chase_paused: true,
     } as never)
-    .eq("id", leadId);
+    .eq("id", leadId)
+    .neq("status", "declined")
+    .select("id");
   if (error) return { ok: false as const, error: error.message };
+  if (!flipped?.length) {
+    // Already lost — the first caller ran the full unwind. Nothing more to do.
+    revalidatePath(`/leads/${leadId}`);
+    revalidatePath("/leads");
+    return { ok: true as const };
+  }
 
   const { data: open } = await sb
     .from("follow_ups")

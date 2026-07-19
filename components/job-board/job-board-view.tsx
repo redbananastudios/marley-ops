@@ -258,10 +258,17 @@ export function JobBoardView({
   }
 
   async function doAssign(appt: BoardAppt, res: Resource) {
-    const r = await assignResourceAction(appt.id, { kind: res.kind, id: res.id });
-    if (!r.ok) toast.error(r.error);
-    else {
-      toast.success("already" in r && r.already ? `${res.name} was already on this job.` : `${res.name} assigned.`);
+    try {
+      const r = await assignResourceAction(appt.id, { kind: res.kind, id: res.id });
+      if (!r.ok) toast.error(r.error);
+      else {
+        toast.success("already" in r && r.already ? `${res.name} was already on this job.` : `${res.name} assigned.`);
+      }
+    } catch {
+      // A rejected action may still have COMMITTED (e.g. a post-write notify threw)
+      // — refresh so the board shows the DB truth rather than a stale drag.
+      toast.error("Couldn't confirm the assignment — refreshing the board.");
+    } finally {
       router.refresh();
     }
   }
@@ -897,19 +904,27 @@ function AssignDialog({
 
   async function save() {
     setBusy(true);
-    const res = await setAssignmentsAction({
-      appointment_id: appt.id,
-      staff_ids: [...staffSel],
-      vehicle_ids: [...vehicleSel],
-    });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+    // try/finally: a rejected action must clear busy — otherwise Confirm stays
+    // disabled+spinning and the assignment is silently not saved (a job can go
+    // out unassigned).
+    try {
+      const res = await setAssignmentsAction({
+        appointment_id: appt.id,
+        staff_ids: [...staffSel],
+        vehicle_ids: [...vehicleSel],
+      });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success("Assignments updated.");
+      onClose();
+      router.refresh();
+    } catch {
+      toast.error("Couldn't reach the server — check the job's crew/vans before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success("Assignments updated.");
-    onClose();
-    router.refresh();
   }
 
   const row = (

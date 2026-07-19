@@ -16,6 +16,7 @@
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOfficeProfile } from "@/lib/ai/auth";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
 import { ukParts, ukTimeAt } from "@/lib/uk-time";
@@ -400,8 +401,11 @@ export async function resendCertificateAction(
   completionId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(completionId).success) return { ok: false, error: "Invalid completion" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  // Office-only: re-sends a customer email on the service-role client. Crew genuinely
+  // collect in-person signatures + complete jobs (those stay requireActiveProfile),
+  // but must not loop certificate emails to customers.
+  const prof = await requireOfficeProfile();
+  if (!prof) return { ok: false, error: "Office access required." };
 
   const admin = createAdminClient();
   const { data: comp } = await admin

@@ -76,17 +76,27 @@ function recorderMime(): string | null {
   return null;
 }
 
-async function videoDuration(file: Blob): Promise<number> {
+async function videoDuration(file: Blob): Promise<number | undefined> {
   const video = document.createElement("video");
   const url = URL.createObjectURL(file);
   video.preload = "metadata";
   video.src = url;
   try {
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve();
-      video.onerror = () => reject(new Error("Video format is not supported."));
+    // Bounded: some MOV/codec clips on iOS Safari never fire loadedmetadata NOR
+    // error, which would leave the import hung at 0% with no toast (the 2026-07-11
+    // "browser media waits must be bounded" lesson). On timeout resolve undefined —
+    // duration is optional, so the clip still uploads.
+    return await new Promise<number | undefined>((resolve, reject) => {
+      const timer = setTimeout(() => resolve(undefined), 8000);
+      video.onloadedmetadata = () => {
+        clearTimeout(timer);
+        resolve(Math.round(video.duration * 10) / 10);
+      };
+      video.onerror = () => {
+        clearTimeout(timer);
+        reject(new Error("Video format is not supported."));
+      };
     });
-    return Math.round(video.duration * 10) / 10;
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -294,11 +304,13 @@ export function AiSurveyCapture({
     }
     const isVideo = mime.startsWith("video/");
     try {
+      const durationS = isVideo ? await videoDuration(file) : undefined;
+      if (isVideo && durationS === undefined) toast("Couldn't read that clip's length — continuing.");
       setPending({
         blob: file,
         mime,
         kind: isVideo ? "import_video" : "photo",
-        durationS: isVideo ? await videoDuration(file) : undefined,
+        durationS,
         previewUrl: URL.createObjectURL(file),
         roomId: isVideo && wholePropertyImport ? undefined : selectedRoom || undefined,
       });

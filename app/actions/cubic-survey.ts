@@ -23,6 +23,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { computeCubicTotals, reconcileCubicLineProvenance, sanitizeCubicLines } from "@/lib/cubic-survey";
 import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+import { requireOfficeProfile } from "@/lib/ai/auth";
 
 const FROM = "Marley Moves <hello@marleymoves.co.uk>";
 
@@ -149,8 +150,10 @@ export async function getCubicShareLinkByLeadAction(
   leadId: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(leadId).success) return { ok: false, error: "Invalid lead" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  // Office-only: mints/sends a customer-facing link on the service-role client, so
+  // the profile check is the only gate — crew must never send customer comms.
+  const prof = await requireOfficeProfile();
+  if (!prof) return { ok: false, error: "Office access required." };
   const admin = createAdminClient();
   const surveyId = await ensureSurveyForLead(admin, leadId, prof.id);
   if (!surveyId) return { ok: false, error: "Could not start the survey." };
@@ -162,8 +165,8 @@ export async function getCubicShareLinkAction(
   surveyId: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(surveyId).success) return { ok: false, error: "Invalid survey" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const prof = await requireOfficeProfile();
+  if (!prof) return { ok: false, error: "Office access required." };
 
   const admin = createAdminClient();
   const { data: row } = await admin.from("cubic_surveys").select("id, share_token").eq("id", surveyId).single();
@@ -201,8 +204,8 @@ export async function getCubicShareLinkAction(
  *  to the lead's Comms tab via the shared dispatcher. */
 export async function emailCubicShareLinkAction(leadId: string): Promise<DispatchCommResult> {
   if (!z.string().uuid().safeParse(leadId).success) return { ok: false, error: "Invalid lead" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const prof = await requireOfficeProfile();
+  if (!prof) return { ok: false, error: "Office access required." };
 
   const admin = createAdminClient();
   const { data: lead } = await admin

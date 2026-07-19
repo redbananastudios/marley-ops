@@ -81,21 +81,27 @@ export function AcceptQuoteButton({
       return;
     }
     setBusy(true);
-    const res = await acceptQuote(quoteId, value, dep);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not accept the quote.");
-      return;
+    try {
+      const res = await acceptQuote(quoteId, value, dep);
+      if (!res.ok) {
+        toast.error(res.error || "Could not accept the quote.");
+        return;
+      }
+      toast.success(
+        `Accepted — ${gbp(res.agreedPrice)} booked. ${
+          res.emailed
+            ? `Payment email sent (${gbp(res.deposit ?? depositAmount)} deposit).`
+            : "No customer email on file — send the payment link from Bookings."
+        }`,
+      );
+      setOpen(false);
+      router.refresh();
+    } catch {
+      // acceptQuote is idempotent (never-create-twice) — retry is safe.
+      toast.error("Couldn't reach the server — check Bookings before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success(
-      `Accepted — ${gbp(res.agreedPrice)} booked. ${
-        res.emailed
-          ? `Payment email sent (${gbp(res.deposit ?? depositAmount)} deposit).`
-          : "No customer email on file — send the payment link from Bookings."
-      }`,
-    );
-    setOpen(false);
-    router.refresh();
   }
 
   return (
