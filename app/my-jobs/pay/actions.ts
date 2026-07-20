@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/auth";
 import {
   computeLineAmount,
@@ -35,7 +36,7 @@ async function meAsStaff() {
   // through the crew path, and crew recomputeTotal would fold estimator lines +
   // a weekly-guarantee floor into it and corrupt the total.
   const profile = await getSessionProfile();
-  if (!profile || profile.role !== "crew") return { error: "This is the crew pay page." as const };
+  if (!profile?.active || profile.role !== "crew") return { error: "This is the crew pay page." as const };
 
   if (!(await isSelfBillingEnabled())) return { error: "Contractor invoicing isn't switched on yet." as const };
 
@@ -174,6 +175,7 @@ export async function seedMyStatementJobsAction(input: { statement_id: string })
   const ctx = await meAsStaff();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const { sb, staff, hourlyRate, weeklyGuarantee } = ctx;
+  const admin = createAdminClient();
 
   const { data: stmt } = await sb
     .from("staff_statements")
@@ -184,18 +186,20 @@ export async function seedMyStatementJobsAction(input: { statement_id: string })
   if (stmt.status !== "draft") return { ok: false as const, error: "This statement has already been submitted." };
 
   // The crew member's assigned appointments that fall in the period.
-  const { data: myAssigns } = await sb.from("appointment_assignments").select("appointment_id").eq("staff_id", staff.id);
+  // 0069 removes crew's direct CRM reads. These service-role reads remain
+  // bounded by the staff id resolved from the authenticated session above.
+  const { data: myAssigns } = await admin.from("appointment_assignments").select("appointment_id").eq("staff_id", staff.id);
   const apptIds = [...new Set((myAssigns ?? []).map((a) => a.appointment_id))];
   const days: SeedDay[] = [];
   if (apptIds.length) {
-    const { data: appts } = await sb
+    const { data: appts } = await admin
       .from("appointments")
       .select("id, starts_at, appt_type, lead_id, status")
       .in("id", apptIds)
       .neq("status", "cancelled");
     const leadIds = [...new Set((appts ?? []).map((a) => a.lead_id).filter(Boolean))] as string[];
     const { data: leads } = leadIds.length
-      ? await sb.from("leads").select("id, name").in("id", leadIds)
+      ? await admin.from("leads").select("id, name").in("id", leadIds)
       : { data: [] as { id: string; name: string | null }[] };
     const leadName = new Map((leads ?? []).map((l) => [l.id, l.name]));
 

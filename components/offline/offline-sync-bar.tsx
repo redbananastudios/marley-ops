@@ -18,7 +18,7 @@ import { useOutbox } from "./outbox-provider";
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
 
 export function OfflineSyncBar() {
-  const { items, syncing, online, flush } = useOutbox();
+  const { items, syncing, online, retryFailed } = useOutbox();
   const queued = items.filter((i) => i.status === "queued").length;
   const failed = items.filter((i) => i.status === "failed").length;
 
@@ -31,7 +31,7 @@ export function OfflineSyncBar() {
     return (
       <button
         type="button"
-        onClick={() => void flush()}
+        onClick={() => void retryFailed()}
         role="status"
         className={`${base} border-danger/40 bg-danger/10 text-danger`}
         style={safeArea}

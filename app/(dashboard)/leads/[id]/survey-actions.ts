@@ -3,9 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createMediaStore } from "@/lib/storage/media-store";
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
-import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
+import {
+  isValidDeclaredUploadSize,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_LABEL,
+} from "@/lib/storage/upload-limits";
 import {
   SURVEY_PHOTOS_BUCKET,
   isSurveyPhotoCategory,
@@ -17,30 +22,18 @@ import {
  *  prefix (or the Supabase survey-photos bucket on the supabase driver). */
 const surveyPhotoStore = () => createMediaStore(process.env, { bucket: SURVEY_PHOTOS_BUCKET });
 
-async function ctx() {
+async function officeCtx() {
+  const profile = await requireOfficeProfile();
+  if (!profile) return null;
   const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  return { sb, userId: user?.id ?? null };
-}
-
-/** Signed-in AND active — the is_staff() bar for the service-role / seam paths
- *  that bypass RLS (deleteSurveyPhoto, signSurveyPhotoUrls). A deactivated
- *  account with a still-valid session must not read or delete survey photos. */
-async function activeUserId(): Promise<string | null> {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return null;
-  const { data: prof } = await sb.from("profiles").select("active").eq("id", user.id).maybeSingle();
-  return prof?.active ? user.id : null;
+  return { sb, userId: profile.id, accessToken: profile.accessToken };
 }
 
 /** Find the lead's latest survey, or create one. Returns the survey id. */
 export async function ensureSurveyForLead(leadId: string) {
-  const { sb, userId } = await ctx();
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
+  const { sb, userId } = context;
   const { data: existing } = await sb
     .from("surveys")
     .select("id")
@@ -63,7 +56,9 @@ export async function ensureSurveyForLead(leadId: string) {
 /** List a lead's survey photos (across its latest survey). Read-only; for the
  *  quote builder's in-step photo uploaders to hydrate what's already there. */
 export async function loadSurveyPhotos(leadId: string) {
-  const { sb } = await ctx();
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
+  const { sb } = context;
   const { data: survey } = await sb
     .from("surveys")
     .select("id")
@@ -89,7 +84,9 @@ export async function saveSurveyData(
   surveyData: Record<string, unknown>,
   status?: "scheduled" | "completed" | "cancelled",
 ) {
-  const { sb } = await ctx();
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
+  const { sb } = context;
   const { error } = await sb
     .from("surveys")
     .update({ survey_data: surveyData as never, ...(status ? { status } : {}) })
@@ -107,7 +104,9 @@ export async function recordSurveyPhoto(
   storagePath: string,
   caption?: string,
 ) {
-  const { sb, userId } = await ctx();
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
+  const { sb, userId } = context;
   const { error } = await sb.from("survey_photos").insert({
     survey_id: surveyId,
     category,
@@ -120,21 +119,31 @@ export async function recordSurveyPhoto(
   return { ok: true as const };
 }
 
-/** Remove a photo (DB row + storage object). Uses the service role so any staff can tidy up. */
+/** Remove a photo (DB row + storage object). Office-only because it uses the service role. */
 export async function deleteSurveyPhoto(photoId: string, storagePath: string, leadId: string) {
-  // Service-role path — must not be callable anonymously OR by a deactivated
-  // account (review, 2026-07-10 + R2 migration review).
-  const userId = await activeUserId();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
   const admin = createAdminClient();
+  const { data: photo } = await admin
+    .from("survey_photos")
+    .select("id, storage_path")
+    .eq("id", photoId)
+    .maybeSingle();
+  if (!photo?.storage_path || photo.storage_path !== storagePath) {
+    return { ok: false as const, error: "Photo not found." };
+  }
   // Best-effort object bin through the seam (follows the active driver — R2 in
   // prod). deleteObjects is idempotent (a missing object is a no-op) and throws
   // only on a real failure; the row still deletes either way, preserving the
   // original remove-and-don't-block behaviour.
   await surveyPhotoStore()
-    .deleteObjects([storagePath])
+    .deleteObjects([photo.storage_path])
     .catch(() => {});
-  const { error } = await admin.from("survey_photos").delete().eq("id", photoId);
+  const { error } = await admin
+    .from("survey_photos")
+    .delete()
+    .eq("id", photoId)
+    .eq("storage_path", photo.storage_path);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath(`/leads/${leadId}`);
   return { ok: true as const };
@@ -143,22 +152,16 @@ export async function deleteSurveyPhoto(photoId: string, storagePath: string, le
 /** Mint a seam upload target for one survey photo (presigned PUT on R2 in prod,
  *  a Supabase TUS target on the supabase driver). The path is survey-anchored
  *  and re-validated here; the session token keeps the Supabase bucket's
- *  is_staff() RLS applying (the R2 driver embeds auth in the presigned URL and
+ *  office RLS applying (the R2 driver embeds auth in the presigned URL and
  *  ignores it). Client then PUTs via uploadToMediaTarget. */
 export async function createSurveyPhotoUploadTargetAction(
   surveyId: string,
   category: SurveyPhotoCategory,
-  input: { path: string; mime: string; bytes?: number },
+  input: { path: string; mime: string; bytes: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return { ok: false, error: "Not signed in." };
-  const {
-    data: { session },
-  } = await sb.auth.getSession();
-  if (!session?.access_token) return { ok: false, error: "Session expired — sign in again." };
+  const context = await officeCtx();
+  if (!context) return { ok: false, error: "Office access required." };
+  const { sb, accessToken } = context;
 
   if (!isSurveyPhotoCategory(category)) return { ok: false, error: "Invalid photo category." };
   if (!isValidSurveyPhotoPath(input.path, surveyId, category)) {
@@ -166,7 +169,7 @@ export async function createSurveyPhotoUploadTargetAction(
   }
   // Size ceiling: reject an over-cap declared size, and bind the presigned PUT to
   // it (R2 rejects any other Content-Length) so the browser can't exceed it.
-  if (typeof input.bytes === "number" && (input.bytes <= 0 || input.bytes > MAX_IMAGE_UPLOAD_BYTES)) {
+  if (!isValidDeclaredUploadSize(input.bytes, MAX_IMAGE_UPLOAD_BYTES)) {
     return { ok: false, error: `That photo is too large — keep it under ${MAX_IMAGE_UPLOAD_LABEL}.` };
   }
   // The survey must exist and be visible to this login (RLS-scoped read) before
@@ -179,8 +182,8 @@ export async function createSurveyPhotoUploadTargetAction(
     const target = await surveyPhotoStore().createUploadTarget({
       objectKey: input.path,
       contentType,
-      accessToken: session.access_token,
-      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
+      accessToken,
+      sizeBytes: input.bytes,
     });
     return { ok: true, target };
   } catch {
@@ -190,16 +193,14 @@ export async function createSurveyPhotoUploadTargetAction(
 
 /** Short-lived (1h) signed read URLs for survey photos, keyed by storage path.
  *  Replaces the old client-side createSignedUrl — signing must be server-side
- *  now the store lives behind the seam. Any signed-in staff may sign (mirrors
- *  the survey-photos is_staff() read policy — all staff see all survey photos);
+ *  now the store lives behind the seam. Office users may sign (matching the
+ *  survey-photo office-only read policy);
  *  a failed sign drops that one path rather than the whole set. */
 export async function signSurveyPhotoUrls(
   storagePaths: string[],
 ): Promise<{ ok: true; urls: Record<string, string> } | { ok: false; error: string }> {
-  // Active-profile gate = the is_staff() read bar the old client-side RLS
-  // enforced; a deactivated session must not mint survey-photo read URLs.
-  const userId = await activeUserId();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const context = await officeCtx();
+  if (!context) return { ok: false as const, error: "Office access required." };
   const paths = [...new Set(storagePaths)]
     .filter((p): p is string => typeof p === "string" && p.length > 0)
     .slice(0, 100);

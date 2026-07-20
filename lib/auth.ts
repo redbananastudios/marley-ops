@@ -13,5 +13,8 @@ export const getSessionProfile = cache(async (): Promise<Profile | null> => {
   } = await supabase.auth.getUser();
   if (!user) return null;
   const { data } = await supabase.from("profiles").select("*").eq("id", user.id).single();
-  return data ?? null;
+  // A deactivated account may retain a valid auth refresh token. Treat it as
+  // signed out at the shared profile boundary so every page/action using this
+  // helper fails closed without having to remember a second active check.
+  return data?.active ? data : null;
 });

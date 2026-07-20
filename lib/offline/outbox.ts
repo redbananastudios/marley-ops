@@ -25,6 +25,9 @@ export type OutboxKind = "job_completion";
 export interface OutboxItem<P = unknown> {
   /** Client-generated unique id (dedupe within the queue / stable React key). */
   id: string;
+  /** Supabase profile that created the signed payload. Shared devices must
+   * never display or replay another person's queued work. */
+  ownerId: string;
   kind: OutboxKind;
   /** Idempotency/dedupe key — one PENDING item per (kind, key). For a job
    *  completion this is the appointment id, so re-saving replaces the queued
@@ -120,11 +123,14 @@ export async function flushOutbox(store: OutboxStore, runners: RunnerMap): Promi
  */
 export async function enqueue(
   store: OutboxStore,
-  input: { id: string; kind: OutboxKind; key: string; payload: unknown; label: string; now: number },
+  input: { id: string; ownerId: string; kind: OutboxKind; key: string; payload: unknown; label: string; now: number },
 ): Promise<OutboxItem> {
-  const existing = (await store.all()).find((i) => i.kind === input.kind && i.key === input.key);
+  const existing = (await store.all()).find(
+    (i) => i.ownerId === input.ownerId && i.kind === input.kind && i.key === input.key,
+  );
   const item: OutboxItem = {
     id: existing?.id ?? input.id,
+    ownerId: input.ownerId,
     kind: input.kind,
     key: input.key,
     payload: input.payload,
@@ -135,4 +141,32 @@ export async function enqueue(
   };
   await store.put(item);
   return item;
+}
+
+/** Explicit user gesture: re-arm failed items before flushing. Automatic flushes
+ * deliberately leave failed evidence visible rather than retrying forever. */
+export async function retryFailed(store: OutboxStore, id?: string): Promise<number> {
+  const failed = (await store.all()).filter((item) => item.status === "failed" && (!id || item.id === id));
+  for (const item of failed) {
+    await store.put({ ...item, status: "queued", attempts: 0, lastError: undefined });
+  }
+  return failed.length;
+}
+
+/** Owner-scoped view over a physical device store. Legacy unowned items are
+ * quarantined: they cannot be guessed to belong to whichever user signs in. */
+export function scopeOutboxStore(store: OutboxStore, ownerId: string): OutboxStore {
+  return {
+    async all() {
+      return (await store.all()).filter((item) => item.ownerId === ownerId);
+    },
+    async put(item) {
+      if (item.ownerId !== ownerId) throw new Error("Outbox owner mismatch");
+      await store.put(item);
+    },
+    async remove(id) {
+      const owned = (await store.all()).some((item) => item.id === id && item.ownerId === ownerId);
+      if (owned) await store.remove(id);
+    },
+  };
 }

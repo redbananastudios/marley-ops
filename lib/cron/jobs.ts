@@ -132,6 +132,15 @@ export const CRON_JOBS: CronJobMeta[] = [
     maxAgeMins: 45,
     endpoint: "/api/cron/health-watchdog",
   },
+  {
+    slug: "fleet-reminders",
+    label: "Fleet reminders",
+    schedule: "0 7 * * *",
+    cadence: "Daily · 07:00 UTC",
+    description: "Emails and pushes due MOT, tax, insurance, service, and lease reminders without repeating a threshold.",
+    maxAgeMins: 26 * 60,
+    endpoint: "/api/cron/fleet-reminders",
+  },
 ];
 
 /** A row from public.cron_runs (what the page + API return). */

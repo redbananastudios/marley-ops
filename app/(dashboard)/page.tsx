@@ -68,6 +68,26 @@ export default async function DashboardPage() {
   // fail-soft so a slow/unreachable Sanity never blocks the dashboard render.
   await syncSanityLeads({ incremental: true }).catch(() => null);
 
+  // Start independent external/attention reads before the all-time KPI scan.
+  // They used to sit behind all lead/appointment/quote processing, adding their
+  // full network latency to every uncached dashboard render.
+  const externalPanelsPromise = fetchExternalPanels();
+  const attentionPromise = Promise.all([
+    supabase
+      .from("vehicles")
+      .select("tax_due, mot_due, insurance_renewal, service_due, end_of_term")
+      .eq("is_active", true),
+    Promise.all([
+      supabase.from("quotes").select("id").eq("status", "accepted"),
+      supabase.from("signatures").select("quote_id").eq("kind", "contract"),
+    ]),
+    supabase
+      .from("claims")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["open", "assessing", "offer_made"]),
+    supabase.from("follow_ups").select("due_at").eq("status", "open"),
+  ]);
+
   // Unbounded, all-time tables → page through fetchAllRows (PostgREST caps a
   // plain select at 1000 rows and would silently corrupt every all-time KPI).
   // leads keeps submitted_at-desc for the "Latest enquiries" slice(0,6) below,
@@ -145,7 +165,7 @@ export default async function DashboardPage() {
   };
 
   /* PostHog website funnel + Google Ads spend — cached (see fetchExternalPanels) */
-  const { ph: phResults, spend: spendResults } = await fetchExternalPanels();
+  const { ph: phResults, spend: spendResults } = await externalPanelsPromise;
 
   const periods = Object.fromEntries(
     PERIOD_KEYS.map((k, i) => {
@@ -185,6 +205,15 @@ export default async function DashboardPage() {
   /* needs-action (now) */
   const statusCounts = new Map<string, number>();
   for (const l of leads) statusCounts.set(l.status, (statusCounts.get(l.status) ?? 0) + 1);
+  const [fleetResult, [acceptedResult, signedResult], claimsResult, followUpsResult] = await attentionPromise;
+  const signedIds = new Set((signedResult.data ?? []).map((signature) => signature.quote_id));
+  let followUpsOverdue = 0;
+  let followUpsDueToday = 0;
+  for (const followUp of followUpsResult.data ?? []) {
+    const time = new Date(followUp.due_at).getTime();
+    if (time < startToday) followUpsOverdue++;
+    else if (time < startToday + DAY) followUpsDueToday++;
+  }
   const needsAction = {
     newToAction: statusCounts.get("website_enquiry") ?? 0,
     surveysToday: appts.filter(
@@ -204,42 +233,12 @@ export default async function DashboardPage() {
     ).length,
     // Fleet compliance: active vehicles with any expiry (MOT/tax/insurance/
     // service/lease) due ≤30d or overdue — the full fleet-reminder scope.
-    ...(await (async () => {
-      const { data: vs } = await supabase
-        .from("vehicles")
-        .select("tax_due, mot_due, insurance_renewal, service_due, end_of_term")
-        .eq("is_active", true);
-      return { fleetDocsDue: (vs ?? []).filter((v) => vehicleHasExpiryDue(v)).length };
-    })()),
-    ...(await (async () => {
-      // Accepted quotes with no contract signature — crew must collect on arrival.
-      const [{ data: accepted }, { data: signed }] = await Promise.all([
-        supabase.from("quotes").select("id").eq("status", "accepted"),
-        supabase.from("signatures").select("quote_id").eq("kind", "contract"),
-      ]);
-      const signedIds = new Set((signed ?? []).map((s) => s.quote_id));
-      return { unsignedContracts: (accepted ?? []).filter((qq) => !signedIds.has(qq.id)).length };
-    })()),
-    ...(await (async () => {
-      // Live claims (open/assessing/offer_made) — liability never sits unseen.
-      const { count } = await supabase
-        .from("claims")
-        .select("id", { count: "exact", head: true })
-        .in("status", ["open", "assessing", "offer_made"]);
-      return { openClaims: count ?? 0 };
-    })()),
-    ...(await (async () => {
-      // Follow-up queue counts (open only): overdue = due before today, dueToday = due today.
-      const { data: fus } = await supabase.from("follow_ups").select("due_at").eq("status", "open");
-      let followUpsOverdue = 0;
-      let followUpsDueToday = 0;
-      for (const f of fus ?? []) {
-        const t = new Date(f.due_at).getTime();
-        if (t < startToday) followUpsOverdue++;
-        else if (t < startToday + DAY) followUpsDueToday++;
-      }
-      return { followUpsOverdue, followUpsDueToday };
-    })()),
+    fleetDocsDue: (fleetResult.data ?? []).filter((vehicle) => vehicleHasExpiryDue(vehicle)).length,
+    // Accepted quotes with no contract signature — crew must collect on arrival.
+    unsignedContracts: (acceptedResult.data ?? []).filter((quote) => !signedIds.has(quote.id)).length,
+    openClaims: claimsResult.count ?? 0,
+    followUpsOverdue,
+    followUpsDueToday,
   };
 
   /* median first-response (all-time pulse) */

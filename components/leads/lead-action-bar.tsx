@@ -30,7 +30,7 @@ import {
 import { toast } from "sonner";
 import { ContactAction } from "@/components/ui/contact-action";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
-import { CaptureLauncher } from "@/components/capture/capture-sheet";
+import { CaptureLauncher } from "@/components/capture/capture-launchers";
 import {
   markLeadContactedAction,
   updateLeadStatusAction,

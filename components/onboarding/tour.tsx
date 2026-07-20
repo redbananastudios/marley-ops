@@ -15,11 +15,20 @@
  */
 
 import { useEffect, useRef } from "react";
-import { driver, type DriveStep } from "driver.js";
-import "driver.js/dist/driver.css";
+import type { DriveStep } from "driver.js";
 import { markTourSeenAction } from "@/app/actions/tour";
 import { TOURS, type TourName, type TourStep } from "./tours";
 import { START_TOUR_EVENT, tourDoneKey } from "./launch";
+
+let driverAssets: Promise<typeof import("driver.js")> | null = null;
+
+function loadDriverAssets() {
+  driverAssets ??= Promise.all([
+    import("driver.js"),
+    import("driver.js/dist/driver.css"),
+  ]).then(([driverModule]) => driverModule);
+  return driverAssets;
+}
 
 /** First rendered, non-hidden match — skips a display:none desktop sidebar on
  *  mobile so we spotlight the real element or fall back to a centred modal. */
@@ -76,10 +85,23 @@ export function OnboardingTour({
       void markTourSeenAction().catch(() => {});
     }
 
-    function run() {
+    async function run() {
       if (runningRef.current) return;
+
+      runningRef.current = true;
+      let driver: typeof import("driver.js").driver;
+      try {
+        ({ driver } = await loadDriverAssets());
+      } catch {
+        runningRef.current = false;
+        return;
+      }
+
       const steps = toDriveSteps(TOURS[tour]);
-      if (steps.length === 0) return;
+      if (steps.length === 0) {
+        runningRef.current = false;
+        return;
+      }
       const d = driver({
         showProgress: true,
         progressText: "{{current}} of {{total}}",
@@ -118,7 +140,6 @@ export function OnboardingTour({
           markSeen();
         },
       });
-      runningRef.current = true;
       d.drive();
       // Stamp the account the moment the tour is actually on screen. This also
       // covers the SPA case where the user navigates away and the component
@@ -131,7 +152,7 @@ export function OnboardingTour({
     function onStartEvent(e: Event) {
       const name = (e as CustomEvent<TourName>).detail;
       if (name && name !== tour) return;
-      run();
+      void run();
     }
     window.addEventListener(START_TOUR_EVENT, onStartEvent);
 

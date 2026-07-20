@@ -57,7 +57,14 @@ async function cacheFirst(request) {
   if (hit) return hit;
   const res = await fetch(request);
   if (res && res.ok && res.type === "basic") {
-    cache.put(request, res.clone()).then(() => trimCache(STATIC_CACHE, MAX_STATIC));
+    // Keep the worker alive until the cache mutation finishes. Cache failures
+    // stay fail-soft: the successful network response still wins.
+    try {
+      await cache.put(request, res.clone());
+      await trimCache(STATIC_CACHE, MAX_STATIC);
+    } catch {
+      // best-effort read cache
+    }
   }
   return res;
 }
@@ -69,7 +76,12 @@ async function networkFirstDoc(request) {
     // Only cache a real, successful, same-origin document (never a redirect to
     // /login — that would pin a signed-out shell as the crew's "jobs").
     if (res && res.ok && res.type === "basic" && !res.redirected) {
-      cache.put(request, res.clone()).then(() => trimCache(JOBS_DOC_CACHE, MAX_JOB_DOCS));
+      try {
+        await cache.put(request, res.clone());
+        await trimCache(JOBS_DOC_CACHE, MAX_JOB_DOCS);
+      } catch {
+        // best-effort read cache; keep serving the live document
+      }
     }
     return res;
   } catch (err) {

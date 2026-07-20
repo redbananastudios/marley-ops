@@ -40,6 +40,13 @@ export async function runCron<T extends Record<string, unknown>>(
 
   try {
     summary = await work();
+    // Several integrations deliberately return structured failures instead of
+    // throwing. Treat `{ ok: false }` as a failed run so watchdogs, HTTP status
+    // and the audit log cannot report a false green.
+    if (summary.ok === false) {
+      ok = false;
+      error = typeof summary.error === "string" ? summary.error : "Job reported failure";
+    }
   } catch (e) {
     ok = false;
     const ec = errorContext(e);

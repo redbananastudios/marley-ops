@@ -95,7 +95,7 @@ export function JobMediaList({
               {m.kind === "photo" ? (
                 <img src={m.url} alt={m.caption || "Job photo"} className="size-full object-cover" loading="lazy" />
               ) : m.kind === "video" ? (
-                <video src={m.url} muted playsInline preload="metadata" className="size-full object-cover" />
+                <video src={m.url} muted playsInline preload="none" className="size-full object-cover" />
               ) : (
                 <span className="flex size-full items-center justify-center text-mist-400">
                   <Mic className="size-8" strokeWidth={1.5} />

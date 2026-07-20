@@ -319,6 +319,16 @@ export async function acceptQuoteOnline(
   const quote = await fetchQuoteByToken(sb, token);
   if (!quote) return { ok: false, error: "This quote link is no longer valid." };
   if (quote.status === "accepted") {
+    // Never create money side effects for an accepted row that is missing its
+    // contract evidence (for example, a prior partial failure).
+    const { data: signature } = await sb
+      .from("signatures")
+      .select("id")
+      .eq("quote_id", quote.id)
+      .eq("kind", "contract")
+      .limit(1)
+      .maybeSingle();
+    if (!signature) return { ok: false, error: "We couldn't verify the acceptance record — please call 01747 637070." };
     await ensureDepositInvoice(sb, quote.id); // self-heal, then treat as success
     return { ok: true, alreadyAccepted: true };
   }
@@ -336,25 +346,42 @@ export async function acceptQuoteOnline(
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
 
-  const { error } = await sb
+  const acceptedAt = new Date().toISOString();
+  const { data: won, error } = await sb
     .from("quotes")
     .update({
       status: "accepted",
-      accepted_at: new Date().toISOString(),
+      accepted_at: acceptedAt,
       accepted_name: name,
       accepted_ip: ip,
       agreed_price: agreed,
       deposit_amount: deposit,
     } as never)
     .eq("id", quote.id)
-    .eq("status", "sent"); // double-submit race: only one accept wins
+    .eq("status", "sent") // double-submit / accept-vs-decline race: only one wins
+    .select("id");
   if (error) return { ok: false, error: "Something went wrong — please call 01747 637070." };
+  if (!won?.length) {
+    const current = await fetchQuoteById(sb, quote.id);
+    if (current?.status === "accepted") {
+      const { data: signature } = await sb
+        .from("signatures")
+        .select("id")
+        .eq("quote_id", quote.id)
+        .eq("kind", "contract")
+        .limit(1)
+        .maybeSingle();
+      if (signature) return { ok: true, alreadyAccepted: true };
+      return { ok: false, error: "Your acceptance is still being saved — please wait a moment and refresh." };
+    }
+    return { ok: false, error: "This quote link is no longer valid." };
+  }
 
   // The contract signature record — typed name + the acknowledgment set +
   // T&C version + IP/UA. One per quote (unique index); a replay just skips.
   // signatureImage = the client's script rendering of the typed name (nice
   // for certificates/office view); the typed name itself is the signature.
-  await sb.from("signatures").insert({
+  const { error: signatureError } = await sb.from("signatures").insert({
     kind: "contract",
     quote_id: quote.id,
     lead_id: quote.lead_id,
@@ -368,6 +395,31 @@ export async function acceptQuoteOnline(
     ip,
     user_agent: opts?.userAgent ?? null,
   } as never);
+  if (signatureError && signatureError.code !== "23505") {
+    // Keep quote state and legal evidence together. The conditional rollback
+    // cannot undo another later transition because it is bound to our stamp.
+    const { data: rolledBack } = await sb
+      .from("quotes")
+      .update({
+        status: "sent",
+        accepted_at: null,
+        accepted_name: null,
+        accepted_ip: null,
+        agreed_price: quote.agreed_price,
+        deposit_amount: quote.deposit_amount,
+      } as never)
+      .eq("id", quote.id)
+      .eq("status", "accepted")
+      .eq("accepted_at", acceptedAt)
+      .select("id");
+    if (!rolledBack?.length) {
+      await sendOpsAlert(`Acceptance evidence FAILED — ${quote.quote_ref}`, [
+        `Quote <strong>${quote.quote_ref}</strong> was accepted but its signature record failed and the safe rollback did not win.`,
+        `Do not request payment until the contract evidence is repaired.`,
+      ], "system").catch(() => {});
+    }
+    return { ok: false, error: "We couldn't save the acceptance — please try again or call 01747 637070." };
+  }
 
   // Retire sibling quotes (re-quote path): carries a paid deposit across,
   // voids an unpaid one — never two live deposit invoices on one lead.
@@ -649,7 +701,7 @@ export async function declineQuoteOnline(
   }
   const lostReason = DECLINE_REASONS.has(reason) ? reason : "other";
 
-  const { data: won } = await sb
+  const { data: won, error: declineError } = await sb
     .from("quotes")
     .update({
       status: "rejected",
@@ -659,7 +711,14 @@ export async function declineQuoteOnline(
     .eq("id", quote.id)
     .eq("status", "sent")
     .select("id");
-  if (!won?.length) return { ok: true }; // raced an accept/decline — the other action stands
+  if (declineError) return { ok: false, error: "We couldn't save that — please try again." };
+  if (!won?.length) {
+    // Only report success when this or an identical decline won. If an accept
+    // won the race, never tell the customer that their quote was declined.
+    const current = await fetchQuoteById(sb, quote.id);
+    if (current?.status === "rejected") return { ok: true };
+    return { ok: false, error: "This quote can't be declined online any more — call us on 01747 637070." };
+  }
 
   if (quote.lead_id) {
     await sb

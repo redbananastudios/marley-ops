@@ -13,6 +13,7 @@
  */
 
 const TOKEN_SAFETY_MS = 5 * 60 * 1000; // refresh 5 min before Zoho's 1h expiry
+const ZOHO_TIMEOUT_MS = 10_000;
 
 export class ZohoError extends Error {
   constructor(
@@ -41,33 +42,44 @@ function cfg() {
 }
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
+let tokenRefreshPromise: Promise<string> | null = null;
 
 async function getAccessToken(): Promise<string> {
   if (tokenCache && Date.now() < tokenCache.expiresAt) return tokenCache.token;
-  const c = cfg();
-  const res = await fetch(`${c.accountsUrl}/oauth/v2/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      refresh_token: c.refreshToken,
-      client_id: c.clientId,
-      client_secret: c.clientSecret,
-      grant_type: "refresh_token",
-    }),
-  });
-  const json = (await res.json().catch(() => ({}))) as {
-    access_token?: string;
-    expires_in?: number;
-    error?: string;
-  };
-  if (!res.ok || !json.access_token) {
-    throw new ZohoError(`Zoho token refresh failed: ${json.error ?? res.status}`, undefined, res.status);
+  if (!tokenRefreshPromise) {
+    tokenRefreshPromise = (async () => {
+      const c = cfg();
+      const res = await fetch(`${c.accountsUrl}/oauth/v2/token`, {
+        method: "POST",
+        signal: AbortSignal.timeout(ZOHO_TIMEOUT_MS),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          refresh_token: c.refreshToken,
+          client_id: c.clientId,
+          client_secret: c.clientSecret,
+          grant_type: "refresh_token",
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        access_token?: string;
+        expires_in?: number;
+        error?: string;
+      };
+      if (!res.ok || !json.access_token) {
+        throw new ZohoError(`Zoho token refresh failed: ${json.error ?? res.status}`, undefined, res.status);
+      }
+      tokenCache = {
+        token: json.access_token,
+        expiresAt: Date.now() + (json.expires_in ?? 3600) * 1000 - TOKEN_SAFETY_MS,
+      };
+      return tokenCache.token;
+    })();
   }
-  tokenCache = {
-    token: json.access_token,
-    expiresAt: Date.now() + (json.expires_in ?? 3600) * 1000 - TOKEN_SAFETY_MS,
-  };
-  return tokenCache.token;
+  try {
+    return await tokenRefreshPromise;
+  } finally {
+    tokenRefreshPromise = null;
+  }
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -76,6 +88,7 @@ async function zoho<T = any>(method: string, path: string, body?: unknown): Prom
   const token = await getAccessToken();
   const res = await fetch(`${c.apiUrl}/invoice/v3${path}`, {
     method,
+    signal: AbortSignal.timeout(ZOHO_TIMEOUT_MS),
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
       "X-com-zoho-invoice-organizationid": c.orgId,
@@ -341,6 +354,7 @@ export async function getInvoicePdfBase64(invoiceId: string): Promise<string> {
   const c = cfg();
   const token = await getAccessToken();
   const res = await fetch(`${c.apiUrl}/invoice/v3/invoices/${invoiceId}?accept=pdf`, {
+    signal: AbortSignal.timeout(ZOHO_TIMEOUT_MS),
     headers: {
       Authorization: `Zoho-oauthtoken ${token}`,
       "X-com-zoho-invoice-organizationid": c.orgId,

@@ -3,6 +3,8 @@ import {
   enqueue,
   flushOutbox,
   pendingCount,
+  retryFailed,
+  scopeOutboxStore,
   MAX_OUTBOX_ATTEMPTS,
   type OutboxItem,
   type OutboxStore,
@@ -27,6 +29,7 @@ function memStore(seed: OutboxItem[] = []): OutboxStore & { snapshot: () => Outb
 
 const item = (over: Partial<OutboxItem> = {}): OutboxItem => ({
   id: "i1",
+  ownerId: "owner-1",
   kind: "job_completion",
   key: "appt-1",
   payload: { appointmentId: "appt-1" },
@@ -124,8 +127,8 @@ describe("flushOutbox", () => {
 describe("enqueue", () => {
   it("collapses to one pending item per (kind, key), replacing the payload", async () => {
     const store = memStore();
-    await enqueue(store, { id: "x1", kind: "job_completion", key: "appt-1", payload: { v: 1 }, label: "A", now: 1000 });
-    await enqueue(store, { id: "x2", kind: "job_completion", key: "appt-1", payload: { v: 2 }, label: "A", now: 2000 });
+    await enqueue(store, { id: "x1", ownerId: "owner-1", kind: "job_completion", key: "appt-1", payload: { v: 1 }, label: "A", now: 1000 });
+    await enqueue(store, { id: "x2", ownerId: "owner-1", kind: "job_completion", key: "appt-1", payload: { v: 2 }, label: "A", now: 2000 });
     const rows = store.snapshot();
     expect(rows).toHaveLength(1);
     expect(rows[0].id).toBe("x1"); // stable id + createdAt preserved
@@ -135,10 +138,33 @@ describe("enqueue", () => {
 
   it("re-queues a previously failed item back to 'queued'", async () => {
     const store = memStore([item({ status: "failed", attempts: MAX_OUTBOX_ATTEMPTS, lastError: "x" })]);
-    await enqueue(store, { id: "new", kind: "job_completion", key: "appt-1", payload: { v: 9 }, label: "A", now: 5000 });
+    await enqueue(store, { id: "new", ownerId: "owner-1", kind: "job_completion", key: "appt-1", payload: { v: 9 }, label: "A", now: 5000 });
     const [row] = store.snapshot();
     expect(row.status).toBe("queued");
     expect(row.attempts).toBe(0);
+  });
+
+  it("keeps identical job keys separate between owners", async () => {
+    const store = memStore();
+    await enqueue(store, { id: "a", ownerId: "owner-1", kind: "job_completion", key: "appt-1", payload: 1, label: "A", now: 1 });
+    await enqueue(store, { id: "b", ownerId: "owner-2", kind: "job_completion", key: "appt-1", payload: 2, label: "B", now: 2 });
+    expect(store.snapshot()).toHaveLength(2);
+  });
+
+  it("owner-scoped stores never expose, mutate, or remove another user's work", async () => {
+    const physical = memStore([item(), item({ id: "i2", ownerId: "owner-2" })]);
+    const mine = scopeOutboxStore(physical, "owner-1");
+    expect((await mine.all()).map((row) => row.id)).toEqual(["i1"]);
+    await mine.remove("i2");
+    expect(physical.snapshot()).toHaveLength(2);
+    await expect(mine.put(item({ id: "bad", ownerId: "owner-2" }))).rejects.toThrow("owner mismatch");
+  });
+
+  it("explicit retry re-arms failed work", async () => {
+    const store = memStore([item({ status: "failed", attempts: MAX_OUTBOX_ATTEMPTS, lastError: "offline" })]);
+    await expect(retryFailed(store)).resolves.toBe(1);
+    expect(store.snapshot()[0]).toMatchObject({ status: "queued", attempts: 0 });
+    expect(store.snapshot()[0].lastError).toBeUndefined();
   });
 
   it("pendingCount counts queued + failed", () => {

@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
   weight: ["400", "500", "600"],
+  preload: false,
 });
 
 // Cormorant Garamond — the Marley Moves website heading face. Used for the

@@ -14,9 +14,9 @@
  */
 
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOfficeProfile } from "@/lib/ai/auth";
+import { requireAppointmentAccess } from "@/lib/job-access";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
 import { ukParts, ukTimeAt } from "@/lib/uk-time";
@@ -32,17 +32,6 @@ import { createMediaStore } from "@/lib/storage/media-store";
 import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
 import { claimRef } from "@/lib/claims";
 
-async function requireActiveProfile() {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return null;
-  const { data: prof } = await sb.from("profiles").select("id, active, full_name, email").eq("id", user.id).single();
-  if (!prof?.active) return null;
-  return prof;
-}
-
 /* ------------------------------------------------- in-person contract */
 
 export async function signContractInPersonAction(
@@ -50,8 +39,9 @@ export async function signContractInPersonAction(
   input: { signerName: string; signatureDataUri: string; acks: Record<string, boolean> },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const access = await requireAppointmentAccess(appointmentId);
+  if (!access) return { ok: false, error: "You are not assigned to this job." };
+  const { actor: prof, admin } = access;
 
   const name = input.signerName.trim();
   if (name.length < 2) return { ok: false, error: "Type the customer's full name." };
@@ -60,7 +50,6 @@ export async function signContractInPersonAction(
     return { ok: false, error: "The signature didn't come through — ask them to sign again." };
   }
 
-  const admin = createAdminClient();
   const { data: appt } = await admin.from("appointments").select("id, lead_id").eq("id", appointmentId).single();
   if (!appt?.lead_id) return { ok: false, error: "This job has no linked lead." };
 
@@ -129,8 +118,9 @@ export async function completeJobAction(
   | { ok: false; error: string }
 > {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const access = await requireAppointmentAccess(appointmentId);
+  if (!access) return { ok: false, error: "You are not assigned to this job." };
+  const { actor: prof, admin } = access;
 
   const parsed = completionSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Something in the form didn't come through — try again." };
@@ -150,7 +140,6 @@ export async function completeJobAction(
     }
   }
 
-  const admin = createAdminClient();
   const { data: appt } = await admin
     .from("appointments")
     .select("id, lead_id, starts_at, appt_type, status")
@@ -402,7 +391,7 @@ export async function resendCertificateAction(
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(completionId).success) return { ok: false, error: "Invalid completion" };
   // Office-only: re-sends a customer email on the service-role client. Crew genuinely
-  // collect in-person signatures + complete jobs (those stay requireActiveProfile),
+  // collect in-person signatures + complete jobs (those are assignment-scoped),
   // but must not loop certificate emails to customers.
   const prof = await requireOfficeProfile();
   if (!prof) return { ok: false, error: "Office access required." };
