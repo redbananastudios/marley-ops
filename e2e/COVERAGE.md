@@ -37,7 +37,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Claims — register tabs (working page ⬜) | 🟡 | office/records.spec.ts |
 | Content — review-state tabs | ✅ | office/records.spec.ts |
 | Staff & Fleet — tabs + add dialogs | ✅ | office/staff-fleet.spec.ts |
-| Storage — page + add-site dialog (full let flow ⬜) | 🟡 | office/storage.spec.ts |
+| Storage — create a site → units entry (full let assign ⬜) | 🟡 | office/storage.spec.ts |
 | Performance — Overview/Sales/Storage tabs | ✅ | office/reports.spec.ts |
 | Growth — Website & Tracking, Ads | ✅ | office/reports.spec.ts |
 | Automations (AI survey log) | ✅ | office/reports.spec.ts |
