@@ -7,13 +7,25 @@
  *
  * Constants MUST match e2e/fixtures/seed-data.ts.
  *
- * SAFETY: refuses to run without SEED_CONFIRM=yes, and never seeds real
- * customer contacts (everything points at the sink). Do NOT run against prod.
+ * SAFETY: refuses to run without SEED_CONFIRM=yes, hard-refuses the prod Supabase
+ * host, and never seeds real customer contacts (everything points at the sink).
+ *
+ * ORDERING: run scripts/create-e2e-users.mjs FIRST — the crew AND estimator auth
+ * profiles must exist so this seed can link the crew/estimator staff rows and the
+ * estimator-pay unlock; block 13 warns-and-skips if the estimator profile is
+ * absent (which then surfaces as a confusing "gate still showing" in estimator/pay).
+ *
+ * PERSISTENT ROWS: the E2E staff rows (E2E Crew, E2E Pay Crew, E2E Estimator) and
+ * the E2E Luton vehicle intentionally persist across runs (find-or-reuse), unlike
+ * the lead/client/storage rows which wipe() clears by name. Each such block
+ * delete-before-inserts its own children (statements, agreements) so re-runs stay
+ * idempotent; the staff rows themselves are stable resources.
  *
  * Usage:
- *   SEED_CONFIRM=yes node --env-file=.env.staging scripts/seed-e2e.mjs
+ *   SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
  */
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -56,10 +68,27 @@ const SEED = {
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  markLost: { name: "E2E Mark Lost" },
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
   cubicSurvey: { name: "E2E Cubic Survey", shareToken: "e2e-cubic-share-token-0001" },
   daySheet: { token: "e2e-day-sheet-token-0001" },
+  payCrew: { name: "E2E Pay Crew", statementRef: "MMP-E2E01" },
+  claim: { name: "E2E Claim Lead" },
+  followUp: { name: "E2E Follow-up Lead" },
 };
+const ESTIMATOR_EMAIL = process.env.E2E_ESTIMATOR_EMAIL || "e2e-estimator@marleymoves.test";
+// Derive the agreement version + ack keys from the app's source of truth so a
+// future v2 bump (which re-prompts everyone) can't leave the seed signing a stale
+// version — that would silently re-show the sign gate and fail estimator/pay.spec.
+const AGREEMENT_SRC = readFileSync(new URL("../lib/contractor/agreement.ts", import.meta.url), "utf8");
+const CONTRACTOR_AGREEMENT_VERSION = AGREEMENT_SRC.match(/CONTRACTOR_AGREEMENT_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
+const CONTRACTOR_ACKS = Object.fromEntries(
+  [...AGREEMENT_SRC.matchAll(/key:\s*["'](\w+)["']/g)].map((m) => [m[1], true]),
+);
+if (!CONTRACTOR_AGREEMENT_VERSION || Object.keys(CONTRACTOR_ACKS).length < 5) {
+  console.error("Could not derive the contractor agreement version/acks from lib/contractor/agreement.ts");
+  process.exit(1);
+}
 const DAY = 86_400_000;
 const at = (daysFromNow, hour = 9) => {
   const d = new Date(Date.now() + daysFromNow * DAY);
@@ -332,6 +361,13 @@ await resetCrewContractorState();
   console.log(`seeded fresh enquiry: ${SEED.freshEnquiry.name}`);
 }
 
+// 2b. A quoted lead + its quote — the office mark-lost (reason-gated) test.
+{
+  const ids = await makeLead({ name: SEED.markLost.name, status: "quoted" });
+  await makeQuote(ids, SEED.markLost, { ref: "E2E-LOST-001", total: 1100, status: "sent" });
+  console.log(`seeded mark-lost candidate: ${SEED.markLost.name}`);
+}
+
 // 3. Accepted quote awaiting a deposit — deposit/card scenario.
 {
   const ids = await makeLead({ name: SEED.awaitingDeposit.name, status: "confirmed" });
@@ -478,6 +514,77 @@ await resetCrewContractorState();
   });
   if (error) die("crew day sheet", error);
   console.log(`seeded day sheet: e2e-crew tomorrow (/sheet/${SEED.daySheet.token})`);
+}
+
+// 10. A SUBMITTED contractor invoice for a separate staff member — the office
+//     contractor-pay review (return / mark paid). Separate staff so the crew
+//     sign-gate reset never wipes it.
+{
+  let { data: payStaff } = await sb.from("staff").select("id").ilike("full_name", SEED.payCrew.name).maybeSingle();
+  if (!payStaff) {
+    const { data, error } = await sb.from("staff").insert({ full_name: SEED.payCrew.name, staff_role: "crew", is_active: true }).select("id").single();
+    if (error) die("pay-crew staff", error);
+    payStaff = data;
+  }
+  const { data: prev } = await sb.from("staff_statements").select("id").eq("staff_id", payStaff.id);
+  const prevIds = (prev ?? []).map((s) => s.id);
+  if (prevIds.length) {
+    await sb.from("staff_statement_lines").delete().in("statement_id", prevIds);
+    await sb.from("staff_statements").delete().in("id", prevIds);
+  }
+  const { data: stmt, error: sErr } = await sb
+    .from("staff_statements")
+    .insert({ staff_id: payStaff.id, ref: SEED.payCrew.statementRef, period_start: at(-7).slice(0, 10), period_end: at(-1).slice(0, 10), status: "submitted", total: 150, submitted_at: at(-1) })
+    .select("id")
+    .single();
+  if (sErr) die("pay-crew statement", sErr);
+  const { error: lErr } = await sb.from("staff_statement_lines").insert({ statement_id: stmt.id, description: "Full day — Friday", amount: 150, source: "job", sort_index: 0 });
+  if (lErr) die("pay-crew line", lErr);
+  console.log(`seeded submitted invoice: ${SEED.payCrew.name} (${SEED.payCrew.statementRef})`);
+}
+
+// 11. A lead with an OPEN claim — the claims working page.
+{
+  const ids = await makeLead({ name: SEED.claim.name, status: "completed" });
+  const { error } = await sb.from("claims").insert({ lead_id: ids.leadId, client_id: ids.clientId, description: "Damaged wardrobe during the move", reported_channel: "phone" });
+  if (error) die("claim", error);
+  console.log(`seeded claim: ${SEED.claim.name}`);
+}
+
+// 12. A lead with a DUE (overdue) follow-up — the follow-ups queue.
+{
+  const ids = await makeLead({ name: SEED.followUp.name, status: "quoted" });
+  const { error } = await sb.from("follow_ups").insert({ lead_id: ids.leadId, client_id: ids.clientId, reason: "quote_followup", due_at: at(-1), status: "open", source: "manual" });
+  if (error) die("follow-up", error);
+  console.log(`seeded follow-up: ${SEED.followUp.name}`);
+}
+
+// 13. Estimator pay unlocked — a staff row linked to the estimator profile + a
+//     signed contractor agreement (self-billing is already ON from the crew reset).
+{
+  const { data: estProfile } = await sb.from("profiles").select("id").ilike("email", ESTIMATOR_EMAIL).maybeSingle();
+  if (!estProfile) {
+    console.warn(`  ⚠ no estimator profile for ${ESTIMATOR_EMAIL} — /estimator/pay unlock skipped.`);
+  } else {
+    let { data: estStaff } = await sb.from("staff").select("id, profile_id").ilike("email", ESTIMATOR_EMAIL).maybeSingle();
+    if (!estStaff) {
+      const { data, error } = await sb
+        .from("staff")
+        .insert({ full_name: "E2E Estimator", staff_role: "estimator", email: ESTIMATOR_EMAIL, profile_id: estProfile.id, is_active: true })
+        .select("id")
+        .single();
+      if (error) die("estimator staff", error);
+      estStaff = data;
+    } else if (estStaff.profile_id !== estProfile.id) {
+      await sb.from("staff").update({ profile_id: estProfile.id }).eq("id", estStaff.id);
+    }
+    await sb.from("contractor_agreements").delete().eq("profile_id", estProfile.id);
+    const { error: aErr } = await sb
+      .from("contractor_agreements")
+      .insert({ profile_id: estProfile.id, staff_id: estStaff.id, role: "estimator", agreement_version: CONTRACTOR_AGREEMENT_VERSION, signer_name: "E2E Estimator", acknowledgments: CONTRACTOR_ACKS });
+    if (aErr) die("estimator agreement", aErr);
+    console.log(`seeded estimator pay unlock: ${ESTIMATOR_EMAIL}`);
+  }
 }
 
 console.log("\n✓ E2E seed complete.");

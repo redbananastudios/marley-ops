@@ -59,6 +59,9 @@ export const SEED = {
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  /** A quoted lead used ONLY by the office mark-lost test — dedicated so marking
+   *  it lost never consumes a lead another spec depends on. */
+  markLost: { name: "E2E Mark Lost" },
   /** An OPEN storage let (unsigned) with a remote-signing token — the public
    *  /s/<token> storage-agreement page. Client name drives the greeting. */
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
@@ -68,4 +71,12 @@ export const SEED = {
   /** A crew day-sheet token — the public /sheet/<token> page (the SMS'd day plan).
    *  Points at the e2e-crew staff row for TOMORROW (their seeded crew job's day). */
   daySheet: { token: "e2e-day-sheet-token-0001" },
+  /** A SEPARATE staff member with a SUBMITTED invoice — the office contractor-pay
+   *  review (return / mark paid). Separate from the crew login so the contractor
+   *  sign-gate reset never wipes it. */
+  payCrew: { name: "E2E Pay Crew", statementRef: "MMP-E2E01" },
+  /** A lead with an OPEN claim — the claims working page (status/resolution). */
+  claim: { name: "E2E Claim Lead" },
+  /** A lead with a DUE follow-up — the follow-ups queue (snooze / done). */
+  followUp: { name: "E2E Follow-up Lead" },
 } as const;
