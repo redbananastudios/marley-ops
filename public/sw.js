@@ -29,7 +29,12 @@ const OFFLINE_URL = "/offline.html";
 const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE];
 const WARM_HEADER = "x-mo-warm";
 const MAX_JOB_DOCS = 30;
-const MAX_STATIC = 80;
+// Generous: a cached /my-jobs document (network-first, always the latest build)
+// links this build's hashed chunks. FIFO evicts OLDEST first (older builds), but
+// the cap must comfortably exceed one build's whole client-asset set so a chunk
+// the current cached document still needs is never evicted. Old-build assets are
+// also purged on activate() when CACHE_VERSION bumps.
+const MAX_STATIC = 400;
 
 function isCrewJobDoc(pathname) {
   return pathname === "/my-jobs" || pathname.startsWith("/my-jobs/");

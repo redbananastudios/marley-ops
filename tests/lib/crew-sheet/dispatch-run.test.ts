@@ -3,12 +3,15 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 // Stub the low-level senders so the run doesn't hit Resend/WebEx. The PDF render
 // is left real — it exercises the server printer end-to-end.
 const sent: { email: number; sms: number } = { email: 0, sms: 0 };
+const sendCtl = { fail: false }; // flip to simulate a dropped/failed send
 vi.mock("@/lib/comms/send", () => ({
   sendEmail: vi.fn(async () => {
+    if (sendCtl.fail) return { ok: false, error: "no signal" };
     sent.email++;
     return { ok: true, providerId: "email-x" };
   }),
   sendSms: vi.fn(async () => {
+    if (sendCtl.fail) return { ok: false, error: "no signal" };
     sent.sms++;
     return { ok: true, providerId: "sms-x" };
   }),
@@ -115,6 +118,7 @@ describe("dispatchCrewJobSheets — full cycle", () => {
   beforeEach(() => {
     sent.email = 0;
     sent.sms = 0;
+    sendCtl.fail = false;
   });
 
   it("sends once, then is idempotent, then supersedes on a change", async () => {
@@ -165,5 +169,46 @@ describe("dispatchCrewJobSheets — full cycle", () => {
     const r = await dispatchCrewJobSheets(admin as never, early);
     expect(r.sent).toBe(0);
     expect(sheets).toHaveLength(0); // no row created before the window
+  });
+
+  it("retries a failed send on the next pass and only counts the delivery once", async () => {
+    const { admin, sheets } = memAdmin(canned());
+
+    // Pass 1: both channels fail (dropped signal) — row created, nothing delivered.
+    sendCtl.fail = true;
+    const r1 = await dispatchCrewJobSheets(admin as never, NOW);
+    expect(r1.sent).toBe(0);
+    expect(sheets[0].delivered_hash).toBeNull();
+    expect(sheets[0].attempts).toBe(1);
+    expect(sheets[0].version).toBe(1);
+
+    // Pass 2: signal is back — the retry path claims + re-sends, now delivered.
+    sendCtl.fail = false;
+    const r2 = await dispatchCrewJobSheets(admin as never, NOW);
+    expect(r2.sent).toBe(1);
+    expect(sheets[0].delivered_hash).toBe(sheets[0].content_hash);
+    expect(sheets[0].version).toBe(1); // a retry is NOT a new version
+    expect(sent.email).toBe(1); // delivered exactly once, not on the failed pass
+
+    // Pass 3: settled → no further send.
+    const r3 = await dispatchCrewJobSheets(admin as never, NOW);
+    expect(r3.sent).toBe(0);
+    expect(sent.email).toBe(1);
+  });
+
+  it("a crew member with no email or phone is surfaced once and not retried every pass", async () => {
+    const data = canned();
+    data.staff = [{ id: "s1", full_name: "Rob Pierce", email: null, phone: null, is_active: true }] as unknown as typeof data.staff;
+    const { admin, sheets, sends } = memAdmin(data);
+
+    const r1 = await dispatchCrewJobSheets(admin as never, NOW);
+    expect(r1.skippedNoContact).toBe(1);
+    expect(r1.failures.some((f) => f.channel === "none")).toBe(true);
+    expect(sheets[0].attempts).toBe(6); // marked terminal — no more retries
+
+    const sendsAfter1 = sends.length;
+    const r2 = await dispatchCrewJobSheets(admin as never, NOW);
+    expect(r2.skippedNoContact).toBe(0); // decideSheetAction → done, not reprocessed
+    expect(sends.length).toBe(sendsAfter1); // no new skipped rows logged
   });
 });

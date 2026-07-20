@@ -31,7 +31,10 @@ export const WARM_HEADER = "x-mo-warm";
 /** Cap cached job docs / static assets (FIFO) so an install doesn't grow without
  *  bound across months of deploys. */
 export const MAX_JOB_DOCS = 30;
-export const MAX_STATIC = 80;
+// Comfortably larger than one build's whole client-asset set: a cached job doc
+// (always the latest build) references this build's hashed chunks, and FIFO
+// eviction must never drop a chunk the current cached doc still needs.
+export const MAX_STATIC = 400;
 
 /** A crew job document we network-first cache for offline reading. */
 export function isCrewJobDoc(pathname: string): boolean {

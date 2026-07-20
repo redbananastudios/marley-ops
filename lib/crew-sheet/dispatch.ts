@@ -207,6 +207,7 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
       const { data: staff } = await admin
         .from("staff")
         .select("id, full_name, email, phone")
+        .eq("is_active", true) // don't email a "you're clear" sheet to a deactivated crew member
         .in("id", emptyStaffIds);
       for (const s of (staff ?? []) as any[]) {
         byStaff.set(s.id, {
@@ -252,8 +253,19 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
         claimed = upd;
         version = row.version + 1;
       } else {
-        // retry of the same undelivered content
-        claimed = row;
+        // Retry of the same undelivered content. Claim atomically (CAS on
+        // attempts) so two overlapping cron runs — a slow run isn't unusual with
+        // many crew + PDF renders — can't both re-send the same sheet.
+        const { data: updated } = await admin
+          .from("crew_job_sheets")
+          .update({ attempts: row.attempts + 1 })
+          .eq("id", row.id)
+          .eq("content_hash", row.content_hash)
+          .eq("attempts", row.attempts) // CAS — lose the race → skip
+          .select("id, version, content_hash, delivered_hash, attempts, token");
+        const upd = (updated ?? [])[0] as SheetStateRow | undefined;
+        if (!upd) continue;
+        claimed = upd;
         version = row.version;
       }
 
@@ -271,6 +283,13 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
         const { loadPhotoDataUris } = await import("@/lib/job-sheet-load");
         let budget = PHOTOS_PER_DAY;
         for (const job of day.jobs) {
+          // A job object is shared across the crew-mates on it (daily-data fans
+          // one DailyJob into every sheet). If a crew-mate's pass already loaded
+          // its photos, reuse them instead of re-fetching from R2.
+          if (job.sheet.photos !== undefined) {
+            budget -= job.sheet.photos.length;
+            continue;
+          }
           if (budget <= 0 || !job.surveyId) {
             job.sheet.photos = [];
             continue;
@@ -341,7 +360,13 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
         logs.push({ channel: "sms", status: "skipped", recipient: null, provider: null, error: "no phone on file" });
       }
 
-      if (!day.crew.email && !day.crew.phone) summary.skippedNoContact++;
+      const noContact = !day.crew.email && !day.crew.phone;
+      if (noContact) {
+        summary.skippedNoContact++;
+        // Surface WHO can't be reached (once — the row is marked terminal below
+        // so this crew isn't reprocessed every pass).
+        summary.failures.push({ staff: day.crew.fullName, date: workDate, channel: "none", error: "no email or phone on file" });
+      }
       if (anyOk) summary.sent++;
 
       // Log every attempt.
@@ -360,13 +385,21 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
         );
       }
 
-      // Advance the state: bump attempts; on any successful channel mark this
-      // content delivered so it's never re-sent.
+      // Advance the state: bump attempts; on ANY successful channel mark this
+      // content delivered. Any-channel (not both) is deliberate: the email and
+      // the SMS both carry the SAME login-less /sheet link (the email also
+      // attaches the PDF), so an email-OK / SMS-failed crew member already has
+      // their sheet — we don't re-send (which would re-email) to chase the SMS.
+      // The failed SMS is still logged status='failed' and shown on the office
+      // failure panel so a bad number gets fixed.
+      // A crew member with no email AND no phone can never be reached — mark the
+      // attempts terminal so we don't burn a full retry cycle (and re-log skipped
+      // rows) every pass on them.
       const prevAttempts = decision.contentChanged || !row ? 0 : row.attempts;
       await admin
         .from("crew_job_sheets")
         .update({
-          attempts: prevAttempts + 1,
+          attempts: noContact ? MAX_ATTEMPTS : prevAttempts + 1,
           ...(anyOk ? { delivered_hash: currentHash, delivered_at: now.toISOString() } : {}),
         })
         .eq("id", claimed.id);
