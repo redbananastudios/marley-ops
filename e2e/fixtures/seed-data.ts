@@ -71,4 +71,12 @@ export const SEED = {
   /** A crew day-sheet token — the public /sheet/<token> page (the SMS'd day plan).
    *  Points at the e2e-crew staff row for TOMORROW (their seeded crew job's day). */
   daySheet: { token: "e2e-day-sheet-token-0001" },
+  /** A SEPARATE staff member with a SUBMITTED invoice — the office contractor-pay
+   *  review (return / mark paid). Separate from the crew login so the contractor
+   *  sign-gate reset never wipes it. */
+  payCrew: { name: "E2E Pay Crew", statementRef: "MMP-E2E01" },
+  /** A lead with an OPEN claim — the claims working page (status/resolution). */
+  claim: { name: "E2E Claim Lead" },
+  /** A lead with a DUE follow-up — the follow-ups queue (snooze / done). */
+  followUp: { name: "E2E Follow-up Lead" },
 } as const;

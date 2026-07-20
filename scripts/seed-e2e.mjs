@@ -60,7 +60,13 @@ const SEED = {
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
   cubicSurvey: { name: "E2E Cubic Survey", shareToken: "e2e-cubic-share-token-0001" },
   daySheet: { token: "e2e-day-sheet-token-0001" },
+  payCrew: { name: "E2E Pay Crew", statementRef: "MMP-E2E01" },
+  claim: { name: "E2E Claim Lead" },
+  followUp: { name: "E2E Follow-up Lead" },
 };
+const ESTIMATOR_EMAIL = process.env.E2E_ESTIMATOR_EMAIL || "e2e-estimator@marleymoves.test";
+const CONTRACTOR_AGREEMENT_VERSION = "v1-2026-07-18";
+const CONTRACTOR_ACKS = { self_employed: true, own_tax: true, no_vat: true, own_invoices: true, no_employee_rights: true };
 const DAY = 86_400_000;
 const at = (daysFromNow, hour = 9) => {
   const d = new Date(Date.now() + daysFromNow * DAY);
@@ -486,6 +492,77 @@ await resetCrewContractorState();
   });
   if (error) die("crew day sheet", error);
   console.log(`seeded day sheet: e2e-crew tomorrow (/sheet/${SEED.daySheet.token})`);
+}
+
+// 10. A SUBMITTED contractor invoice for a separate staff member — the office
+//     contractor-pay review (return / mark paid). Separate staff so the crew
+//     sign-gate reset never wipes it.
+{
+  let { data: payStaff } = await sb.from("staff").select("id").ilike("full_name", SEED.payCrew.name).maybeSingle();
+  if (!payStaff) {
+    const { data, error } = await sb.from("staff").insert({ full_name: SEED.payCrew.name, staff_role: "crew", is_active: true }).select("id").single();
+    if (error) die("pay-crew staff", error);
+    payStaff = data;
+  }
+  const { data: prev } = await sb.from("staff_statements").select("id").eq("staff_id", payStaff.id);
+  const prevIds = (prev ?? []).map((s) => s.id);
+  if (prevIds.length) {
+    await sb.from("staff_statement_lines").delete().in("statement_id", prevIds);
+    await sb.from("staff_statements").delete().in("id", prevIds);
+  }
+  const { data: stmt, error: sErr } = await sb
+    .from("staff_statements")
+    .insert({ staff_id: payStaff.id, ref: SEED.payCrew.statementRef, period_start: at(-7).slice(0, 10), period_end: at(-1).slice(0, 10), status: "submitted", total: 150, submitted_at: at(-1) })
+    .select("id")
+    .single();
+  if (sErr) die("pay-crew statement", sErr);
+  const { error: lErr } = await sb.from("staff_statement_lines").insert({ statement_id: stmt.id, description: "Full day — Friday", amount: 150, source: "job", sort_index: 0 });
+  if (lErr) die("pay-crew line", lErr);
+  console.log(`seeded submitted invoice: ${SEED.payCrew.name} (${SEED.payCrew.statementRef})`);
+}
+
+// 11. A lead with an OPEN claim — the claims working page.
+{
+  const ids = await makeLead({ name: SEED.claim.name, status: "completed" });
+  const { error } = await sb.from("claims").insert({ lead_id: ids.leadId, client_id: ids.clientId, description: "Damaged wardrobe during the move", reported_channel: "phone" });
+  if (error) die("claim", error);
+  console.log(`seeded claim: ${SEED.claim.name}`);
+}
+
+// 12. A lead with a DUE (overdue) follow-up — the follow-ups queue.
+{
+  const ids = await makeLead({ name: SEED.followUp.name, status: "quoted" });
+  const { error } = await sb.from("follow_ups").insert({ lead_id: ids.leadId, client_id: ids.clientId, reason: "quote_followup", due_at: at(-1), status: "open", source: "manual" });
+  if (error) die("follow-up", error);
+  console.log(`seeded follow-up: ${SEED.followUp.name}`);
+}
+
+// 13. Estimator pay unlocked — a staff row linked to the estimator profile + a
+//     signed contractor agreement (self-billing is already ON from the crew reset).
+{
+  const { data: estProfile } = await sb.from("profiles").select("id").ilike("email", ESTIMATOR_EMAIL).maybeSingle();
+  if (!estProfile) {
+    console.warn(`  ⚠ no estimator profile for ${ESTIMATOR_EMAIL} — /estimator/pay unlock skipped.`);
+  } else {
+    let { data: estStaff } = await sb.from("staff").select("id, profile_id").ilike("email", ESTIMATOR_EMAIL).maybeSingle();
+    if (!estStaff) {
+      const { data, error } = await sb
+        .from("staff")
+        .insert({ full_name: "E2E Estimator", staff_role: "estimator", email: ESTIMATOR_EMAIL, profile_id: estProfile.id, is_active: true })
+        .select("id")
+        .single();
+      if (error) die("estimator staff", error);
+      estStaff = data;
+    } else if (estStaff.profile_id !== estProfile.id) {
+      await sb.from("staff").update({ profile_id: estProfile.id }).eq("id", estStaff.id);
+    }
+    await sb.from("contractor_agreements").delete().eq("profile_id", estProfile.id);
+    const { error: aErr } = await sb
+      .from("contractor_agreements")
+      .insert({ profile_id: estProfile.id, staff_id: estStaff.id, role: "estimator", agreement_version: CONTRACTOR_AGREEMENT_VERSION, signer_name: "E2E Estimator", acknowledgments: CONTRACTOR_ACKS });
+    if (aErr) die("estimator agreement", aErr);
+    console.log(`seeded estimator pay unlock: ${ESTIMATOR_EMAIL}`);
+  }
 }
 
 console.log("\n✓ E2E seed complete.");
