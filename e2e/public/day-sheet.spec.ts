@@ -1,5 +1,4 @@
 import { test, expect } from "@playwright/test";
-import { step } from "../fixtures/artefacts";
 import { SEED } from "../fixtures/seed-data";
 
 /**
