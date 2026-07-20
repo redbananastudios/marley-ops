@@ -72,13 +72,16 @@ test.describe("P0 #8 — double-submit is idempotent", () => {
       await drawSignature(page, canvases.nth(1));
     });
 
-    await step("double-click submit → one success, second is 'already signed off'", page, async () => {
+    await step("double-tap submit → collapses to ONE completion", page, async () => {
       const submit = page.getByRole("dialog").getByRole("button", { name: "Complete job" });
+      // Genuinely fire a second tap. The client guard disables the button during
+      // the transition, so the second click is forced (bypasses actionability) —
+      // whether it's swallowed client-side OR reaches the server, appointment_id
+      // uniqueness must collapse both to one record + one email.
       await submit.click();
-      // The button disables during the transition; a genuine second reach must
-      // collapse to the same record (server unique on appointment_id).
+      await submit.click({ force: true, timeout: 2000 }).catch(() => {}); // second tap: disabled = the guard working
       await expect(page.getByText(/completed|already signed off/i)).toBeVisible();
-      // Re-opening the job offers no second completion (it's done, exactly once).
+      // Exactly once: the job is now terminal — no second Complete affordance.
       await page.reload();
       await expect(page.getByRole("button", { name: "Complete job" })).toHaveCount(0);
     });

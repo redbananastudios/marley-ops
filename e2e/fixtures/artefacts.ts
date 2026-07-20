@@ -20,9 +20,16 @@ function dirFor(): string {
 }
 
 let counter = 0;
+let counterKey = "";
 
-/** Run a named step and capture a full-page screenshot at the end of it. */
+/** Run a named step and capture a full-page screenshot at the end of it.
+ *  The sequence number resets per test so each artefact folder reads 01, 02, … */
 export async function step(name: string, page: Page, body: () => Promise<void>): Promise<void> {
+  const key = test.info().testId;
+  if (key !== counterKey) {
+    counter = 0;
+    counterKey = key;
+  }
   await test.step(name, async () => {
     await body();
     const file = join(dirFor(), `${String(++counter).padStart(2, "0")}-${slug(name)}.png`);

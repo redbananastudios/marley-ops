@@ -69,7 +69,9 @@ async function wipe() {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 async function ensureVehicle() {
-  const { data: existing } = await sb.from("vehicles").select("id").eq("registration", SEED.vehicle.registration).maybeSingle();
+  // ilike (not eq): the app matches registration/email case-insensitively, so a
+  // case difference must find the existing row, never create a duplicate.
+  const { data: existing } = await sb.from("vehicles").select("id").ilike("registration", SEED.vehicle.registration).maybeSingle();
   if (existing) return existing.id;
   const { data, error } = await sb
     .from("vehicles")
@@ -81,7 +83,7 @@ async function ensureVehicle() {
 }
 
 async function ensureCrewStaff() {
-  const { data: existing } = await sb.from("staff").select("id, profile_id").eq("email", CREW_EMAIL).maybeSingle();
+  const { data: existing } = await sb.from("staff").select("id, profile_id").ilike("email", CREW_EMAIL).maybeSingle();
   const { data: profile } = await sb.from("profiles").select("id").ilike("email", CREW_EMAIL).maybeSingle();
   if (existing) {
     if (profile && existing.profile_id !== profile.id) await sb.from("staff").update({ profile_id: profile.id }).eq("id", existing.id);

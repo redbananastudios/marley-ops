@@ -21,8 +21,10 @@ for (const [role, cfg] of Object.entries(E2E_USERS)) {
     await page.getByLabel("Password").fill(cfg.password);
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    // Web-first: wait for the role's landing route rather than a fixed delay.
-    await page.waitForURL(cfg.landing, { timeout: 30_000 });
+    // The real success signal is leaving /login — wait for that FIRST (a loose
+    // landing pattern can match a transient redirect hop mid-chain), then
+    // confirm the role's landing route.
+    await page.waitForURL((url) => !url.pathname.startsWith("/login"), { timeout: 30_000 });
     await expect(page).toHaveURL(cfg.landing);
 
     await page.context().storageState({ path: `${AUTH_DIR}/${role}.json` });
