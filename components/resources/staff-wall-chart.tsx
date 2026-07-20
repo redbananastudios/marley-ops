@@ -55,11 +55,15 @@ export function StaffWallChart({
   staff,
   staffAvailability,
   today,
+  isAdmin,
   onEditStaff,
 }: {
   staff: WallStaff[];
   staffAvailability: WallAvailRow[];
   today: string;
+  /** Editing the staff RECORD (name/pattern/pay) is admin-only; a non-admin can
+   *  still change per-day availability via the cells. */
+  isAdmin: boolean;
   onEditStaff: (id: string) => void;
 }) {
   const [weekStart, setWeekStart] = useState<string>(() => mondayOf(today));
@@ -253,7 +257,7 @@ export function StaffWallChart({
                 setNoteInput(overrides.get(`${s.id}|${iso}`)?.note ?? "");
                 setEditing({ staffId: s.id, staffName: s.full_name, date: iso });
               }}
-              onEdit={() => onEditStaff(s.id)}
+              onEdit={isAdmin ? () => onEditStaff(s.id) : undefined}
             />
           ))}
 
@@ -354,7 +358,9 @@ function StaffWallRow({
   noteOf: (iso: string) => string | null;
   pendingOn: (iso: string) => boolean;
   onTapCell: (iso: string) => void;
-  onEdit: () => void;
+  /** undefined for non-admins → the row header renders read-only (name/pattern
+   *  only, no edit affordance); availability cells stay editable regardless. */
+  onEdit?: () => void;
 }) {
   const META: Record<CellState, { cls: string; icon: React.ReactNode }> = {
     working: { cls: "border-success/30 bg-success/10 text-success", icon: <Check className="size-3.5" strokeWidth={3} /> },
@@ -364,18 +370,27 @@ function StaffWallRow({
   };
   return (
     <>
-      <button
-        type="button"
-        onClick={onEdit}
-        className="focus-ring sticky left-0 z-10 flex items-center justify-between gap-2 border-b border-r border-border bg-card px-3 py-2 text-left hover:bg-muted/50"
-        title="Edit staff, pattern and holidays"
-      >
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-foreground">{s.full_name}</span>
-          <span className="block truncate text-[11px] text-mist-400">{pat}</span>
-        </span>
-        <Pencil className="size-3.5 shrink-0 text-mist-300" strokeWidth={1.75} />
-      </button>
+      {onEdit ? (
+        <button
+          type="button"
+          onClick={onEdit}
+          className="focus-ring sticky left-0 z-10 flex items-center justify-between gap-2 border-b border-r border-border bg-card px-3 py-2 text-left hover:bg-muted/50"
+          title="Edit staff, pattern and holidays"
+        >
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-foreground">{s.full_name}</span>
+            <span className="block truncate text-[11px] text-mist-400">{pat}</span>
+          </span>
+          <Pencil className="size-3.5 shrink-0 text-mist-300" strokeWidth={1.75} />
+        </button>
+      ) : (
+        <div className="sticky left-0 z-10 flex items-center justify-between gap-2 border-b border-r border-border bg-card px-3 py-2 text-left">
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-foreground">{s.full_name}</span>
+            <span className="block truncate text-[11px] text-mist-400">{pat}</span>
+          </span>
+        </div>
+      )}
       {days.map((d) => {
         const st = cellState(d.iso);
         const meta = META[st];

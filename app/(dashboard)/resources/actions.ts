@@ -6,23 +6,30 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { normalizeWorkingDays } from "@/lib/staff/availability";
 
-async function actor() {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  return { sb, userId: user?.id ?? null };
-}
-
-/** Staff & Fleet writes are an OFFICE surface. This gates them at the app layer
- *  in addition to RLS — a crew login could otherwise call saveStaffAction to edit
- *  their own staff row (their staff_update RLS permits it). Pay is now separate:
- *  staff_pay is office-write-only at the RLS layer, so rates can't be self-set
- *  even via the raw API. */
+/** Staff-availability scheduling is an OFFICE surface — estimators plan around
+ *  crew availability. Gated at the app layer in addition to RLS (a crew login
+ *  could otherwise self-edit). Fleet management, incl. vehicle off-road windows,
+ *  is admin (requireAdminActor) — not this. */
 async function requireOfficeActor() {
   const profile = await getSessionProfile();
   if (!profile) return { error: "Not signed in." as const };
   if (profile.role !== "admin" && profile.role !== "estimator") return { error: "Office only." as const };
+  const sb = await createClient();
+  return { sb, userId: profile.id, role: profile.role };
+}
+
+/** Staff + fleet RECORD writes (crew roster, vehicle records, pay) are
+ *  ADMIN-only — they manage who's on the team and what we own. Critically,
+ *  `staff.profile_id` is an auth key the availability/statement/pay self-scopes
+ *  trust, so a non-admin office user (an estimator, who is is_office()) must not
+ *  create or repoint staff rows (MED-4). RLS enforces the same in migration
+ *  0067; this is the app-layer half. Covers staff records + pay and the whole
+ *  fleet (vehicle records + off-road windows). Only staff-availability
+ *  scheduling stays office (requireOfficeActor). */
+async function requireAdminActor() {
+  const profile = await getSessionProfile();
+  if (!profile) return { error: "Not signed in." as const };
+  if (profile.role !== "admin") return { error: "Admins only." as const };
   const sb = await createClient();
   return { sb, userId: profile.id, role: profile.role };
 }
@@ -65,8 +72,9 @@ export async function saveVehicleAction(input: VehicleInput) {
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const v = parsed.data;
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
 
   const row = {
     name: v.name,
@@ -96,8 +104,9 @@ export async function saveVehicleAction(input: VehicleInput) {
 
 /** Archive (never hard-delete from the UI — assignments will reference vehicles). */
 export async function setVehicleActiveAction(id: string, isActive: boolean) {
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
   const { error } = await sb.from("vehicles").update({ is_active: isActive }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
@@ -133,8 +142,9 @@ export async function saveVehicleUnavailabilityAction(input: VehicleUnavailabili
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const u = parsed.data;
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb, userId } = ctx;
 
   const row = {
     vehicle_id: u.vehicle_id,
@@ -155,8 +165,9 @@ export async function saveVehicleUnavailabilityAction(input: VehicleUnavailabili
 }
 
 export async function deleteVehicleUnavailabilityAction(id: string) {
-  const { sb, userId } = await actor();
-  if (!userId) return { ok: false as const, error: "Not signed in." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
   const { error } = await sb.from("vehicle_unavailability").delete().eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
@@ -191,7 +202,7 @@ export async function saveStaffAction(input: StaffInput) {
     return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
   }
   const v = parsed.data;
-  const ctx = await requireOfficeActor();
+  const ctx = await requireAdminActor();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const { sb, role } = ctx;
 
@@ -240,7 +251,7 @@ export async function saveStaffAction(input: StaffInput) {
 }
 
 export async function setStaffActiveAction(id: string, isActive: boolean) {
-  const ctx = await requireOfficeActor();
+  const ctx = await requireAdminActor();
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const { sb } = ctx;
   const { error } = await sb.from("staff").update({ is_active: isActive }).eq("id", id);
