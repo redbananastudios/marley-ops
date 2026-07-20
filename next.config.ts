@@ -5,6 +5,12 @@ const nextConfig: NextConfig = {
   // (minimal runtime, no full node_modules) that `node server.js` runs.
   output: "standalone",
 
+  // pdfmake (server-side crew job-sheet rendering) pulls in pdfkit/fontkit,
+  // which use dynamic requires + __dirname font lookups that a bundler mangles.
+  // Keep it an external runtime require so it's traced into the standalone
+  // output untouched.
+  serverExternalPackages: ["pdfmake"],
+
   // i9 is the host; Peter reaches the dev server over Tailscale from his laptop.
   // Next 16 blocks cross-origin dev requests (HMR, server actions) unless the
   // origin is allow-listed — without this, the LAN login hangs / 403s.
