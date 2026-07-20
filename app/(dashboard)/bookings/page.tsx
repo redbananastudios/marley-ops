@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AlertTriangle, CalendarPlus, CalendarRange, CheckCircle2, PauseCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getBusinessSettings } from "@/lib/settings";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
 import { balanceDue } from "@/lib/quote/payments";
@@ -118,13 +119,20 @@ export default async function BookingsPage() {
   const sb = await createClient();
   const settings = await getBusinessSettings(sb);
 
-  const { data: quotes } = await sb
-    .from("quotes")
-    .select(
-      "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
-    )
-    .eq("status", "accepted")
-    .not("lead_id", "is", null);
+  // Accepted quotes accumulate for the life of the business → page through
+  // fetchAllRows (a plain select truncates at PostgREST's 1000-row cap). Rows
+  // are re-sorted by accepted_at below, so id-order paging is fine.
+  const quotes = await fetchAllRows((f, t) =>
+    sb
+      .from("quotes")
+      .select(
+        "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+      )
+      .eq("status", "accepted")
+      .not("lead_id", "is", null)
+      .order("id")
+      .range(f, t),
+  );
 
   const leadIds = [...new Set((quotes ?? []).map((q) => q.lead_id as string))];
   const [{ data: leads }, { data: appts }] = await Promise.all([

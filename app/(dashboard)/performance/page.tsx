@@ -92,9 +92,11 @@ async function StorageTabPage() {
     ),
     sb.from("clients").select("id, display_name"),
   ]);
-  const { data: storageInvoices } = await sb
-    .from("storage_invoices")
-    .select("amount, status, period_start");
+  // Full storage-invoice history feeds the billing stats (aggregation only, so
+  // order-independent) → page through fetchAllRows past PostgREST's 1000-row cap.
+  const storageInvoices = await fetchAllRows((f, t) =>
+    sb.from("storage_invoices").select("amount, status, period_start").order("id").range(f, t),
+  );
 
   const today = (() => {
     const p = ukParts();
@@ -210,7 +212,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UK_TZ });
 
   const sb = await createClient();
-  const [{ data: appts }, { data: profiles }, { data: leads }, { data: quotes }] =
+  const [{ data: appts }, { data: profiles }, leads, quotes] =
     await Promise.all([
       sb
         .from("appointments")
@@ -220,8 +222,11 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         .gte("starts_at", monthStart.toISOString())
         .lt("starts_at", monthEnd.toISOString()),
       sb.from("profiles").select("id, full_name"),
-      sb.from("leads").select("id, name, status"),
-      sb.from("quotes").select("lead_id, status, agreed_price, grand_total"),
+      // leads + quotes are full-table lookups (name/status maps, accepted-value
+      // map) — order-independent → page through fetchAllRows so they aren't
+      // truncated at PostgREST's 1000-row cap once the business grows.
+      fetchAllRows((f, t) => sb.from("leads").select("id, name, status").order("id").range(f, t)),
+      fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total").order("id").range(f, t)),
     ]);
 
   // Accepted quotes in this month = the booked jobs we score margin on.

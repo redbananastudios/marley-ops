@@ -1,6 +1,7 @@
 import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
 import { fetchAdSpend } from "@/lib/google-ads";
 import {
@@ -67,16 +68,32 @@ export default async function DashboardPage() {
   // fail-soft so a slow/unreachable Sanity never blocks the dashboard render.
   await syncSanityLeads({ incremental: true }).catch(() => null);
 
-  const [{ data: leadsData }, { data: apptData }, { data: quoteData }, { data: profilesData }, settings] =
+  // Unbounded, all-time tables → page through fetchAllRows (PostgREST caps a
+  // plain select at 1000 rows and would silently corrupt every all-time KPI).
+  // leads keeps submitted_at-desc for the "Latest enquiries" slice(0,6) below,
+  // with id as a unique tiebreaker so the range() windows never skip/duplicate.
+  const [leadsData, apptData, quoteData, { data: profilesData }, settings] =
     await Promise.all([
-      supabase
-        .from("leads")
-        .select(
-          "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
-        )
-        .order("submitted_at", { ascending: false }),
-      supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id"),
-      supabase.from("quotes").select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at"),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("leads")
+          .select(
+            "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+          )
+          .order("submitted_at", { ascending: false })
+          .order("id")
+          .range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id").order("id").range(f, t),
+      ),
+      fetchAllRows((f, t) =>
+        supabase
+          .from("quotes")
+          .select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at")
+          .order("id")
+          .range(f, t),
+      ),
       supabase.from("profiles").select("id, full_name"),
       getBusinessSettings(supabase),
     ]);

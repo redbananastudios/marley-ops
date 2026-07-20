@@ -3,6 +3,7 @@ import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { log } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { sendEmail } from "@/lib/comms/send";
 import { apptDays, apptWindow } from "@/lib/job-board";
 
@@ -77,11 +78,19 @@ export async function GET(req: Request) {
 
   // Un-reminded assignments joined to a window of appointments around tomorrow
   // (multi-day moves can START days earlier and still span tomorrow).
-  const { data: assigns } = await admin
-    .from("appointment_assignments")
-    .select("id, staff_id, appointment_id")
-    .not("staff_id", "is", null)
-    .is("reminded_at", null);
+  // Un-reminded assignments accumulate (cancelled/past jobs are never reminded
+  // and keep reminded_at null forever), so this set can outgrow PostgREST's
+  // 1000-row cap → page through fetchAllRows or tomorrow's crew silently miss
+  // their reminder. Order-independent (folded into a Set below).
+  const assigns = await fetchAllRows((f, t) =>
+    admin
+      .from("appointment_assignments")
+      .select("id, staff_id, appointment_id")
+      .not("staff_id", "is", null)
+      .is("reminded_at", null)
+      .order("id")
+      .range(f, t),
+  );
   const apptIds = [...new Set((assigns ?? []).map((a) => a.appointment_id))];
   if (!apptIds.length) return { sent: 0, reason: "no unreminded assignments" };
 
