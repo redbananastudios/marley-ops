@@ -2,9 +2,9 @@
 
 ## Verdict
 
-**Code verdict: release-ready after migration `0069_crew_rls_lockdown.sql` is applied to production in the same release.** The review found release-blocking authorization, race, offline-data-isolation and observability defects; all are fixed on `codex/final-release-review` and verified in the development stack. Production data, production schema and the live deployment were not changed by this review.
+**Code verdict: release-ready.** The review and follow-up closed the release-blocking authorization, race, replay, offline-data-isolation, pagination and observability defects. Migrations `0069_crew_rls_lockdown.sql` and `0070_delivery_claims_and_operational_issues.sql` are applied and verified locally and in production. The application image has not been deployed from this branch.
 
-**Business go-live verdict: still conditional.** Keep production mock-only, `SANITY_SYNC_DISABLED=true` and `COMMS_DRYRUN=true` until the manual cutover gates in this report are signed off. Those gates are operational/legal inputs, not unresolved code defects.
+**Business go-live verdict: still conditional.** Production remains mock-only with `SANITY_SYNC_DISABLED=true`. The intended pre-launch policy says `COMMS_DRYRUN=true`, but the live container configuration was verified as `COMMS_DRYRUN=false`; sends are real and Peter must explicitly decide whether to retain or restore that flag before application rollout. Those gates are operational inputs, not unresolved code defects.
 
 Review base: latest `origin/master` at `f68c285` (ahead/behind `0/0` when frozen). Dedicated worktree: `O:\projects\red-banana\clients\marley\marley-ops-final-release`.
 
@@ -22,6 +22,10 @@ Review base: latest `origin/master` at `f68c285` (ahead/behind `0/0` when frozen
 | P1 | Scheduled/manual API auth accepted any signed-in user; structured cron `{ok:false}` results were logged as successful; fleet reminders were missing from the registry. | Manual runs now require an active admin/estimator or scheduler secret. `runCron` converts structured failures to failed runs. Registry tests discover every cron/sync route and fleet reminders are registered. |
 | P1 | Service-worker cache writes could be terminated before `cache.put`/trim completed. | Cache mutation and trim are awaited inside fail-soft blocks, keeping successful network responses available while making cache persistence reliable. |
 | P1 | Quote-list debounced search could race a fast row click and pull the user back to `/quotes?q=…`. | Pending replacement navigation is cancelled for a normal row navigation, while modified-clicks remain unaffected. The exact failing browser scenario is green in standalone production mode. |
+| P2 | Verified Resend webhook retries could repeat customer forwards, follow-ups and alerts. | Migration 0070 atomically claims the Svix event ID, uniquely fences database side effects, leases each forward step and persists a hash of the exact Resend JSON so only byte-identical safe-window retries can reuse the provider key. |
+| P2 | Outbound duplicate detection happened before the provider call, but the durable unique communication row was inserted afterwards. | Dispatch now inserts/leases the communication first, marks provider start, conditionally finalizes the same token and blocks unsafe SMS/expired-email retries. The exact provider JSON hash includes HTML, template variables, sender, reply-to and attachment bytes. |
+| P2 | Removal-calendar appointment and lead reads relied on PostgREST's default 1,000-row cap. | Both growing datasets now page deterministically with strict error handling; parallel loading and display ordering are preserved. |
+| P2 | Runtime logs were inconsistent and there was no durable daily view of unresolved failures. | JSON logs now have a fixed schema, environment/release fields, size/depth caps and nested email/phone/secret redaction. Operational issues are keyed/counting/resolvable, checkpointed once per UK day, shown on Automations and delivered through an atomic frozen-payload digest with honest simulated state. |
 
 ## Performance improvements applied
 
@@ -47,7 +51,7 @@ All 49 `page.tsx` entry points and all 23 API routes were inspected. The browser
 | Pipeline | `/leads`, `/leads/new`, `/leads/[id]`, `/board`, `/follow-ups` | Lead access and workflow transitions pass. Lead-detail joins are grouped in two `Promise.all` phases; a later optimization can flatten remaining dependent waterfalls after profiling. Capture code removed from initial lead bundle. |
 | Cubic survey | `/leads/[id]/cubic`, `/review`, `/scan` | Office route/access and storage signing reviewed. Survey service actions are now office-only and path-bound. AI/file analysis constraints unchanged. |
 | Quotes/sales | `/quotes`, `/quotes/new`, `/quotes/[id]`, `/bookings`, `/payments` | Search/navigation race fixed. Quote builder, acceptance, decline, deposit/balance and bank/card state transitions reviewed. Automated list, wizard and public quote scenarios pass. |
-| Schedule/jobs | `/schedule/board`, `/schedule/removals`, `/schedule/surveys`, `/jobs` | Job board uses paginated parallel resource reads. Survey schedule paginates. Removal calendar is still a bounded-at-current-scale P2 because its three direct selects rely on the PostgREST row cap. |
+| Schedule/jobs | `/schedule/board`, `/schedule/removals`, `/schedule/surveys`, `/jobs` | Job board and survey schedule paginate. Removal-calendar appointment and lead reads now use deterministic strict pagination, fail closed on late-page errors and no longer rely on PostgREST's 1,000-row cap. |
 | Customers/claims/content | `/clients`, `/clients/[id]`, `/claims`, `/claims/[id]`, `/documents`, `/content` | Access and object signing reviewed. Capture is deferred; videos no longer preload. Claim evidence and content approval boundaries retained. |
 | Finance/contractors | `/finance`, `/finance/statements`, `/estimator`, `/estimator/pay`, `/estimator/pay/[id]` | Office/admin role boundaries, Zoho failure behavior and pay privacy reviewed. Provider latency is now bounded/coalesced. |
 | Crew PWA | `/my-jobs`, `/my-jobs/[id]`, `/availability`, `/agreement`, `/manual`, `/pay`, `/pay/[id]` | Active-session shell gate, owner-scoped offline queue and assignment-bounded service-role reads/actions implemented. Complete crew browser suite passes. |
@@ -80,7 +84,7 @@ The 23 API handlers were checked as four classes:
 - Cron/sync (13): scheduler-secret/office boundaries, `runCron` logging, registry/watchdog coverage and structured failure behavior. Fleet reminders were the sole registry gap and are now covered.
 - Money/provider callbacks (2): card callback signature/idempotency and return-page separation retained.
 - AI/maps/places/automation state (7): session/office access, bounded provider errors and response shaping reviewed; no new release blocker.
-- Resend inbound webhook (1): Svix signature and robot/loop guards are present. Replay idempotency remains a P2 below.
+- Resend inbound webhook (1): Svix signature/age checks, durable event claims, replay outcomes, unique side-effect keys and exact-payload-fenced forward delivery are implemented.
 
 ## Verification evidence
 
@@ -88,17 +92,17 @@ The 23 API handlers were checked as four classes:
 |---|---|
 | Latest code / lineage | `origin/master` fetched; review base `f68c285`; ahead/behind `0/0`. |
 | Clean install | `npm ci` installed 617 packages. |
-| Unit/integration | **81 files, 828 tests passed** after final changes. |
+| Unit/integration | **86 files, 843 tests passed** after final follow-up changes. |
 | TypeScript | `tsc --noEmit` passed after final changes. |
 | ESLint | **0 errors**; 34 existing React-compiler warnings (same baseline class/count). |
 | Production build | Next.js 16.2.9 standalone build passed; 73 app/API routes compiled; build-time public env mirrored Docker; deployment ID verified. |
 | Full browser coverage | Full suite exercised 108 automated scenarios with six intentionally skipped manual/sandbox money scenarios. One quote-search race failed, was fixed, and its exact case passed on re-run. |
 | Post-hardening browser | 26/26 crew tests and 32/32 office access/lead/quote-builder tests passed against migration 0069. |
 | Standalone browser | Docker-equivalent standalone server: three-role auth, crew job-note flow and quote search/open all passed (5/5). |
-| RLS SQL | Migration executed inside `BEGIN … ROLLBACK` with `ON_ERROR_STOP`, then applied to development and PostgREST reloaded. Production not touched. |
+| RLS/reliability SQL | Migrations 0069–0070 passed `BEGIN … ROLLBACK` rehearsals, were applied locally and in production with `ON_ERROR_STOP`, and passed rollback-only behavior probes after apply. |
 | Live crew JWT probe | Active: profile=1, own staff=1, 19 restricted tables all zero. Inactive same token: bootstrap profile=1, staff=0, CRM=0. Profile restored active. |
 | Policy inspection | `pg_policies` contains no broad `is_staff()` policy; only assignment-safe own-row `staff_read` remains. |
-| Communications/data safety | Every E2E/dev run used `COMMS_DRYRUN=true`, `SANITY_SYNC_DISABLED=true`; staging Zoho cleanup ran; production untouched. |
+| Production migration | Fresh backup saved at `O:\projects\red-banana\clients\marley\backups\marley-ops-20260721-0021.sql.zip`; all 31 communication rows preserved and backfilled; 5 new RLS tables, 14 RPCs and 3 unique indexes verified. No probe data retained. |
 
 The six non-automated scenarios are explicit rather than false-green. The staging-Zoho deposit and balance legs did run; the documented skips are:
 
@@ -113,22 +117,18 @@ The six non-automated scenarios are explicit rather than false-green. The stagin
 
 These are not reasons to hold the initial release at current volume, but should enter the post-launch backlog in this order:
 
-1. **P2 — inbound webhook replay idempotency.** `app/api/webhooks/resend-inbound/route.ts` verifies Svix and loop/robot guards but does not persist/claim the webhook event ID before forwarding/logging. Add a unique event ledger so provider retries cannot duplicate forwards or alerts.
-2. **P2 — outbound communication claim-before-send.** `lib/comms/dispatch.ts` checks duplicates, sends, then inserts the unique communication row. A narrow concurrent race can still double-send before one insert loses. Move to a durable claim/lease/outbox pattern; provider-side idempotency should be used where available.
-3. **P2 — removals calendar pagination.** `app/(dashboard)/schedule/removals/page.tsx` runs its reads concurrently but still relies on default PostgREST limits. Replace direct selects with date-windowed/paginated reads before appointments/leads can exceed 1,000 rows.
-4. **P2 — profile lead-detail latency.** `app/(dashboard)/leads/[id]/page.tsx` already groups most work, but still has two dependent I/O phases. Capture server timings after launch, then flatten or cache only the measured hot joins.
-5. **P3 — route loading boundaries.** Add targeted `loading.tsx` skeletons for the heaviest schedule/finance/lead routes if real-user RUM shows navigation latency; do not add global visual churn without evidence.
-6. **P3 — React compiler warnings.** The 34 warnings are pre-existing and non-failing, mostly intentional state reseeding in effects or incompatible-library notices. Reduce them component-by-component after release, guarded by behavior tests.
-7. **P3 — residual dependency advisory.** `npm audit` reports two moderate records for Next.js's bundled PostCSS `<8.5.10`. `npm audit fix --force` proposes a destructive downgrade to Next 9.3.3, so it was rejected. Track the framework fix and upgrade normally.
+1. **P2 — profile lead-detail latency.** `app/(dashboard)/leads/[id]/page.tsx` already groups most work, but still has two dependent I/O phases. Capture server timings after launch, then flatten or cache only the measured hot joins.
+2. **P3 — route loading boundaries.** Add targeted `loading.tsx` skeletons for the heaviest schedule/finance/lead routes if real-user RUM shows navigation latency; do not add global visual churn without evidence.
+3. **P3 — React compiler warnings.** The 34 warnings are pre-existing and non-failing, mostly intentional state reseeding in effects or incompatible-library notices. Reduce them component-by-component after release, guarded by behavior tests.
+4. **P3 — residual dependency advisory.** `npm audit` reports two moderate records for Next.js's bundled PostCSS `<8.5.10`. `npm audit fix --force` proposes a destructive downgrade to Next 9.3.3, so it was rejected. Track the framework fix and upgrade normally.
 
 ## Required release sequence
 
 1. Review and merge this branch.
-2. Take/verify the normal production backup.
-3. Apply migration 0069 to production with `ON_ERROR_STOP`; reload PostgREST; run the active/inactive crew JWT assertions against production in a rollback-safe transaction where mutation is involved.
-4. Build the Docker image with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL` and the merged `GIT_SHA` exactly as `.github/workflows/deploy.yml` already does.
-5. Deploy once, retain the previous image, verify `/api/version`, three-role login, `/my-jobs`, `/quotes`, public quote view and one cron health row. The new deployment ID protects clients from version skew.
-6. Keep mock-only flags on until Peter explicitly authorizes the data/comms cutover.
+2. Production backup and migrations 0069–0070 are complete and verified; do not reapply them as a release step.
+3. Build the Docker image with `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_APP_URL` and the merged `GIT_SHA` exactly as `.github/workflows/deploy.yml` already does.
+4. Deploy once, retain the previous image, verify `/api/version`, three-role login, `/my-jobs`, `/quotes`, `/automations` issue state, public quote view and one cron health row. The deployment ID protects clients from version skew.
+5. Resolve the `COMMS_DRYRUN=false` policy discrepancy explicitly before rollout; keep `SANITY_SYNC_DISABLED=true` until Peter authorizes data cutover.
 
 ## Human/business cutover gates
 
@@ -142,4 +142,4 @@ These are not reasons to hold the initial release at current volume, but should 
 
 ## Final recommendation
 
-Merge and release the code/migration as one unit, then hold the data/comms switches until the human checklist is signed. Do not deploy the application changes without migration 0069: the app-side assignment checks improve safety, but the migration is the database authorization boundary that closes direct PostgREST access.
+Merge and deploy the application once, then hold the data switch until the human checklist is signed. The required database authorization and reliability migrations are already live. Decide the real-send flag explicitly rather than assuming the documented dry-run state matches production.

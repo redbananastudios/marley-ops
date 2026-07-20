@@ -12,6 +12,7 @@ const BATCH = 1000;
 
 export async function fetchAllRows<T>(
   query: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+  options?: { strict?: boolean },
 ): Promise<T[]> {
   const out: T[] = [];
   for (let from = 0; ; from += BATCH) {
@@ -20,6 +21,7 @@ export async function fetchAllRows<T>(
       // Fail-soft with what we have — the page renders rather than 500s, and the
       // first window (newest rows) is always present.
       log.error("fetch-all.window_failed", { from, gotSoFar: out.length, error: error.message });
+      if (options?.strict) throw new Error(`Could not load complete dataset: ${error.message}`);
       break;
     }
     out.push(...(data ?? []));

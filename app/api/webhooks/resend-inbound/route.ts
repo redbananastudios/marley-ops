@@ -1,124 +1,155 @@
-import { createHmac, timingSafeEqual } from "crypto";
+import { createHash, createHmac, timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { sendEmail } from "@/lib/comms/send";
+import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
-
-/**
- * Resend inbound webhook (`email.received`) — a customer replied to a chase
- * email. Their Reply-To was q-<acceptToken>@reply.marleymoves.co.uk, so the
- * recipient maps straight back to the quote/lead:
- *
- *   pause the chase → log the reply in the lead's Comms tab → open a
- *   "customer replied" follow-up → forward the message to the lead OWNER's
- *   own mailbox (Luke's replies go to Luke — owner-only per Peter 2026-07-16;
- *   the follow-up gives the rest of the office visibility) → ops alert.
- *
- * Mail to the reply domain that DOESN'T resolve to a quote is no longer
- * silently dropped — it forwards to the front door (hello@) so a mangled
- * token or a hand-typed address still reaches a human.
- *
- * Signature: Resend webhooks are svix-signed. Verified manually against
- * RESEND_INBOUND_WEBHOOK_SECRET (whsec_...) — no svix dependency.
- */
+import { errorContext, log } from "@/lib/log";
+import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issues";
 
 export const dynamic = "force-dynamic";
+
+type Sb = SupabaseClient<Database>;
+type InboundEvent = {
+  type?: string;
+  data?: { email_id?: string; id?: string; from?: string; to?: string[]; subject?: string };
+};
 
 function verifySvix(payload: string, headers: Headers, secret: string): boolean {
   const id = headers.get("svix-id");
   const timestamp = headers.get("svix-timestamp");
   const signatures = headers.get("svix-signature");
   if (!id || !timestamp || !signatures) return false;
-  // Reject stale timestamps (replay guard, 5 min).
-  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
-  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
-  const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${payload}`).digest("base64");
-  return signatures.split(" ").some((part) => {
-    const sig = part.split(",")[1] ?? "";
-    const a = Buffer.from(sig);
-    const b = Buffer.from(expected);
-    return a.length === b.length && timingSafeEqual(a, b);
-  });
+  const timestampNumber = Number(timestamp);
+  if (!Number.isFinite(timestampNumber) || Math.abs(Date.now() / 1000 - timestampNumber) > 300) return false;
+  try {
+    const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+    const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${payload}`).digest("base64");
+    return signatures.split(" ").some((part) => {
+      const signature = part.split(",")[1] ?? "";
+      const actual = Buffer.from(signature);
+      const wanted = Buffer.from(expected);
+      return actual.length === wanted.length && timingSafeEqual(actual, wanted);
+    });
+  } catch {
+    return false;
+  }
 }
 
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** Full received-email content (webhooks carry metadata only). */
 async function fetchReceivedEmail(emailId: string): Promise<{ text?: string; html?: string } | null> {
   const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
   if (!key) return null;
   for (const path of [`/emails/receiving/${emailId}`, `/emails/${emailId}`]) {
     try {
-      const res = await fetch(`https://api.resend.com${path}`, {
+      const response = await fetch(`https://api.resend.com${path}`, {
         headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(20_000),
       });
-      if (res.ok) return (await res.json()) as { text?: string; html?: string };
+      if (response.ok) return (await response.json()) as { text?: string; html?: string };
     } catch {
-      /* try next */
+      // The next compatible Resend endpoint is attempted.
     }
   }
   return null;
 }
 
-export async function POST(req: Request) {
-  const secret = process.env.RESEND_INBOUND_WEBHOOK_SECRET;
-  if (!secret) return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
-
-  const payload = await req.text();
-  if (!verifySvix(payload, req.headers, secret)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+async function sendDurableWebhookEmail(
+  sb: Sb,
+  eventId: string,
+  leaseToken: string,
+  step: string,
+  input: Parameters<typeof sendEmail>[0],
+): Promise<void> {
+  const { data: rows, error: claimError } = await sb.rpc("claim_webhook_delivery_step", {
+    p_provider: "resend",
+    p_event_id: eventId,
+    p_lease_token: leaseToken,
+    p_step: step,
+    p_payload_hash: emailPayloadHash(input),
+  });
+  const claim = rows?.[0];
+  if (claimError || !claim) throw new Error(`Claim ${step} delivery: ${claimError?.message ?? "no result"}`);
+  if (claim.decision === "completed") return;
+  if (claim.decision === "manual_review") {
+    throw new Error(`${step} delivery is outside Resend's safe idempotency window; manual review required`);
+  }
+  if (claim.decision === "payload_mismatch") {
+    throw new Error(`${step} delivery payload changed after its first attempt; manual review required`);
+  }
+  if (claim.decision !== "send" && claim.decision !== "retry_safe") {
+    throw new Error(`${step} delivery lease is no longer valid`);
   }
 
-  const event = JSON.parse(payload) as {
-    type?: string;
-    data?: { email_id?: string; id?: string; from?: string; to?: string[]; subject?: string };
-  };
-  if (event.type !== "email.received" || !event.data) return NextResponse.json({ ok: true });
+  const result = await sendEmail(input);
+  if (!result.ok) {
+    await sb.rpc("fail_webhook_delivery_step", {
+      p_provider: "resend",
+      p_event_id: eventId,
+      p_lease_token: leaseToken,
+      p_step: step,
+      p_outcome_unknown: !!result.outcomeUnknown,
+    });
+    throw new Error(`${step} delivery failed: ${result.error ?? "unknown provider error"}`);
+  }
+  const { data: completed, error: completeError } = await sb.rpc("complete_webhook_delivery_step", {
+    p_provider: "resend",
+    p_event_id: eventId,
+    p_step: step,
+    p_provider_id: result.providerId ?? "",
+  });
+  if (completeError || !completed) throw new Error(`Complete ${step} delivery: ${completeError?.message ?? "no row"}`);
+}
 
-  const to = event.data.to ?? [];
-  const token = to.map(tokenFromReplyAddress).find(Boolean) ?? null;
+function requireDb(error: { message: string } | null, step: string): void {
+  if (error) throw new Error(`${step}: ${error.message}`);
+}
 
-  const from = event.data.from ?? "unknown sender";
-  const subject = event.data.subject ?? "(no subject)";
-  const emailId = event.data.email_id ?? event.data.id;
-
-  const sb = createAdminClient();
+async function processInbound(
+  sb: Sb,
+  eventId: string,
+  leaseToken: string,
+  event: InboundEvent,
+): Promise<{ matched: boolean }> {
+  const data = event.data!;
+  const token = (data.to ?? []).map(tokenFromReplyAddress).find(Boolean) ?? null;
+  const from = data.from ?? "unknown sender";
+  const subject = data.subject ?? "(no subject)";
+  const emailId = data.email_id ?? data.id;
   const quote = token ? await fetchQuoteByToken(sb, token) : null;
 
-  // Unresolvable inbound (no token / dead token): forward to the front door
-  // instead of vanishing — a real customer can arrive via a mangled address.
-  // Loop-guarded: our own domains and machine senders are dropped.
   if (!quote) {
     if (shouldForwardUnmatched(from)) {
       const content = emailId ? await fetchReceivedEmail(emailId) : null;
-      const bodyText = content?.text?.trim() || "(no message body retrieved)";
-      await sendEmail({
+      await sendDurableWebhookEmail(sb, eventId, leaseToken, "unmatched_forward", {
         to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
         subject: `Unmatched inbound email — ${subject}`,
         html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
           <p>An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.</p>
           <hr style="border:none;border-top:1px solid #e4e4e7;">
-          <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
+          <div style="white-space:pre-wrap;">${esc(content?.text?.trim() || "(no message body retrieved)")}</div>
         </div>`,
         replyTo: from,
+        idempotencyKey: `marley-inbound-unmatched/${eventId}`,
       });
     }
-    return NextResponse.json({ ok: true, matched: false });
+    return { matched: false };
   }
 
   const content = emailId ? await fetchReceivedEmail(emailId) : null;
   const bodyText = content?.text?.trim() || "(open the forwarded copy for the message)";
 
-  // 1. Stop chasing — a human conversation has started.
   if (quote.lead_id) {
-    await sb.from("leads").update({ chase_paused: true } as never).eq("id", quote.lead_id);
+    const { error } = await sb.from("leads").update({ chase_paused: true }).eq("id", quote.lead_id);
+    requireDb(error, "pause chase");
   }
 
-  // 2. Log the inbound reply where staff look (the lead's Comms tab).
-  await sb.from("communications").insert({
+  const { error: commError } = await sb.from("communications").insert({
     client_id: quote.client_id,
     lead_id: quote.lead_id,
     quote_id: quote.id,
@@ -128,7 +159,7 @@ export async function POST(req: Request) {
     to_norm: from.toLowerCase(),
     subject,
     body: bodyText.slice(0, 5000),
-    content_hash: `inbound-${emailId ?? Date.now()}`,
+    content_hash: `inbound-${emailId ?? eventId}`,
     status: "sent",
     provider: "resend",
     provider_id: emailId ?? null,
@@ -136,68 +167,162 @@ export async function POST(req: Request) {
     first_sent_at: new Date().toISOString(),
     last_sent_at: new Date().toISOString(),
   });
+  if (commError?.code !== "23505") requireDb(commError, "log inbound communication");
 
-  // 3. A human takes over — task due now.
   if (quote.lead_id) {
-    const { data: open } = await sb
-      .from("follow_ups").select("id")
-      .eq("lead_id", quote.lead_id).eq("reason", "custom").eq("status", "open")
-      .eq("source", "inbound_reply").limit(1).maybeSingle();
-    if (!open) {
-      await sb.from("follow_ups").insert({
-        lead_id: quote.lead_id,
-        client_id: quote.client_id,
-        quote_id: quote.id,
-        reason: "custom",
-        due_at: new Date().toISOString(),
-        assigned_to: quote.estimator_id,
-        source: "inbound_reply",
-        notes: `Customer replied to a chase email — respond. Subject: ${subject}`,
-      } as never);
-    }
-    await sb.from("activities").insert({
+    const { error: followUpError } = await sb.from("follow_ups").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      quote_id: quote.id,
+      reason: "custom",
+      due_at: new Date().toISOString(),
+      assigned_to: quote.estimator_id,
+      source: "inbound_reply",
+      notes: `Customer replied to a chase email — respond. Subject: ${subject}`,
+      metadata: { inbound_event_id: eventId },
+    });
+    if (followUpError?.code !== "23505") requireDb(followUpError, "create inbound follow-up");
+
+    const { error: activityError } = await sb.from("activities").insert({
       lead_id: quote.lead_id,
       client_id: quote.client_id,
       actor_id: null,
       type: "note",
       summary: `Customer replied by email (${subject}) — chasing paused`,
-      meta: { quote_id: quote.id, inbound_email_id: emailId ?? null },
+      meta: { quote_id: quote.id, inbound_email_id: emailId ?? null, inbound_event_id: eventId },
     });
+    if (activityError?.code !== "23505") requireDb(activityError, "create inbound activity");
   }
 
-  // 4. Forward to the LEAD OWNER's own mailbox (owner-only — Peter's explicit
-  //    pick 2026-07-16: Connor must not receive Luke's threads; the panel's
-  //    follow-up queue is the shared-visibility net). Ownership uses the SAME
-  //    canonical rule as the outbound chase From (leads.estimator_id, else the
-  //    survey-derived estimator, else the quote's creator) — the person whose
-  //    name fronted the email is the person who receives its reply. Unowned /
-  //    inactive / off-domain → the front door. Robot senders (bounces,
-  //    auto-responders) are logged + pause the chase but are NOT forwarded.
   const owner = await leadOwnerIdentity(sb, quote.lead_id, quote.estimator_id);
-  const ownerMailbox =
-    owner.email && owner.email.toLowerCase().endsWith("@marleymoves.co.uk") ? owner.email : null;
+  const ownerMailbox = owner.email?.toLowerCase().endsWith("@marleymoves.co.uk") ? owner.email : null;
   const forwardTo = ownerMailbox || process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk";
   const robotSender = !shouldForwardUnmatched(from);
   if (!robotSender) {
-    await sendEmail({
+    await sendDurableWebhookEmail(sb, eventId, leaseToken, "owner_forward", {
       to: forwardTo,
       subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
       html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
-      <p><strong>${esc(quote.customer_name ?? "Customer")}</strong> (${esc(from)}) replied about quote <strong>${esc(quote.quote_ref)}</strong>. Chasing is paused.</p>
-      <hr style="border:none;border-top:1px solid #e4e4e7;">
-      <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
-      <hr style="border:none;border-top:1px solid #e4e4e7;">
-      <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${esc(from)}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
-    </div>`,
+        <p><strong>${esc(quote.customer_name ?? "Customer")}</strong> (${esc(from)}) replied about quote <strong>${esc(quote.quote_ref)}</strong>. Chasing is paused.</p>
+        <hr style="border:none;border-top:1px solid #e4e4e7;">
+        <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
+        <hr style="border:none;border-top:1px solid #e4e4e7;">
+        <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${esc(from)}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
+      </div>`,
       replyTo: from,
+      idempotencyKey: `marley-inbound-forward/${eventId}`,
     });
   }
 
-  await sendOpsAlert(`Customer replied — ${quote.quote_ref}`, [
-    robotSender
-      ? `An automated message (${esc(from)}) hit the reply address for ${esc(quote.quote_ref)} — likely a bounce or auto-reply. Chasing paused; check the lead's Comms tab.`
-      : `${esc(quote.customer_name ?? from)} replied to a chase email (${esc(subject)}). Chasing paused; forwarded to ${forwardTo}; follow-up opened.`,
-  ]);
+  await sendOpsAlert(
+    `Customer replied — ${quote.quote_ref}`,
+    [robotSender
+      ? `An automated message hit the reply address for ${esc(quote.quote_ref)}. Chasing paused; check the lead's Comms tab.`
+      : `${esc(quote.customer_name ?? "Customer")} replied to a chase email. Chasing paused; forwarded to the owner; follow-up opened.`],
+    "business",
+    `marley-inbound-alert/${eventId}`,
+  );
+  return { matched: true };
+}
 
-  return NextResponse.json({ ok: true, matched: true });
+export async function POST(req: Request) {
+  const secret = process.env.RESEND_INBOUND_WEBHOOK_SECRET;
+  if (!secret) return NextResponse.json({ error: "Webhook not configured" }, { status: 503 });
+
+  const payload = await req.text();
+  if (!verifySvix(payload, req.headers, secret)) {
+    log.warn("webhook.resend.signature_invalid");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  let event: InboundEvent;
+  try {
+    event = JSON.parse(payload) as InboundEvent;
+  } catch {
+    log.warn("webhook.resend.payload_invalid");
+    return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
+  }
+  if (event.type !== "email.received" || !event.data) return NextResponse.json({ ok: true });
+
+  const eventId = req.headers.get("svix-id")!;
+  const payloadHash = createHash("sha256").update(payload).digest("hex");
+  const sb = createAdminClient();
+  const { data: claimRows, error: claimError } = await sb.rpc("claim_webhook_event", {
+    p_provider: "resend",
+    p_event_id: eventId,
+    p_event_type: event.type,
+    p_payload_hash: payloadHash,
+    p_lease_seconds: 300,
+  });
+  const claim = claimRows?.[0];
+  if (claimError || !claim) {
+    await reportOperationalIssue(sb, {
+      key: `webhook:resend:${eventId}`,
+      severity: "error",
+      source: "resend-inbound",
+      event: "webhook.resend.claim_failed",
+      message: "A verified Resend webhook could not be durably claimed.",
+      context: { eventId, error: claimError?.message },
+    });
+    return NextResponse.json({ error: "Could not claim webhook" }, { status: 503 });
+  }
+  if (claim.decision === "completed") {
+    await resolveOperationalIssue(sb, `webhook:resend:${eventId}`);
+    log.info("webhook.resend.replay_completed", { eventId, attemptCount: claim.attempt_count });
+    return NextResponse.json({ ok: true, replay: true });
+  }
+  if (claim.decision === "busy") {
+    log.info("webhook.resend.replay_busy", { eventId, attemptCount: claim.attempt_count });
+    return NextResponse.json({ error: "Webhook already processing" }, { status: 503, headers: { "Retry-After": "30" } });
+  }
+  if (claim.decision === "payload_mismatch") {
+    await reportOperationalIssue(sb, {
+      key: `webhook:resend:${eventId}`,
+      severity: "critical",
+      source: "resend-inbound",
+      event: "webhook.resend.payload_mismatch",
+      message: "A reused verified webhook ID arrived with a different payload.",
+      context: { eventId, attemptCount: claim.attempt_count },
+    });
+    return NextResponse.json({ error: "Webhook payload mismatch" }, { status: 409 });
+  }
+  if (claim.decision !== "claimed" || !claim.lease_token) {
+    return NextResponse.json({ error: "Unexpected webhook claim state" }, { status: 503 });
+  }
+
+  log.info("webhook.resend.claimed", { eventId, attemptCount: claim.attempt_count });
+  try {
+    const outcome = await processInbound(sb, eventId, claim.lease_token, event);
+    const { data: completed, error: completeError } = await sb.rpc("complete_webhook_event", {
+      p_provider: "resend",
+      p_event_id: eventId,
+      p_lease_token: claim.lease_token,
+      p_outcome: outcome,
+    });
+    if (completeError || !completed) throw new Error(completeError?.message ?? "Webhook lease was lost before completion");
+    await resolveOperationalIssue(sb, `webhook:resend:${eventId}`);
+    log.info("webhook.resend.completed", { eventId, matched: outcome.matched });
+    return NextResponse.json({ ok: true, ...outcome });
+  } catch (error) {
+    const context = errorContext(error);
+    const { data: failed, error: failError } = await sb.rpc("fail_webhook_event", {
+      p_provider: "resend",
+      p_event_id: eventId,
+      p_lease_token: claim.lease_token,
+      p_error: context.error,
+    });
+    if (failed) {
+      await reportOperationalIssue(sb, {
+        key: `webhook:resend:${eventId}`,
+        severity: "error",
+        source: "resend-inbound",
+        event: "webhook.resend.failed",
+        message: "A claimed inbound webhook failed before completion.",
+        context: { eventId, error: context.error },
+      });
+    } else {
+      log.warn("webhook.resend.stale_failure", { eventId, error: failError?.message ?? context.error });
+    }
+    return NextResponse.json({ error: "Inbound webhook failed" }, { status: 500 });
+  }
 }

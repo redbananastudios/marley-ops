@@ -79,10 +79,10 @@ export async function GET(req: Request) {
     const subject = fleetDigestSubject(items);
     const html = fleetDigestHtml(items);
     let sent = 0;
-    for (const to of recipients) {
+    for (const [recipientIndex, to] of recipients.entries()) {
       const r = await sendEmail({ to, subject, html, replyTo: "hello@marleymoves.co.uk" });
       if (r.ok) sent += 1;
-      else log.error("cron.fleet-reminders.send_failed", { to, error: r.error });
+      else log.error("cron.fleet-reminders.send_failed", { recipientIndex, error: r.error });
     }
     // Every recipient bounced — record nothing so the next run retries.
     if (sent === 0) return { due: due.length, emailed: 0 };

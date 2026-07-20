@@ -16,16 +16,24 @@ export async function GET() {
   }
   try {
     const sb = await createClient();
-    const { data, error } = await sb
-      .from("cron_runs")
-      .select("id, job, status, started_at, finished_at, duration_ms, summary, error")
-      .order("started_at", { ascending: false })
-      .limit(100);
-    if (error) {
-      log.error("automations.runs.query_failed", { error: error.message });
+    const [{ data, error }, { data: issues, error: issuesError }] = await Promise.all([
+      sb
+        .from("cron_runs")
+        .select("id, job, status, started_at, finished_at, duration_ms, summary, error")
+        .order("started_at", { ascending: false })
+        .limit(100),
+      sb
+        .from("operational_issues")
+        .select("id,issue_key,severity,source,event,message,status,occurrence_count,first_seen_at,last_seen_at,last_checkpoint_at,resolved_at")
+        .eq("status", "open")
+        .order("last_seen_at", { ascending: false })
+        .limit(100),
+    ]);
+    if (error || issuesError) {
+      log.error("automations.runs.query_failed", { error: error?.message ?? issuesError?.message });
       return NextResponse.json({ error: "Could not load automation runs" }, { status: 500 });
     }
-    return NextResponse.json({ runs: data ?? [], fetchedAt: new Date().toISOString() });
+    return NextResponse.json({ runs: data ?? [], issues: issues ?? [], fetchedAt: new Date().toISOString() });
   } catch (e) {
     log.error("automations.runs.threw", errorContext(e));
     return NextResponse.json({ error: "Could not load automation runs" }, { status: 500 });

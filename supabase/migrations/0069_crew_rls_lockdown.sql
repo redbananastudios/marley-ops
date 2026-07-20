@@ -12,6 +12,8 @@
 -- compare trusted UUID columns AS text; untrusted object names are never cast to
 -- uuid, so malformed paths fail closed instead of raising inside an RLS policy.
 
+begin;
+
 -- ---------------------------------------------------------------------------
 -- Assignment-scoped storage helpers.
 
@@ -348,3 +350,5 @@ create policy survey_photos_delete on storage.objects for delete using (
 );
 
 notify pgrst, 'reload schema';
+
+commit;

@@ -13,6 +13,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { cn } from "@/lib/utils";
 import { CRON_JOBS, type CronRunRow } from "@/lib/cron/jobs";
+import type { OperationalIssueRow } from "@/lib/ops/issues";
 
 const POLL_MS = 30 * 60 * 1000; // 30 minutes
 const LABEL_BY_SLUG = new Map(CRON_JOBS.map((j) => [j.slug, j.label]));
@@ -65,8 +66,15 @@ function StatusChip({ status }: { status: CronRunRow["status"] }) {
   );
 }
 
-export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
+export function AutomationsLog({
+  initialRuns,
+  initialIssues,
+}: {
+  initialRuns: CronRunRow[];
+  initialIssues: OperationalIssueRow[];
+}) {
   const [runs, setRuns] = useState<CronRunRow[]>(initialRuns);
+  const [issues, setIssues] = useState<OperationalIssueRow[]>(initialIssues);
   const [fetchedAt, setFetchedAt] = useState<number>(() => Date.now());
   const [loading, setLoading] = useState(false);
   const [firing, setFiring] = useState<string | null>(null);
@@ -77,8 +85,9 @@ export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
     try {
       const res = await fetch("/api/automations/runs", { cache: "no-store" });
       if (res.ok) {
-        const data = (await res.json()) as { runs?: CronRunRow[] };
+        const data = (await res.json()) as { runs?: CronRunRow[]; issues?: OperationalIssueRow[] };
         setRuns(data.runs ?? []);
+        setIssues(data.issues ?? []);
       }
     } catch {
       // keep the last-known runs; the next poll retries
@@ -137,6 +146,26 @@ export function AutomationsLog({ initialRuns }: { initialRuns: CronRunRow[] }) {
           Refresh
         </button>
       </div>
+
+      {issues.length > 0 ? (
+        <Card className="border-danger/30 bg-danger/5 p-0">
+          <div className="border-b border-danger/20 px-4 py-3 sm:px-5">
+            <h2 className="font-display text-lg font-semibold text-danger">Open operational issues ({issues.length})</h2>
+            <p className="mt-0.5 text-xs text-mist-500">Structured failures are counted and checkpointed once per UK day by the health watchdog.</p>
+          </div>
+          <ul className="divide-y divide-danger/15">
+            {issues.map((issue) => (
+              <li key={issue.id} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">{issue.message}</p>
+                  <p className="text-xs text-mist-400">{issue.source} · {issue.event} · seen {issue.occurrence_count} time{issue.occurrence_count === 1 ? "" : "s"}</p>
+                </div>
+                <span className="text-xs text-mist-500">Last seen {relative(issue.last_seen_at, now)}</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ) : null}
 
       {/* per-job health grid */}
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

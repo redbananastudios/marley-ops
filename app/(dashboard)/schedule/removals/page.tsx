@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { PageHeader } from "@/components/page-header";
 import {
   SchedulerView,
@@ -22,19 +23,25 @@ export default async function RemovalsSchedulePage({
 
   // Fetch removals + surveys both: surveys can be overlaid via the "Show surveys"
   // toggle so a survey-vs-move clash is visible without a separate Overlap page.
-  const [{ data: appts }, { data: leads }, { data: estimators }] = await Promise.all([
-    sb
-      .from("appointments")
-      .select(
-        "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
-      )
-      .order("starts_at", { ascending: true }),
-    sb
-      .from("leads")
-      .select(
-        "id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
-      )
-      .order("created_at", { ascending: false }),
+  const [appts, leads, { data: estimators }] = await Promise.all([
+    fetchAllRows((from, to) =>
+      sb
+        .from("appointments")
+        .select("id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id")
+        .order("starts_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to),
+      { strict: true },
+    ),
+    fetchAllRows((from, to) =>
+      sb
+        .from("leads")
+        .select("id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to),
+      { strict: true },
+    ),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 
@@ -42,11 +49,11 @@ export default async function RemovalsSchedulePage({
 
   // Per-lead survey estimator (a removal inherits it read-only).
   const surveyEst = new Map<string, string>();
-  for (const a of appts ?? []) {
+  for (const a of appts) {
     if (a.appt_type === "survey" && a.status !== "cancelled" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
       surveyEst.set(a.lead_id, a.estimator_id);
   }
-  const leadOptions = (leads ?? []).map(({ notes, ...l }) => ({
+  const leadOptions = leads.map(({ notes, ...l }) => ({
     ...l,
     lead_notes: notes,
     source: classifySource(l as unknown as LeadLite),
@@ -69,7 +76,7 @@ export default async function RemovalsSchedulePage({
       <PageHeader eyebrow="Schedule" title="Removals" />
       <SchedulerView
         view="removal"
-        events={(appts ?? []) as SchedulerEvent[]}
+        events={appts as SchedulerEvent[]}
         leads={leadOptions}
         estimators={(estimators ?? []) as { id: string; full_name: string }[]}
         defaultEstimatorId={user?.id ?? null}

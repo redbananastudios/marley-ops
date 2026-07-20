@@ -1,5 +1,6 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/lib/supabase/database.types";
 import { CRON_JOBS } from "@/lib/cron/jobs";
 import { bankFeedConfigured } from "@/lib/bank-feed/sync";
 import { sendSms } from "@/lib/comms/send";
@@ -10,6 +11,12 @@ import {
   WATCHDOG_JOB,
   type HealthAlert,
 } from "@/lib/watchdog-rules";
+import {
+  checkpointOperationalIssues,
+  deliverDailyOperationalIssueDigest,
+  reportOperationalIssue,
+  resolveOperationalIssue,
+} from "@/lib/ops/issues";
 
 /**
  * Health watchdog (cron, every 15 min): checks that every registered
@@ -31,12 +38,14 @@ export type WatchdogSummary = {
   smsSent: boolean;
   smsError?: string;
   smsSkipped?: "cooldown" | "no-recipient" | "none";
+  dailyIssueUpdates?: number;
+  dailyIssueDigest?: "sent" | "simulated" | "already-sent" | "none" | "failed";
 };
 
 const COOLDOWN_HOURS = 6;
 
 export async function runHealthWatchdog(
-  sb: SupabaseClient,
+  sb: SupabaseClient<Database>,
   opts?: { forceTestSms?: boolean },
 ): Promise<WatchdogSummary> {
   const now = new Date();
@@ -82,7 +91,32 @@ export async function runHealthWatchdog(
     if (stale) alerts.push(stale);
   }
 
-  if (!alerts.length) return { alerts, smsSent: false, smsSkipped: "none" };
+  const activeAlertKeys = new Set(alerts.map((alert) => alert.key));
+  const { data: existingWatchdogIssues } = await sb
+    .from("operational_issues")
+    .select("issue_key")
+    .eq("source", "health-watchdog")
+    .eq("status", "open");
+  const existingKeys = new Set((existingWatchdogIssues ?? []).map((issue) => issue.issue_key.replace(/^watchdog:/, "")));
+  await Promise.all([
+    ...alerts.filter((alert) => !existingKeys.has(alert.key)).map((alert) =>
+      reportOperationalIssue(sb, {
+        key: `watchdog:${alert.key}`,
+        severity: "error",
+        source: "health-watchdog",
+        event: "watchdog.health_alert",
+        message: alert.message,
+        context: { alertKey: alert.key },
+      }),
+    ),
+    ...[...existingKeys]
+      .filter((key) => !activeAlertKeys.has(key))
+      .map((key) => resolveOperationalIssue(sb, `watchdog:${key}`)),
+  ]);
+  const dailyIssueUpdates = await checkpointOperationalIssues(sb, now);
+  const dailyIssueDigest = await deliverDailyOperationalIssueDigest(sb, now);
+
+  if (!alerts.length) return { alerts, smsSent: false, smsSkipped: "none", dailyIssueUpdates, dailyIssueDigest };
 
   // Cooldown: what did we already SMS in the last 6h?
   const since = new Date(now.getTime() - COOLDOWN_HOURS * 3_600_000).toISOString();
@@ -93,18 +127,18 @@ export async function runHealthWatchdog(
     .gte("finished_at", since)
     .order("finished_at", { ascending: false })
     .limit(48);
-  const summaries = (recent ?? []).map((r) => (r.summary ?? {}) as WatchdogSummary);
+  const summaries = (recent ?? []).map((r) => (r.summary ?? {}) as unknown as WatchdogSummary);
   if (alertsAlreadySent(alerts, summaries)) {
-    return { alerts, smsSent: false, smsSkipped: "cooldown" };
+    return { alerts, smsSent: false, smsSkipped: "cooldown", dailyIssueUpdates, dailyIssueDigest };
   }
 
   const to = process.env.OPS_ALERT_SMS;
-  if (!to) return { alerts, smsSent: false, smsSkipped: "no-recipient" };
+  if (!to) return { alerts, smsSent: false, smsSkipped: "no-recipient", dailyIssueUpdates, dailyIssueDigest };
 
   const body = `MARLEY OPS ALERT: ${alerts
     .map((a) => a.message)
     .join("; ")
     .slice(0, 380)} — ops.marleymoves.co.uk/automations`;
   const res = await sendSms({ to, body });
-  return { alerts, smsSent: res.ok, ...(res.ok ? {} : { smsError: res.error }) };
+  return { alerts, smsSent: res.ok, dailyIssueUpdates, dailyIssueDigest, ...(res.ok ? {} : { smsError: res.error }) };
 }

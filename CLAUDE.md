@@ -6,7 +6,7 @@
 
 ## AI survey gotchas (2026-07-13)
 
-- **`GEMINI_API_BASE_URL` MUST include `/v1beta`** (`https://generativelanguage.googleapis.com/v1beta`). `lib/ai/gemini.ts` polls file status at `${baseUrl}/${file.name}` and passes baseUrl into `createGoogle` — the bare origin 404s every analysis ("Gemini file status failed (404)"). Only the upload path tolerates both forms. Prod `app.env` fixed to the /v1beta form 2026-07-13. Also `COMMS_DRYRUN=true` on prod until go-live (mock-data policy) — flip to `false` at launch.
+- **`GEMINI_API_BASE_URL` MUST include `/v1beta`** (`https://generativelanguage.googleapis.com/v1beta`). `lib/ai/gemini.ts` polls file status at `${baseUrl}/${file.name}` and passes baseUrl into `createGoogle` — the bare origin 404s every analysis ("Gemini file status failed (404)"). Only the upload path tolerates both forms. Prod `app.env` fixed to the /v1beta form 2026-07-13. The intended pre-launch policy is `COMMS_DRYRUN=true`, but live `app.env` was verified as `COMMS_DRYRUN=false` on 2026-07-20; do not assume sends are simulated or change the flag without Peter's cutover decision.
 - **Local dev has NO cron** — `ai_jobs` sit `queued` forever and the survey UI polls indefinitely. Drain manually while logged in as office: open `http://localhost:3015/api/cron/ai-jobs`.
 
 ## House conventions
@@ -15,10 +15,10 @@
 
 ## Current State
 
-Last touched: 2026-07-20 on i9 (latest) — **FINAL RELEASE REVIEW COMPLETE on `codex/final-release-review` (not deployed; migration 0069 dev-only). Code verdict: release-ready when app + migration ship together; mock-data/comms flags stay ON pending Peter's human cutover sign-off.** Full evidence: `docs/final-release-review-2026-07-20.md`.
-- **Release blockers closed:** broad crew `is_staff()` PostgREST/RLS access; unassigned service-role crew job actions; inactive-session access; survey R2 path trust; quote accept/signature and accept-vs-decline races; shared-device outbox leakage/retry; upload size/MIME binding; cron auth/false-green/registry gaps; service-worker cache lifetime; quote-search navigation race.
-- **Performance:** capture and tour libraries deferred; Geist Mono preload removed; review videos no-preload; dashboard I/O parallelized; Zoho refresh coalesced + 10s bounded; Next `deploymentId` wired to build SHA. Measured route savings 5.1–10.6 KB gzip, plus driver 23.3 KB JS/3.0 KB CSS deferred.
-- **Proof:** 828 unit tests, tsc, lint 0 errors (34 baseline compiler warnings), Next 16.2.9 standalone build, full 108-scenario browser coverage plus 63 affected-path post-hardening passes, live dev JWT/RLS active+inactive assertions. Production untouched. **Required next:** merge; backup; apply 0069 prod + reload/verify; one Docker deploy; keep `SANITY_SYNC_DISABLED=true` and `COMMS_DRYRUN=true` until manual gates.
+Last touched: 2026-07-20 on i9 (latest) — **FINAL RELEASE RELIABILITY FOLLOW-UP COMPLETE on `codex/final-release-review`. Migrations 0069 + 0070 are applied and rollback-proven locally and in production; application changes are committed on the release worktree but not deployed.** Full evidence: `docs/final-release-review-2026-07-20.md`.
+- **Release blockers closed:** all original review findings plus verified webhook replay claims, claim-before-provider communication dispatch, exact Resend-payload retry fences, deterministic strict removal-calendar pagination, and durable structured operational issues/daily updates/digests.
+- **Production DB proof:** fresh backup `O:\projects\red-banana\clients\marley\backups\marley-ops-20260721-0021.sql.zip`; 31/31 communication rows preserved/backfilled; 5 RLS-protected issue/webhook tables, 14 RPCs and 3 unique indexes present; transactional behavior probe passed and rolled back without retained test data.
+- **Proof:** 843 unit tests, tsc, lint 0 errors (34 baseline compiler warnings), Next 16.2.9 production build, local/prod SQL adversarial probes, and three clean specialist release-gate reviews. **Required next:** merge and one Docker deploy; verify `/api/version` and automation issue UI. `SANITY_SYNC_DISABLED=true`; live `COMMS_DRYRUN=false` conflicts with the written pre-launch policy and needs Peter's explicit cutover decision before changing.
 - Prior:
 
 Last touched: 2026-07-20 on i9 (latest) — **E2E COVERAGE COMPLETE — role-based Playwright suite now green across all four roles; the last two depth items shipped (PR #14, live prod `dace49f`, CI test gate + OVH deploy green).**

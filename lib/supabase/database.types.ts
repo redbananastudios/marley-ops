@@ -959,12 +959,16 @@ export type Database = {
       communications: {
         Row: {
           attachment_ref: string | null
+          attempt_count: number
           body: string
           channel: Database["public"]["Enums"]["comm_channel"]
+          claim_expires_at: string | null
+          claim_token: string | null
           client_id: string | null
           content_hash: string
           created_at: string
           direction: string
+          dispatch_key: string | null
           first_sent_at: string | null
           id: string
           is_override: boolean
@@ -974,6 +978,9 @@ export type Database = {
           provider: string | null
           provider_error: string | null
           provider_id: string | null
+          provider_outcome_unknown: boolean
+          provider_payload_hash: string | null
+          provider_started_at: string | null
           quote_id: string | null
           send_count: number
           sent_by: string | null
@@ -985,12 +992,16 @@ export type Database = {
         }
         Insert: {
           attachment_ref?: string | null
+          attempt_count?: number
           body: string
           channel: Database["public"]["Enums"]["comm_channel"]
+          claim_expires_at?: string | null
+          claim_token?: string | null
           client_id?: string | null
           content_hash: string
           created_at?: string
           direction?: string
+          dispatch_key?: string | null
           first_sent_at?: string | null
           id?: string
           is_override?: boolean
@@ -1000,6 +1011,9 @@ export type Database = {
           provider?: string | null
           provider_error?: string | null
           provider_id?: string | null
+          provider_outcome_unknown?: boolean
+          provider_payload_hash?: string | null
+          provider_started_at?: string | null
           quote_id?: string | null
           send_count?: number
           sent_by?: string | null
@@ -1011,12 +1025,16 @@ export type Database = {
         }
         Update: {
           attachment_ref?: string | null
+          attempt_count?: number
           body?: string
           channel?: Database["public"]["Enums"]["comm_channel"]
+          claim_expires_at?: string | null
+          claim_token?: string | null
           client_id?: string | null
           content_hash?: string
           created_at?: string
           direction?: string
+          dispatch_key?: string | null
           first_sent_at?: string | null
           id?: string
           is_override?: boolean
@@ -1026,6 +1044,9 @@ export type Database = {
           provider?: string | null
           provider_error?: string | null
           provider_id?: string | null
+          provider_outcome_unknown?: boolean
+          provider_payload_hash?: string | null
+          provider_started_at?: string | null
           quote_id?: string | null
           send_count?: number
           sent_by?: string | null
@@ -1066,49 +1087,59 @@ export type Database = {
           },
         ]
       }
-      crew_job_sheets: {
+      contractor_agreements: {
         Row: {
-          attempts: number
-          content_hash: string
+          acknowledgments: Json
+          agreement_version: string
           created_at: string
-          delivered_at: string | null
-          delivered_hash: string | null
           id: string
-          staff_id: string
-          token: string
-          updated_at: string
-          version: number
-          work_date: string
+          ip: string | null
+          profile_id: string
+          role: string
+          signature_data: string | null
+          signed_at: string
+          signer_name: string
+          staff_id: string | null
+          user_agent: string | null
         }
         Insert: {
-          attempts?: number
-          content_hash: string
+          acknowledgments?: Json
+          agreement_version: string
           created_at?: string
-          delivered_at?: string | null
-          delivered_hash?: string | null
           id?: string
-          staff_id: string
-          token: string
-          updated_at?: string
-          version?: number
-          work_date: string
+          ip?: string | null
+          profile_id: string
+          role: string
+          signature_data?: string | null
+          signed_at?: string
+          signer_name: string
+          staff_id?: string | null
+          user_agent?: string | null
         }
         Update: {
-          attempts?: number
-          content_hash?: string
+          acknowledgments?: Json
+          agreement_version?: string
           created_at?: string
-          delivered_at?: string | null
-          delivered_hash?: string | null
           id?: string
-          staff_id?: string
-          token?: string
-          updated_at?: string
-          version?: number
-          work_date?: string
+          ip?: string | null
+          profile_id?: string
+          role?: string
+          signature_data?: string | null
+          signed_at?: string
+          signer_name?: string
+          staff_id?: string | null
+          user_agent?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "crew_job_sheets_staff_id_fkey"
+            foreignKeyName: "contractor_agreements_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contractor_agreements_staff_id_fkey"
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
@@ -1159,6 +1190,56 @@ export type Database = {
             columns: ["sheet_id"]
             isOneToOne: false
             referencedRelation: "crew_job_sheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crew_job_sheets: {
+        Row: {
+          attempts: number
+          content_hash: string
+          created_at: string
+          delivered_at: string | null
+          delivered_hash: string | null
+          id: string
+          staff_id: string
+          token: string
+          updated_at: string
+          version: number
+          work_date: string
+        }
+        Insert: {
+          attempts?: number
+          content_hash: string
+          created_at?: string
+          delivered_at?: string | null
+          delivered_hash?: string | null
+          id?: string
+          staff_id: string
+          token: string
+          updated_at?: string
+          version?: number
+          work_date: string
+        }
+        Update: {
+          attempts?: number
+          content_hash?: string
+          created_at?: string
+          delivered_at?: string | null
+          delivered_hash?: string | null
+          id?: string
+          staff_id?: string
+          token?: string
+          updated_at?: string
+          version?: number
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_job_sheets_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
             referencedColumns: ["id"]
           },
         ]
@@ -2408,6 +2489,143 @@ export type Database = {
           },
         ]
       }
+      operational_issue_daily_digests: {
+        Row: {
+          attempt_count: number
+          claim_expires_at: string | null
+          claim_token: string | null
+          issue_count: number
+          payload: Json
+          payload_hash: string
+          provider_error: string | null
+          sent_at: string | null
+          snapshot_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempt_count?: number
+          claim_expires_at?: string | null
+          claim_token?: string | null
+          issue_count?: number
+          payload?: Json
+          payload_hash?: string
+          provider_error?: string | null
+          sent_at?: string | null
+          snapshot_date: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempt_count?: number
+          claim_expires_at?: string | null
+          claim_token?: string | null
+          issue_count?: number
+          payload?: Json
+          payload_hash?: string
+          provider_error?: string | null
+          sent_at?: string | null
+          snapshot_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      operational_issue_daily_updates: {
+        Row: {
+          context: Json
+          created_at: string
+          id: string
+          issue_id: string
+          occurrence_count: number
+          severity: string
+          snapshot_date: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          context?: Json
+          created_at?: string
+          id?: string
+          issue_id: string
+          occurrence_count: number
+          severity: string
+          snapshot_date: string
+          status: string
+          updated_at?: string
+        }
+        Update: {
+          context?: Json
+          created_at?: string
+          id?: string
+          issue_id?: string
+          occurrence_count?: number
+          severity?: string
+          snapshot_date?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operational_issue_daily_updates_issue_id_fkey"
+            columns: ["issue_id"]
+            isOneToOne: false
+            referencedRelation: "operational_issues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      operational_issues: {
+        Row: {
+          context: Json
+          event: string
+          first_seen_at: string
+          id: string
+          issue_key: string
+          last_checkpoint_at: string | null
+          last_seen_at: string
+          message: string
+          occurrence_count: number
+          resolved_at: string | null
+          severity: string
+          source: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          context?: Json
+          event: string
+          first_seen_at?: string
+          id?: string
+          issue_key: string
+          last_checkpoint_at?: string | null
+          last_seen_at?: string
+          message: string
+          occurrence_count?: number
+          resolved_at?: string | null
+          severity: string
+          source: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          context?: Json
+          event?: string
+          first_seen_at?: string
+          id?: string
+          issue_key?: string
+          last_checkpoint_at?: string | null
+          last_seen_at?: string
+          message?: string
+          occurrence_count?: number
+          resolved_at?: string | null
+          severity?: string
+          source?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           active: boolean
@@ -2941,62 +3159,65 @@ export type Database = {
           },
         ]
       }
-      contractor_agreements: {
+      staff_statement_lines: {
         Row: {
-          acknowledgments: Json
-          agreement_version: string
+          amount: number
+          appointment_id: string | null
           created_at: string
+          description: string
           id: string
-          ip: string | null
-          profile_id: string
-          role: string
-          signature_data: string | null
-          signed_at: string
-          signer_name: string
-          staff_id: string | null
-          user_agent: string | null
+          lead_id: string | null
+          quantity: number | null
+          sort_index: number
+          source: string
+          statement_id: string
+          unit_amount: number | null
+          updated_at: string
+          work_date: string | null
         }
         Insert: {
-          acknowledgments?: Json
-          agreement_version: string
+          amount?: number
+          appointment_id?: string | null
           created_at?: string
+          description: string
           id?: string
-          ip?: string | null
-          profile_id: string
-          role: string
-          signature_data?: string | null
-          signed_at?: string
-          signer_name: string
-          staff_id?: string | null
-          user_agent?: string | null
+          lead_id?: string | null
+          quantity?: number | null
+          sort_index?: number
+          source?: string
+          statement_id: string
+          unit_amount?: number | null
+          updated_at?: string
+          work_date?: string | null
         }
         Update: {
-          acknowledgments?: Json
-          agreement_version?: string
+          amount?: number
+          appointment_id?: string | null
           created_at?: string
+          description?: string
           id?: string
-          ip?: string | null
-          profile_id?: string
-          role?: string
-          signature_data?: string | null
-          signed_at?: string
-          signer_name?: string
-          staff_id?: string | null
-          user_agent?: string | null
+          lead_id?: string | null
+          quantity?: number | null
+          sort_index?: number
+          source?: string
+          statement_id?: string
+          unit_amount?: number | null
+          updated_at?: string
+          work_date?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "contractor_agreements_profile_id_fkey"
-            columns: ["profile_id"]
+            foreignKeyName: "staff_statement_lines_appointment_id_fkey"
+            columns: ["appointment_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "appointments"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "contractor_agreements_staff_id_fkey"
-            columns: ["staff_id"]
+            foreignKeyName: "staff_statement_lines_statement_id_fkey"
+            columns: ["statement_id"]
             isOneToOne: false
-            referencedRelation: "staff"
+            referencedRelation: "staff_statements"
             referencedColumns: ["id"]
           },
         ]
@@ -3075,69 +3296,6 @@ export type Database = {
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      staff_statement_lines: {
-        Row: {
-          amount: number
-          appointment_id: string | null
-          created_at: string
-          description: string
-          id: string
-          lead_id: string | null
-          quantity: number | null
-          sort_index: number
-          source: string
-          statement_id: string
-          unit_amount: number | null
-          updated_at: string
-          work_date: string | null
-        }
-        Insert: {
-          amount?: number
-          appointment_id?: string | null
-          created_at?: string
-          description: string
-          id?: string
-          lead_id?: string | null
-          quantity?: number | null
-          sort_index?: number
-          source?: string
-          statement_id: string
-          unit_amount?: number | null
-          updated_at?: string
-          work_date?: string | null
-        }
-        Update: {
-          amount?: number
-          appointment_id?: string | null
-          created_at?: string
-          description?: string
-          id?: string
-          lead_id?: string | null
-          quantity?: number | null
-          sort_index?: number
-          source?: string
-          statement_id?: string
-          unit_amount?: number | null
-          updated_at?: string
-          work_date?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "staff_statement_lines_appointment_id_fkey"
-            columns: ["appointment_id"]
-            isOneToOne: false
-            referencedRelation: "appointments"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "staff_statement_lines_statement_id_fkey"
-            columns: ["statement_id"]
-            isOneToOne: false
-            referencedRelation: "staff_statements"
             referencedColumns: ["id"]
           },
         ]
@@ -3598,6 +3756,95 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_delivery_steps: {
+        Row: {
+          event_id: string
+          payload_hash: string
+          provider: string
+          provider_completed_at: string | null
+          provider_id: string | null
+          provider_started_at: string
+          status: string
+          step: string
+        }
+        Insert: {
+          event_id: string
+          payload_hash?: string
+          provider: string
+          provider_completed_at?: string | null
+          provider_id?: string | null
+          provider_started_at?: string
+          status?: string
+          step: string
+        }
+        Update: {
+          event_id?: string
+          payload_hash?: string
+          provider?: string
+          provider_completed_at?: string | null
+          provider_id?: string | null
+          provider_started_at?: string
+          status?: string
+          step?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_delivery_steps_provider_event_id_fkey"
+            columns: ["provider", "event_id"]
+            isOneToOne: false
+            referencedRelation: "webhook_receipts"
+            referencedColumns: ["provider", "event_id"]
+          },
+        ]
+      }
+      webhook_receipts: {
+        Row: {
+          attempt_count: number
+          completed_at: string | null
+          event_id: string
+          event_type: string
+          first_received_at: string
+          last_error: string | null
+          last_received_at: string
+          lease_expires_at: string | null
+          lease_token: string | null
+          outcome: Json
+          payload_hash: string
+          provider: string
+          status: string
+        }
+        Insert: {
+          attempt_count?: number
+          completed_at?: string | null
+          event_id: string
+          event_type: string
+          first_received_at?: string
+          last_error?: string | null
+          last_received_at?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          outcome?: Json
+          payload_hash: string
+          provider: string
+          status?: string
+        }
+        Update: {
+          attempt_count?: number
+          completed_at?: string | null
+          event_id?: string
+          event_type?: string
+          first_received_at?: string
+          last_error?: string | null
+          last_received_at?: string
+          lease_expires_at?: string | null
+          lease_token?: string | null
+          outcome?: Json
+          payload_hash?: string
+          provider?: string
+          status?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -3612,6 +3859,10 @@ export type Database = {
           p_segment_id: string
         }
         Returns: Json
+      }
+      checkpoint_operational_issues: {
+        Args: { p_snapshot_date: string }
+        Returns: number
       }
       claim_ai_jobs: {
         Args: { p_batch?: number; p_lease_seconds?: number; p_worker: string }
@@ -3640,6 +3891,51 @@ export type Database = {
           isOneToOne: false
           isSetofReturn: true
         }
+      }
+      claim_operational_issue_digest: {
+        Args: {
+          p_issue_count: number
+          p_lease_seconds?: number
+          p_payload: Json
+          p_payload_hash: string
+          p_retry_simulated?: boolean
+          p_snapshot_date: string
+        }
+        Returns: {
+          decision: string
+          digest_attempt_count: number
+          digest_claim_token: string
+          digest_issue_count: number
+          digest_payload: Json
+        }[]
+      }
+      claim_webhook_delivery_step: {
+        Args: {
+          p_event_id: string
+          p_lease_token: string
+          p_payload_hash: string
+          p_provider: string
+          p_step: string
+        }
+        Returns: {
+          decision: string
+          provider_id: string
+          provider_started_at: string
+        }[]
+      }
+      claim_webhook_event: {
+        Args: {
+          p_event_id: string
+          p_event_type: string
+          p_lease_seconds?: number
+          p_payload_hash: string
+          p_provider: string
+        }
+        Returns: {
+          attempt_count: number
+          decision: string
+          lease_token: string
+        }[]
       }
       complete_ai_media_job: {
         Args: {
@@ -3698,6 +3994,28 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      complete_operational_issue_digest: {
+        Args: { p_claim_token: string; p_snapshot_date: string }
+        Returns: boolean
+      }
+      complete_webhook_delivery_step: {
+        Args: {
+          p_event_id: string
+          p_provider: string
+          p_provider_id: string
+          p_step: string
+        }
+        Returns: boolean
+      }
+      complete_webhook_event: {
+        Args: {
+          p_event_id: string
+          p_lease_token: string
+          p_outcome?: Json
+          p_provider: string
+        }
+        Returns: boolean
+      }
       confirm_ai_room: {
         Args: {
           p_actor_id: string
@@ -3744,6 +4062,18 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      crew_can_access_appointment_object: {
+        Args: { p_object_name: string }
+        Returns: boolean
+      }
+      crew_can_access_lead_object: {
+        Args: { p_object_name: string }
+        Returns: boolean
+      }
+      crew_can_access_survey_object: {
+        Args: { p_object_name: string }
+        Returns: boolean
+      }
       fail_ai_job: {
         Args: { p_error: string; p_job_id: string; p_worker: string }
         Returns: {
@@ -3771,6 +4101,33 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      fail_operational_issue_digest: {
+        Args: {
+          p_claim_token: string
+          p_error: string
+          p_snapshot_date: string
+        }
+        Returns: boolean
+      }
+      fail_webhook_delivery_step: {
+        Args: {
+          p_event_id: string
+          p_lease_token: string
+          p_outcome_unknown: boolean
+          p_provider: string
+          p_step: string
+        }
+        Returns: boolean
+      }
+      fail_webhook_event: {
+        Args: {
+          p_error: string
+          p_event_id: string
+          p_lease_token: string
+          p_provider: string
+        }
+        Returns: boolean
       }
       finalise_ai_call: {
         Args: { p_actual_usd: number; p_attempt_key: string }
@@ -3811,6 +4168,16 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      finalize_communication_send: {
+        Args: {
+          p_claim_token: string
+          p_id: string
+          p_provider_id: string
+          p_sent_at?: string
+        }
+        Returns: boolean
+      }
+      has_signed_contractor_agreement: { Args: never; Returns: boolean }
       heartbeat_ai_job: {
         Args: { p_job_id: string; p_lease_seconds?: number; p_worker: string }
         Returns: boolean
@@ -3822,8 +4189,19 @@ export type Database = {
       is_admin: { Args: never; Returns: boolean }
       is_office: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
+      my_email: { Args: never; Returns: string }
       next_quote_ref: { Args: { kind: string }; Returns: string }
-      next_statement_ref: { Args: Record<PropertyKey, never>; Returns: string }
+      next_statement_ref: { Args: never; Returns: string }
+      reclaim_communication_send: {
+        Args: {
+          p_id: string
+          p_lease_seconds?: number
+          p_new_claim_token: string
+          p_old_claim_token: string
+          p_provider_payload_hash: string
+        }
+        Returns: boolean
+      }
       recompute_ai_room_state: {
         Args: { p_room_id: string }
         Returns: undefined
@@ -3832,6 +4210,17 @@ export type Database = {
       release_stale_ai_reservations: {
         Args: { p_age_minutes?: number }
         Returns: number
+      }
+      report_operational_issue: {
+        Args: {
+          p_context?: Json
+          p_event: string
+          p_issue_key: string
+          p_message: string
+          p_severity: string
+          p_source: string
+        }
+        Returns: string
       }
       reserve_ai_call: {
         Args: {
@@ -3854,6 +4243,10 @@ export type Database = {
           p_qty: number
         }
         Returns: Json
+      }
+      resolve_operational_issue: {
+        Args: { p_issue_key: string }
+        Returns: boolean
       }
       retry_ai_job: {
         Args: { p_actor_id: string; p_job_id: string }
@@ -3882,6 +4275,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      simulate_operational_issue_digest: {
+        Args: { p_claim_token: string; p_snapshot_date: string }
+        Returns: boolean
+      }
+      start_communication_provider: {
+        Args: { p_claim_token: string; p_id: string }
+        Returns: string
       }
     }
     Enums: {

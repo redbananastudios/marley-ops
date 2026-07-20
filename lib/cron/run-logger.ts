@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { log, errorContext } from "@/lib/log";
+import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issues";
 
 /**
  * Wrap a cron job's work so every run is (a) structured-logged and (b) recorded
@@ -57,7 +58,7 @@ export async function runCron<T extends Record<string, unknown>>(
   const finishedAt = new Date();
   const durationMs = finishedAt.getTime() - startedAt.getTime();
 
-  if (ok) log.info("cron.done", { job, durationMs, summary });
+  if (ok) log.info("cron.done", { job, durationMs, summaryKeys: Object.keys(summary ?? {}).slice(0, 50) });
   else log.error("cron.failed", { job, durationMs, error, stack });
 
   // Best-effort audit row — never let a logging failure surface to the caller.
@@ -73,6 +74,18 @@ export async function runCron<T extends Record<string, unknown>>(
       error: error ?? null,
     } as never);
     if (insertErr) log.warn("cron.audit.insert_failed", { job, error: insertErr.message });
+    if (ok) {
+      await resolveOperationalIssue(sb, `cron:${job}`);
+    } else {
+      await reportOperationalIssue(sb, {
+        key: `cron:${job}`,
+        severity: "error",
+        source: "cron",
+        event: "cron.failed",
+        message: `Scheduled job ${job} failed.`,
+        context: { job, durationMs, error },
+      });
+    }
   } catch (e) {
     log.warn("cron.audit.insert_threw", { job, ...errorContext(e) });
   }
