@@ -1,4 +1,38 @@
-import type { Page, Locator } from "@playwright/test";
+import { expect, type Page, type Locator } from "@playwright/test";
+
+/**
+ * Click a submit control and wait for the page to advance to `expected`.
+ *
+ * Guards the Next.js pre-hydration race: a `<form onSubmit>` button clicked
+ * before React attaches its handler does a NATIVE form submission (a plain GET
+ * reload) instead of running the server action — the checkboxes/fields are wiped
+ * and nothing happens. On a miss this re-runs `prepare` (re-tick, re-fill) and
+ * clicks again, so the second attempt (now hydrated) runs the real action.
+ */
+export async function submitUntil(
+  page: Page,
+  opts: {
+    prepare?: () => Promise<void>;
+    click: Locator;
+    expected: Locator;
+    attempts?: number;
+    perAttemptMs?: number;
+  },
+): Promise<void> {
+  const attempts = opts.attempts ?? 3;
+  for (let i = 1; i <= attempts; i++) {
+    if (opts.prepare) await opts.prepare();
+    await opts.click.click();
+    try {
+      await opts.expected.waitFor({ state: "visible", timeout: opts.perAttemptMs ?? 8000 });
+      return;
+    } catch {
+      if (i === attempts) break;
+      await page.waitForLoadState("networkidle").catch(() => {});
+    }
+  }
+  await expect(opts.expected).toBeVisible({ timeout: 5000 });
+}
 
 /**
  * Draw a few strokes on a <canvas> signature pad so it yields a real (non-blank)

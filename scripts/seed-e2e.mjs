@@ -54,13 +54,40 @@ const die = (msg, err) => {
 };
 
 // ── clean up any prior E2E rows (FK-safe order) ───────────────────────────────
+// Every child table that references a lead (directly or via its appointments).
+// Crew sign-off writes job_completions (RESTRICT on appointment) and claims
+// (RESTRICT on lead), so a naive lead/appointment delete is BLOCKED and rows
+// pile up until quote_ref collides. Clear the whole chain, deepest first.
+const LEAD_CHILD_TABLES = [
+  "claims",
+  "job_completions",
+  "card_payments",
+  "communications",
+  "activities",
+  "surveys",
+  "storage_lets",
+  "signatures",
+  "job_notes",
+  "job_media",
+  "cubic_surveys",
+  "follow_ups",
+];
+
 async function wipe() {
   const { data: leads } = await sb.from("leads").select("id").ilike("name", "E2E %");
   const leadIds = (leads ?? []).map((l) => l.id);
   if (leadIds.length) {
     const { data: appts } = await sb.from("appointments").select("id").in("lead_id", leadIds);
     const apptIds = (appts ?? []).map((a) => a.id);
-    if (apptIds.length) await sb.from("appointment_assignments").delete().in("appointment_id", apptIds);
+    for (const t of LEAD_CHILD_TABLES) {
+      const { error } = await sb.from(t).delete().in("lead_id", leadIds);
+      // A table that doesn't exist in this schema is fine to skip; anything else fails loud.
+      if (error && !/does not exist|find the table/i.test(error.message)) die(`wipe ${t}`, error);
+    }
+    if (apptIds.length) {
+      await sb.from("staff_statement_lines").delete().in("appointment_id", apptIds);
+      await sb.from("appointment_assignments").delete().in("appointment_id", apptIds);
+    }
     await sb.from("appointments").delete().in("lead_id", leadIds);
     await sb.from("quotes").delete().in("lead_id", leadIds);
     await sb.from("leads").delete().in("id", leadIds);

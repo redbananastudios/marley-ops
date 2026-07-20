@@ -4,12 +4,12 @@ import { drawSignature } from "../fixtures/ui";
 import { SEED } from "../fixtures/seed-data";
 
 /**
- * P0 scenarios — must all pass before go-live (PRD B3). The crew-reliability
- * pair (#7 offline completion, #8 double-submit) are the ones this branch
- * directly implements, so they're written in full here. The money scenarios
- * (#1–#6) need the Zoho + takepayments SANDBOXES wired to staging; they're
- * captured as fixme specs with the exact rule each must prove, ready to fill in
- * against staging. See e2e/README.md.
+ * P0 crew-reliability scenarios (PRD B3), crew role, phone viewport.
+ * #7 (offline completion never lost) + #8 (double-submit idempotent).
+ *
+ * The money scenarios (#1 deposit+balance separation; #2–#6) are the OFFICE
+ * role, so they live in scenarios/p0-money.spec.ts (office project). See there
+ * and e2e/README.md.
  */
 
 // ── #7 — Crew completes a job offline; it queues and syncs on reconnect ───────
@@ -127,27 +127,5 @@ test.describe("P0 #8 — double-submit is idempotent", () => {
       await page.reload();
       await expect(page.getByRole("button", { name: "Complete job" })).toHaveCount(0);
     });
-  });
-});
-
-// ── #1–#6 — money scenarios (need Zoho + takepayments sandbox on staging) ─────
-test.describe("P0 money scenarios (fill against staging with sandboxes wired)", () => {
-  test("#1 deposit + balance are invoiced SEPARATELY, never one net invoice", async () => {
-    test.fixme(true, "Needs Zoho sandbox. Assert: after deposit paid + move completed, /finance shows two invoices for the job ref — a -DEP and a -BAL — each with its own VAT line; never a single invoice with a deduction.");
-  });
-  test("#2 cancel after deposit, refunded in full → credit note, VAT reverses", async () => {
-    test.fixme(true, "Assert: refunding the deposit raises a Zoho credit note against the -DEP invoice and the reversed VAT drops out of the period's output VAT on /finance.");
-  });
-  test("#3 cancel after deposit, forfeited → VAT stays due, net → cancellation fees", async () => {
-    test.fixme(true, "Assert: forfeiting keeps the -DEP invoice + its VAT; the net is recognised as a cancellation fee, not refunded.");
-  });
-  test("#4 priced lower on the day → partial credit note, correct VAT", async () => {
-    test.fixme(true, "Assert: reducing the agreed price on completion raises a partial credit note; VAT on the credit matches the reduction at the inclusive rate.");
-  });
-  test("#5 deposit in one VAT quarter, move in the next → VAT lands in the deposit's quarter", async () => {
-    test.fixme(true, "Assert: with the deposit tax-point in Q1 and the move in Q2, /finance attributes the deposit VAT to Q1 and the balance VAT to Q2.");
-  });
-  test("#6 card declined mid-booking → job not confirmed, no orphaned records", async () => {
-    test.fixme(true, "Needs takepayments sandbox declined card. Assert: a declined authorisation leaves the quote un-accepted, no deposit recorded, no Zoho invoice, no confirmed booking.");
   });
 });

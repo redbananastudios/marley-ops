@@ -18,31 +18,40 @@ scripts/seed-e2e.mjs   idempotent reset to the known state the specs assert
 playwright.config.ts   env-agnostic (E2E_BASE_URL); chromium only
 ```
 
-## Status (validated against local dev, 2026-07-20)
+## Status (validated against local dev + staging Zoho, 2026-07-20)
 
-**Green now** (run against i9 local dev — see "Running locally"):
+Full suite: **12 passed, 6 skipped, 0 failed** (run twice back-to-back to prove
+the seed wipe survives sign-off artifacts). ZOHO_ORG_ID pointed at the staging
+org **Demo Removals** (20117092566) — a separate Zoho account that physically
+cannot reach the live books.
+
+**Green now:**
 - Crew journey — jobs list + honest last-updated stamp + version; job sheet
   (price-free) + PDF download.
 - **P0 #7** offline completion queues + syncs, **P0 #8** double-submit idempotent.
 - Office dashboard + automations smoke (asserts the crew-job-sheets cron shows).
 - Estimator workspace — "My day", starts a quote (reaches `/quotes/new`).
-- Customer accept page — `/q/<token>` renders the sent quote (total, deposit,
-  accept form).
+- Customer accept page — `/q/<token>` renders the sent quote AND *accept →
+  deposit invoice*: the £100 **-DEP** invoice is raised **in staging** and
+  asserted directly against the Zoho books (VAT-itemised, £100, never live).
+- **P0 #1** — deposit + balance invoiced SEPARATELY: the office raises the
+  **-BAL** balance invoice (£2,300 = agreed − deposit) and it's asserted in
+  staging (VAT-itemised, distinct reference). With the -DEP proof above, that's
+  the full invariant: two invoices per job, each VAT-itemised, never one net.
 
-**Gated (skip until the sandbox exists), body ready to run when un-gated:**
-- Customer *accept → deposit invoice* — raises a real Zoho invoice, so it's gated
-  on a **staging Zoho org** (`ZOHO_ORG_ID` numeric, never the live org).
-
-**Outlined (`test.fixme`) — write the bodies against the staging Zoho org:**
-- **P0 #1–#5** money-path (deposit/balance separation, refund credit-note + VAT
-  reversal, forfeit, partial credit, VAT-quarter). Each drives the office
-  deposit/complete/refund flow and asserts `/finance`; develop against the
-  staging Zoho org (they hit Zoho, so they can't be verified without it).
-- **P0 #6** declined card + office payment-matching — also need the
-  **takepayments sandbox**.
-
-These stay `fixme` on purpose: they hit Zoho/takepayments, so they can't be
-verified without the sandboxes and must not ship as false green.
+**Deliberately NOT automated E2E** (`test.fixme` with the accurate reason — see
+`scenarios/p0-money.spec.ts`):
+- **#2 refund / #4 partial credit** — refunds + credit notes are handled
+  **manually in Zoho by design** (deferred 2026-07-09). The app raises a
+  refund-decision task on cancel; there is no in-app flow to drive.
+- **#3 forfeit** — a human decision; the unwind (cancel appts, void UNPAID
+  invoices, raise the refund-decision task) is unit-tested, the keep/refund call
+  is manual in Zoho.
+- **#5 VAT-quarter attribution** — the maths lives in `lib/finance` and is
+  unit-tested; an E2E can't set differing tax points (Zoho dates at creation, no
+  UI backdating).
+- **#6 declined card + payment-matching** — needs the **takepayments sandbox**
+  (deferred until the merchant id lands).
 
 ## Running locally (works today, no staging needed)
 

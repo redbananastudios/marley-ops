@@ -59,7 +59,7 @@ export default defineConfig({
     {
       name: "office",
       dependencies: ["setup"],
-      testMatch: /journeys\/office\.spec\.ts/,
+      testMatch: /(journeys\/office|scenarios\/p0-money)\.spec\.ts/,
       use: { storageState: `${authDir}/office.json`, viewport: { width: 1280, height: 900 } },
     },
     {

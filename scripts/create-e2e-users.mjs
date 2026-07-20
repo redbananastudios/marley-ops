@@ -62,7 +62,16 @@ for (const u of USERS) {
   }
   const { error: pErr } = await sb
     .from("profiles")
-    .upsert({ id: user.id, email: u.email, full_name: u.full_name, role: u.role, active: true });
+    // tour_seen_at stamped so the first-login onboarding tour (driver.js) never
+    // auto-starts — its overlay intercepts clicks and breaks the suite.
+    .upsert({
+      id: user.id,
+      email: u.email,
+      full_name: u.full_name,
+      role: u.role,
+      active: true,
+      tour_seen_at: new Date().toISOString(),
+    });
   if (pErr) throw pErr;
 }
 console.log(`\n✓ ${USERS.length} E2E users provisioned on ${url}`);
