@@ -42,6 +42,9 @@ const SEED = {
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
+  cubicSurvey: { name: "E2E Cubic Survey", shareToken: "e2e-cubic-share-token-0001" },
+  daySheet: { token: "e2e-day-sheet-token-0001" },
 };
 const DAY = 86_400_000;
 const at = (daysFromNow, hour = 9) => {
@@ -93,6 +96,29 @@ async function wipe() {
     await sb.from("quotes").delete().in("lead_id", leadIds);
     await sb.from("leads").delete().in("id", leadIds);
   }
+  // Storage lets carry lead_id=NULL, so the lead-child pass above misses them —
+  // and their client (E2E Storage Client) is about to be deleted, which the let's
+  // FK would block. Clear the whole storage chain (deepest first) by our markers.
+  const { data: eSites } = await sb.from("storage_sites").select("id").ilike("name", "E2E %");
+  const siteIds = (eSites ?? []).map((s) => s.id);
+  if (siteIds.length) {
+    const { data: eUnits } = await sb.from("storage_units").select("id").in("site_id", siteIds);
+    const unitIds = (eUnits ?? []).map((u) => u.id);
+    if (unitIds.length) {
+      const { data: eLets } = await sb.from("storage_lets").select("id").in("unit_id", unitIds);
+      const letIds = (eLets ?? []).map((l) => l.id);
+      if (letIds.length) {
+        await sb.from("signatures").delete().in("storage_let_id", letIds);
+        const { error: invErr } = await sb.from("storage_invoices").delete().in("let_id", letIds);
+        if (invErr && !/does not exist|find the table/i.test(invErr.message)) die("wipe storage_invoices", invErr);
+        await sb.from("storage_lets").delete().in("id", letIds);
+      }
+      await sb.from("storage_units").delete().in("id", unitIds);
+    }
+    await sb.from("storage_sites").delete().in("id", siteIds);
+  }
+  // Crew day-sheet token is unique — a re-seed would collide; clear it.
+  await sb.from("crew_job_sheets").delete().eq("token", SEED.daySheet.token);
   await sb.from("clients").delete().ilike("display_name", "E2E %");
   console.log(`wiped prior E2E data (${leadIds.length} leads)`);
 }
@@ -335,6 +361,70 @@ const crewStaffId = await ensureCrewStaff();
   });
   if (error) die(`${SEED.declineQuote.name} sent quote`, error);
   console.log(`seeded decline quote: ${SEED.declineQuote.name} (/q/${SEED.declineQuote.acceptToken})`);
+}
+
+// 7. An OPEN, UNSIGNED storage let with a remote-signing token — /s/<token>.
+{
+  const { data: client, error: cErr } = await sb
+    .from("clients")
+    .insert({ display_name: SEED.storageAgreement.client, postcode_home: "SP7 8AA", notes: MARKER })
+    .select("id")
+    .single();
+  if (cErr) die("storage client", cErr);
+  const { data: site, error: sErr } = await sb
+    .from("storage_sites")
+    .insert({ name: SEED.storageAgreement.site, address: "Yard Lane, Shaftesbury, SP7 8AA", is_active: true, notes: MARKER })
+    .select("id")
+    .single();
+  if (sErr) die("storage site", sErr);
+  const { data: unit, error: uErr } = await sb
+    .from("storage_units")
+    .insert({ site_id: site.id, code: SEED.storageAgreement.unitCode, name: "Crate 1", unit_type: "crate_250", size_cuft: 250, is_active: true, notes: MARKER })
+    .select("id")
+    .single();
+  if (uErr) die("storage unit", uErr);
+  const { error: lErr } = await sb.from("storage_lets").insert({
+    client_id: client.id,
+    unit_id: unit.id,
+    start_date: at(0).slice(0, 10),
+    rate: 25,
+    rate_period: "week",
+    sign_token: SEED.storageAgreement.signToken,
+    notes: MARKER,
+  });
+  if (lErr) die("storage let", lErr);
+  console.log(`seeded storage let: ${SEED.storageAgreement.client} (/s/${SEED.storageAgreement.signToken})`);
+}
+
+// 8. A cubic survey with a customer share token — /cv/<token> self-fill.
+{
+  const ids = await makeLead({ name: SEED.cubicSurvey.name, status: "quoted" });
+  const { error } = await sb.from("cubic_surveys").insert({
+    lead_id: ids.leadId,
+    client_id: ids.clientId,
+    status: "draft",
+    items: [{ key: "sofa_2", label: "2-seat sofa", qty: 1, ft3: 35 }],
+    customer_notes: "",
+    notes: MARKER,
+    share_token: SEED.cubicSurvey.shareToken,
+  });
+  if (error) die("cubic survey", error);
+  console.log(`seeded cubic survey: ${SEED.cubicSurvey.name} (/cv/${SEED.cubicSurvey.shareToken})`);
+}
+
+// 9. A crew day-sheet token for the e2e-crew staff, TOMORROW (their seeded
+//    crew job's day, inside the 3-day staleness window) — /sheet/<token>.
+{
+  const { error } = await sb.from("crew_job_sheets").insert({
+    staff_id: crewStaffId,
+    work_date: at(1).slice(0, 10),
+    token: SEED.daySheet.token,
+    version: 1,
+    attempts: 0,
+    content_hash: "e2e-seed",
+  });
+  if (error) die("crew day sheet", error);
+  console.log(`seeded day sheet: e2e-crew tomorrow (/sheet/${SEED.daySheet.token})`);
 }
 
 console.log("\n✓ E2E seed complete.");

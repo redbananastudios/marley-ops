@@ -55,4 +55,13 @@ export const SEED = {
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  /** An OPEN storage let (unsigned) with a remote-signing token — the public
+   *  /s/<token> storage-agreement page. Client name drives the greeting. */
+  storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
+  /** A cubic survey with a customer share token — the public /cv/<token> self-fill
+   *  page. Anchored to its own lead so the greeting has a first name. */
+  cubicSurvey: { name: "E2E Cubic Survey", shareToken: "e2e-cubic-share-token-0001" },
+  /** A crew day-sheet token — the public /sheet/<token> page (the SMS'd day plan).
+   *  Points at the e2e-crew staff row for TOMORROW (their seeded crew job's day). */
+  daySheet: { token: "e2e-day-sheet-token-0001" },
 } as const;

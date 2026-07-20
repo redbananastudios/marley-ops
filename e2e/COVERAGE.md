@@ -70,9 +70,16 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 |---|---|---|
 | /q accept → deposit invoice (staging) | ✅ | public/customer.spec.ts |
 | /q decline with reason | ✅ | public/decline.spec.ts |
-| /s storage-agreement signing (needs let-token seed) | ⬜ | public/signing.spec.ts |
-| /cv customer cubic survey self-fill (needs token seed) | ⬜ | public/cubic.spec.ts |
-| /sheet crew day sheet (needs sheet-token seed) | ⬜ | public/day-sheet.spec.ts |
+| /s storage-agreement signing (render + affordance + bad-token 404) | ✅ | public/signing.spec.ts |
+| /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
+| /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
+
+## Bugs this suite surfaced
+- **`/sheet/<token>` was 307'd to /login** — the crew day-sheet page (designed to
+  open from an SMS with no login, same token-as-credential model as /q /s /cv) was
+  missing from the auth-proxy public allowlist in `lib/supabase/proxy-session.ts`.
+  The feature was broken for its entire intended use. Fixed (one allowlist line);
+  `public/day-sheet.spec.ts` is the regression guard.
 
 ## Notes
 - Money-path invariants that AREN'T automated E2E (manual-in-Zoho refunds/credit
