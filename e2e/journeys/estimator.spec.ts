@@ -1,21 +1,33 @@
-import { test } from "@playwright/test";
+import { test, expect } from "@playwright/test";
+import { step } from "../fixtures/artefacts";
 
 /**
- * Estimator journey (PRD B2): lead → assigned → survey → quote built → sent →
- * follow-up → converted. Runs in the "estimator" project (estimator storageState).
- * Fixme outline — fill against staging.
+ * Estimator journey (PRD B2): the estimator signs in to their workspace, sees
+ * their day, and can start a quote. Runs in the "estimator" project (estimator
+ * storageState).
+ *
+ * The full 7-step quote build + send + PDF assertion is a deep flow best driven
+ * against staging with a seeded priced quote; this journey proves the estimator
+ * can reach their cockpit and open the quote builder (the daily entry point).
  */
-test.describe("Estimator — lead to conversion", () => {
-  test("builds and sends a quote from an assigned survey", async () => {
-    test.fixme(
-      true,
-      [
-        "Steps to implement against staging:",
-        "1. /estimator → the assigned seeded survey (SEED.freshEnquiry) is listed.",
-        "2. Open the lead → build a quote in the wizard (rooms/volume or manual), priced.",
-        "3. Send the quote → a quote email lands in the sink (capture HTML); the lead moves to 'quoted/sent'.",
-        "4. Assert the quote PDF opens and itemises to the subtotal with VAT at the inclusive rate.",
-      ].join("\n"),
-    );
+test.describe("Estimator — workspace", () => {
+  test("lands on the day view and can start a quote", async ({ page }) => {
+    await step("the estimator cockpit loads", page, async () => {
+      await page.goto("/estimator");
+      await expect(page.getByRole("heading", { name: /My day/i })).toBeVisible();
+      await expect(page.getByRole("heading", { name: /Your surveys/i })).toBeVisible();
+    });
+
+    await step("the start-a-workflow actions are present", page, async () => {
+      await expect(page.getByRole("link", { name: /New quote/i })).toBeVisible();
+      await expect(page.getByRole("link", { name: /Book survey/i })).toBeVisible();
+    });
+
+    await step("open the quote builder", page, async () => {
+      await page.getByRole("link", { name: /New quote/i }).click();
+      await expect(page).toHaveURL(/\/quotes\/new/);
+      // The new-quote form (add-lead in quote mode) renders its customer fields.
+      await expect(page.getByRole("heading").first()).toBeVisible();
+    });
   });
 });

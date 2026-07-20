@@ -6,6 +6,10 @@ import type { Page, Locator } from "@playwright/test";
  * mouse across the canvas bounding box.
  */
 export async function drawSignature(page: Page, canvas: Locator): Promise<void> {
+  // Bring the canvas fully into view first — in a tall scrollable dialog a
+  // below-the-fold pad yields off-screen coordinates, so the strokes would land
+  // on the backdrop (closing the dialog) instead of the pad.
+  await canvas.scrollIntoViewIfNeeded();
   const box = await canvas.boundingBox();
   if (!box) throw new Error("signature canvas not visible");
   const y = box.y + box.height / 2;

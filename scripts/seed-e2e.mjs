@@ -35,9 +35,11 @@ const SINK_PHONE = process.env.E2E_SINK_PHONE || "07700900000";
 const CREW_EMAIL = process.env.E2E_CREW_EMAIL || "e2e-crew@marleymoves.test";
 const SEED = {
   crewJobCustomer: { name: "E2E Crew Job Customer", quoteRef: "E2E-CREW-001" },
+  crewJobTwo: { name: "E2E Crew Job Two", quoteRef: "E2E-CREW-002" },
   freshEnquiry: { name: "E2E Fresh Enquiry" },
   awaitingDeposit: { name: "E2E Awaiting Deposit", quoteRef: "E2E-DEP-001" },
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
+  sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
 };
 const DAY = 86_400_000;
@@ -171,7 +173,12 @@ async function makeRemoval(ids, startsIso, staffId, vehicleId, title) {
     .select("id")
     .single();
   if (error) die(`${title} appt`, error);
-  const { error: aErr } = await sb.from("appointment_assignments").insert({ appointment_id: appt.id, staff_id: staffId, vehicle_id: vehicleId });
+  // appointment_assignments enforces XOR (staff_id IS NULL) <> (vehicle_id IS NULL):
+  // one row per resource — a staff row AND a separate vehicle row, never both in one.
+  const { error: aErr } = await sb.from("appointment_assignments").insert([
+    { appointment_id: appt.id, staff_id: staffId },
+    { appointment_id: appt.id, vehicle_id: vehicleId },
+  ]);
   if (aErr) die(`${title} assignment`, aErr);
   return appt.id;
 }
@@ -194,6 +201,22 @@ const crewStaffId = await ensureCrewStaff();
   });
   await makeRemoval(ids, at(1), crewStaffId, vehicleId, SEED.crewJobCustomer.name);
   console.log(`seeded crew job: ${SEED.crewJobCustomer.name} (removal tomorrow, e2e-crew assigned)`);
+}
+
+// 1b. A SECOND crew job — the double-submit scenario (P0 #8) needs its own job
+// because P0 #7 completes the first one.
+{
+  const ids = await makeLead({ name: SEED.crewJobTwo.name, status: "confirmed" });
+  await makeQuote(ids, SEED.crewJobTwo, {
+    ref: SEED.crewJobTwo.quoteRef,
+    total: 1800,
+    status: "accepted",
+    movingDate: at(1).slice(0, 10),
+    acceptedAt: at(-2),
+    deposit: 100,
+  });
+  await makeRemoval(ids, at(1), crewStaffId, vehicleId, SEED.crewJobTwo.name);
+  console.log(`seeded crew job 2: ${SEED.crewJobTwo.name} (removal tomorrow, e2e-crew assigned)`);
 }
 
 // 2. Fresh enquiry — office/estimator entry point.
@@ -229,6 +252,33 @@ const crewStaffId = await ensureCrewStaff();
   });
   await makeRemoval(ids, at(-1), crewStaffId, vehicleId, SEED.balanceDue.name);
   console.log(`seeded balance-due: ${SEED.balanceDue.name}`);
+}
+
+// 5. A SENT quote with a share token — the public customer accept page /q/<token>.
+{
+  const ids = await makeLead({ name: SEED.sentQuote.name, status: "quoted" });
+  const { error } = await sb.from("quotes").insert({
+    quote_ref: SEED.sentQuote.quoteRef,
+    client_id: ids.clientId,
+    lead_id: ids.leadId,
+    customer_name: SEED.sentQuote.name,
+    customer_email: SINK_EMAIL,
+    customer_phone: SINK_PHONE,
+    subtotal: SEED.sentQuote.total,
+    grand_total: SEED.sentQuote.total,
+    status: "sent",
+    moving_date: at(7).slice(0, 10),
+    deposit_amount: 100,
+    accept_token: SEED.sentQuote.acceptToken,
+    email_sent_at: at(-1), // sent yesterday — within the 30-day validity window
+    collect_addr: "1 Test Street, Shaftesbury, SP7 8AA",
+    dest_addr: "2 Sample Road, Gillingham, SP8 4AB",
+    vat_enabled: true,
+    breakdown: { vehicle: "1luton", totalMiles: 20 },
+    state_blob: { seeded: MARKER },
+  });
+  if (error) die(`${SEED.sentQuote.name} sent quote`, error);
+  console.log(`seeded sent quote: ${SEED.sentQuote.name} (/q/${SEED.sentQuote.acceptToken})`);
 }
 
 console.log("\n✓ E2E seed complete.");

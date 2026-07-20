@@ -18,22 +18,68 @@ scripts/seed-e2e.mjs   idempotent reset to the known state the specs assert
 playwright.config.ts   env-agnostic (E2E_BASE_URL); chromium only
 ```
 
-## Status
+## Status (validated against local dev, 2026-07-20)
 
-**Runnable now** (once staging + seed + test users exist):
-- Crew journey (`journeys/crew.spec.ts`) — browse jobs, read the sheet, download the PDF.
-- **P0 #7** offline completion queues + syncs, **P0 #8** double-submit is idempotent (`scenarios/p0.spec.ts`).
-- Office dashboard + automations smoke (`journeys/office.spec.ts`).
+**Green now** (run against i9 local dev — see "Running locally"):
+- Crew journey — jobs list + honest last-updated stamp + version; job sheet
+  (price-free) + PDF download.
+- **P0 #7** offline completion queues + syncs, **P0 #8** double-submit idempotent.
+- Office dashboard + automations smoke (asserts the crew-job-sheets cron shows).
+- Estimator workspace — "My day", starts a quote (reaches `/quotes/new`).
+- Customer accept page — `/q/<token>` renders the sent quote (total, deposit,
+  accept form).
 
-**Outlined (`test.fixme`) — fill selectors/assertions against staging:**
-- Customer + estimator journeys.
-- **P0 #1–#6** (deposit/balance separation, refund credit-note + VAT reversal,
-  forfeit, partial credit, VAT-quarter attribution, declined card) — each needs
-  the **Zoho + takepayments sandboxes** and carries the exact rule to prove.
+**Gated (skip until the sandbox exists), body ready to run when un-gated:**
+- Customer *accept → deposit invoice* — raises a real Zoho invoice, so it's gated
+  on a **staging Zoho org** (`ZOHO_ORG_ID` numeric, never the live org).
 
-These are `fixme` on purpose: they were written from the code, not yet validated
-against a running UI, so they don't ship as false green. Turn them on as you
-confirm each against staging.
+**Outlined (`test.fixme`) — write the bodies against the staging Zoho org:**
+- **P0 #1–#5** money-path (deposit/balance separation, refund credit-note + VAT
+  reversal, forfeit, partial credit, VAT-quarter). Each drives the office
+  deposit/complete/refund flow and asserts `/finance`; develop against the
+  staging Zoho org (they hit Zoho, so they can't be verified without it).
+- **P0 #6** declined card + office payment-matching — also need the
+  **takepayments sandbox**.
+
+These stay `fixme` on purpose: they hit Zoho/takepayments, so they can't be
+verified without the sandboxes and must not ship as false green.
+
+## Running locally (works today, no staging needed)
+
+The app runs on i9; local dev is the E2E target for everything that doesn't hit
+Zoho/takepayments. `.env.e2e` (gitignored) holds only the overrides — it's
+layered over `.env.local`, and critically pins `ZOHO_ORG_ID` to a dummy so a
+stray Zoho call fails closed instead of touching the live books.
+
+```
+# 1. Provision the three role logins in local Supabase
+node --env-file=.env.local --env-file=.env.e2e scripts/create-e2e-users.mjs
+
+# 2. Start the app under test with Zoho pointed away from the live org
+ZOHO_ORG_ID=E2E-STAGING-PENDING COMMS_DRYRUN=true npx next dev -H 0.0.0.0 -p 3016
+
+# 3. Seed the known state
+SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
+
+# 4. Run (env comes from .env.e2e)
+set -a; source .env.e2e; set +a
+npx playwright test                 # 10 pass, 8 skipped (Zoho/takepayments-gated)
+npx playwright test --project=crew  # just the crew role
+```
+
+## Turning on the money-path tests
+
+Once the **staging Zoho Invoice org** exists (a separate org under the same Zoho
+account — the same OAuth app works, the org is chosen per call), point the E2E
+app + seed at it and the gated tests un-skip:
+
+1. In `.env.e2e`, set `ZOHO_ORG_ID=<staging-org-id>` (numeric).
+2. Restart the dev server with that `ZOHO_ORG_ID` (not the dummy).
+3. Mirror the VAT config in the staging org (20% output + FRS 10% + the
+   registration date) so the VAT specs are meaningful.
+4. The `customer accept → deposit invoice` test un-skips automatically; write the
+   P0 #1–#5 bodies against it.
+5. **P0 #6 + payment-matching** additionally need the takepayments sandbox creds.
 
 ## Setup
 

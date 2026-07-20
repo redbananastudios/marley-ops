@@ -39,11 +39,17 @@ export const SEED = {
   /** A customer with an accepted quote + a removal booked TOMORROW, crew
    *  (e2e-crew) assigned — drives the crew journey + the P0 completion scenarios. */
   crewJobCustomer: { name: "E2E Crew Job Customer", quoteRef: "E2E-CREW-001" },
+  /** A second crew job (same crew, also tomorrow) — the double-submit scenario
+   *  needs its own job because the completion one is consumed by P0 #7. */
+  crewJobTwo: { name: "E2E Crew Job Two", quoteRef: "E2E-CREW-002" },
   /** A fresh website enquiry — office/estimator journey entry point. */
   freshEnquiry: { name: "E2E Fresh Enquiry" },
   /** An accepted quote awaiting a deposit — the deposit/card scenario. */
   awaitingDeposit: { name: "E2E Awaiting Deposit", quoteRef: "E2E-DEP-001" },
   /** A completed move with the balance outstanding — the balance-invoice scenario. */
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
+  /** A SENT quote with a fixed share token — the customer accept page /q/<token>.
+   *  The token is a credential; a fixed local value lets the customer spec load it. */
+  sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
 } as const;
