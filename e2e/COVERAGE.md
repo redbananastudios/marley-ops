@@ -24,7 +24,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Follow-ups — snooze/done/no-reply | ⬜ | office/follow-ups.spec.ts |
 | Pipeline Board — week nav, move + reason, mark-lost | ⬜ | office/pipeline-board.spec.ts |
 | Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
-| Quote builder wizard — new quote → send → PDF | ⬜ | office/quote-builder.spec.ts |
+| Quote builder wizard — new quote → 7-step wizard → send dialog | ✅ | office/quote-builder.spec.ts |
 | Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
 | Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
