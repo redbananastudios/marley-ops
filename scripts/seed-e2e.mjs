@@ -7,13 +7,25 @@
  *
  * Constants MUST match e2e/fixtures/seed-data.ts.
  *
- * SAFETY: refuses to run without SEED_CONFIRM=yes, and never seeds real
- * customer contacts (everything points at the sink). Do NOT run against prod.
+ * SAFETY: refuses to run without SEED_CONFIRM=yes, hard-refuses the prod Supabase
+ * host, and never seeds real customer contacts (everything points at the sink).
+ *
+ * ORDERING: run scripts/create-e2e-users.mjs FIRST — the crew AND estimator auth
+ * profiles must exist so this seed can link the crew/estimator staff rows and the
+ * estimator-pay unlock; block 13 warns-and-skips if the estimator profile is
+ * absent (which then surfaces as a confusing "gate still showing" in estimator/pay).
+ *
+ * PERSISTENT ROWS: the E2E staff rows (E2E Crew, E2E Pay Crew, E2E Estimator) and
+ * the E2E Luton vehicle intentionally persist across runs (find-or-reuse), unlike
+ * the lead/client/storage rows which wipe() clears by name. Each such block
+ * delete-before-inserts its own children (statements, agreements) so re-runs stay
+ * idempotent; the staff rows themselves are stable resources.
  *
  * Usage:
- *   SEED_CONFIRM=yes node --env-file=.env.staging scripts/seed-e2e.mjs
+ *   SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
  */
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -65,8 +77,18 @@ const SEED = {
   followUp: { name: "E2E Follow-up Lead" },
 };
 const ESTIMATOR_EMAIL = process.env.E2E_ESTIMATOR_EMAIL || "e2e-estimator@marleymoves.test";
-const CONTRACTOR_AGREEMENT_VERSION = "v1-2026-07-18";
-const CONTRACTOR_ACKS = { self_employed: true, own_tax: true, no_vat: true, own_invoices: true, no_employee_rights: true };
+// Derive the agreement version + ack keys from the app's source of truth so a
+// future v2 bump (which re-prompts everyone) can't leave the seed signing a stale
+// version — that would silently re-show the sign gate and fail estimator/pay.spec.
+const AGREEMENT_SRC = readFileSync(new URL("../lib/contractor/agreement.ts", import.meta.url), "utf8");
+const CONTRACTOR_AGREEMENT_VERSION = AGREEMENT_SRC.match(/CONTRACTOR_AGREEMENT_VERSION\s*=\s*["']([^"']+)["']/)?.[1];
+const CONTRACTOR_ACKS = Object.fromEntries(
+  [...AGREEMENT_SRC.matchAll(/key:\s*["'](\w+)["']/g)].map((m) => [m[1], true]),
+);
+if (!CONTRACTOR_AGREEMENT_VERSION || Object.keys(CONTRACTOR_ACKS).length < 5) {
+  console.error("Could not derive the contractor agreement version/acks from lib/contractor/agreement.ts");
+  process.exit(1);
+}
 const DAY = 86_400_000;
 const at = (daysFromNow, hour = 9) => {
   const d = new Date(Date.now() + daysFromNow * DAY);

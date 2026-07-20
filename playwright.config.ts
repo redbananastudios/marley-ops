@@ -32,7 +32,12 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
+  // No test-level retries: mutating specs consume dedicated seeded state, and a
+  // retry does NOT reseed — so retrying a spec after its mutation committed would
+  // fail its (now-stale) arrange step. Hydration races are handled INSIDE the
+  // specs via bounded retries (submitUntil / openDialog / toPass), so a genuine
+  // flake should be reseed-and-rerun, not silently retried against consumed state.
+  retries: 0,
   timeout: 90_000,
   expect: { timeout: 10_000 }, // web-first assertions poll up to here — no hardcoded waits
   reporter: [
