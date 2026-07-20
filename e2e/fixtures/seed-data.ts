@@ -59,6 +59,9 @@ export const SEED = {
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  /** A quoted lead used ONLY by the office mark-lost test — dedicated so marking
+   *  it lost never consumes a lead another spec depends on. */
+  markLost: { name: "E2E Mark Lost" },
   /** An OPEN storage let (unsigned) with a remote-signing token — the public
    *  /s/<token> storage-agreement page. Client name drives the greeting. */
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },

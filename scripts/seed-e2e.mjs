@@ -56,6 +56,7 @@ const SEED = {
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
+  markLost: { name: "E2E Mark Lost" },
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
   cubicSurvey: { name: "E2E Cubic Survey", shareToken: "e2e-cubic-share-token-0001" },
   daySheet: { token: "e2e-day-sheet-token-0001" },
@@ -330,6 +331,13 @@ await resetCrewContractorState();
 {
   await makeLead({ name: SEED.freshEnquiry.name, status: "website_enquiry" });
   console.log(`seeded fresh enquiry: ${SEED.freshEnquiry.name}`);
+}
+
+// 2b. A quoted lead + its quote — the office mark-lost (reason-gated) test.
+{
+  const ids = await makeLead({ name: SEED.markLost.name, status: "quoted" });
+  await makeQuote(ids, SEED.markLost, { ref: "E2E-LOST-001", total: 1100, status: "sent" });
+  console.log(`seeded mark-lost candidate: ${SEED.markLost.name}`);
 }
 
 // 3. Accepted quote awaiting a deposit — deposit/card scenario.

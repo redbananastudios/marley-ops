@@ -22,7 +22,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Leads — presets, search, add-lead create → detail | ✅ | office/leads.spec.ts |
 | Lead detail — stepper, action bar per stage, tabs | ⬜ | office/lead-detail.spec.ts |
 | Follow-ups — snooze/done/no-reply | ⬜ | office/follow-ups.spec.ts |
-| Pipeline Board — week nav, move + reason, mark-lost | ⬜ | office/pipeline-board.spec.ts |
+| Mark lost — reason-gated loss flow | ✅ | office/mark-lost.spec.ts |
 | Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
 | Quote builder wizard — new quote → 7-step wizard → send dialog | ✅ | office/quote-builder.spec.ts |
 | Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
