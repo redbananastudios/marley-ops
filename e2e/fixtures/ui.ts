@@ -56,6 +56,20 @@ export async function expectBounced(page: Page, path: string, to: RegExp): Promi
 }
 
 /**
+ * Click a trigger and wait for the dialog to open, retrying through the
+ * pre-hydration window where the onClick handler isn't attached yet (the click
+ * is a no-op until React hydrates). Returns the dialog locator.
+ */
+export async function openDialog(page: Page, trigger: Locator): Promise<Locator> {
+  const dialog = page.getByRole("dialog");
+  await expect(async () => {
+    await trigger.click();
+    await expect(dialog).toBeVisible({ timeout: 1500 });
+  }).toPass({ timeout: 15_000 });
+  return dialog;
+}
+
+/**
  * Draw a few strokes on a <canvas> signature pad so it yields a real (non-blank)
  * signature data-URI — the server rejects an empty one. Works by dragging the
  * mouse across the canvas bounding box.

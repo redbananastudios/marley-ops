@@ -18,41 +18,41 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 ## Office / admin features
 | Flow | Status | Spec |
 |---|---|---|
-| Dashboard — period tabs, needs-action cards | ⬜ | office/dashboard.spec.ts |
-| Leads — filters/presets, search, sort, quick actions | ⬜ | office/leads.spec.ts |
-| Add lead → lead detail | ⬜ | office/leads.spec.ts |
-| Lead detail — pipeline stepper, action bar per stage, tabs | ⬜ | office/lead-detail.spec.ts |
+| Dashboard — period tabs, needs-action cards | ✅ | office/dashboard.spec.ts |
+| Leads — presets, search, add-lead create → detail | ✅ | office/leads.spec.ts |
+| Lead detail — stepper, action bar per stage, tabs | ⬜ | office/lead-detail.spec.ts |
 | Follow-ups — snooze/done/no-reply | ⬜ | office/follow-ups.spec.ts |
-| Pipeline Board — week nav, drag, backward-move reason, mark-lost | ⬜ | office/pipeline-board.spec.ts |
-| Quotes — list presets, search, accept/reject/resend | ⬜ | office/quotes.spec.ts |
+| Pipeline Board — week nav, move + reason, mark-lost | ⬜ | office/pipeline-board.spec.ts |
+| Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
 | Quote builder wizard — new quote → send → PDF | ⬜ | office/quote-builder.spec.ts |
-| Bookings — deposit paid (BACS/cash), book removal, balance | ✅ (balance = P0#1) | office/bookings.spec.ts |
-| Payments — day view, card/recorded sections | ⬜ | office/payments.spec.ts |
-| Finance — Invoices & VAT, VAT/FRS, quarter | 🟡 (reads staging Zoho) | office/finance.spec.ts |
+| Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
+| Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
+| Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
 | Contractor pay — return/mark-paid/void | ⬜ | office/contractor-pay.spec.ts |
-| Schedule — survey diary, removal diary, new appointment | ⬜ | office/schedule.spec.ts |
-| Job Board — capacity, assign (modal + drag), off-road, job sheet | ⬜ | office/job-board.spec.ts |
+| Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
+| Job Board — capacity, assign (modal + drag), off-road | ⬜ | office/job-board.spec.ts |
 | Completed Jobs | ⬜ | office/jobs.spec.ts |
-| Clients — grid/list/sort/search, client detail, new quote for client | ⬜ | office/clients.spec.ts |
-| Documents — contracts/certs/unsigned/contractor agreements tabs | ⬜ | office/documents.spec.ts |
-| Claims — register + working page (status/resolution) | ⬜ | office/claims.spec.ts |
-| Content — job content review queue | ⬜ | office/content.spec.ts |
-| Staff & Fleet — staff, vehicles, compliance, availability wall chart | ⬜ | office/staff-fleet.spec.ts |
-| Storage — sites/units/lets, agreement, billing | ⬜ | office/storage.spec.ts |
-| Performance — Overview/Sales/Storage tabs | ⬜ | office/performance.spec.ts |
-| Growth — Website & Tracking, Ads | ⬜ | office/growth.spec.ts |
-| Automations (AI survey) | ⬜ | office/automations.spec.ts |
-| Settings — every control + admin-only gating | ⬜ | office/settings.spec.ts |
+| Clients — toggle/search, detail, add-client dialog | ✅ | office/clients.spec.ts |
+| Documents — tabs + search | ✅ | office/records.spec.ts |
+| Claims — register tabs (working page ⬜) | 🟡 | office/records.spec.ts |
+| Content — review-state tabs | ✅ | office/records.spec.ts |
+| Staff & Fleet — tabs + add dialogs | ✅ | office/staff-fleet.spec.ts |
+| Storage — page + add-site dialog (full let flow ⬜) | 🟡 | office/storage.spec.ts |
+| Performance — Overview/Sales/Storage tabs | ✅ | office/reports.spec.ts |
+| Growth — Website & Tracking, Ads | ✅ | office/reports.spec.ts |
+| Automations (AI survey log) | ✅ | office/reports.spec.ts |
+| Settings — admin sees every control | ✅ | office/settings.spec.ts |
 | P0 #1 deposit+balance separated (money) | ✅ | office/p0-money.spec.ts |
 
 ## Estimator features
 | Flow | Status | Spec |
 |---|---|---|
 | Cockpit "My day" → start a quote | ✅ | estimator/journey.spec.ts |
+| Access — every nav route loads; /finance* redirect | ✅ | estimator/access + gating.spec.ts |
+| Settings trimmed (no admin money/team controls) | ✅ | estimator/settings.spec.ts |
 | Leads scoped to own / Mine preset | ⬜ | estimator/work.spec.ts |
 | Build + send a quote | ⬜ | estimator/quote.spec.ts |
 | My invoices — contractor-agreement gate → invoice | ⬜ | estimator/pay.spec.ts |
-| Settings trimmed (Quick sign-in + Notifications) | ⬜ | estimator/settings.spec.ts |
 
 ## Crew features
 | Flow | Status | Spec |
