@@ -15,6 +15,12 @@
 
 ## Current State
 
+Last touched: 2026-07-20 on i9 (latest) — **FINAL RELEASE REVIEW COMPLETE on `codex/final-release-review` (not deployed; migration 0069 dev-only). Code verdict: release-ready when app + migration ship together; mock-data/comms flags stay ON pending Peter's human cutover sign-off.** Full evidence: `docs/final-release-review-2026-07-20.md`.
+- **Release blockers closed:** broad crew `is_staff()` PostgREST/RLS access; unassigned service-role crew job actions; inactive-session access; survey R2 path trust; quote accept/signature and accept-vs-decline races; shared-device outbox leakage/retry; upload size/MIME binding; cron auth/false-green/registry gaps; service-worker cache lifetime; quote-search navigation race.
+- **Performance:** capture and tour libraries deferred; Geist Mono preload removed; review videos no-preload; dashboard I/O parallelized; Zoho refresh coalesced + 10s bounded; Next `deploymentId` wired to build SHA. Measured route savings 5.1–10.6 KB gzip, plus driver 23.3 KB JS/3.0 KB CSS deferred.
+- **Proof:** 828 unit tests, tsc, lint 0 errors (34 baseline compiler warnings), Next 16.2.9 standalone build, full 108-scenario browser coverage plus 63 affected-path post-hardening passes, live dev JWT/RLS active+inactive assertions. Production untouched. **Required next:** merge; backup; apply 0069 prod + reload/verify; one Docker deploy; keep `SANITY_SYNC_DISABLED=true` and `COMMS_DRYRUN=true` until manual gates.
+- Prior:
+
 Last touched: 2026-07-20 on i9 (latest) — **E2E COVERAGE COMPLETE — role-based Playwright suite now green across all four roles; the last two depth items shipped (PR #14, live prod `dace49f`, CI test gate + OVH deploy green).**
 - **Storage** 🟡→✅ (`e2e/office/storage.spec.ts`): the FULL let-assignment chain — create site → select it → add unit → assign the seeded client at £25/wk → the unit flips to Occupied showing client + rate (the let dialog only offers existing clients, so it uses the seeded `E2E Storage Client`).
 - **Claims** (`e2e/office/claims.spec.ts`): the full arc on one seeded open claim — advance non-terminal (open→assessing) → settle terminally, which reveals the required resolution + amount (goodwill payment → £150) → verify the settled Outcome + payout render.
