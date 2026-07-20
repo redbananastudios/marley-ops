@@ -42,6 +42,10 @@ export const SEED = {
   /** A second crew job (same crew, also tomorrow) — the double-submit scenario
    *  needs its own job because the completion one is consumed by P0 #7. */
   crewJobTwo: { name: "E2E Crew Job Two", quoteRef: "E2E-CREW-002" },
+  /** A third crew job — P0 #7 COMPLETES its job, so it must own one that no
+   *  read-only spec (journey/job-detail read crewJobCustomer) depends on. Keeps
+   *  the crew completion specs order-independent. */
+  crewJobThree: { name: "E2E Crew Job Three", quoteRef: "E2E-CREW-003" },
   /** A fresh website enquiry — office/estimator journey entry point. */
   freshEnquiry: { name: "E2E Fresh Enquiry" },
   /** An accepted quote awaiting a deposit — the deposit/card scenario. */

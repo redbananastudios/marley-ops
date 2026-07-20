@@ -72,9 +72,16 @@ SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e
 
 # 4. Run (env comes from .env.e2e)
 set -a; source .env.e2e; set +a
-npx playwright test                 # 10 pass, 8 skipped (Zoho/takepayments-gated)
+npx playwright test                 # 100 pass, 6 skipped (money fixmes; +2 more when staging Zoho is wired)
 npx playwright test --project=crew  # just the crew role
 ```
+
+**Re-run hygiene:** re-seed (step 3) before every full run. Several specs mutate
+shared seeded state (P0 #7 completes a crew job; the crew contractor spec signs
+the agreement), and the seed is the idempotent reset that restores the known
+state — a re-run without re-seeding will fail those specs. The seed refuses any
+non-local target (and hard-refuses the prod Supabase host); pass
+`SEED_REMOTE_CONFIRM=yes` only for a deliberate staging seed.
 
 ## Turning on the money-path tests
 

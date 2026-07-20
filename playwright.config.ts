@@ -25,6 +25,9 @@ export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/artefacts/_output",
   globalSetup: "./e2e/fixtures/global-setup.ts",
+  // Cleans up staging-Zoho invoices the money specs raised (no-op when no
+  // staging Zoho is wired). Never touches the live org — see the file.
+  globalTeardown: "./e2e/fixtures/global-teardown.ts",
   // Shared seeded DB state → run serially so tests don't race each other's data.
   fullyParallel: false,
   workers: 1,

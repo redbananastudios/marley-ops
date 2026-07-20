@@ -17,14 +17,14 @@ test.describe("P0 #7 — offline job completion is never lost", () => {
   test("completing offline queues locally, then syncs when signal returns", async ({ page, context }) => {
     await step("open the seeded crew job", page, async () => {
       await page.goto("/my-jobs");
-      await page.getByText(SEED.crewJobCustomer.name).first().click();
-      await expect(page.getByRole("heading", { name: SEED.crewJobCustomer.name })).toBeVisible();
+      await page.getByText(SEED.crewJobThree.name).first().click();
+      await expect(page.getByRole("heading", { name: SEED.crewJobThree.name })).toBeVisible();
       // Full-load the job page and wait for it to settle BEFORE cutting the
       // network. A client-side nav still streaming (slow in dev) that's
       // interrupted by going offline can leave the offline provider's listener
       // unregistered. A real crew member opens the job, THEN loses signal.
       await page.reload();
-      await expect(page.getByRole("heading", { name: SEED.crewJobCustomer.name })).toBeVisible();
+      await expect(page.getByRole("heading", { name: SEED.crewJobThree.name })).toBeVisible();
       await expect(page.getByText(/Updated \d{2}:\d{2}/)).toBeVisible();
       // The PWA must be fully warmed before we cut the network: offline can't
       // fetch un-loaded JS chunks, so client hydration + the service-worker cache
@@ -117,9 +117,11 @@ test.describe("P0 #8 — double-submit is idempotent", () => {
     await step("double-tap submit → collapses to ONE completion", page, async () => {
       const submit = page.getByRole("dialog").getByRole("button", { name: /Sign off/i });
       // Genuinely fire a second tap. The client guard disables the button during
-      // the transition, so the second click is forced (bypasses actionability) —
-      // whether it's swallowed client-side OR reaches the server, appointment_id
-      // uniqueness must collapse both to one record + one email.
+      // the transition, so the second click is forced (bypasses actionability).
+      // This E2E proves the USER-VISIBLE guarantee: the job reaches one terminal
+      // state with no second Complete affordance. The DB-level guarantee that a
+      // double-submit yields exactly one job_completions row + one email rests on
+      // the appointment_id uniqueness constraint, which is unit-covered.
       await submit.click();
       await submit.click({ force: true, timeout: 2000 }).catch(() => {}); // second tap: disabled = the guard working
       await expect(page.getByText(/completed|already signed off/i)).toBeVisible();

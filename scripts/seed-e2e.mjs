@@ -25,6 +25,19 @@ if (process.env.SEED_CONFIRM !== "yes") {
   console.error(`REFUSING to seed ${url} — set SEED_CONFIRM=yes if you really mean it.`);
   process.exit(1);
 }
+// Prod guard — this is the most destructive script in the suite (it wipes rows
+// AND flips business_settings.self_billing_enabled). Hard-refuse the prod
+// Supabase host outright; require an explicit extra confirm for any other
+// non-local target. Mirrors scripts/create-e2e-users.mjs.
+const isLocal = url.includes("127.0.0.1") || url.includes("localhost") || url.includes("://i9");
+if (url.includes("supabase.redbananastudios.com")) {
+  console.error(`REFUSING: ${url} is the PRODUCTION Supabase host. The E2E seed never runs against prod.`);
+  process.exit(1);
+}
+if (!isLocal && process.env.SEED_REMOTE_CONFIRM !== "yes") {
+  console.error(`Target is NOT local (${url}). Re-run with SEED_REMOTE_CONFIRM=yes to seed a remote (staging) target.`);
+  process.exit(1);
+}
 
 const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
 
@@ -36,6 +49,7 @@ const CREW_EMAIL = process.env.E2E_CREW_EMAIL || "e2e-crew@marleymoves.test";
 const SEED = {
   crewJobCustomer: { name: "E2E Crew Job Customer", quoteRef: "E2E-CREW-001" },
   crewJobTwo: { name: "E2E Crew Job Two", quoteRef: "E2E-CREW-002" },
+  crewJobThree: { name: "E2E Crew Job Three", quoteRef: "E2E-CREW-003" },
   freshEnquiry: { name: "E2E Fresh Enquiry" },
   awaitingDeposit: { name: "E2E Awaiting Deposit", quoteRef: "E2E-DEP-001" },
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
@@ -294,6 +308,22 @@ await resetCrewContractorState();
   });
   await makeRemoval(ids, at(1), crewStaffId, vehicleId, SEED.crewJobTwo.name);
   console.log(`seeded crew job 2: ${SEED.crewJobTwo.name} (removal tomorrow, e2e-crew assigned)`);
+}
+
+// 1c. A THIRD crew job — P0 #7 COMPLETES its job, so it owns a dedicated one no
+// read-only spec depends on (journey/job-detail read crewJobCustomer).
+{
+  const ids = await makeLead({ name: SEED.crewJobThree.name, status: "confirmed" });
+  await makeQuote(ids, SEED.crewJobThree, {
+    ref: SEED.crewJobThree.quoteRef,
+    total: 1800,
+    status: "accepted",
+    movingDate: at(1).slice(0, 10),
+    acceptedAt: at(-2),
+    deposit: 100,
+  });
+  await makeRemoval(ids, at(1), crewStaffId, vehicleId, SEED.crewJobThree.name);
+  console.log(`seeded crew job 3: ${SEED.crewJobThree.name} (removal tomorrow, e2e-crew assigned)`);
 }
 
 // 2. Fresh enquiry — office/estimator entry point.
