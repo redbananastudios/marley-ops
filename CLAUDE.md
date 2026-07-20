@@ -15,7 +15,13 @@
 
 ## Current State
 
-Last touched: 2026-07-20 on i9 (latest) — **MED-4 CLOSED: Staff & Fleet record writes are ADMIN-ONLY (`8a89e5f`, migration 0067). The 2026-07-20 audit is now FULLY closed — no open findings.** Prod RLS-simulated (rolled back); shipped via CI.
+Last touched: 2026-07-20 on i9 (latest) — **Estimator-commission low money edges CLOSED (`c44a7b6`) — the last open items on the estimator-invoicing review. ClickUp [869e6h9ex](https://app.clickup.com/t/869e6h9ex) fully closed.** Pure engine + a warning toast, no DB change; +5 unit tests, 729 green, shipped via CI.
+- **(1) Multi-accepted-quote pick** now deterministic — most-recently accepted, tie-broken by quote_ref (matches /bookings + /performance) + a warning if >1 accepted survives (supersede-guard miss).
+- **(2) Both-null-value accepted quote** no longer silently drops the £0 commission — the completed job is skipped with a surfaced warning ("no agreed price — ask the office to set it") so the estimator is never quietly short.
+- **(3) VAT registration-date floor** — new pure `jobVatApplies()` reuses `lib/finance` `VAT_REGISTERED_FROM` (2026-06-01); a job billed before registration is treated as ex-VAT (no /1.2 on a stale `vat_enabled=true` flag → no under-pay). Uses the completion (billing) day.
+- Prior:
+
+Last touched: 2026-07-20 on i9 — **MED-4 CLOSED: Staff & Fleet record writes are ADMIN-ONLY (`8a89e5f`, migration 0067). The 2026-07-20 audit is now FULLY closed — no open findings.** Prod RLS-simulated (rolled back); shipped via CI.
 - **The hole:** `staff` INSERT/UPDATE (0054) gated on `is_office()`, but estimators ARE `is_office()`, and `staff.profile_id` is an auth key the availability/pay-statement/`staff_pay` self-scopes trust — so an estimator could repoint any staff row's profile_id to themselves and hijack another person's availability/pay/rate reads. Bounded after 0065 (not a self-payment vector) but a real identity hijack.
 - **Fix (Peter's call — admin-only Staff & Fleet):** migration 0067 moves `staff` + `vehicles` insert/update to `is_admin()`; the crew/estimator first-login **self-link branches are preserved verbatim** (claim your own email-matched unlinked row / edit a row already yours — you just can't repoint profile_id at anyone else or touch foreign rows). App layer: `saveStaff`/`setStaffActive`/`saveVehicle`/`setVehicleActive` + the two vehicle off-road actions → `requireAdminActor` (retired the loose `actor()` helper); **staff-availability scheduling stays office** (estimators plan around crew). UI hides Add staff/Add vehicle + per-card edit/archive + the wall-chart edit-staff pencil for non-admins; availability cells stay editable by office.
 - **Prod RLS-proven (rolled back):** estimator Luke — hijack Jack 0 rows, insert staff/vehicle BLOCKED, vehicle update 0 rows, but own-row self-manage 1 row; admin Connor — all allowed; crew Jack — own-email self-link 1 row, hijack Rob 0 rows. tsc + lint(0 err) + **724 tests** + build green.
