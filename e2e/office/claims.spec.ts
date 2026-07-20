@@ -39,6 +39,17 @@ test.describe("Office — Claims working page", () => {
       await expect(page.locator("#claim-status")).toContainText("Assessing", { timeout: 15_000 });
     });
 
+    await step("reload so the settle reads a fresh concurrency token", page, async () => {
+      // The claim update is a compare-and-swap on updated_at; the first save
+      // bumped it. Reloading re-renders from the server, which both CONFIRMS the
+      // Assessing save persisted (the value is server-derived, not the optimistic
+      // Select state) and hands the form a fresh token — so the terminal save
+      // below can't race a stale one on a slower target and get CAS-rejected.
+      await page.reload();
+      await expect(page.getByRole("heading", { name: /Claim CLM-\d+/ })).toBeVisible();
+      await expect(page.locator("#claim-status")).toContainText("Assessing");
+    });
+
     await step("settle it — resolution + amount appear and are required", page, async () => {
       await pickStatus("Settled");
       // The resolution + amount fields only exist on a terminal status. Pick a
