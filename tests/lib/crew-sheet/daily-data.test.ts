@@ -47,6 +47,7 @@ describe("assembleDaySheets", () => {
       ],
       leads: [LEAD],
       quotes: [],
+      surveys: [{ id: "sv1", lead_id: "L1", created_at: "2026-07-10T00:00:00Z" }],
       staff: [
         { id: "s1", full_name: "Rob Pierce", email: "rob@x.com", phone: "07700900123", is_active: true },
         { id: "s2", full_name: "Oscar Small", email: null, phone: null, is_active: true },
@@ -68,6 +69,7 @@ describe("assembleDaySheets", () => {
     expect(job.sheet.crew).toEqual(["Oscar Small", "Rob Pierce"]); // both crew mates, sorted
     expect(job.sheet.vehicles).toEqual(["Luton 1 (AB12 CDE)"]);
     expect(job.window).toBe("09:00–13:00"); // 08:00Z in BST
+    expect(job.surveyId).toBe("sv1"); // latest survey threaded for photo loading
   });
 
   it("drops an inactive crew member and jobs off the target day", async () => {
@@ -111,6 +113,7 @@ describe("daySheetHash", () => {
         apptType: "removal",
         window: "09:00–13:00",
         startsAt: "2026-07-21T08:00:00Z",
+        surveyId: null,
         sheet: {
           quoteRef: "MMR001",
           customerName: "Jane",

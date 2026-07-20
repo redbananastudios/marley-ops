@@ -94,6 +94,7 @@ const dayFixture = (jobs = 2): CrewDaySheet => ({
     apptType: "removal",
     window: "09:00–13:00",
     startsAt: "2026-07-21T08:00:00Z",
+    surveyId: null,
     sheet: {
       quoteRef: "MMR001",
       customerName: "Jane Doe",

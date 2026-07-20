@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assembleDaySheets, type CrewDaySheet, type DailyJob } from "@/lib/crew-sheet/daily-data";
+import { loadPhotoSignedUrls, type WebPhoto } from "@/lib/job-sheet-load";
 import { UK_TZ } from "@/lib/uk-time";
 
 /**
@@ -71,7 +72,7 @@ function DetailRow({ label, lines }: { label: string; lines: string[] }) {
   );
 }
 
-function JobCard({ job, index, total }: { job: DailyJob; index: number; total: number }) {
+function JobCard({ job, index, total, photos }: { job: DailyJob; index: number; total: number; photos: WebPhoto[] }) {
   const s = job.sheet;
   const inventory = s.items.map((i) => `${i.label} × ${i.qty}`);
   const vehicles = s.vehicles.length ? s.vehicles : s.vehicleLabel ? [`Required: ${s.vehicleLabel}`] : [];
@@ -119,6 +120,21 @@ function JobCard({ job, index, total }: { job: DailyJob; index: number; total: n
         <DetailRow label="Packing" lines={s.packingLabel ? [s.packingLabel] : []} />
         <DetailRow label="Inventory" lines={inventory} />
         <DetailRow label="Notes" lines={notes} />
+
+        {photos.length ? (
+          <div className="mt-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-mm-red">Photos</p>
+            <div className="mt-1.5 grid grid-cols-2 gap-2">
+              {photos.map((p, i) => (
+                <a key={i} href={p.url} target="_blank" rel="noopener noreferrer" className="block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={p.url} alt={p.caption || p.label} className="h-32 w-full rounded-md border border-border object-cover" />
+                  <p className="mt-0.5 truncate text-xs text-mist-400">{p.caption ? `${p.label} — ${p.caption}` : p.label}</p>
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -170,6 +186,14 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
   };
   const total = day.jobs.length;
 
+  // Survey photos as short-lived signed URLs, per job (capped — a phone in a van).
+  const photosByAppt: Record<string, WebPhoto[]> = {};
+  await Promise.all(
+    day.jobs.map(async (j) => {
+      if (j.surveyId) photosByAppt[j.appointmentId] = await loadPhotoSignedUrls(admin, j.surveyId, 6).catch(() => []);
+    }),
+  );
+
   return (
     <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-4 py-8">
       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -195,7 +219,7 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
       ) : (
         <div className="space-y-4">
           {day.jobs.map((job, i) => (
-            <JobCard key={job.appointmentId} job={job} index={i} total={total} />
+            <JobCard key={job.appointmentId} job={job} index={i} total={total} photos={photosByAppt[job.appointmentId] ?? []} />
           ))}
         </div>
       )}

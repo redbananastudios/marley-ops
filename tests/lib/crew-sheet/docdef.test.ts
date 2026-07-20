@@ -12,6 +12,7 @@ const day = (over: Partial<CrewDaySheet> = {}): CrewDaySheet => ({
       apptType: "removal",
       window: "09:00–13:00",
       startsAt: "2026-07-21T08:00:00Z",
+      surveyId: "sv1",
       sheet: {
         quoteRef: "MMR001",
         customerName: "Jane Doe",
@@ -75,6 +76,24 @@ describe("buildDaySheetDocDef", () => {
     const resend = allText(buildDaySheetDocDef(day(), { version: 2, supersedes: true, generatedAtLabel: "18:04 on Sun 20 Jul" })).join(" ");
     expect(resend).toMatch(/UPDATED SHEET \(version 2\)/);
   });
+
+  it("embeds survey photos when present, stays price-free, and renders", async () => {
+    const png =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC";
+    const d = day();
+    d.jobs[0].sheet.photos = [{ dataUri: png, label: "Access", caption: "Tight hallway" }];
+    const dd = buildDaySheetDocDef(d, { version: 1, supersedes: false, generatedAtLabel: "x" });
+    const text = allText(dd);
+    // The caption reaches the sheet…
+    expect(text.join(" ")).toContain("Access — Tight hallway");
+    // …an image node carries the data URI…
+    expect(text).toContain(png);
+    // …and still no money.
+    for (const t of text) expect(t).not.toMatch(/£\s*\d/);
+    // …and the server printer embeds it without choking.
+    const buf = Buffer.from(await renderPdfBase64(dd), "base64");
+    expect(buf.subarray(0, 5).toString()).toBe("%PDF-");
+  }, 20_000);
 
   it("handles a cleared (no-jobs) day", () => {
     const text = allText(buildDaySheetDocDef(day({ jobs: [] }), { version: 2, supersedes: true, generatedAtLabel: "x" })).join(" ");

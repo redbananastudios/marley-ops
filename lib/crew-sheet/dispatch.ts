@@ -29,6 +29,8 @@ type Admin = { from: (t: string) => any };
 
 const SEND_HOUR = 18; // 18:00 UK the evening before — the PRD's send time.
 const MAX_ATTEMPTS = 6; // ~30 min of 5-min retries before a hard failure gives up.
+const PHOTOS_PER_JOB = 3; // survey photos embedded per job on the day sheet…
+const PHOTOS_PER_DAY = 8; // …and a whole-day cap so a many-job PDF stays sane.
 
 const appBase = (): string => (process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, "");
 
@@ -259,6 +261,29 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
       const url = `${appBase()}/sheet/${claimed.token}`;
       const superseding = decision.superseding;
       const meta = { version, supersedes: superseding, generatedAtLabel: generatedLabel(now) };
+
+      // Attach survey photos (access shots, large items). Loaded lazily here and
+      // deliberately kept OUT of the change-hash, so adding a photo doesn't spam
+      // a re-send. Capped per job + per day so a many-job PDF stays a sane size.
+      // Dynamic import: job-sheet-load pulls the `server-only` media-store chain,
+      // which must not load in unit tests (they never reach this path).
+      if (day.jobs.some((j) => j.surveyId)) {
+        const { loadPhotoDataUris } = await import("@/lib/job-sheet-load");
+        let budget = PHOTOS_PER_DAY;
+        for (const job of day.jobs) {
+          if (budget <= 0 || !job.surveyId) {
+            job.sheet.photos = [];
+            continue;
+          }
+          try {
+            const photos = await loadPhotoDataUris(admin as never, job.surveyId, Math.min(PHOTOS_PER_JOB, budget));
+            job.sheet.photos = photos;
+            budget -= photos.length;
+          } catch {
+            job.sheet.photos = []; // a photo store hiccup never blocks the sheet
+          }
+        }
+      }
 
       let pdfBase64: string | null = null;
       try {

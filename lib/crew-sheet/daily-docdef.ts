@@ -84,6 +84,26 @@ function jobCard(job: DailyJob, index: number, total: number): any {
         }
       : null;
 
+  // Survey photos — access shots / large items — two per row, small thumbnails.
+  const photos = s.photos ?? [];
+  const photoCell = (p: { dataUri: string; label: string; caption: string }): any => ({
+    width: "*",
+    stack: [
+      { image: p.dataUri, fit: [232, 165] },
+      { text: p.caption ? `${p.label} — ${p.caption}` : p.label, style: "meta", margin: [0, 2, 0, 0] },
+    ],
+  });
+  const photoRows: any[] = [];
+  for (let i = 0; i < photos.length; i += 2) {
+    photoRows.push({
+      columns: [photoCell(photos[i]), { width: 10, text: "" }, photos[i + 1] ? photoCell(photos[i + 1]) : { width: "*", text: "" }],
+      margin: [0, 6, 0, 0],
+    });
+  }
+  const photoSection: any[] = photos.length
+    ? [{ text: "PHOTOS", style: "miniLabel", margin: [0, 8, 0, 0] }, ...photoRows]
+    : [];
+
   return {
     unbreakable: false,
     table: {
@@ -135,6 +155,7 @@ function jobCard(job: DailyJob, index: number, total: number): any {
               detailRow("Packing", s.packingLabel ? [s.packingLabel] : []) ?? { text: "" },
               detailRow("Inventory", inventory) ?? { text: "" },
               detailRow("Notes", notes) ?? { text: "" },
+              ...photoSection,
             ].filter(Boolean),
           },
         ],

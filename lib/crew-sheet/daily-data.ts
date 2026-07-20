@@ -33,6 +33,9 @@ export interface DailyJob {
   window: string;
   /** Sort key: appointment start (ISO) so a day's jobs read top-to-bottom. */
   startsAt: string | null;
+  /** Latest survey for this job's lead — anchors the survey photos loaded lazily
+   *  at render time (PDF data-URIs / web signed URLs). null = no survey. */
+  surveyId: string | null;
   sheet: JobSheetData;
 }
 
@@ -104,7 +107,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   const staffIds = [...new Set(allAssigns.map((a) => a.staff_id).filter(Boolean))] as string[];
   const vehicleIds = [...new Set(allAssigns.map((a) => a.vehicle_id).filter(Boolean))] as string[];
 
-  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }] = await Promise.all([
+  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }, { data: surveys }] = await Promise.all([
     leadIds.length
       ? admin.from("leads").select("id, name, phone, from_address, from_postcode, to_address, to_postcode, notes").in("id", leadIds)
       : Promise.resolve({ data: [] }),
@@ -121,6 +124,9 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
     vehicleIds.length
       ? admin.from("vehicles").select("id, name, registration").in("id", vehicleIds)
       : Promise.resolve({ data: [] }),
+    leadIds.length
+      ? admin.from("surveys").select("id, lead_id, created_at").in("lead_id", leadIds).order("created_at", { ascending: false })
+      : Promise.resolve({ data: [] }),
   ]);
 
   const leadById = new Map(((leads ?? []) as any[]).map((l: any) => [l.id, l])); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -132,6 +138,9 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   }
   const staffById = new Map(((staff ?? []) as any[]).map((s: any) => [s.id, s])); // eslint-disable-line @typescript-eslint/no-explicit-any
   const vehicleById = new Map(((vehicles ?? []) as any[]).map((v: any) => [v.id, v])); // eslint-disable-line @typescript-eslint/no-explicit-any
+  // Latest survey per lead (rows already ordered newest-first).
+  const surveyByLead = new Map<string, string>();
+  for (const sv of (surveys ?? []) as any[]) if (sv.lead_id && !surveyByLead.has(sv.lead_id)) surveyByLead.set(sv.lead_id, sv.id); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   // Assignments grouped by appointment (for the crew/vehicle lists on each job).
   const assignsByAppt = new Map<string, typeof allAssigns>();
@@ -165,6 +174,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
       apptType: appt.appt_type,
       window: apptWindow(appt as ApptLite),
       startsAt: appt.starts_at,
+      surveyId: appt.lead_id ? surveyByLead.get(appt.lead_id) ?? null : null,
       sheet,
     });
   }
