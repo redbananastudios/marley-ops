@@ -69,17 +69,36 @@ npx playwright test --project=crew  # just the crew role
 
 ## Turning on the money-path tests
 
-Once the **staging Zoho Invoice org** exists (a separate org under the same Zoho
-account — the same OAuth app works, the org is chosen per call), point the E2E
-app + seed at it and the gated tests un-skip:
+The staging org (**Demo Removals**, `20117092566`) is a **separate Zoho account**
+from Connor's live books — deliberate, so the staging credentials physically
+can't reach live. The org is chosen per API call, but a refresh token only sees
+orgs in the account it was issued for, so staging needs **its own token**.
 
-1. In `.env.e2e`, set `ZOHO_ORG_ID=<staging-org-id>` (numeric).
-2. Restart the dev server with that `ZOHO_ORG_ID` (not the dummy).
-3. Mirror the VAT config in the staging org (20% output + FRS 10% + the
-   registration date) so the VAT specs are meaningful.
-4. The `customer accept → deposit invoice` test un-skips automatically; write the
+1. **Mint the staging token** (once). Follow the browser prep in
+   `scripts/zoho-staging-token.mjs` (create a Self Client under the demo@ login,
+   generate a grant code), then:
+   ```
+   node scripts/zoho-staging-token.mjs --client-id <id> --client-secret <secret> \
+     --code <grant> --org 20117092566 [--dc eu]
+   ```
+   It verifies the token sees Demo Removals and prints the `.env.e2e` block.
+2. In `.env.e2e`, paste that block (all four `ZOHO_*` vars) and comment out the
+   `ZOHO_ORG_ID=E2E-STAGING-PENDING` dummy. **All four must switch together** —
+   only changing the org id leaves the live token in `.env.local` in play, which
+   can't reach the staging org (it fails, safely, closed).
+3. Mirror the VAT config in Demo Removals (20% output rate + FRS 10% +
+   registration date 2026-06-01) so the VAT specs are meaningful.
+4. Start the dev server with `.env.e2e` **sourced** so the staging `ZOHO_*`
+   override `.env.local` (Next respects already-set `process.env` over `.env`
+   files), then reseed:
+   ```
+   set -a; source .env.e2e; set +a
+   COMMS_DRYRUN=true npx next dev -H 0.0.0.0 -p 3016
+   SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
+   ```
+5. The `customer accept → deposit invoice` test un-skips automatically; write the
    P0 #1–#5 bodies against it.
-5. **P0 #6 + payment-matching** additionally need the takepayments sandbox creds.
+6. **P0 #6 + payment-matching** additionally need the takepayments sandbox creds.
 
 ## Setup
 
