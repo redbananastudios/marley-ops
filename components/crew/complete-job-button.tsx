@@ -25,6 +25,9 @@ import { SignaturePad } from "@/components/signature-pad";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import { buildCompletionCertDocDef, type CompletionCertData } from "@/lib/completion-cert-docdef";
 import { completeJobAction } from "@/app/actions/crew-signatures";
+import { useOutbox } from "@/components/offline/outbox-provider";
+import { PendingSyncBadge } from "@/components/offline/offline-sync-bar";
+import type { JobCompletionPayload } from "@/components/offline/runners";
 
 // window.pdfMake's ambient declaration lives in lib/quote/pdf-client.ts.
 
@@ -76,6 +79,8 @@ export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJo
   const [crewName, setCrewName] = useState(job.crewNameDefault);
   const [crewSig, setCrewSig] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const outbox = useOutbox();
+  const queuedItem = outbox.items.find((i) => i.kind === "job_completion" && i.key === job.appointmentId);
 
   const ready =
     crewName.trim().length >= 2 &&
@@ -117,7 +122,7 @@ export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJo
         certB64 = null;
       }
 
-      const res = await completeJobAction(job.appointmentId, {
+      const input = {
         exceptions,
         customerAbsent: absent,
         customerName: custName,
@@ -126,17 +131,64 @@ export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJo
         crewName,
         crewSignature: crewSig!,
         certificatePdfBase64: certB64,
-      });
-      if (!res.ok) {
-        toast.error(res.error);
+      };
+      const payload: JobCompletionPayload = { appointmentId: job.appointmentId, input };
+
+      // Queue to the on-device outbox so nothing done in a dead spot is lost;
+      // it replays on reconnect and the server dedupes on appointment_id.
+      const queueForLater = async () => {
+        try {
+          await outbox.enqueue({
+            kind: "job_completion",
+            key: job.appointmentId,
+            payload,
+            label: `Completion — ${(absent ? job.customerName : custName.trim()) || "customer"}`,
+          });
+          toast.success("Saved on your phone — it'll sync when you're back in signal.");
+          setOpen(false);
+        } catch {
+          // Can't even persist locally (e.g. private-mode Safari) — fail loudly.
+          toast.error("Couldn't save this on your phone. You'll need signal to finish the job.");
+        }
+      };
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await queueForLater();
         return;
       }
-      if (res.alreadyCompleted) toast.success("This job was already signed off.");
-      else if (res.emailed) toast.success("Job completed — certificate emailed to the customer.");
-      else toast.success(`Job completed.${res.emailNote ? ` ${res.emailNote}` : ""}`);
-      setOpen(false);
-      router.refresh();
+
+      try {
+        const res = await completeJobAction(job.appointmentId, input);
+        if (!res.ok) {
+          toast.error(res.error);
+          return;
+        }
+        if (res.alreadyCompleted) toast.success("This job was already signed off.");
+        else if (res.emailed) toast.success("Job completed — certificate emailed to the customer.");
+        else toast.success(`Job completed.${res.emailNote ? ` ${res.emailNote}` : ""}`);
+        setOpen(false);
+        router.refresh();
+      } catch {
+        // Signal dropped mid-submit — don't lose it, queue it.
+        await queueForLater();
+      }
     });
+  }
+
+  // A completion queued (offline) or stuck on this job: show its sync state
+  // rather than the Complete button, so the crew can't accidentally re-sign a
+  // job they've already finished — and can retry a failed sync in one tap.
+  if (queuedItem) {
+    return (
+      <button
+        type="button"
+        onClick={() => queuedItem.status === "failed" && void outbox.flush()}
+        className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md px-2"
+        aria-label={queuedItem.status === "failed" ? "Retry syncing this completion" : "Completion saved, waiting to sync"}
+      >
+        <PendingSyncBadge state={queuedItem.status} />
+      </button>
+    );
   }
 
   return (

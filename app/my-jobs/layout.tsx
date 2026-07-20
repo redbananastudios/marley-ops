@@ -1,19 +1,20 @@
 import type { ReactNode } from "react";
 import { PushSwRegister } from "@/components/push/sw-register";
-import { OfflineBanner } from "@/components/pwa/offline-banner";
+import { OutboxProvider } from "@/components/offline/outbox-provider";
+import { OfflineSyncBar } from "@/components/offline/offline-sync-bar";
 
 /**
- * Crew shell. Registers the service worker (push + the A2 read-cache) and mounts
- * the persistent offline indicator across every /my-jobs surface — so caching
- * and the offline banner aren't limited to the jobs list, and a crew member deep
- * in a job (or on /pay, /availability) still gets both.
+ * Crew shell. Registers the service worker (push + the A2 read-cache), wraps the
+ * crew surfaces in the offline outbox (A3) so a completion taken with no signal
+ * is queued + synced, and mounts the persistent connection/sync status bar
+ * across every /my-jobs surface.
  */
 export default function MyJobsLayout({ children }: { children: ReactNode }) {
   return (
-    <>
+    <OutboxProvider>
       <PushSwRegister />
       {children}
-      <OfflineBanner />
-    </>
+      <OfflineSyncBar />
+    </OutboxProvider>
   );
 }
