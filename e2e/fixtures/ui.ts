@@ -34,6 +34,27 @@ export async function submitUntil(
   await expect(opts.expected).toBeVisible({ timeout: 5000 });
 }
 
+/** Text the app's error boundaries render — a page that shows this 500'd. */
+const ERROR_BOUNDARY = /Something went wrong|Application error|Unhandled Runtime|Internal Server Error|This page can'?t load/i;
+
+/**
+ * A page loaded for THIS role: it wasn't bounced to /login, the app shell
+ * rendered a <main>, and no error boundary fired. Deliberately selector-light so
+ * it works across every route without per-page headings.
+ */
+export async function expectPageLoaded(page: Page, path: string): Promise<void> {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+  await expect(page, `${path} should not bounce to /login`).not.toHaveURL(/\/login/);
+  await expect(page.locator("main").first(), `${path} should render a <main>`).toBeVisible();
+  await expect(page.getByText(ERROR_BOUNDARY), `${path} should not hit the error boundary`).toHaveCount(0);
+}
+
+/** A role that must NOT see `path` is redirected somewhere matching `to`. */
+export async function expectBounced(page: Page, path: string, to: RegExp): Promise<void> {
+  await page.goto(path, { waitUntil: "domcontentloaded" });
+  await expect(page, `${path} should redirect this role`).toHaveURL(to);
+}
+
 /**
  * Draw a few strokes on a <canvas> signature pad so it yields a real (non-blank)
  * signature data-URI — the server rejects an empty one. Works by dragging the
