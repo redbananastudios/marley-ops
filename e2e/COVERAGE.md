@@ -30,7 +30,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
 | Contractor pay — return/mark-paid/void | ⬜ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
-| Job Board — capacity, assign (modal + drag), off-road | ⬜ | office/job-board.spec.ts |
+| Job Board — resources, week nav, assign modal | ✅ | office/job-board.spec.ts |
 | Completed Jobs | ⬜ | office/jobs.spec.ts |
 | Clients — toggle/search, detail, add-client dialog | ✅ | office/clients.spec.ts |
 | Documents — tabs + search | ✅ | office/records.spec.ts |
