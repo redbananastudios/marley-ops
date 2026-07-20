@@ -20,7 +20,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 |---|---|---|
 | Dashboard — period tabs, needs-action cards | ✅ | office/dashboard.spec.ts |
 | Leads — presets, search, add-lead create → detail | ✅ | office/leads.spec.ts |
-| Lead detail — stepper, action bar per stage, tabs | ⬜ | office/lead-detail.spec.ts |
+| Lead detail — stepper + tab switching | ✅ | office/lead-detail.spec.ts |
 | Follow-ups — snooze/done/no-reply | ⬜ | office/follow-ups.spec.ts |
 | Mark lost — reason-gated loss flow | ✅ | office/mark-lost.spec.ts |
 | Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
