@@ -31,6 +31,7 @@ import { JobNotes } from "@/components/crew/job-notes";
 import type { JobSheetAddress } from "@/lib/job-sheet-docdef";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
+import { LastUpdated } from "@/components/pwa/last-updated";
 import { CollectContractButton } from "@/components/crew/collect-contract-button";
 import { CompleteJobButton } from "@/components/crew/complete-job-button";
 import { CrewActionBar } from "@/components/crew/crew-action-bar";
@@ -116,6 +117,10 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
     </p>
   );
 
+  // Baked render time → honest "last updated" when this page is served from the
+  // offline cache (A2).
+  const fetchedAt = new Date().toISOString();
+
   return (
     <div className="min-h-screen bg-background">
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-white/8 bg-sidebar px-4 sm:px-5">
@@ -124,13 +129,16 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
       </header>
 
       <main className="mx-auto max-w-2xl p-4 pb-28 sm:p-5 sm:pb-28 md:p-8 md:pb-28">
-        <Link
-          href="/my-jobs"
-          className="focus-ring inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-mist-500 hover:text-foreground"
-        >
-          <ArrowLeft className="size-4" strokeWidth={1.75} />
-          My jobs
-        </Link>
+        <div className="flex items-center justify-between gap-3">
+          <Link
+            href="/my-jobs"
+            className="focus-ring inline-flex min-h-11 items-center gap-1.5 text-sm font-medium text-mist-500 hover:text-foreground"
+          >
+            <ArrowLeft className="size-4" strokeWidth={1.75} />
+            My jobs
+          </Link>
+          <LastUpdated at={fetchedAt} />
+        </div>
 
         {/* headline */}
         <div className="mt-2 rounded-xl border border-border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-5">
