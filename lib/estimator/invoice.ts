@@ -15,6 +15,7 @@
  */
 
 import { round2 } from "@/lib/staff/statements";
+import { VAT_REGISTERED_FROM } from "@/lib/finance/invoices";
 
 export interface EstimatorFees {
   /** £ per attended survey visit. */
@@ -42,6 +43,21 @@ export function jobValueExVat(value: number, vatEnabled: boolean): number {
 /** Commission on a completed job = pct% of the ex-VAT job value, to the penny. */
 export function commissionAmount(value: number, vatEnabled: boolean, pct: number): number {
   return round2((jobValueExVat(value, vatEnabled) * Math.max(0, pct || 0)) / 100);
+}
+
+/**
+ * Whether VAT was actually part of a job's price — the same registration-date
+ * floor the finance page applies to invoices (lib/finance VAT_REGISTERED_FROM).
+ * A job billed BEFORE registration carried no VAT even if the quote's vat_enabled
+ * flag says otherwise, so its stored value is already ex-VAT and the estimator
+ * earns commission on the full figure (never divided by 1.2). Without this floor a
+ * pre-registration job with a stale vat_enabled=true flag would silently under-pay
+ * the estimator. `jobDate` = the completion (billing) day; a missing date is
+ * treated as current-era (VAT applies), matching the finance rule.
+ */
+export function jobVatApplies(quoteVatEnabled: boolean, jobDate: string | null): boolean {
+  if (!quoteVatEnabled) return false;
+  return !jobDate || jobDate.slice(0, 10) >= VAT_REGISTERED_FROM;
 }
 
 export interface SurveyVisit {
