@@ -242,6 +242,29 @@ await wipe();
 const vehicleId = await ensureVehicle();
 const crewStaffId = await ensureCrewStaff();
 
+// Contractor-invoicing state: switch the feature ON, give the crew a pay rate,
+// and RESET the crew's signed agreement + any prior statements so the crew
+// contractor spec (gate → sign → unlock) starts from a clean, unsigned state
+// every run.
+async function resetCrewContractorState() {
+  // Feature toggle (singleton row keyed id=true).
+  await sb.from("business_settings").update({ self_billing_enabled: true }).eq("id", true);
+  // Crew pay rate (the invoice pre-fills from staff_pay).
+  await sb.from("staff_pay").upsert({ staff_id: crewStaffId, hourly_rate: 15, weekly_guarantee: null }, { onConflict: "staff_id" });
+  // Clear prior statements for the crew (lines first — FK), then the agreement,
+  // so the sign gate reappears unsigned.
+  const { data: stmts } = await sb.from("staff_statements").select("id").eq("staff_id", crewStaffId);
+  const stmtIds = (stmts ?? []).map((s) => s.id);
+  if (stmtIds.length) {
+    await sb.from("staff_statement_lines").delete().in("statement_id", stmtIds);
+    await sb.from("staff_statements").delete().in("id", stmtIds);
+  }
+  const { data: prof } = await sb.from("profiles").select("id").ilike("email", CREW_EMAIL).maybeSingle();
+  if (prof) await sb.from("contractor_agreements").delete().eq("profile_id", prof.id);
+  console.log("reset crew contractor state: self-billing ON, rate £15/hr, agreement cleared");
+}
+await resetCrewContractorState();
+
 // 1. Crew job — accepted quote + removal TOMORROW + e2e-crew assigned (crew journey + P0 #7/#8).
 {
   const ids = await makeLead({ name: SEED.crewJobCustomer.name, status: "confirmed" });

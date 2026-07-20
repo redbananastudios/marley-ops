@@ -62,7 +62,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | P0 #7 offline completion, #8 double-submit sign-off | ✅ | crew/p0.spec.ts |
 | Job detail — brief + add a private crew note | ✅ | crew/job-detail.spec.ts |
 | Availability — normal week + calendar render | ✅ | crew/availability.spec.ts |
-| Contractor agreement gate → sign (needs self-billing seed) | ⬜ | crew/contractor.spec.ts |
+| Contractor agreement gate → sign → invoicing unlocks | ✅ | crew/contractor.spec.ts |
 | Contractor invoicing — start/add lines/submit | ⬜ | crew/contractor.spec.ts |
 
 ## Public (no auth)
