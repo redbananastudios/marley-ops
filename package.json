@@ -13,7 +13,10 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "e2e:seed": "node scripts/seed-e2e.mjs",
+    "e2e:review": "node e2e/review.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.12",
@@ -38,6 +41,7 @@
     "lucide-react": "^1.21.0",
     "next": "16.2.9",
     "next-themes": "^0.4.6",
+    "pdfmake": "^0.2.10",
     "radix-ui": "^1.6.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
@@ -50,6 +54,7 @@
   },
   "devDependencies": {
     "@neondatabase/serverless": "^1.1.0",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

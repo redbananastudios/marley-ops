@@ -11,10 +11,11 @@ import { SignOutButton } from "@/components/my-jobs/sign-out-button";
 import { OnboardingTour } from "@/components/onboarding/tour";
 import { QuickSigninRow } from "@/components/my-jobs/quick-signin-row";
 import { NotificationsRow } from "@/components/my-jobs/notifications-row";
-import { PushSwRegister } from "@/components/push/sw-register";
 import { InstallPrompt } from "@/components/pwa/install-prompt";
 import { UpdateBanner } from "@/components/pwa/update-banner";
 import { PullToRefresh } from "@/components/pwa/pull-to-refresh";
+import { LastUpdated } from "@/components/pwa/last-updated";
+import { JobsPrefetch } from "@/components/pwa/jobs-prefetch";
 
 /**
  * /my-jobs — the crew surface (iMVE "can access assigned jobs"). A crew login
@@ -155,6 +156,21 @@ export default async function MyJobsPage() {
   }
   const orderedDays = [...groups.keys()].sort();
 
+  // When this page's data was fetched — baked into the HTML so the offline copy
+  // shows an honest "last updated" (A2), never a fake "now".
+  const fetchedAt = new Date().toISOString();
+
+  // Warm the offline cache for today's + tomorrow's jobs (A2).
+  const tomorrow = (() => {
+    const d = new Date(`${today}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const prefetchHrefs = [
+    "/my-jobs",
+    ...[...(groups.get(today) ?? []), ...(groups.get(tomorrow) ?? [])].map((j) => `/my-jobs/${j.id}`),
+  ];
+
   // Week-at-a-glance: the next 7 days with how many jobs sit on each.
   const weekStrip = Array.from({ length: 7 }, (_, i) => {
     const d = new Date(`${today}T00:00:00Z`);
@@ -182,7 +198,10 @@ export default async function MyJobsPage() {
 
       <main className="mx-auto max-w-2xl p-4 pb-10 sm:p-5 md:p-8">
         <p className="eyebrow">Your jobs</p>
-        <h1 className="mt-1 font-display text-3xl font-bold text-foreground">My jobs</h1>
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h1 className="font-display text-3xl font-bold text-foreground">My jobs</h1>
+          <LastUpdated at={fetchedAt} />
+        </div>
 
         {staffRow ? (
           <div className="mt-4 grid grid-cols-7 gap-1.5" aria-label="Your week at a glance">
@@ -375,9 +394,9 @@ export default async function MyJobsPage() {
             <ChevronRight className="ml-auto size-4 text-mist-400" strokeWidth={1.75} />
           </Link>
         </section>
-        <PushSwRegister />
         <UpdateBanner />
         <PullToRefresh />
+        <JobsPrefetch hrefs={prefetchHrefs} />
       </main>
     </div>
   );

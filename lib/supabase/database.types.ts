@@ -1066,6 +1066,103 @@ export type Database = {
           },
         ]
       }
+      crew_job_sheets: {
+        Row: {
+          attempts: number
+          content_hash: string
+          created_at: string
+          delivered_at: string | null
+          delivered_hash: string | null
+          id: string
+          staff_id: string
+          token: string
+          updated_at: string
+          version: number
+          work_date: string
+        }
+        Insert: {
+          attempts?: number
+          content_hash: string
+          created_at?: string
+          delivered_at?: string | null
+          delivered_hash?: string | null
+          id?: string
+          staff_id: string
+          token: string
+          updated_at?: string
+          version?: number
+          work_date: string
+        }
+        Update: {
+          attempts?: number
+          content_hash?: string
+          created_at?: string
+          delivered_at?: string | null
+          delivered_hash?: string | null
+          id?: string
+          staff_id?: string
+          token?: string
+          updated_at?: string
+          version?: number
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_job_sheets_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      crew_job_sheet_sends: {
+        Row: {
+          channel: string
+          created_at: string
+          error: string | null
+          id: string
+          provider_id: string | null
+          recipient: string | null
+          sheet_id: string
+          status: string
+          superseding: boolean
+          version: number
+        }
+        Insert: {
+          channel: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          provider_id?: string | null
+          recipient?: string | null
+          sheet_id: string
+          status: string
+          superseding?: boolean
+          version: number
+        }
+        Update: {
+          channel?: string
+          created_at?: string
+          error?: string | null
+          id?: string
+          provider_id?: string | null
+          recipient?: string | null
+          sheet_id?: string
+          status?: string
+          superseding?: boolean
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "crew_job_sheet_sends_sheet_id_fkey"
+            columns: ["sheet_id"]
+            isOneToOne: false
+            referencedRelation: "crew_job_sheets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       cron_runs: {
         Row: {
           created_at: string

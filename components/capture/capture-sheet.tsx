@@ -445,7 +445,11 @@ export function CaptureSheet({
       // Clear ONLY the filed items — failed ones stay visible for retry/remove.
       setTrayTracked((t) => t.filter((x) => !savedKeys.has(x.key)));
       toast.success(
-        res.count === 1 ? "Filed to the job — the office can see it." : `${res.count} items filed to the job.`,
+        res.count === 0
+          ? "Already filed to the job."
+          : res.count === 1
+            ? "Filed to the job — the office can see it."
+            : `${res.count} items filed to the job.`,
       );
       router.refresh();
       const failedLeft = trayRef.current.filter((t) => t.status === "failed").length;

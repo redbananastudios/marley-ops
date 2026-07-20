@@ -13,6 +13,12 @@
 # testing
 /coverage
 
+# e2e (Playwright) — captured artefacts + stored auth sessions never committed
+/e2e/artefacts/
+/e2e/fixtures/.auth/
+/test-results/
+/playwright-report/
+
 # next.js
 /.next/
 /out/

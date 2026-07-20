@@ -238,21 +238,25 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
   };
 }
 
-/** Survey photos as data URIs for pdfmake — capped, oversized files skipped. */
-export async function loadPhotoDataUris(admin: Admin, surveyId: string): Promise<JobSheetPhoto[]> {
+/** Survey photos as data URIs for pdfmake — capped, oversized files skipped.
+ *  `max` caps how many are embedded (default MAX_PHOTOS; the multi-job crew day
+ *  sheet passes a smaller cap so N jobs of photos don't bloat one PDF). */
+export async function loadPhotoDataUris(admin: Admin, surveyId: string, max = MAX_PHOTOS): Promise<JobSheetPhoto[]> {
+  const cap = Math.max(0, Math.min(max, MAX_PHOTOS));
+  if (cap === 0) return [];
   const { data: rows } = await admin
     .from("survey_photos")
     .select("category, storage_path, caption")
     .eq("survey_id", surveyId)
     .order("created_at", { ascending: true })
-    .limit(MAX_PHOTOS * 2);
+    .limit(cap * 2);
 
   // Route through the media-store seam so photos follow the active driver (R2
   // in prod). getObject returns raw bytes; pdfmake needs a base64 data URI.
   const store = createMediaStore(process.env, { bucket: SURVEY_PHOTOS_BUCKET });
   const out: JobSheetPhoto[] = [];
   for (const row of rows ?? []) {
-    if (out.length >= MAX_PHOTOS) break;
+    if (out.length >= cap) break;
     try {
       const bytes = await store.getObject(row.storage_path);
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_PHOTO_BYTES) continue;
@@ -277,13 +281,15 @@ export interface WebPhoto {
 
 /** Survey photos as short-lived signed URLs for the /my-jobs/[id] web view —
  *  lighter than data URIs on a phone in a van. */
-export async function loadPhotoSignedUrls(admin: Admin, surveyId: string): Promise<WebPhoto[]> {
+export async function loadPhotoSignedUrls(admin: Admin, surveyId: string, max = 12): Promise<WebPhoto[]> {
+  const cap = Math.max(0, max);
+  if (cap === 0) return [];
   const { data: rows } = await admin
     .from("survey_photos")
     .select("category, storage_path, caption")
     .eq("survey_id", surveyId)
     .order("created_at", { ascending: true })
-    .limit(12);
+    .limit(cap);
   if (!rows?.length) return [];
 
   // Sign through the seam (active driver — R2 in prod). One key at a time so a

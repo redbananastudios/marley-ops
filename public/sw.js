@@ -1,19 +1,85 @@
 /**
- * Marley Ops service worker — Web Push only (v1).
+ * Marley Ops service worker — Web Push + a SCOPED crew read-cache (v2).
  *
- * Deliberately NO fetch/caching handler: the app is online-only today, and a
- * push-only worker means zero risk of serving stale bundles or cached
- * authenticated data (the class of bug that bit the quotes-app PWA). If an
- * offline shell is ever wanted, it gets designed on purpose, not smuggled in.
+ * The read-cache is the offline shell "designed on purpose" the v1 note asked
+ * for (crew-reliability PRD A2). It is deliberately narrow:
+ *  - Crew job documents (/my-jobs*) → NETWORK-FIRST: online always live; offline
+ *    falls back to the last good copy so a crew member with no signal can read
+ *    their jobs.
+ *  - Immutable, content-hashed build assets (/_next/static/*) → CACHE-FIRST (the
+ *    URL changes every build, so a cached copy can't be stale) — this is what
+ *    lets the offline document actually render.
+ *  - Everything else (APIs, RSC, auth, /_next/data, images) is UNTOUCHED, served
+ *    live exactly as the push-only v1 did. No stale bundles, no stale auth data.
  *
- * The payload contract + deep-link allowlist mirror lib/push/payload.ts —
- * this file is a plain script (no imports), so the rules are duplicated and
- * pinned by tests/lib/push/payload.test.ts. Change BOTH or neither.
+ * Two contracts are DUPLICATED here because this is a plain script (no imports):
+ *  - push payload + deep-link allowlist ↔ lib/push/payload.ts (tests/lib/push/payload.test.ts)
+ *  - cache rules ↔ lib/pwa/cache-rules.ts (tests/lib/pwa/cache-rules.test.ts)
+ * Change BOTH or neither.
  */
 
 const ICON = "/icons/icon-192.png";
 const FALLBACK_TITLE = "Marley Ops";
 const FALLBACK_BODY = "You have a new update.";
+
+// ── Read-cache rules (mirror lib/pwa/cache-rules.ts) ──────────────────────────
+const JOBS_DOC_CACHE = "mo-jobs-docs-v1";
+const STATIC_CACHE = "mo-static-v1";
+const OFFLINE_URL = "/offline.html";
+const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE];
+const WARM_HEADER = "x-mo-warm";
+const MAX_JOB_DOCS = 30;
+// Generous: a cached /my-jobs document (network-first, always the latest build)
+// links this build's hashed chunks. FIFO evicts OLDEST first (older builds), but
+// the cap must comfortably exceed one build's whole client-asset set so a chunk
+// the current cached document still needs is never evicted. Old-build assets are
+// also purged on activate() when CACHE_VERSION bumps.
+const MAX_STATIC = 400;
+
+function isCrewJobDoc(pathname) {
+  return pathname === "/my-jobs" || pathname.startsWith("/my-jobs/");
+}
+function isImmutableAsset(pathname) {
+  return pathname.startsWith("/_next/static/");
+}
+
+// FIFO trim so an install doesn't grow without bound over months of deploys.
+async function trimCache(cacheName, max) {
+  const cache = await caches.open(cacheName);
+  const keys = await cache.keys();
+  if (keys.length <= max) return;
+  for (const req of keys.slice(0, keys.length - max)) await cache.delete(req);
+}
+
+async function cacheFirst(request) {
+  const cache = await caches.open(STATIC_CACHE);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  const res = await fetch(request);
+  if (res && res.ok && res.type === "basic") {
+    cache.put(request, res.clone()).then(() => trimCache(STATIC_CACHE, MAX_STATIC));
+  }
+  return res;
+}
+
+async function networkFirstDoc(request) {
+  const cache = await caches.open(JOBS_DOC_CACHE);
+  try {
+    const res = await fetch(request);
+    // Only cache a real, successful, same-origin document (never a redirect to
+    // /login — that would pin a signed-out shell as the crew's "jobs").
+    if (res && res.ok && res.type === "basic" && !res.redirected) {
+      cache.put(request, res.clone()).then(() => trimCache(JOBS_DOC_CACHE, MAX_JOB_DOCS));
+    }
+    return res;
+  } catch (err) {
+    const hit = await cache.match(request, { ignoreVary: true });
+    if (hit) return hit;
+    const offline = await caches.match(OFFLINE_URL);
+    if (offline) return offline;
+    throw err;
+  }
+}
 
 // Keep in sync with ALLOWED_ROUTE_PREFIXES in lib/push/payload.ts.
 const ALLOWED_ROUTE_PREFIXES = [
@@ -43,13 +109,66 @@ function isAllowedRoute(url) {
   );
 }
 
-self.addEventListener("install", () => {
-  // Push-only worker: activate immediately, nothing to precache.
-  self.skipWaiting();
+self.addEventListener("install", (event) => {
+  // Precache the offline fallback so a first-ever visit made offline still lands
+  // on a branded page. Best-effort — a failed precache never blocks install.
+  event.waitUntil(
+    caches
+      .open(STATIC_CACHE)
+      .then((c) => c.add(OFFLINE_URL))
+      .catch(() => {})
+      .then(() => self.skipWaiting()),
+  );
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      // Drop any of OUR caches from an older version; leave everything else.
+      const names = await caches.keys();
+      await Promise.all(
+        names.filter((n) => n.startsWith("mo-") && !MANAGED_CACHES.includes(n)).map((n) => caches.delete(n)),
+      );
+      await self.clients.claim();
+    })(),
+  );
+});
+
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+  if (req.method !== "GET") return;
+  let url;
+  try {
+    url = new URL(req.url);
+  } catch {
+    return;
+  }
+  if (url.origin !== self.location.origin) return;
+
+  // Immutable build assets → cache-first (safe: hashed URL, never stale).
+  if (isImmutableAsset(url.pathname)) {
+    event.respondWith(cacheFirst(req));
+    return;
+  }
+
+  // Crew job documents → network-first with an offline fallback. Covers a real
+  // navigation (PWA relaunch / refresh) and an explicit background warm request.
+  const isWarm = req.headers.get(WARM_HEADER) === "1";
+  if (isCrewJobDoc(url.pathname) && (req.mode === "navigate" || isWarm)) {
+    event.respondWith(networkFirstDoc(req));
+    return;
+  }
+
+  // Everything else is served live, untouched — as the push-only worker did.
+});
+
+// Sign-out (and any caller) can wipe the crew read-cache off a shared device.
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "mm-clear-cache") {
+    event.waitUntil(
+      caches.keys().then((names) => Promise.all(names.filter((n) => n.startsWith("mo-")).map((n) => caches.delete(n)))),
+    );
+  }
 });
 
 self.addEventListener("push", (event) => {

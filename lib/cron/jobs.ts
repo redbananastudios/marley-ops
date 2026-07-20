@@ -66,13 +66,14 @@ export const CRON_JOBS: CronJobMeta[] = [
     endpoint: "/api/cron/chase",
   },
   {
-    slug: "crew-reminders",
-    label: "Crew reminders",
-    schedule: "0 17 * * *",
-    cadence: "Daily · 17:00 UTC",
-    description: "Emails each crew member the jobs they're assigned to tomorrow.",
-    maxAgeMins: 26 * 60,
-    endpoint: "/api/cron/crew-reminders",
+    slug: "crew-job-sheets",
+    label: "Crew job sheets",
+    schedule: "*/5 * * * *",
+    cadence: "Every 5 minutes",
+    description:
+      "At 18:00 the evening before, emails each crew member their day-sheet PDF + texts a login-less link; re-sends a superseding copy within a tick when a job changes.",
+    maxAgeMins: 20,
+    endpoint: "/api/cron/crew-job-sheets",
   },
   {
     slug: "ai-retention",
