@@ -176,22 +176,37 @@ export async function recordJobMediaAction(
     captured_by: prof.id,
     captured_by_name: authorName,
   }));
-  const { error } = await admin.from("job_media").insert(rows as never);
+  // Idempotent on the item's storage_path (its natural key — one object, one
+  // row). A dropped-response retry — the norm on rural signal, and the crew's
+  // ONLY copy is the tray — must not error or double-record: ignore-duplicates
+  // means an already-filed item is a no-op and only genuinely new rows come
+  // back. Without this, the unique index turned a successful-but-unacked save
+  // into a permanent "Could not save" the crew could never clear (A4).
+  const { data: insertedRows, error } = await admin
+    .from("job_media")
+    .upsert(rows as never, { onConflict: "storage_path", ignoreDuplicates: true })
+    .select("storage_path");
   if (error) return { ok: false, error: "Could not save — try again." };
 
-  await admin.from("activities").insert({
-    lead_id: resolved.leadId,
-    client_id: resolved.clientId,
-    actor_id: prof.id,
-    type: "note",
-    summary: `${authorName} captured ${captureSummary(v.items)} on the job`,
-    meta: { via: "job_capture", appointment_id: resolved.appointmentId, count: v.items.length },
-  });
+  const insertedPaths = new Set((insertedRows ?? []).map((r: { storage_path: string }) => r.storage_path));
+  const newItems = v.items.filter((it) => insertedPaths.has(it.path));
 
-  revalidatePath(`/leads/${resolved.leadId}`);
-  if (resolved.appointmentId) revalidatePath(`/my-jobs/${resolved.appointmentId}`);
-  revalidatePath("/content");
-  return { ok: true, count: v.items.length };
+  // Log + revalidate only for genuinely new items — a pure retry (0 new) is a
+  // silent success, never a second activity line.
+  if (newItems.length > 0) {
+    await admin.from("activities").insert({
+      lead_id: resolved.leadId,
+      client_id: resolved.clientId,
+      actor_id: prof.id,
+      type: "note",
+      summary: `${authorName} captured ${captureSummary(newItems)} on the job`,
+      meta: { via: "job_capture", appointment_id: resolved.appointmentId, count: newItems.length },
+    });
+    revalidatePath(`/leads/${resolved.leadId}`);
+    if (resolved.appointmentId) revalidatePath(`/my-jobs/${resolved.appointmentId}`);
+    revalidatePath("/content");
+  }
+  return { ok: true, count: newItems.length };
 }
 
 /** Bin an uploaded-but-unrecorded object (tray remove before save). */
