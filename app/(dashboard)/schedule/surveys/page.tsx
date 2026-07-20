@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { PageHeader } from "@/components/page-header";
@@ -20,20 +21,33 @@ export default async function SurveysSchedulePage({
     data: { user },
   } = await sb.auth.getUser();
 
-  const [{ data: appts }, { data: leads }, { data: estimators }] = await Promise.all([
-    sb
-      .from("appointments")
-      .select(
-        "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
-      )
-      .eq("appt_type", "survey")
-      .order("starts_at", { ascending: true }),
-    sb
-      .from("leads")
-      .select(
-        "id,client_id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
-      )
-      .order("created_at", { ascending: false }),
+  // appts + leads are unbounded and grow for the life of the business → page
+  // through fetchAllRows (a plain select truncates at PostgREST's 1000-row cap;
+  // the lead picker below reads this array directly, so past 1000 rows recent
+  // leads would silently vanish from it). id is a unique tiebreaker so the
+  // display order (starts_at / created_at) pages without skips or duplicates.
+  const [appts, leads, { data: estimators }] = await Promise.all([
+    fetchAllRows((f, t) =>
+      sb
+        .from("appointments")
+        .select(
+          "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
+        )
+        .eq("appt_type", "survey")
+        .order("starts_at", { ascending: true })
+        .order("id")
+        .range(f, t),
+    ),
+    fetchAllRows((f, t) =>
+      sb
+        .from("leads")
+        .select(
+          "id,client_id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign",
+        )
+        .order("created_at", { ascending: false })
+        .order("id")
+        .range(f, t),
+    ),
     sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
   ]);
 

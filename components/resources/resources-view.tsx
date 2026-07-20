@@ -279,7 +279,7 @@ export function ResourcesView({
           {tabBtn("staff", UserRound, "Staff", counts.staff)}
           {tabBtn("vehicles", Truck, "Vehicles", counts.vehicles)}
         </div>
-        {tab !== "availability" ? (
+        {tab !== "availability" && isAdmin ? (
           <Button
             className="ml-auto"
             onClick={() => (tab === "staff" ? setStaffEdit("new") : setVehicleEdit("new"))}
@@ -303,6 +303,7 @@ export function ResourcesView({
             staff={activeStaff}
             staffAvailability={staffAvailability}
             today={today}
+            isAdmin={isAdmin}
             onEditStaff={(id) => {
               const s = staff.find((x) => x.id === id);
               if (s) setStaffEdit(s);
@@ -347,6 +348,7 @@ export function ResourcesView({
                 key={v.id}
                 v={v}
                 windows={windowsByVehicle.get(v.id) ?? []}
+                isAdmin={isAdmin}
                 onEdit={() => setVehicleEdit(v)}
               />
             ))}
@@ -446,6 +448,7 @@ function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: Av
         ) : (
           <span />
         )}
+        {isAdmin ? (
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -472,6 +475,7 @@ function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: Av
             )}
           </button>
         </div>
+        ) : null}
       </div>
     </div>
   );
@@ -643,7 +647,7 @@ function StaffDialog({
 
 /* --------------------------------------------------------------- vehicles */
 
-function VehicleCard({ v, windows, onEdit }: { v: VehicleRow; windows: UnavailabilityRow[]; onEdit: () => void }) {
+function VehicleCard({ v, windows, isAdmin, onEdit }: { v: VehicleRow; windows: UnavailabilityRow[]; isAdmin: boolean; onEdit: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const today = todayUk();
@@ -710,6 +714,7 @@ function VehicleCard({ v, windows, onEdit }: { v: VehicleRow; windows: Unavailab
             ? `${gbp(v.cost_per_month)}/mo${v.payment_day ? ` · day ${v.payment_day}` : ""}`
             : "no monthly cost"}
         </span>
+        {isAdmin ? (
         <div className="flex items-center gap-0.5">
           <button
             type="button"
@@ -736,6 +741,7 @@ function VehicleCard({ v, windows, onEdit }: { v: VehicleRow; windows: Unavailab
             )}
           </button>
         </div>
+        ) : null}
       </div>
     </div>
   );

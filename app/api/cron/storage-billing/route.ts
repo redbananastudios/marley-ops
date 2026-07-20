@@ -4,6 +4,7 @@ import { runCron } from "@/lib/cron/run-logger";
 import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/comms/send";
+import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import {
   createInvoice,
@@ -49,7 +50,7 @@ export async function GET(req: Request) {
   const run = await runCron("storage-billing", async () => {
   const admin = createAdminClient();
   const today = new Date().toLocaleDateString("en-CA", { timeZone: UK });
-  const summary = { raised: 0, emailed: 0, statusUpdated: 0, errors: [] as string[] };
+  const summary = { raised: 0, emailed: 0, statusUpdated: 0, errors: [] as string[], billingFailures: [] as string[] };
 
   // Lets that can still owe a period: open, or ended within the last 60 days.
   const cutoff = new Date(`${today}T00:00:00Z`);
@@ -182,15 +183,44 @@ export async function GET(req: Request) {
           }
         }
       } catch (err) {
-        summary.errors.push(`${let_.id} ${period.period_start}: ${err instanceof Error ? err.message : "unknown"}`);
-        await admin
+        const msg = err instanceof Error ? err.message : "unknown";
+        summary.errors.push(`${let_.id} ${period.period_start}: ${msg}`);
+        // RELEASE the claim so the period retries next run — do NOT leave a
+        // pending/error row behind. periodsDue() is status-agnostic (it reads
+        // every storage_invoices row for the let), so a surviving claim would be
+        // treated as "already billed" forever → silent under-bill. Deleting the
+        // still-pending row is safe: it never carries a zoho_invoice_id (the
+        // write-back runs only on success), and orphan adoption via the stable
+        // MMS-<let>-<period> reference makes the re-create idempotent even if
+        // Zoho did create the invoice before the failure. A row that already
+        // reached 'sent' has a real invoice and is untouched by the status gate.
+        const { error: delErr } = await admin
           .from("storage_invoices")
-          .update({ status: "error", error: err instanceof Error ? err.message : "unknown" } as never)
+          .delete()
           .eq("let_id", let_.id)
           .eq("period_start", period.period_start)
           .eq("status", "pending");
+        summary.billingFailures.push(
+          `Let ${let_.id.slice(0, 8)} · period ${period.period_start} · ${msg}${
+            delErr ? ` · ⚠️ NOT released (${delErr.message}) — may not bill until fixed` : " · released for retry"
+          }`,
+        );
       }
     }
+  }
+
+  // A billing failure that isn't surfaced becomes a permanent under-bill. One
+  // consolidated money alert (not one per period) so a full Zoho outage doesn't
+  // flood the accounts desk.
+  if (summary.billingFailures.length) {
+    await sendOpsAlert(
+      "Storage billing could not raise some invoices",
+      [
+        `${summary.billingFailures.length} storage ${summary.billingFailures.length === 1 ? "period" : "periods"} failed to bill on ${today}. Released periods retry automatically on the next run; any marked “NOT released” need manual attention.`,
+        ...summary.billingFailures,
+      ],
+      "money",
+    );
   }
 
   /* ---------------- refresh unpaid statuses ---------------- */

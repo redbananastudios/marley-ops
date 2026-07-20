@@ -3,6 +3,7 @@ import {
   buildEstimatorLines,
   commissionAmount,
   jobValueExVat,
+  jobVatApplies,
   type CompletedJob,
   type EstimatorFees,
   type PhoneQuote,
@@ -43,6 +44,32 @@ describe("commissionAmount", () => {
   it("is zero for a valueless or negative job", () => {
     expect(commissionAmount(0, true, 7.5)).toBe(0);
     expect(commissionAmount(-100, false, 7.5)).toBe(0);
+  });
+});
+
+describe("jobVatApplies (VAT registration-date floor)", () => {
+  // VAT_REGISTERED_FROM = "2026-06-01" (lib/finance/invoices).
+  it("is false when the quote never had VAT, whatever the date", () => {
+    expect(jobVatApplies(false, "2026-07-01")).toBe(false);
+    expect(jobVatApplies(false, "2026-05-01")).toBe(false);
+    expect(jobVatApplies(false, null)).toBe(false);
+  });
+  it("applies VAT for a VAT-enabled job billed on/after registration", () => {
+    expect(jobVatApplies(true, "2026-06-01")).toBe(true);
+    expect(jobVatApplies(true, "2026-07-16")).toBe(true);
+  });
+  it("floors VAT to none for a job billed BEFORE registration even if the flag says true", () => {
+    // The stale-flag case the edge is about: a pre-registration completion must
+    // not be divided by 1.2, or the estimator is under-paid.
+    expect(jobVatApplies(true, "2026-05-31")).toBe(false);
+    expect(jobVatApplies(true, "2026-01-15")).toBe(false);
+  });
+  it("treats a missing date as current-era (VAT applies)", () => {
+    expect(jobVatApplies(true, null)).toBe(true);
+  });
+  it("end-to-end: a pre-registration job earns commission on the FULL value (no /1.2)", () => {
+    const vat = jobVatApplies(true, "2026-05-20"); // pre-reg → false
+    expect(commissionAmount(1200, vat, 7.5)).toBe(90); // 7.5% of 1200, not of 1000
   });
 });
 

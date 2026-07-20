@@ -100,6 +100,9 @@ export function EstimatorStatementEditor({
         return;
       }
       toast.success(r.added ? `Added ${r.added} line${r.added === 1 ? "" : "s"}.` : "No new work to add for this week.");
+      // Completed jobs that couldn't be commissioned (no agreed price, or a
+      // duplicate-accepted anomaly) are flagged so they're never silently missed.
+      for (const w of r.warnings ?? []) toast.warning(w, { duration: 10000 });
       router.refresh();
     } catch {
       toast.error("Couldn't reach the server — check your connection and try again.");

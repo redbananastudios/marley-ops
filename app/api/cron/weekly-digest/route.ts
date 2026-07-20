@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireOfficeOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { sendEmail } from "@/lib/comms/send";
 import { HELLO_FROM, MARLEY_EMAIL_DOMAIN } from "@/lib/comms/sender";
 import { buildWeeklyDigest, digestWeeks, type DigestInputs } from "@/lib/digest/weekly";
@@ -45,25 +46,39 @@ export async function GET(req: Request) {
 
     const [leads, quotes, completions, appointments, bankPending, followUps, units, lets, claims] =
       await Promise.all([
-        sb
-          .from("leads")
-          .select("id, created_at, lost_at, balance_paid_at")
-          .or(`created_at.gte.${since},lost_at.gte.${since},balance_paid_at.gte.${since}`)
-          .limit(2000),
-        sb
-          .from("quotes")
-          .select(QUOTE_COLS)
-          .or(
-            `email_sent_at.gte.${since},accepted_at.gte.${since},deposit_paid_at.gte.${since},balance_invoice_amount.gt.0`,
-          )
-          .limit(2000),
+        // .limit(2000) is a lie — PostgREST hard-caps every response at 1000
+        // rows, so these windowed reads would silently drop digest data if a
+        // busy week ever exceeded it. Page through fetchAllRows and keep the
+        // { data } shape the digest inputs below read. Ordered by id so the
+        // range() windows are stable; the digest aggregates order-independently.
+        fetchAllRows((f, t) =>
+          sb
+            .from("leads")
+            .select("id, created_at, lost_at, balance_paid_at")
+            .or(`created_at.gte.${since},lost_at.gte.${since},balance_paid_at.gte.${since}`)
+            .order("id")
+            .range(f, t),
+        ).then((data) => ({ data })),
+        fetchAllRows((f, t) =>
+          sb
+            .from("quotes")
+            .select(QUOTE_COLS)
+            .or(
+              `email_sent_at.gte.${since},accepted_at.gte.${since},deposit_paid_at.gte.${since},balance_invoice_amount.gt.0`,
+            )
+            .order("id")
+            .range(f, t),
+        ).then((data) => ({ data })),
         sb.from("job_completions").select("created_at, exceptions").gte("created_at", since).limit(1000),
-        sb
-          .from("appointments")
-          .select("appt_type, status, starts_at")
-          .gte("starts_at", since)
-          .lte("starts_at", new Date(now.getTime() + 8 * 86_400_000).toISOString())
-          .limit(2000),
+        fetchAllRows((f, t) =>
+          sb
+            .from("appointments")
+            .select("appt_type, status, starts_at")
+            .gte("starts_at", since)
+            .lte("starts_at", new Date(now.getTime() + 8 * 86_400_000).toISOString())
+            .order("id")
+            .range(f, t),
+        ).then((data) => ({ data })),
         sb
           .from("bank_transactions")
           .select("id", { count: "exact", head: true })

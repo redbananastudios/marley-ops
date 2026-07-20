@@ -11,6 +11,7 @@ import { round2 } from "@/lib/staff/statements";
 import { UK_TZ, ukInstant } from "@/lib/uk-time";
 import {
   buildEstimatorLines,
+  jobVatApplies,
   type CompletedJob,
   type EstimatorFees,
   type PhoneQuote,
@@ -214,7 +215,7 @@ export async function seedMyEstimatorWorkAction(input: { statement_id: string })
     await sb.from("staff_statement_lines").delete().eq("statement_id", stmt.id).in("source", [...ESTIMATOR_SOURCES]);
     await recomputeEstimatorTotal(sb, stmt.id);
     revalidatePath(`/estimator/pay/${stmt.id}`);
-    return { ok: true as const, added: 0 };
+    return { ok: true as const, added: 0, warnings: [] as string[] };
   }
 
   const [{ data: leadRows }, { data: leadSurveyAppts }, { data: allQuotes }] = await Promise.all([
@@ -319,26 +320,54 @@ export async function seedMyEstimatorWorkAction(input: { statement_id: string })
   }
 
   // Commission: per completed job owned by me, from the accepted quote's value.
+  // `warnings` surface jobs whose commission couldn't be computed so it's never
+  // just silently missing off the invoice (the estimator would be short).
   const completions: CompletedJob[] = [];
+  const warnings: string[] = [];
   for (const leadId of completionLeadIds) {
     if (billedCommissionLeadIds.has(leadId)) continue; // commission already billed for this job
     const lead = leadById.get(leadId);
     if (!lead || lead.status !== "completed") continue; // job truly done
-    const accepted = (allQuotes ?? [])
+    // Normally the supersede guard leaves exactly one accepted quote per lead.
+    // If more than one survives, pick DETERMINISTICALLY the most-recently accepted
+    // (the price the customer last committed to — matches /bookings + /performance),
+    // tie-broken by quote_ref so the choice never varies run to run.
+    const acceptedQuotes = (allQuotes ?? [])
       .filter((q) => q.lead_id === leadId && q.status === "accepted")
-      .sort((a, b) => (b.accepted_at ?? "").localeCompare(a.accepted_at ?? ""))[0];
+      .sort(
+        (a, b) =>
+          (b.accepted_at ?? "").localeCompare(a.accepted_at ?? "") ||
+          (b.quote_ref ?? "").localeCompare(a.quote_ref ?? ""),
+      );
+    const accepted = acceptedQuotes[0];
     // Canonical owner: explicit lead estimator → earliest survey estimator → accepted quote estimator.
     const owner = lead.estimator_id ?? earliestSurveyEstimator.get(leadId) ?? accepted?.estimator_id ?? null;
     if (owner !== me) continue;
     if (!accepted) continue; // no accepted quote → no agreed value → nothing to commission
+
+    const who = `${lead.name?.trim() || "a completed job"}${accepted.quote_ref ? ` (${accepted.quote_ref})` : ""}`;
+    const completionDay = completionByLead.get(leadId) as string;
     const value = Number(accepted.agreed_price ?? accepted.grand_total ?? 0);
+    // A completed job I own whose accepted quote has no agreed price can't be
+    // commissioned. buildEstimatorLines would drop the resulting £0 line silently,
+    // so surface it instead (unless commission is switched off entirely, pct=0).
+    if (value <= 0) {
+      if (fees.commissionPct > 0)
+        warnings.push(`No commission added for ${who} — the accepted quote has no agreed price yet. Ask the office to set it, then re-add your work.`);
+      continue;
+    }
+    if (acceptedQuotes.length > 1)
+      warnings.push(`${who} has ${acceptedQuotes.length} accepted quotes — commission used the most recent. Ask the office to tidy the extras.`);
+
     completions.push({
       leadId,
       ref: accepted.quote_ref,
       customer: lead.name?.trim() || "Customer",
-      day: completionByLead.get(leadId) as string,
+      day: completionDay,
       value,
-      vatEnabled: accepted.vat_enabled === true,
+      // Apply the VAT registration-date floor: a job billed before registration
+      // carried no VAT even if the quote flag says otherwise (so ex-VAT = gross).
+      vatEnabled: jobVatApplies(accepted.vat_enabled === true, completionDay),
     });
   }
 
@@ -373,7 +402,7 @@ export async function seedMyEstimatorWorkAction(input: { statement_id: string })
   await recomputeEstimatorTotal(sb, stmt.id);
 
   revalidatePath(`/estimator/pay/${stmt.id}`);
-  return { ok: true as const, added: lines.length };
+  return { ok: true as const, added: lines.length, warnings };
 }
 
 const lineSchema = z.object({
