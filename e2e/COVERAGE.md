@@ -34,10 +34,10 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Completed Jobs | ⬜ | office/jobs.spec.ts |
 | Clients — toggle/search, detail, add-client dialog | ✅ | office/clients.spec.ts |
 | Documents — tabs + search | ✅ | office/records.spec.ts |
-| Claims — register + working page (advance status) | ✅ | office/records.spec.ts + claims.spec.ts |
+| Claims — register + working page (advance → settle w/ resolution + amount) | ✅ | office/records.spec.ts + claims.spec.ts |
 | Content — review-state tabs | ✅ | office/records.spec.ts |
 | Staff & Fleet — tabs + add dialogs | ✅ | office/staff-fleet.spec.ts |
-| Storage — create a site → units entry (full let assign ⬜) | 🟡 | office/storage.spec.ts |
+| Storage — create site → add unit → assign client at a rate (occupied) | ✅ | office/storage.spec.ts |
 | Performance — Overview/Sales/Storage tabs | ✅ | office/reports.spec.ts |
 | Growth — Website & Tracking, Ads | ✅ | office/reports.spec.ts |
 | Automations (AI survey log) | ✅ | office/reports.spec.ts |
