@@ -40,6 +40,7 @@ const SEED = {
   awaitingDeposit: { name: "E2E Awaiting Deposit", quoteRef: "E2E-DEP-001" },
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
+  declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
 };
 const DAY = 86_400_000;
@@ -306,6 +307,34 @@ const crewStaffId = await ensureCrewStaff();
   });
   if (error) die(`${SEED.sentQuote.name} sent quote`, error);
   console.log(`seeded sent quote: ${SEED.sentQuote.name} (/q/${SEED.sentQuote.acceptToken})`);
+}
+
+// 6. A second SENT quote with a token — the public DECLINE flow (kept separate
+// so declining never consumes the accept quote).
+{
+  const ids = await makeLead({ name: SEED.declineQuote.name, status: "quoted" });
+  const { error } = await sb.from("quotes").insert({
+    quote_ref: SEED.declineQuote.quoteRef,
+    client_id: ids.clientId,
+    lead_id: ids.leadId,
+    customer_name: SEED.declineQuote.name,
+    customer_email: SINK_EMAIL,
+    customer_phone: SINK_PHONE,
+    subtotal: SEED.declineQuote.total,
+    grand_total: SEED.declineQuote.total,
+    status: "sent",
+    moving_date: at(7).slice(0, 10),
+    deposit_amount: 100,
+    accept_token: SEED.declineQuote.acceptToken,
+    email_sent_at: at(-1),
+    collect_addr: "1 Test Street, Shaftesbury, SP7 8AA",
+    dest_addr: "2 Sample Road, Gillingham, SP8 4AB",
+    vat_enabled: true,
+    breakdown: { vehicle: "1luton", totalMiles: 20 },
+    state_blob: { seeded: MARKER },
+  });
+  if (error) die(`${SEED.declineQuote.name} sent quote`, error);
+  console.log(`seeded decline quote: ${SEED.declineQuote.name} (/q/${SEED.declineQuote.acceptToken})`);
 }
 
 console.log("\n✓ E2E seed complete.");

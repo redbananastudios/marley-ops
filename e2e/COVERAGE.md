@@ -57,21 +57,22 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 ## Crew features
 | Flow | Status | Spec |
 |---|---|---|
+| Access — /my-jobs routes load; bounced off dashboard | ✅ | crew/access.spec.ts |
 | Jobs list + week strip + job sheet PDF | ✅ | crew/journey.spec.ts |
-| P0 #7 offline completion, #8 double-submit | ✅ | crew/p0.spec.ts |
-| Job detail — sign-off, crew notes+photos, content capture | 🟡 (#7/#8 sign off) | crew/job-detail.spec.ts |
-| Availability — normal week + calendar override | ⬜ | crew/availability.spec.ts |
-| Contractor agreement gate → sign | ⬜ | crew/agreement.spec.ts |
-| Contractor invoicing — start/add lines/submit | ⬜ | crew/pay.spec.ts |
+| P0 #7 offline completion, #8 double-submit sign-off | ✅ | crew/p0.spec.ts |
+| Job detail — brief + add a private crew note | ✅ | crew/job-detail.spec.ts |
+| Availability — normal week + calendar render | ✅ | crew/availability.spec.ts |
+| Contractor agreement gate → sign (needs self-billing seed) | ⬜ | crew/contractor.spec.ts |
+| Contractor invoicing — start/add lines/submit | ⬜ | crew/contractor.spec.ts |
 
 ## Public (no auth)
 | Flow | Status | Spec |
 |---|---|---|
 | /q accept → deposit invoice (staging) | ✅ | public/customer.spec.ts |
-| /q decline with reason | ⬜ | public/customer.spec.ts |
-| /s storage-agreement signing | ⬜ | public/signing.spec.ts |
-| /cv customer cubic survey self-fill | ⬜ | public/cubic.spec.ts |
-| /sheet crew day sheet (read-only) | ⬜ | public/day-sheet.spec.ts |
+| /q decline with reason | ✅ | public/decline.spec.ts |
+| /s storage-agreement signing (needs let-token seed) | ⬜ | public/signing.spec.ts |
+| /cv customer cubic survey self-fill (needs token seed) | ⬜ | public/cubic.spec.ts |
+| /sheet crew day sheet (needs sheet-token seed) | ⬜ | public/day-sheet.spec.ts |
 
 ## Notes
 - Money-path invariants that AREN'T automated E2E (manual-in-Zoho refunds/credit
