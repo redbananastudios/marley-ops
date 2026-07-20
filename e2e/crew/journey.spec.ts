@@ -44,18 +44,28 @@ test.describe("Crew — my jobs", () => {
     });
 
     await step("the brief shows the customer + route (price-free)", page, async () => {
-      await expect(page.getByText(/Job sheet/)).toBeVisible();
+      // Eyebrow "Job sheet · <ref>" (unique — distinct from the "Job sheet (PDF)" button).
+      await expect(page.getByText(`Job sheet · ${SEED.crewJobCustomer.quoteRef}`)).toBeVisible();
+      await expect(page.getByText("Moving from")).toBeVisible();
+      await expect(page.getByText("Moving to")).toBeVisible();
       // Crew sheets never carry money.
       await expect(page.locator("main")).not.toContainText("£");
     });
 
     await step("download the job-sheet PDF → artefact", page, async () => {
+      // The button builds the PDF client-side (pdfmake + vfs fonts, loaded from a
+      // CDN/local script). A cold Next-dev compile of this route can push that
+      // load past the button's own 15s internal wait, so wait for the engine to
+      // be ready BEFORE clicking — then the download fires deterministically.
+      await page.waitForFunction(() => Boolean((window as unknown as { pdfMake?: { vfs?: unknown } }).pdfMake?.vfs), null, { timeout: 60_000 });
       const [download] = await Promise.all([
-        page.waitForEvent("download"),
+        page.waitForEvent("download", { timeout: 60_000 }),
         page.getByRole("button", { name: /job sheet/i }).click(),
       ]);
       const file = await captureDownload(download, "crew-job-sheet");
       expect(file).toMatch(/\.pdf$/);
+      // Success toast confirms the whole build+download path completed.
+      await expect(page.getByText("Job sheet downloaded.")).toBeVisible();
     });
   });
 });

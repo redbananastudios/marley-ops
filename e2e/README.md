@@ -18,22 +18,103 @@ scripts/seed-e2e.mjs   idempotent reset to the known state the specs assert
 playwright.config.ts   env-agnostic (E2E_BASE_URL); chromium only
 ```
 
-## Status
+## Status (validated against local dev + staging Zoho, 2026-07-20)
 
-**Runnable now** (once staging + seed + test users exist):
-- Crew journey (`journeys/crew.spec.ts`) — browse jobs, read the sheet, download the PDF.
-- **P0 #7** offline completion queues + syncs, **P0 #8** double-submit is idempotent (`scenarios/p0.spec.ts`).
-- Office dashboard + automations smoke (`journeys/office.spec.ts`).
+Full suite: **12 passed, 6 skipped, 0 failed** (run twice back-to-back to prove
+the seed wipe survives sign-off artifacts). ZOHO_ORG_ID pointed at the staging
+org **Demo Removals** (20117092566) — a separate Zoho account that physically
+cannot reach the live books.
 
-**Outlined (`test.fixme`) — fill selectors/assertions against staging:**
-- Customer + estimator journeys.
-- **P0 #1–#6** (deposit/balance separation, refund credit-note + VAT reversal,
-  forfeit, partial credit, VAT-quarter attribution, declined card) — each needs
-  the **Zoho + takepayments sandboxes** and carries the exact rule to prove.
+**Green now:**
+- Crew journey — jobs list + honest last-updated stamp + version; job sheet
+  (price-free) + PDF download.
+- **P0 #7** offline completion queues + syncs, **P0 #8** double-submit idempotent.
+- Office dashboard + automations smoke (asserts the crew-job-sheets cron shows).
+- Estimator workspace — "My day", starts a quote (reaches `/quotes/new`).
+- Customer accept page — `/q/<token>` renders the sent quote AND *accept →
+  deposit invoice*: the £100 **-DEP** invoice is raised **in staging** and
+  asserted directly against the Zoho books (VAT-itemised, £100, never live).
+- **P0 #1** — deposit + balance invoiced SEPARATELY: the office raises the
+  **-BAL** balance invoice (£2,300 = agreed − deposit) and it's asserted in
+  staging (VAT-itemised, distinct reference). With the -DEP proof above, that's
+  the full invariant: two invoices per job, each VAT-itemised, never one net.
 
-These are `fixme` on purpose: they were written from the code, not yet validated
-against a running UI, so they don't ship as false green. Turn them on as you
-confirm each against staging.
+**Deliberately NOT automated E2E** (`test.fixme` with the accurate reason — see
+`scenarios/p0-money.spec.ts`):
+- **#2 refund / #4 partial credit** — refunds + credit notes are handled
+  **manually in Zoho by design** (deferred 2026-07-09). The app raises a
+  refund-decision task on cancel; there is no in-app flow to drive.
+- **#3 forfeit** — a human decision; the unwind (cancel appts, void UNPAID
+  invoices, raise the refund-decision task) is unit-tested, the keep/refund call
+  is manual in Zoho.
+- **#5 VAT-quarter attribution** — the maths lives in `lib/finance` and is
+  unit-tested; an E2E can't set differing tax points (Zoho dates at creation, no
+  UI backdating).
+- **#6 declined card + payment-matching** — needs the **takepayments sandbox**
+  (deferred until the merchant id lands).
+
+## Running locally (works today, no staging needed)
+
+The app runs on i9; local dev is the E2E target for everything that doesn't hit
+Zoho/takepayments. `.env.e2e` (gitignored) holds only the overrides — it's
+layered over `.env.local`, and critically pins `ZOHO_ORG_ID` to a dummy so a
+stray Zoho call fails closed instead of touching the live books.
+
+```
+# 1. Provision the three role logins in local Supabase
+node --env-file=.env.local --env-file=.env.e2e scripts/create-e2e-users.mjs
+
+# 2. Start the app under test with Zoho pointed away from the live org
+ZOHO_ORG_ID=E2E-STAGING-PENDING COMMS_DRYRUN=true npx next dev -H 0.0.0.0 -p 3016
+
+# 3. Seed the known state
+SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
+
+# 4. Run (env comes from .env.e2e)
+set -a; source .env.e2e; set +a
+npx playwright test                 # 100 pass, 6 skipped (money fixmes; +2 more when staging Zoho is wired)
+npx playwright test --project=crew  # just the crew role
+```
+
+**Re-run hygiene:** re-seed (step 3) before every full run. Several specs mutate
+shared seeded state (P0 #7 completes a crew job; the crew contractor spec signs
+the agreement), and the seed is the idempotent reset that restores the known
+state — a re-run without re-seeding will fail those specs. The seed refuses any
+non-local target (and hard-refuses the prod Supabase host); pass
+`SEED_REMOTE_CONFIRM=yes` only for a deliberate staging seed.
+
+## Turning on the money-path tests
+
+The staging org (**Demo Removals**, `20117092566`) is a **separate Zoho account**
+from Connor's live books — deliberate, so the staging credentials physically
+can't reach live. The org is chosen per API call, but a refresh token only sees
+orgs in the account it was issued for, so staging needs **its own token**.
+
+1. **Mint the staging token** (once). Follow the browser prep in
+   `scripts/zoho-staging-token.mjs` (create a Self Client under the demo@ login,
+   generate a grant code), then:
+   ```
+   node scripts/zoho-staging-token.mjs --client-id <id> --client-secret <secret> \
+     --code <grant> --org 20117092566 [--dc eu]
+   ```
+   It verifies the token sees Demo Removals and prints the `.env.e2e` block.
+2. In `.env.e2e`, paste that block (all four `ZOHO_*` vars) and comment out the
+   `ZOHO_ORG_ID=E2E-STAGING-PENDING` dummy. **All four must switch together** —
+   only changing the org id leaves the live token in `.env.local` in play, which
+   can't reach the staging org (it fails, safely, closed).
+3. Mirror the VAT config in Demo Removals (20% output rate + FRS 10% +
+   registration date 2026-06-01) so the VAT specs are meaningful.
+4. Start the dev server with `.env.e2e` **sourced** so the staging `ZOHO_*`
+   override `.env.local` (Next respects already-set `process.env` over `.env`
+   files), then reseed:
+   ```
+   set -a; source .env.e2e; set +a
+   COMMS_DRYRUN=true npx next dev -H 0.0.0.0 -p 3016
+   SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
+   ```
+5. The `customer accept → deposit invoice` test un-skips automatically; write the
+   P0 #1–#5 bodies against it.
+6. **P0 #6 + payment-matching** additionally need the takepayments sandbox creds.
 
 ## Setup
 

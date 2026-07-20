@@ -25,6 +25,9 @@ export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/artefacts/_output",
   globalSetup: "./e2e/fixtures/global-setup.ts",
+  // Cleans up staging-Zoho invoices the money specs raised (no-op when no
+  // staging Zoho is wired). Never touches the live org — see the file.
+  globalTeardown: "./e2e/fixtures/global-teardown.ts",
   // Shared seeded DB state → run serially so tests don't race each other's data.
   fullyParallel: false,
   workers: 1,
@@ -50,29 +53,31 @@ export default defineConfig({
     // Signs in each role once and stores its session (storageState).
     { name: "setup", testMatch: /auth\.setup\.ts/ },
 
+    // Specs are organised by role directory (e2e/<role>/*.spec.ts) so new
+    // feature files are picked up without touching this config.
     {
       name: "crew",
       dependencies: ["setup"],
-      testMatch: /(journeys\/crew|scenarios\/p0)\.spec\.ts/,
+      testMatch: /[\\/]crew[\\/].*\.spec\.ts$/,
       use: { storageState: `${authDir}/crew.json`, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
     {
       name: "office",
       dependencies: ["setup"],
-      testMatch: /journeys\/office\.spec\.ts/,
+      testMatch: /[\\/]office[\\/].*\.spec\.ts$/,
       use: { storageState: `${authDir}/office.json`, viewport: { width: 1280, height: 900 } },
     },
     {
       name: "estimator",
       dependencies: ["setup"],
-      testMatch: /journeys\/estimator\.spec\.ts/,
+      testMatch: /[\\/]estimator[\\/].*\.spec\.ts$/,
       use: { storageState: `${authDir}/estimator.json`, viewport: { width: 1280, height: 900 } },
     },
     {
-      // Customer-facing public pages (/q, /s) — no auth, phone-sized.
+      // Customer-facing public pages (/q, /s, /cv) — no auth, phone-sized.
       name: "public",
       dependencies: ["setup"],
-      testMatch: /journeys\/customer\.spec\.ts/,
+      testMatch: /[\\/]public[\\/].*\.spec\.ts$/,
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
   ],

@@ -42,6 +42,9 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/s/") ||
     // Customer cubic-survey self-fill — same token-as-credential model.
     path.startsWith("/cv/") ||
+    // Crew day sheet opened from the SMS with no login — same
+    // token-as-credential model (the page reads it, noindex, stale-expires).
+    path.startsWith("/sheet/") ||
     // Scheduled callers (Vercel cron / i9 tasks) authenticate with a bearer
     // secret INSIDE the route (requireUserOrCronSecret); a redirect-to-login
     // here would silently break them.
