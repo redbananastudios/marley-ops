@@ -18,12 +18,19 @@ import { getUnackedWebLeadsAction } from "@/app/actions/lead-alerts";
 
 export const dynamic = "force-dynamic";
 
+// Customer names ride in this JSON — belt-and-braces no-store so no proxy or
+// browser heuristic can ever cache it across sessions.
+const NO_STORE = { "cache-control": "no-store" };
+
 export async function GET() {
   try {
     const leads = await getUnackedWebLeadsAction();
-    return NextResponse.json({ leads });
+    return NextResponse.json({ leads }, { headers: NO_STORE });
   } catch {
     // Transient read failure — the poller keeps its last state and retries.
-    return NextResponse.json({ error: "Could not load new-lead alerts." }, { status: 500 });
+    return NextResponse.json(
+      { error: "Could not load new-lead alerts." },
+      { status: 500, headers: NO_STORE },
+    );
   }
 }

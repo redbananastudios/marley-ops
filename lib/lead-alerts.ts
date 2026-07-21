@@ -64,3 +64,25 @@ export interface UnackedWebLead {
   name: string;
   created_at: string;
 }
+
+/** A row created this long after it was submitted is an IMPORT, not a live lead. */
+export const IMPORT_GAP_MS = 24 * 3600 * 1000;
+
+/**
+ * True when an unacked website row looks like a historical IMPORT (the row was
+ * created long after the enquiry was submitted) rather than a genuinely fresh
+ * lead nobody has acknowledged yet. Mirrors migration 0071's guard exactly: a
+ * live-synced lead has created_at ≈ submitted_at, so it stays unacknowledged —
+ * and keeps its banner — until a human presses Acknowledge, no matter how many
+ * days it sits. Only the created/submitted gap identifies an import.
+ */
+export function isImportedUnackedRow(
+  createdAt: string | null,
+  alertSubmittedAt: string | null,
+): boolean {
+  if (!createdAt || !alertSubmittedAt) return false;
+  const created = Date.parse(createdAt);
+  const submitted = Date.parse(alertSubmittedAt);
+  if (!Number.isFinite(created) || !Number.isFinite(submitted)) return false;
+  return created - submitted > IMPORT_GAP_MS;
+}

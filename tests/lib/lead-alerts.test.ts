@@ -3,6 +3,8 @@ import {
   ALERT_POLL_MS,
   CHIME_MAX_REPEATS,
   CHIME_REPEAT_MS,
+  IMPORT_GAP_MS,
+  isImportedUnackedRow,
   nextChimeState,
   parseChimedLeadIds,
   serializeChimedLeadIds,
@@ -74,5 +76,30 @@ describe("device chime ledger", () => {
     expect(parsed.size).toBe(100);
     expect(parsed.has(ids[0])).toBe(false);
     expect(parsed.has(ids[104])).toBe(true);
+  });
+});
+
+describe("isImportedUnackedRow (the sync ack-repair guard)", () => {
+  const submitted = "2026-07-14T12:00:00Z";
+
+  it("flags a row created well after submission — a historical import", () => {
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", submitted)).toBe(true);
+  });
+
+  it("a live-synced lead (created ≈ submitted) is NEVER an import — no matter its age", () => {
+    // The weekend case: submitted Friday, still unacked Monday. The row was
+    // created moments after submission, so the machine must not ack it.
+    expect(isImportedUnackedRow("2026-07-14T12:00:05Z", submitted)).toBe(false);
+    // Exactly at the 24h boundary still counts as live (guard is strict >).
+    expect(
+      isImportedUnackedRow(new Date(Date.parse(submitted) + IMPORT_GAP_MS).toISOString(), submitted),
+    ).toBe(false);
+  });
+
+  it("missing or garbled timestamps never trigger the repair", () => {
+    expect(isImportedUnackedRow(null, submitted)).toBe(false);
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", null)).toBe(false);
+    expect(isImportedUnackedRow("not-a-date", submitted)).toBe(false);
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", "garbled")).toBe(false);
   });
 });

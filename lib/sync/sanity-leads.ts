@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
+import { isImportedUnackedRow } from "@/lib/lead-alerts";
 import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import type { Database } from "@/lib/supabase/database.types";
@@ -202,7 +203,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
 
       const { data: existing } = await admin
         .from("leads")
-        .select("id, web_alert_ack_at")
+        .select("id, web_alert_ack_at, created_at")
         .eq("sanity_id", doc._id)
         .maybeSingle();
 
@@ -212,9 +213,14 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
           .from("leads")
           .update({
             ...baseFields,
-            // Repair historical rows imported by the pre-freshness sync. A
-            // genuinely fresh, still-unseen lead remains unacknowledged.
-            ...(existing.web_alert_ack_at === null && !isFreshAlert
+            // Repair historical rows imported by the pre-freshness sync — the
+            // created/submitted gap identifies an import (migration 0071's
+            // guard). A genuinely fresh lead has created_at ≈ submitted_at, so
+            // it stays unacknowledged FOREVER until a human acknowledges it —
+            // sitting unacked over a weekend must never machine-ack the alarm.
+            ...(existing.web_alert_ack_at === null &&
+            !isFreshAlert &&
+            isImportedUnackedRow(existing.created_at, alertSubmittedAt)
               ? { web_alert_ack_at: syncNow.toISOString() }
               : {}),
           })
