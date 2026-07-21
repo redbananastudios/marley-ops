@@ -20,7 +20,7 @@ import Link from "next/link";
 import { Volume2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { ackWebLeadsAction, getUnackedWebLeadsAction } from "@/app/actions/lead-alerts";
+import { ackWebLeadsAction } from "@/app/actions/lead-alerts";
 import {
   ALERT_POLL_MS,
   CHIMED_STORAGE_KEY,
@@ -34,6 +34,19 @@ import {
 import { ALERT_LEDGER_CACHE, ALERT_MARKER_PATH } from "@/lib/pwa/cache-rules";
 
 type WindowWithAudio = Window & { webkitAudioContext?: typeof AudioContext };
+
+/**
+ * Poll the unacked-lead read over plain fetch, NOT a server action. Server
+ * actions share the router's navigation queue, so a mount/focus-time action
+ * dispatch can supersede an in-flight redirect (it reproducibly swallowed the
+ * post-login / -> /estimator hop). A fetch cannot touch the router.
+ */
+async function fetchUnackedWebLeads(): Promise<UnackedWebLead[]> {
+  const res = await fetch("/api/lead-alerts", { cache: "no-store" });
+  if (!res.ok) throw new Error("Could not load new-lead alerts.");
+  const body = (await res.json()) as { leads?: UnackedWebLead[] };
+  return Array.isArray(body.leads) ? body.leads : [];
+}
 
 async function readLastOsNotificationAt(): Promise<number | null> {
   if (typeof caches === "undefined") return null;
@@ -183,7 +196,7 @@ export function NewLeadAlert() {
     const sequence = ++pollSequenceRef.current;
     try {
       const [rows, osNotifiedAt] = await Promise.all([
-        getUnackedWebLeadsAction(),
+        fetchUnackedWebLeads(),
         readLastOsNotificationAt(),
       ]);
       if (sequence !== pollSequenceRef.current) return;
