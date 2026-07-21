@@ -17,7 +17,7 @@ import {
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { vehicleHasExpiryDue } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
-import { jobCost, boxesFromItems } from "@/lib/margin";
+import { jobCost, boxesFromItems, commissionCost } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
@@ -98,7 +98,7 @@ export default async function DashboardPage() {
         supabase
           .from("leads")
           .select(
-            "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+            "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, referral_commission, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
           )
           .order("submitted_at", { ascending: false })
           .order("id")
@@ -123,6 +123,15 @@ export default async function DashboardPage() {
   const leads = (leadsData ?? []) as LeadLite[];
   const appts = apptData ?? [];
   const quotes = quoteData ?? [];
+
+  // Lead-level 3rd-party referral fees (numeric arrives as a string) — folded
+  // into each won job's cost below so margin reflects what the job really made.
+  const commissionByLead = new Map(
+    (leadsData ?? []).map((l) => [
+      l.id as string,
+      (l as { referral_commission?: number | string | null }).referral_commission ?? null,
+    ]),
+  );
 
   // Server component: a per-request timestamp is correct here (this is not a
   // client render that must stay idempotent across re-renders).
@@ -159,7 +168,9 @@ export default async function DashboardPage() {
             },
             settings,
           );
-          return [q.lead_id as string, c.total];
+          // A lead-level 3rd-party referral fee is a real cost of winning this
+          // job — fold it in so the profit/margin KPI shows what's actually made.
+          return [q.lead_id as string, c.total + commissionCost(commissionByLead.get(q.lead_id as string))];
         }),
     ),
   };

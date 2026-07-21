@@ -352,6 +352,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 property_size: lead.property_size ?? "",
                 preferred_date: dateInput(lead.preferred_date),
                 estimate_given: lead.estimate_given != null ? String(lead.estimate_given) : "",
+                referral_commission:
+                  lead.referral_commission != null ? String(lead.referral_commission) : "",
                 notes: lead.notes ?? "",
               }}
             />
@@ -368,6 +370,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           <Fact label="Entry channel" value={CHANNEL_LABELS[lead.entry_channel] ?? lead.entry_channel} />
           {surveyEstimatorName ? <Fact label="Estimator" value={surveyEstimatorName} /> : null}
           {lead.estimate_given != null ? <Fact label="Estimate given" value={gbp(lead.estimate_given)} /> : null}
+          {Number(lead.referral_commission) > 0 ? (
+            <Fact label="3rd-party commission" value={gbp(Number(lead.referral_commission))} />
+          ) : null}
           <Fact label="Submitted" value={fmtDate(lead.submitted_at ?? lead.created_at)} />
           {previousCount > 0 ? (
             <div>
