@@ -4,6 +4,8 @@ import {
   CHIME_MAX_REPEATS,
   CHIME_REPEAT_MS,
   nextChimeState,
+  parseChimedLeadIds,
+  serializeChimedLeadIds,
 } from "@/lib/lead-alerts";
 
 const A = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -53,5 +55,24 @@ describe("nextChimeState", () => {
     expect(ALERT_POLL_MS).toBe(20_000);
     expect(CHIME_REPEAT_MS).toBe(3_000);
     expect(CHIME_MAX_REPEATS).toBe(10);
+  });
+});
+
+describe("device chime ledger", () => {
+  it("round-trips valid UUIDs and rejects malformed storage", () => {
+    const encoded = serializeChimedLeadIds(new Set([A, B]));
+    expect(parseChimedLeadIds(encoded)).toEqual(new Set([A, B]));
+    expect(parseChimedLeadIds("not-json")).toEqual(new Set());
+    expect(parseChimedLeadIds(JSON.stringify([A, "not-a-uuid"]))).toEqual(new Set([A]));
+  });
+
+  it("caps the ledger to the latest 100 ids", () => {
+    const ids = Array.from({ length: 105 }, (_, i) =>
+      `00000000-0000-4000-8000-${i.toString().padStart(12, "0")}`,
+    );
+    const parsed = parseChimedLeadIds(JSON.stringify(ids));
+    expect(parsed.size).toBe(100);
+    expect(parsed.has(ids[0])).toBe(false);
+    expect(parsed.has(ids[104])).toBe(true);
   });
 });

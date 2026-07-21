@@ -44,7 +44,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         .range(f, t),
     ),
     fetchAllRows((f, t) =>
-      supabase.from("quotes").select("lead_id, grand_total, agreed_price, status, created_at").order("id").range(f, t),
+      supabase.from("quotes").select("lead_id, quote_ref, grand_total, agreed_price, status, created_at").order("id").range(f, t),
     ),
     fetchAllRows((f, t) =>
       supabase.from("appointments").select("lead_id, appt_type, starts_at, status, estimator_id").order("id").range(f, t),
@@ -54,14 +54,30 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   ]);
 
   /* per-lead best value: accepted agreed price, else latest quoted total */
-  const valueMap = new Map<string, { accepted: number | null; latest: number | null; latestAt: number }>();
+  const valueMap = new Map<string, {
+    accepted: number | null;
+    acceptedRef: string | null;
+    latest: number | null;
+    latestRef: string | null;
+    latestAt: number;
+  }>();
   for (const q of quoteData) {
     if (!q.lead_id) continue;
-    const cur = valueMap.get(q.lead_id) ?? { accepted: null, latest: null, latestAt: 0 };
-    if (q.status === "accepted") cur.accepted = Number(q.agreed_price ?? q.grand_total ?? 0);
+    const cur = valueMap.get(q.lead_id) ?? {
+      accepted: null,
+      acceptedRef: null,
+      latest: null,
+      latestRef: null,
+      latestAt: 0,
+    };
+    if (q.status === "accepted") {
+      cur.accepted = Number(q.agreed_price ?? q.grand_total ?? 0);
+      cur.acceptedRef = q.quote_ref;
+    }
     const at = new Date(q.created_at ?? 0).getTime();
     if (at >= cur.latestAt && q.grand_total != null) {
       cur.latest = Number(q.grand_total);
+      cur.latestRef = q.quote_ref;
       cur.latestAt = at;
     }
     valueMap.set(q.lead_id, cur);
@@ -118,6 +134,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
       estimator_id: ownerEstimatorId(l.estimator_id, surveyEstimator.get(l.id)),
       source: classifySource(l as LeadLite),
       value: v ? (v.accepted ?? v.latest) : null,
+      reference: v ? (v.acceptedRef ?? v.latestRef) : null,
       surveyDue: upcomingSurveyAt.has(l.id) || l.status === "survey_booked",
       surveyAt: upcomingSurveyAt.get(l.id) ?? null,
       retry: retryMap.get(l.id) ?? null,
@@ -125,10 +142,10 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   });
 
   return (
-    <main className="flex-1 p-6 md:p-8">
+    <main className="min-h-full flex-1 bg-[#F7F8FA] p-6 md:p-8">
       <PageHeader eyebrow="Pipeline" title="Leads">
         <SyncLeadsButton />
-        <Button asChild>
+        <Button asChild className="bg-[#C03838] hover:bg-[#A8221C]">
           <Link href="/leads/new">
             <Plus strokeWidth={1.75} />
             Add lead

@@ -278,15 +278,18 @@ export function crewJobPush(opts: {
 export const ENQUIRY_FRESH_WINDOW_MS = 24 * 3600 * 1000;
 export const ENQUIRY_DIGEST_THRESHOLD = 3;
 
+/** Shared freshness rule for both push delivery and the in-app audio alarm. */
+export function isFreshEnquiryTimestamp(submittedAt: string | null, now: Date): boolean {
+  if (!submittedAt) return false;
+  const t = Date.parse(submittedAt);
+  return Number.isFinite(t) && now.getTime() - t <= ENQUIRY_FRESH_WINDOW_MS && t <= now.getTime() + 60_000;
+}
+
 export function decideEnquiryPushes(
   inserted: readonly { id: string; name: string | null; submittedAt: string | null }[],
   now: Date,
 ): PushEvent[] {
-  const fresh = inserted.filter((l) => {
-    if (!l.submittedAt) return false;
-    const t = Date.parse(l.submittedAt);
-    return Number.isFinite(t) && now.getTime() - t <= ENQUIRY_FRESH_WINDOW_MS && t <= now.getTime() + 60_000;
-  });
+  const fresh = inserted.filter((l) => isFreshEnquiryTimestamp(l.submittedAt, now));
   if (fresh.length === 0) return [];
   if (fresh.length > ENQUIRY_DIGEST_THRESHOLD) return [newEnquiryDigestPush(fresh.length)];
   return fresh.map((l) => newEnquiryPush(l));

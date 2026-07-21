@@ -11,6 +11,25 @@
 export const ALERT_POLL_MS = 20_000;
 export const CHIME_REPEAT_MS = 3_000;
 export const CHIME_MAX_REPEATS = 10;
+export const CHIMED_STORAGE_KEY = "mm-chimed-web-leads-v1";
+
+/** Parse the device-scoped chime ledger defensively; UUIDs are retained only. */
+export function parseChimedLeadIds(raw: string | null): Set<string> {
+  if (!raw) return new Set();
+  try {
+    const value = JSON.parse(raw) as unknown;
+    if (!Array.isArray(value)) return new Set();
+    return new Set(value.filter((id): id is string =>
+      typeof id === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
+    ).slice(-100));
+  } catch {
+    return new Set();
+  }
+}
+
+export function serializeChimedLeadIds(ids: ReadonlySet<string>): string {
+  return JSON.stringify([...ids].slice(-100));
+}
 
 export interface ChimeDecision {
   /** Ids we have now chimed (or are chiming) for. Feed back into the next call. */

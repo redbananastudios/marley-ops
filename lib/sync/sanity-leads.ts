@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
-import { decideEnquiryPushes } from "@/lib/push/categories";
+import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -155,6 +155,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   let failed = 0;
   let firstError: string | undefined;
   const insertedLeads: { id: string; name: string | null; submittedAt: string | null }[] = [];
+  const syncNow = new Date();
 
   for (const doc of docs) {
     // One bad doc must not abort the batch — isolate each.
@@ -167,6 +168,8 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
       });
 
       const submittedAt = toTimestampOrNull(doc.submittedAt);
+      const alertSubmittedAt = submittedAt ?? toTimestampOrNull(doc._createdAt);
+      const isFreshAlert = isFreshEnquiryTimestamp(alertSubmittedAt, syncNow);
       const baseFields = {
         client_id: clientId,
         entry_channel: "web" as const,
@@ -194,24 +197,40 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         wbraid: doc.wbraid ?? null,
         fbclid: doc.fbclid ?? null,
         msclkid: doc.msclkid ?? null,
-        ...(submittedAt ? { submitted_at: submittedAt } : {}),
+        ...(alertSubmittedAt ? { submitted_at: alertSubmittedAt } : {}),
       };
 
       const { data: existing } = await admin
         .from("leads")
-        .select("id")
+        .select("id, web_alert_ack_at")
         .eq("sanity_id", doc._id)
         .maybeSingle();
 
       if (existing) {
         // Update only non-status fields — preserve any panel-driven status change.
-        const { error } = await admin.from("leads").update(baseFields).eq("id", existing.id);
+        const { error } = await admin
+          .from("leads")
+          .update({
+            ...baseFields,
+            // Repair historical rows imported by the pre-freshness sync. A
+            // genuinely fresh, still-unseen lead remains unacknowledged.
+            ...(existing.web_alert_ack_at === null && !isFreshAlert
+              ? { web_alert_ack_at: syncNow.toISOString() }
+              : {}),
+          })
+          .eq("id", existing.id);
         if (error) throw error;
         updated += 1;
       } else {
         const { data: created, error } = await admin
           .from("leads")
-          .insert({ ...baseFields, status: mapStatus(doc.status) })
+          .insert({
+            ...baseFields,
+            status: mapStatus(doc.status),
+            // Historical imports must not surface as new desktop alarms. Only
+            // genuinely fresh inserts start unacknowledged.
+            web_alert_ack_at: isFreshAlert ? null : syncNow.toISOString(),
+          })
           .select("id")
           .single();
         if (error) throw error;
@@ -222,7 +241,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         insertedLeads.push({
           id: created.id,
           name: doc.name ?? null,
-          submittedAt: submittedAt ?? toTimestampOrNull(doc._createdAt),
+          submittedAt: alertSubmittedAt,
         });
       }
     } catch (docErr) {
@@ -234,7 +253,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   // Office push for freshly-landed enquiries (best-effort — sendPushForEvent
   // never throws). The freshness window + digest rule keep the cutover
   // backfill (months of history in one run) completely silent.
-  for (const event of decideEnquiryPushes(insertedLeads, new Date())) {
+  for (const event of decideEnquiryPushes(insertedLeads, syncNow)) {
     await sendPushForEvent(event);
   }
 
