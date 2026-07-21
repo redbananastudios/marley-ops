@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   CACHE_VERSION,
+  ALERT_LEDGER_CACHE,
+  ALERT_MARKER_PATH,
   JOBS_DOC_CACHE,
   STATIC_CACHE,
   OFFLINE_URL,
@@ -41,7 +43,8 @@ describe("cache names", () => {
   it("are versioned and all managed", () => {
     expect(JOBS_DOC_CACHE).toContain(CACHE_VERSION);
     expect(STATIC_CACHE).toContain(CACHE_VERSION);
-    expect(MANAGED_CACHES).toEqual([JOBS_DOC_CACHE, STATIC_CACHE]);
+    expect(ALERT_LEDGER_CACHE).toContain(CACHE_VERSION);
+    expect(MANAGED_CACHES).toEqual([JOBS_DOC_CACHE, STATIC_CACHE, ALERT_LEDGER_CACHE]);
   });
 });
 
@@ -53,6 +56,8 @@ describe("public/sw.js mirrors the rules", () => {
   it("uses the same cache names, offline url and warm header", () => {
     expect(sw).toContain(JOBS_DOC_CACHE);
     expect(sw).toContain(STATIC_CACHE);
+    expect(sw).toContain(ALERT_LEDGER_CACHE);
+    expect(sw).toContain(ALERT_MARKER_PATH);
     expect(sw).toContain(OFFLINE_URL);
     expect(sw).toContain(WARM_HEADER);
   });
@@ -64,7 +69,7 @@ describe("public/sw.js mirrors the rules", () => {
   });
 
   it("keeps cache writes and trims inside the fetch lifetime", () => {
-    expect(sw.match(/await cache\.put/g)).toHaveLength(2);
+    expect(sw.match(/await cache\.put/g)).toHaveLength(3);
     expect(sw).toContain("await trimCache(STATIC_CACHE, MAX_STATIC)");
     expect(sw).toContain("await trimCache(JOBS_DOC_CACHE, MAX_JOB_DOCS)");
     expect(sw).not.toMatch(/cache\.put\([^\n]+\.then\(/);

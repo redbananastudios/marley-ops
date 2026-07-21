@@ -16,7 +16,23 @@
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Search, Phone, PhoneMissed, MessageCircle, Check, Undo2, FileText, CalendarPlus, Loader2, Home, Clock } from "lucide-react";
+import {
+  Search,
+  Phone,
+  PhoneMissed,
+  MessageCircle,
+  Check,
+  Undo2,
+  FileText,
+  CalendarPlus,
+  Loader2,
+  Home,
+  Clock,
+  MoreHorizontal,
+  ExternalLink,
+  LayoutGrid,
+  Rows3,
+} from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { noReplyForLeadAction } from "@/app/(dashboard)/follow-ups/actions";
@@ -28,9 +44,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { LeadStatusBadge, LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
 import { Pager, usePager } from "@/components/ui/pager";
-import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   markLeadContactedAction,
@@ -53,6 +75,8 @@ export interface LeadCard {
   estimator_id: string | null;
   source: SourceKey;
   value: number | null;
+  /** Accepted quote reference, otherwise the latest quote reference. */
+  reference: string | null;
   surveyDue: boolean;
   /** Soonest upcoming survey appointment, if one is booked. */
   surveyAt: string | null;
@@ -62,6 +86,7 @@ export interface LeadCard {
 
 type PresetKey = "all" | "new" | "uncontacted" | "retry" | "contacted" | "surveys" | "mine" | "week";
 type SortKey = "recent" | "oldest" | "uncontacted" | "contacted";
+type ViewMode = "board" | "table";
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "recent", label: "Most recent" },
@@ -80,11 +105,33 @@ const SOURCE_LABEL: Record<SourceKey, string> = Object.fromEntries(
 const CLOSED = new Set(["completed", "declined"]);
 const DAY = 86_400_000;
 
+const BOARD_STATUS_STYLE: Record<string, { border: string; badge: string }> = {
+  website_enquiry: { border: "#E58A19", badge: "bg-[#FFF4E5] text-[#B56300]" },
+  survey_booked: { border: "#8B5CF6", badge: "bg-[#F2ECFF] text-[#6D3DD1]" },
+  quoted: { border: "#27A862", badge: "bg-[#EAF8F0] text-[#187944]" },
+  provisional: { border: "#2F80ED", badge: "bg-[#EAF3FF] text-[#1D5FBF]" },
+  confirmed: { border: "#C03838", badge: "bg-[#FBECEC] text-[#A8221C]" },
+  completed: { border: "#27A862", badge: "bg-[#EAF8F0] text-[#187944]" },
+  declined: { border: "#697386", badge: "bg-[#F1F3F5] text-[#475467]" },
+};
+
+const FALLBACK_STATUS_STYLE = { border: "#697386", badge: "bg-[#F1F3F5] text-[#475467]" };
+
+function BoardStatusBadge({ status }: { status: string }) {
+  const style = BOARD_STATUS_STYLE[status] ?? FALLBACK_STATUS_STYLE;
+  const label = LEAD_STATUS_META[status]?.label ?? status.replaceAll("_", " ");
+  return (
+    <span className={cn("inline-flex shrink-0 rounded-[5px] px-2 py-1 text-[10px] font-bold leading-none uppercase", style.badge)}>
+      {label}
+    </span>
+  );
+}
+
 const tsOf = (l: LeadCard): number => new Date(l.submitted_at || l.created_at || 0).getTime();
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-/** When the lead came in — e.g. "25 Jun 2026, 12:45". */
+/** When the lead came in — compact enough to scan inside the card. */
 function fmtLeadDate(d: string | null): string {
   if (!d) return "—";
   const t = new Date(d);
@@ -92,7 +139,6 @@ function fmtLeadDate(d: string | null): string {
   return t.toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
-    year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -138,6 +184,7 @@ export function LeadsBoard({
   );
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<SortKey>("recent");
+  const [view, setView] = useState<ViewMode>("board");
 
   const base = useMemo(
     () => (tab === "web" ? leads.filter((l) => l.entry_channel === "web") : leads),
@@ -235,10 +282,22 @@ export function LeadsBoard({
               type="button"
               onClick={() => setPreset(p.key)}
               aria-pressed={active}
-              className={filterChipClass(active)}
+              className={cn(
+                "focus-ring inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 py-1 text-sm font-medium transition-colors",
+                active
+                  ? "border-[#E7A7A7] bg-[#FBECEC] text-[#A8221C]"
+                  : "border-[#E2E6EC] bg-white text-[#667085] hover:border-[#C8CED8] hover:bg-[#F7F8FA] hover:text-[#344054]",
+              )}
             >
               {p.label}
-              <span className={filterChipCountClass(active)}>{count}</span>
+              <span
+                className={cn(
+                  "tabular rounded-full px-1.5 text-xs",
+                  active ? "bg-white/70 text-[#A8221C]" : "bg-[#F1F3F5] text-[#667085]",
+                )}
+              >
+                {count}
+              </span>
             </button>
           );
         })}
@@ -298,6 +357,32 @@ export function LeadsBoard({
           </SelectContent>
         </Select>
         <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
+        <div className="ml-auto inline-flex rounded-md border border-[#E2E6EC] bg-[#F1F3F5] p-0.5" aria-label="Lead view">
+          <button
+            type="button"
+            onClick={() => setView("board")}
+            aria-pressed={view === "board"}
+            className={cn(
+              "focus-ring inline-flex min-h-8 items-center gap-1.5 rounded-[5px] px-2.5 text-xs font-semibold transition-colors",
+              view === "board" ? "bg-white text-[#172033] shadow-xs" : "text-[#667085] hover:text-[#172033]",
+            )}
+          >
+            <LayoutGrid className="size-3.5" aria-hidden />
+            Board
+          </button>
+          <button
+            type="button"
+            onClick={() => setView("table")}
+            aria-pressed={view === "table"}
+            className={cn(
+              "focus-ring inline-flex min-h-8 items-center gap-1.5 rounded-[5px] px-2.5 text-xs font-semibold transition-colors",
+              view === "table" ? "bg-white text-[#172033] shadow-xs" : "text-[#667085] hover:text-[#172033]",
+            )}
+          >
+            <Rows3 className="size-3.5" aria-hidden />
+            Table
+          </button>
+        </div>
       </div>
 
       {/* card grid — 3 per row on desktop, paged so big datasets stay fast */}
@@ -307,11 +392,15 @@ export function LeadsBoard({
         </div>
       ) : (
         <>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {pager.paged.map((l) => (
-              <LeadCardItem key={l.id} lead={l} />
-            ))}
-          </div>
+          {view === "board" ? (
+            <div data-testid="leads-board" className="mt-3 grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {pager.paged.map((l) => (
+                <LeadCardItem key={l.id} lead={l} />
+              ))}
+            </div>
+          ) : (
+            <LeadTable leads={pager.paged} />
+          )}
           <Pager
             page={pager.page}
             pages={pager.pages}
@@ -322,6 +411,85 @@ export function LeadsBoard({
           />
         </>
       )}
+    </div>
+  );
+}
+
+function LeadTable({ leads }: { leads: LeadCard[] }) {
+  return (
+    <div data-testid="leads-table" className="mt-3 overflow-x-auto rounded-[10px] border border-[#E2E6EC] bg-white">
+      <table className="w-full min-w-[920px] border-collapse text-left">
+        <thead className="bg-[#F7F8FA] text-[11px] font-bold uppercase tracking-[0.04em] text-[#667085]">
+          <tr>
+            <th className="px-4 py-2.5">Customer</th>
+            <th className="px-4 py-2.5">Move</th>
+            <th className="px-4 py-2.5">Status</th>
+            <th className="px-4 py-2.5">Quote</th>
+            <th className="px-4 py-2.5">Next action</th>
+            <th className="px-4 py-2.5 text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-[#E2E6EC]">
+          {leads.map((lead) => {
+            const active = !CLOSED.has(lead.status);
+            const route =
+              lead.from_postcode || lead.to_postcode
+                ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
+                : "No postcodes";
+            return (
+              <tr key={lead.id} className="hover:bg-[#F7F8FA]">
+                <td className="px-4 py-3 align-middle">
+                  <Link href={`/leads/${lead.id}`} className="focus-ring rounded-sm text-sm font-bold text-[#172033] hover:text-[#A8221C]">
+                    {lead.name ?? "—"}
+                  </Link>
+                  <p className="mt-0.5 max-w-48 truncate text-[11px] text-[#667085]">
+                    {SOURCE_LABEL[lead.source]}
+                    {lead.reference ? ` · ${lead.reference}` : ""}
+                  </p>
+                </td>
+                <td className="px-4 py-3 align-middle">
+                  <p className="text-[13px] font-semibold text-[#344054]">{route}</p>
+                  {lead.property_size ? <p className="mt-0.5 text-[11px] text-[#667085]">{lead.property_size}</p> : null}
+                </td>
+                <td className="px-4 py-3 align-middle"><BoardStatusBadge status={lead.status} /></td>
+                <td className="px-4 py-3 align-middle">
+                  {lead.value != null ? (
+                    <span className="tabular font-bold text-[#C03838]">{gbp(lead.value)}</span>
+                  ) : (
+                    <span className="text-[#98A2B3]">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 align-middle">
+                  <ResponseChip lead={lead} />
+                  {CLOSED.has(lead.status) ? (
+                    <span className="text-xs text-[#667085]">Received {fmtLeadDate(lead.submitted_at || lead.created_at)}</span>
+                  ) : null}
+                </td>
+                <td className="px-4 py-3 align-middle">
+                  <div className="flex items-center justify-end gap-1">
+                    {lead.phone ? (
+                      <a href={`tel:${lead.phone}`} aria-label={`Call ${lead.name ?? "lead"}`} className="focus-ring rounded-md p-2 text-[#667085] hover:bg-white hover:text-[#172033]">
+                        <Phone className="size-4" aria-hidden />
+                      </a>
+                    ) : null}
+                    {active ? (
+                      <Link href={`/schedule/surveys?leadId=${lead.id}`} aria-label={`Book survey for ${lead.name ?? "lead"}`} className="focus-ring rounded-md p-2 text-[#667085] hover:bg-white hover:text-[#172033]">
+                        <CalendarPlus className="size-4" aria-hidden />
+                      </Link>
+                    ) : null}
+                    <Link href={`/quotes/new?leadId=${lead.id}`} prefetch={false} aria-label={`New quote for ${lead.name ?? "lead"}`} className="focus-ring rounded-md p-2 text-[#667085] hover:bg-white hover:text-[#172033]">
+                      <FileText className="size-4" aria-hidden />
+                    </Link>
+                    <Link href={`/leads/${lead.id}`} aria-label={`Open ${lead.name ?? "lead"}`} className="focus-ring rounded-md p-2 text-[#667085] hover:bg-white hover:text-[#172033]">
+                      <ExternalLink className="size-4" aria-hidden />
+                    </Link>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -339,11 +507,11 @@ function fmtWhen(d: string | null): string {
   return `${t.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}, ${time}`;
 }
 
-function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
+function ResponseChip({ lead }: { lead: LeadCard }) {
   if (CLOSED.has(lead.status)) return null;
   if (lead.retry && !lead.first_contacted_at) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-medium text-warn">
+      <span className="inline-flex items-center gap-1 rounded-[5px] border border-[#F1CACA] bg-[#FBECEC] px-2 py-1 text-[11px] font-semibold leading-none text-[#A8221C]">
         <PhoneMissed className="size-3 shrink-0" strokeWidth={2} />
         Retry {fmtWhen(lead.retry.dueAt)} · attempt {lead.retry.attempts}
       </span>
@@ -351,7 +519,7 @@ function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
   }
   if (lead.surveyAt) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-pill bg-[#eff6ff] px-2 py-0.5 text-xs font-medium text-[#2563eb]">
+      <span className="inline-flex items-center gap-1 rounded-[5px] bg-[#EAF3FF] px-2 py-1 text-[11px] font-semibold leading-none text-[#1D5FBF]">
         <CalendarPlus className="size-3 shrink-0" strokeWidth={2} />
         Survey {fmtWhen(lead.surveyAt)}
       </span>
@@ -359,22 +527,17 @@ function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
   }
   if (lead.first_contacted_at) {
     return (
-      <span className="inline-flex items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-xs text-mist-500">
+      <span className="inline-flex items-center gap-1 rounded-[5px] bg-[#F1F3F5] px-2 py-1 text-[11px] font-medium leading-none text-[#667085]">
+        <Check className="size-3 shrink-0" strokeWidth={2} />
         Contacted {ago(lead.first_contacted_at)} ago
       </span>
     );
   }
-  const mins = Math.floor((now - tsOf(lead)) / 60000);
-  const tone = mins > 240 ? "danger" : mins > 60 ? "warn" : "neutral";
-  const cls =
-    tone === "danger"
-      ? "bg-danger-bg text-danger"
-      : tone === "warn"
-        ? "bg-warn-bg text-warn"
-        : "bg-mist-100 text-charcoal";
+  const age = ago(lead.submitted_at || lead.created_at);
   return (
-    <span className={cn("inline-flex items-center gap-1 rounded-pill px-2 py-0.5 text-xs font-medium", cls)}>
-      {ago(lead.submitted_at || lead.created_at)} · not contacted
+    <span className="inline-flex items-center gap-1 rounded-[5px] border border-[#F1CACA] bg-[#FBECEC] px-2 py-1 text-[11px] font-semibold leading-none text-[#A8221C]">
+      <Clock className="size-3 shrink-0" strokeWidth={2} />
+      Not contacted{age ? ` · ${age}` : ""}
     </span>
   );
 }
@@ -382,8 +545,6 @@ function ResponseChip({ lead, now }: { lead: LeadCard; now: number }) {
 function LeadCardItem({ lead }: { lead: LeadCard }) {
   const router = useRouter();
   const [pending, start] = useTransition();
-  // Stable clock for the response-age chip — lazy init keeps render pure.
-  const [now] = useState(() => Date.now());
   const route =
     lead.from_postcode || lead.to_postcode
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
@@ -392,6 +553,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
   const active = !CLOSED.has(lead.status);
   const uncontacted = active && !lead.first_contacted_at;
   const contacted = active && !!lead.first_contacted_at;
+  const statusStyle = BOARD_STATUS_STYLE[lead.status] ?? FALLBACK_STATUS_STYLE;
 
   function markContacted() {
     start(async () => {
@@ -427,146 +589,157 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
   }
 
   return (
-    <div className="flex flex-col overflow-hidden rounded-lg border border-border bg-card transition-shadow hover:shadow-sm">
-      {/* card body — taps through to the lead */}
-      <Link href={`/leads/${lead.id}`} className="flex flex-1 flex-col gap-3 p-4">
-        {/* identity row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex min-w-0 items-center gap-2.5">
-            <span
-              className="mt-1 size-2.5 shrink-0 rounded-full"
-              style={{ background: SOURCE_COLOR[lead.source] }}
-              title={SOURCE_LABEL[lead.source]}
-            />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-foreground">{lead.name ?? "—"}</p>
-              <p className="truncate text-xs text-mist-400">{SOURCE_LABEL[lead.source]}</p>
-            </div>
+    <article
+      style={{ borderTopColor: statusStyle.border }}
+      className="group flex h-full flex-col overflow-hidden rounded-[10px] border border-t-4 border-[#E2E6EC] bg-white shadow-[0_2px_5px_rgba(16,24,40,0.05)] transition-[transform,border-color,box-shadow] duration-150 motion-safe:hover:-translate-y-px hover:border-[#C8CED8] hover:shadow-[0_5px_12px_rgba(16,24,40,0.09)]"
+    >
+      <div className="flex min-h-[122px] flex-1 flex-col px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Link
+              href={`/leads/${lead.id}`}
+              className="focus-ring min-w-0 rounded-sm text-[15px] font-bold leading-5 text-[#172033] hover:text-[#A8221C]"
+            >
+              <span className="block truncate">{lead.name ?? "—"}</span>
+            </Link>
+            <BoardStatusBadge status={lead.status} />
           </div>
-          <LeadStatusBadge status={lead.status} />
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                aria-label={`More actions for ${lead.name ?? "lead"}`}
+                className="focus-ring -mt-1 -mr-1 flex size-8 shrink-0 items-center justify-center rounded-md text-[#667085] hover:bg-[#F1F3F5] hover:text-[#172033]"
+              >
+                {pending ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-5" strokeWidth={1.75} />}
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem asChild>
+                <Link href={`/leads/${lead.id}`}>
+                  <ExternalLink />
+                  Open lead
+                </Link>
+              </DropdownMenuItem>
+              {wa ? (
+                <DropdownMenuItem asChild>
+                  <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer">
+                    <MessageCircle />
+                    WhatsApp
+                  </a>
+                </DropdownMenuItem>
+              ) : null}
+              {(uncontacted || contacted || active) ? <DropdownMenuSeparator /> : null}
+              {uncontacted ? (
+                <DropdownMenuItem onSelect={markContacted} disabled={pending}>
+                  <Check />
+                  Mark contacted
+                </DropdownMenuItem>
+              ) : null}
+              {contacted ? (
+                <DropdownMenuItem onSelect={markUncontacted} disabled={pending}>
+                  <Undo2 />
+                  Mark uncontacted
+                </DropdownMenuItem>
+              ) : null}
+              {active ? (
+                <DropdownMenuItem onSelect={logNoReply} disabled={pending}>
+                  <PhoneMissed />
+                  No reply — retry tomorrow
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
-        {/* route + value */}
-        <div className="flex items-center justify-between gap-3">
-          <span className="tabular min-w-0 truncate text-sm text-foreground">{route}</span>
-          {lead.value != null ? (
-            <span className="tabular shrink-0 text-sm font-semibold text-foreground">{gbp(lead.value)}</span>
-          ) : null}
-        </div>
-
-        {/* contact line */}
-        <p className="truncate text-xs text-mist-400">
-          {[lead.phone, lead.email].filter(Boolean).join(" · ") || "no contact details"}
-        </p>
-
-        {/* move type + lead date */}
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1.5">
-          {lead.property_size ? (
-            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-[#ecfdf5] px-2 py-0.5 text-xs font-medium text-[#16a34a]">
-              <Home className="size-3 shrink-0" strokeWidth={2} />
-              <span className="truncate">{lead.property_size}</span>
+        <Link href={`/leads/${lead.id}`} className="focus-ring mt-1.5 flex flex-1 flex-col rounded-sm">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+            <span className="tabular min-w-0 truncate text-[13px] font-semibold text-[#344054]">{route}</span>
+            <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-[11px] text-[#667085]">
+              <span
+                aria-hidden
+                className="size-1.5 shrink-0 rounded-full"
+                style={{ background: SOURCE_COLOR[lead.source] }}
+              />
+              <span className="shrink-0">{SOURCE_LABEL[lead.source]}</span>
+              {lead.reference ? (
+                <>
+                  <span aria-hidden>·</span>
+                  <span className="truncate font-medium text-[#475467]">{lead.reference}</span>
+                </>
+              ) : null}
             </span>
-          ) : (
-            <span className="inline-flex min-w-0 items-center gap-1 rounded-pill bg-muted px-2 py-0.5 text-xs text-mist-400">
-              <Home className="size-3 shrink-0" strokeWidth={1.75} />
-              <span className="truncate">Size not given</span>
-            </span>
-          )}
-          <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-[#eff6ff] px-2 py-0.5 text-xs font-medium tabular text-[#2563eb]">
-            <Clock className="size-3 shrink-0" strokeWidth={2} />
-            {fmtLeadDate(lead.submitted_at || lead.created_at)}
-          </span>
-        </div>
+          </div>
 
-        {/* response / urgency chip */}
-        <div className="mt-auto pt-1">
-          <ResponseChip lead={lead} now={now} />
-        </div>
-      </Link>
+          <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
+            {lead.value != null ? (
+              <span className="tabular inline-flex shrink-0 items-baseline gap-1 text-[21px] font-bold leading-none tracking-[-0.3px] text-[#C03838]">
+                {gbp(lead.value)}
+                <span className="text-[10px] font-semibold tracking-normal text-[#667085]">GBP</span>
+              </span>
+            ) : null}
+            {lead.property_size ? (
+              <span className="inline-flex min-w-0 items-center gap-1 rounded-[5px] bg-[#EAF8F0] px-2 py-1 text-[11px] font-semibold leading-none text-[#187944]">
+                <Home className="size-3 shrink-0" strokeWidth={2} />
+                <span className="truncate">{lead.property_size}</span>
+              </span>
+            ) : null}
+            <ResponseChip lead={lead} />
+            {!lead.surveyAt && !lead.retry && !lead.first_contacted_at && CLOSED.has(lead.status) ? (
+              <span className="inline-flex items-center gap-1 rounded-[5px] bg-[#EAF3FF] px-2 py-1 text-[11px] font-semibold leading-none text-[#1D5FBF]">
+                <Clock className="size-3 shrink-0" strokeWidth={2} />
+                Received {fmtLeadDate(lead.submitted_at || lead.created_at)}
+              </span>
+            ) : null}
+          </div>
+        </Link>
+      </div>
 
-      {/* actions — below the card */}
-      <div className="flex items-center gap-0.5 border-t border-border bg-muted/30 px-2.5 py-2">
+      <div className="grid min-h-11 grid-cols-3 divide-x divide-[#E2E6EC] border-t border-[#E2E6EC]">
         {lead.phone ? (
           <a
             href={`tel:${lead.phone}`}
-            title="Call"
-            aria-label="Call"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
+            title={`Call ${lead.phone}`}
+            aria-label={`Call ${lead.name ?? "lead"}`}
+            className="focus-ring flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#344054] hover:bg-[#F7F8FA]"
           >
             <Phone className="size-4" strokeWidth={1.75} />
             Call
           </a>
-        ) : null}
-        {wa ? (
-          <a
-            href={`https://wa.me/${wa}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            title="WhatsApp"
-            aria-label="WhatsApp"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-500 hover:bg-muted hover:text-foreground"
-          >
-            <MessageCircle className="size-4" strokeWidth={1.75} />
-          </a>
-        ) : null}
-        {uncontacted ? (
-          <button
-            type="button"
-            onClick={markContacted}
-            disabled={pending}
-            title="Mark contacted"
-            aria-label="Mark contacted"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-success disabled:opacity-50"
-          >
-            {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Check className="size-4" strokeWidth={1.75} />}
-          </button>
-        ) : null}
-        {contacted ? (
-          <button
-            type="button"
-            onClick={markUncontacted}
-            disabled={pending}
-            title="Mark uncontacted (undo)"
-            aria-label="Mark uncontacted"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground disabled:opacity-50"
-          >
-            {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Undo2 className="size-4" strokeWidth={1.75} />}
-          </button>
-        ) : null}
-        {active ? (
-          <button
-            type="button"
-            onClick={logNoReply}
-            disabled={pending}
-            title="No reply — retry tomorrow"
-            aria-label="No reply"
-            className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-danger disabled:opacity-50"
-          >
-            <PhoneMissed className="size-4" strokeWidth={1.75} />
-          </button>
-        ) : null}
+        ) : (
+          <span aria-disabled="true" className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]">
+            <Phone className="size-4" strokeWidth={1.75} />
+            Call
+          </span>
+        )}
         {active ? (
           <Link
             href={`/schedule/surveys?leadId=${lead.id}`}
             title="Book survey"
-            aria-label="Book survey"
-            className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
+            aria-label={`Book survey for ${lead.name ?? "lead"}`}
+            className="focus-ring flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#344054] hover:bg-[#F7F8FA]"
           >
             <CalendarPlus className="size-4" strokeWidth={1.75} />
             Survey
           </Link>
-        ) : null}
+        ) : (
+          <span aria-disabled="true" className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]">
+            <CalendarPlus className="size-4" strokeWidth={1.75} />
+            Survey
+          </span>
+        )}
         <Link
           href={`/quotes/new?leadId=${lead.id}`}
           prefetch={false}
           title="New quote"
-          aria-label="New quote"
-          className="focus-ring flex h-9 flex-1 items-center justify-center gap-1.5 rounded-md text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground"
+          aria-label={`New quote for ${lead.name ?? "lead"}`}
+          className="focus-ring flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#344054] hover:bg-[#F7F8FA]"
         >
           <FileText className="size-4" strokeWidth={1.75} />
           Quote
         </Link>
       </div>
-    </div>
+    </article>
   );
 }

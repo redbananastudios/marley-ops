@@ -20,11 +20,13 @@
 export const CACHE_VERSION = "v1";
 export const JOBS_DOC_CACHE = `mo-jobs-docs-${CACHE_VERSION}`;
 export const STATIC_CACHE = `mo-static-${CACHE_VERSION}`;
+export const ALERT_LEDGER_CACHE = `mo-alert-ledger-${CACHE_VERSION}`;
+export const ALERT_MARKER_PATH = "/__marley-ops/new-enquiry-notified";
 /** Branded static fallback shown when a job doc is requested offline and nothing
  *  is cached yet (first-ever visit made offline). Precached on SW install. */
 export const OFFLINE_URL = "/offline.html";
 /** Caches this SW owns — activate() deletes any other `mo-*` cache. */
-export const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE];
+export const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE, ALERT_LEDGER_CACHE];
 /** Header a background warm request sets so the SW caches a programmatic (non
  *  navigation) fetch of a job doc. */
 export const WARM_HEADER = "x-mo-warm";

@@ -12,9 +12,53 @@ test.describe("Office — Leads", () => {
     await expect(page.getByRole("heading", { name: "Leads", exact: true })).toBeVisible();
     await expect(page.getByPlaceholder(/Search name, phone/i)).toBeVisible();
     await expect(page.getByRole("link", { name: /Add lead/i })).toBeVisible();
+    // Compact cards retain their primary footer actions and move secondary
+    // controls into the per-lead overflow menu.
+    const firstMenu = page.getByRole("button", { name: /More actions for/i }).first();
+    await expect(firstMenu).toBeVisible();
+    await expect(page.getByRole("link", { name: /New quote for/i }).first()).toBeVisible();
+    // Radix trigger clicks are no-ops until hydration attaches the handler —
+    // retry until the menu actually opens (house pattern, see fixtures/ui.ts).
+    const openLeadItem = page.getByRole("menuitem", { name: "Open lead" });
+    await expect(async () => {
+      await firstMenu.click();
+      await expect(openLeadItem).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+    await page.keyboard.press("Escape");
+    await expect(openLeadItem).toBeHidden();
+    // Same hydration guard on the Board/Table view toggle.
+    const tableBtn = page.getByRole("button", { name: "Table", exact: true });
+    await expect(async () => {
+      await tableBtn.click();
+      await expect(page.getByTestId("leads-table")).toBeVisible({ timeout: 1000 });
+    }).toPass({ timeout: 15_000 });
+    await page.getByRole("button", { name: "Board", exact: true }).click();
+    await expect(page.getByTestId("leads-board")).toBeVisible();
     // Preset chips filter the list — clicking one must not error and stays on /leads.
     await page.getByRole("button", { name: /^Uncontacted/ }).first().click();
     await expect(page).toHaveURL(/\/leads/);
+  });
+
+  test("board responds at desktop, tablet and mobile widths without page overflow", async ({ page }) => {
+    await page.goto("/leads");
+    const board = page.getByTestId("leads-board");
+
+    const expectColumns = async (count: number) => {
+      await expect(board).toBeVisible();
+      await expect.poll(() => board.evaluate((element) =>
+        getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length,
+      )).toBe(count);
+      await expect.poll(() => page.evaluate(() =>
+        document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      )).toBe(true);
+    };
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expectColumns(3);
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expectColumns(2);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expectColumns(1);
   });
 
   test("add a lead → lands on the new lead's detail page", async ({ page }) => {

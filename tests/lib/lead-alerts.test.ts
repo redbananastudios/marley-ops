@@ -3,7 +3,11 @@ import {
   ALERT_POLL_MS,
   CHIME_MAX_REPEATS,
   CHIME_REPEAT_MS,
+  IMPORT_GAP_MS,
+  isImportedUnackedRow,
   nextChimeState,
+  parseChimedLeadIds,
+  serializeChimedLeadIds,
 } from "@/lib/lead-alerts";
 
 const A = "aaaaaaaa-1111-4111-8111-111111111111";
@@ -53,5 +57,49 @@ describe("nextChimeState", () => {
     expect(ALERT_POLL_MS).toBe(20_000);
     expect(CHIME_REPEAT_MS).toBe(3_000);
     expect(CHIME_MAX_REPEATS).toBe(10);
+  });
+});
+
+describe("device chime ledger", () => {
+  it("round-trips valid UUIDs and rejects malformed storage", () => {
+    const encoded = serializeChimedLeadIds(new Set([A, B]));
+    expect(parseChimedLeadIds(encoded)).toEqual(new Set([A, B]));
+    expect(parseChimedLeadIds("not-json")).toEqual(new Set());
+    expect(parseChimedLeadIds(JSON.stringify([A, "not-a-uuid"]))).toEqual(new Set([A]));
+  });
+
+  it("caps the ledger to the latest 100 ids", () => {
+    const ids = Array.from({ length: 105 }, (_, i) =>
+      `00000000-0000-4000-8000-${i.toString().padStart(12, "0")}`,
+    );
+    const parsed = parseChimedLeadIds(JSON.stringify(ids));
+    expect(parsed.size).toBe(100);
+    expect(parsed.has(ids[0])).toBe(false);
+    expect(parsed.has(ids[104])).toBe(true);
+  });
+});
+
+describe("isImportedUnackedRow (the sync ack-repair guard)", () => {
+  const submitted = "2026-07-14T12:00:00Z";
+
+  it("flags a row created well after submission — a historical import", () => {
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", submitted)).toBe(true);
+  });
+
+  it("a live-synced lead (created ≈ submitted) is NEVER an import — no matter its age", () => {
+    // The weekend case: submitted Friday, still unacked Monday. The row was
+    // created moments after submission, so the machine must not ack it.
+    expect(isImportedUnackedRow("2026-07-14T12:00:05Z", submitted)).toBe(false);
+    // Exactly at the 24h boundary still counts as live (guard is strict >).
+    expect(
+      isImportedUnackedRow(new Date(Date.parse(submitted) + IMPORT_GAP_MS).toISOString(), submitted),
+    ).toBe(false);
+  });
+
+  it("missing or garbled timestamps never trigger the repair", () => {
+    expect(isImportedUnackedRow(null, submitted)).toBe(false);
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", null)).toBe(false);
+    expect(isImportedUnackedRow("not-a-date", submitted)).toBe(false);
+    expect(isImportedUnackedRow("2026-07-16T12:00:01Z", "garbled")).toBe(false);
   });
 });

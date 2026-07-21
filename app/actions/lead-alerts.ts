@@ -23,9 +23,16 @@ async function requireOfficeProfile() {
   const sb = await createClient();
   const {
     data: { user },
+    error: userError,
   } = await sb.auth.getUser();
+  if (userError) throw new Error("Could not verify the signed-in user.");
   if (!user) return null;
-  const { data: prof } = await sb.from("profiles").select("id, active, role").eq("id", user.id).single();
+  const { data: prof, error: profileError } = await sb
+    .from("profiles")
+    .select("id, active, role")
+    .eq("id", user.id)
+    .single();
+  if (profileError) throw new Error("Could not load the signed-in profile.");
   if (!prof?.active) return null;
   if (prof.role !== "admin" && prof.role !== "estimator") return null;
   return prof;
@@ -36,13 +43,14 @@ export async function getUnackedWebLeadsAction(): Promise<UnackedWebLead[]> {
   const prof = await requireOfficeProfile();
   if (!prof) return [];
   const admin = createAdminClient();
-  const { data } = await admin
+  const { data, error } = await admin
     .from("leads")
     .select("id, name, created_at")
     .eq("entry_channel", "web")
     .is("web_alert_ack_at", null)
     .order("created_at", { ascending: false })
     .limit(MAX_ALERT_LEADS);
+  if (error) throw new Error("Could not load new-lead alerts.");
   return (data ?? []).map((r) => ({
     id: r.id,
     name: r.name?.trim() || "New enquiry",

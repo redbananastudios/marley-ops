@@ -25,8 +25,10 @@ const FALLBACK_BODY = "You have a new update.";
 // ── Read-cache rules (mirror lib/pwa/cache-rules.ts) ──────────────────────────
 const JOBS_DOC_CACHE = "mo-jobs-docs-v1";
 const STATIC_CACHE = "mo-static-v1";
+const ALERT_LEDGER_CACHE = "mo-alert-ledger-v1";
+const ALERT_MARKER_PATH = "/__marley-ops/new-enquiry-notified";
 const OFFLINE_URL = "/offline.html";
-const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE];
+const MANAGED_CACHES = [JOBS_DOC_CACHE, STATIC_CACHE, ALERT_LEDGER_CACHE];
 const WARM_HEADER = "x-mo-warm";
 const MAX_JOB_DOCS = 30;
 // Generous: a cached /my-jobs document (network-first, always the latest build)
@@ -41,6 +43,38 @@ function isCrewJobDoc(pathname) {
 }
 function isImmutableAsset(pathname) {
   return pathname.startsWith("/_next/static/");
+}
+
+async function requestAudioClaim(client, category, tag) {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    let settled = false;
+    const finish = (claimed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(claimed === true);
+    };
+    const timer = setTimeout(() => finish(false), 500);
+    channel.port1.onmessage = (event) => finish(event.data && event.data.claimed === true);
+    try {
+      client.postMessage({ type: "mm-audio-claim", category, tag }, [channel.port2]);
+    } catch {
+      finish(false);
+    }
+  });
+}
+
+async function rememberOsEnquiryNotification() {
+  try {
+    const cache = await caches.open(ALERT_LEDGER_CACHE);
+    await cache.put(
+      ALERT_MARKER_PATH,
+      new Response(String(Date.now()), { headers: { "content-type": "text/plain" } }),
+    );
+  } catch {
+    // Dedupe is best-effort; never interfere with the notification itself.
+  }
 }
 
 // FIFO trim so an install doesn't grow without bound over months of deploys.
@@ -205,21 +239,14 @@ self.addEventListener("push", (event) => {
     (async () => {
       const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
 
-      // Tell any open app windows so the in-app banner can refresh instantly.
-      for (const client of windows) {
-        try {
-          client.postMessage({ type: "mm-push", category });
-        } catch {
-          // best-effort
-        }
+      // A focused page owns the alert only after it confirms the chime really
+      // started. A suspended AudioContext declines, preserving the reliable OS
+      // notification fallback for a newly launched desktop PWA.
+      const focusedClient = windows.find((c) => c.focused);
+      if (suppressWhenFocused && focusedClient) {
+        const claimed = await requestAudioClaim(focusedClient, category, tag);
+        if (claimed) return;
       }
-
-      // Conflict rule (Peter, 2026-07-15): while a Marley Ops window is
-      // focused, the in-app banner + chime own new-enquiry alerts — showing
-      // the OS notification too would double up. Browsers permit skipping
-      // showNotification when the origin has a focused window.
-      const hasFocused = windows.some((c) => c.focused || c.visibilityState === "visible");
-      if (suppressWhenFocused && hasFocused) return;
 
       await self.registration.showNotification(title, {
         body,
@@ -232,6 +259,17 @@ self.addEventListener("push", (event) => {
         renotify: Boolean(tag),
         data: { url },
       });
+
+      if (category === "new_enquiry") await rememberOsEnquiryNotification();
+
+      // Refresh open app windows only after the OS-alert marker is durable.
+      for (const client of windows) {
+        try {
+          client.postMessage({ type: "mm-push", category, tag });
+        } catch {
+          // best-effort
+        }
+      }
     })(),
   );
 });

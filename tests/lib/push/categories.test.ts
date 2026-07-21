@@ -8,6 +8,7 @@ import {
   decideEnquiryPushes,
   ENQUIRY_DIGEST_THRESHOLD,
   firstNameOnly,
+  isFreshEnquiryTimestamp,
   isPushCategoryId,
   newEnquiryDigestPush,
   newEnquiryPush,
@@ -203,6 +204,12 @@ describe("decideEnquiryPushes (storm guard)", () => {
   it("missing/garbage submittedAt is treated as stale, not fresh", () => {
     expect(decideEnquiryPushes([{ id: "a", name: "X", submittedAt: null }], now)).toEqual([]);
     expect(decideEnquiryPushes([{ id: "a", name: "X", submittedAt: "not-a-date" }], now)).toEqual([]);
+  });
+
+  it("shares a strict 24-hour freshness boundary with the in-app alarm", () => {
+    expect(isFreshEnquiryTimestamp("2026-07-14T12:00:00Z", now)).toBe(true);
+    expect(isFreshEnquiryTimestamp("2026-07-14T11:59:59Z", now)).toBe(false);
+    expect(isFreshEnquiryTimestamp("2026-07-15T12:01:01Z", now)).toBe(false);
   });
 
   it("1-3 fresh leads notify individually", () => {
