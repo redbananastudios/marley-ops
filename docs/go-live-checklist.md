@@ -46,8 +46,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    Onboarding choices to make WITH takepayments: branded hosted payment page,
    Apple Pay + Google Pay ON, gateway's own customer receipts OFF (we send ours),
    and his MMS (merchant management) login. Once received → item C6. (ClickUp 869e58b5v)
-3. ☐ **T&Cs legal review** — customers sign generic-v1 terms on /q today; review
-   together before real signatures. (ClickUp 869e35z42)
+3. ◐ **T&Cs legal review** — customers sign generic-v1 terms on /q today; review
+   together before real signatures. (ClickUp 869e35z42) **Everything the system
+   needs the terms to cover is collected in `docs/terms-review-inputs.md`**
+   (tick-box wording, deposit/refund rules, lien clause, claims window, AI-survey
+   + job-media consent, e-signature clause) — take that doc into the review.
 4. ◐ **Real email addresses + phone numbers for the team** — Connor's login
    SWAPPED to connor@marleymoves.co.uk (16 Jul — same password + passkey; TELL
    HIM the sign-in email changed); Luke already luke@marleymoves.co.uk (stale
@@ -110,12 +113,19 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    next quote email (chase 2 on ~19 Jul proves it unattended).
 4. ☐ Comms flags: COMMS_DRYRUN=false confirmed; decide LEAD_AUTOREPLY_ENABLED
    (still gated off — Peter reviewing the template).
-5. ☐ Data reset: `reset-data.mjs` clears test leads/quotes/comms/appointments —
-   verify staff, fleet, settings, templates and real storage records survive.
-6. ☐ Backfill: remove SANITY_SYNC_DISABLED → redeploy → "Sync website leads".
-   **⚠ THEN IMMEDIATELY the chase-safety gate: bulk-close dead historical leads
-   BEFORE the next chase cron tick** — the single biggest cutover risk (old
-   enquirers getting chase emails on day one).
+5. ☐ **SYSTEM FLUSH (no backfill — Peter, 2026-07-21)**: on the box,
+   `RESET_DRY_RUN=yes node --env-file=/opt/marley-ops/app.env scripts/reset-data.mjs`
+   to preview, then re-run with `RESET_CONFIRM=yes`. Wipes ALL transactional data +
+   every media object (Supabase Storage AND R2, all five buckets); keeps
+   users/passkeys/push devices, settings, staff + pay, vehicles, storage
+   sites/units. Quote-ref counters deliberately NOT reset (a reused ref could
+   adopt a stale test invoice in Zoho); Zoho itself never touched.
+6. ☐ **No-backfill go-live**: set `LEAD_SYNC_SINCE=<cutover ISO timestamp>` in
+   /opt/marley-ops/app.env, THEN remove SANITY_SYNC_DISABLED → redeploy. The
+   floor is enforced in `lib/sync/sanity-leads.ts` — historical website leads
+   can never import, in any mode, including the manual "Sync website leads"
+   button. This retires the old chase-safety gate (there is no historical
+   backlog to bulk-close). Pre-cutover enquiries are handled manually/in iMVE.
 7. ☐ Card payments (when A2 lands): TAKEPAYMENTS_* env into /opt/marley-ops/app.env
    + .env.local → flip the Settings kill switch → Settings test payment → run the
    S9 suite (refund lockout, tampered callback, reconcile cron) → leave ON.

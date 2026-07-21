@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
 import { isImportedUnackedRow } from "@/lib/lead-alerts";
+import { applySyncFloor } from "@/lib/sync/sync-window";
 import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import type { Database } from "@/lib/supabase/database.types";
@@ -120,6 +121,9 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
       since = new Date(new Date(latest.submitted_at).getTime() - 2 * 86_400_000).toISOString();
     }
   }
+  // Hard go-live floor — history before LEAD_SYNC_SINCE never imports, even in
+  // full mode with an empty (freshly-flushed) database. See lib/sync/sync-window.ts.
+  since = applySyncFloor(since, process.env.LEAD_SYNC_SINCE);
 
   const filter = since ? ` && submittedAt >= "${since}"` : "";
   const groq = `*[_type=="quoteSubmission"${filter}]| order(submittedAt asc){ ${FIELDS} }`;
