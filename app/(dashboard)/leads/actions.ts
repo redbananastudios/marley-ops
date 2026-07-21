@@ -3,9 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
+import { buildHeldSnapshot, createRefundQueueEntry } from "@/lib/refunds";
+import { queueAmountsFor } from "@/lib/comms/cancellation-emails";
+import { ukDayOf } from "@/lib/sales-report";
 import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { isBackwardMove } from "@/lib/leads/funnel";
@@ -435,7 +439,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   const { sb, userId } = await actor();
   const { data: current } = await sb
     .from("leads")
-    .select("status, client_id, balance_paid_at, name")
+    .select("status, client_id, balance_paid_at, name, date_confirmed_at")
     .eq("id", leadId)
     .single();
 
@@ -478,22 +482,24 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   // money becomes an explicit refund decision for a human — never touched by code.
   let voidedInvoices = 0;
   let refundTask = false;
+  let anyMoneyTaken = false;
 
-  // Free upcoming diary slots (surveys and removals both).
+  // Free upcoming diary slots (surveys and removals both). starts_at/appt_type
+  // are captured so the refund-queue row can anchor to the cancelled removal.
   const { data: cancelledAppts } = await sb
     .from("appointments")
     .update({ status: "cancelled" as never })
     .eq("lead_id", leadId)
     .eq("status", "scheduled")
     .gte("starts_at", new Date().toISOString())
-    .select("id");
+    .select("id, appt_type, starts_at");
   const apptsCancelled = cancelledAppts?.length ?? 0;
 
   // The money on the lead's accepted quote(s).
   const { data: moneyQuotes } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, estimator_id, client_id",
+      "id, quote_ref, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, commitment_paid_at, commitment_invoice_amount, zoho_commitment_invoice_id, zoho_commitment_invoice_number, estimator_id, client_id",
     )
     .eq("lead_id", leadId)
     .eq("status", "accepted");
@@ -519,6 +525,26 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
         ], "system");
       }
     }
+    // Unpaid commitment invoice → void (Payments Policy v2 — the -COM invoice
+    // sits between deposit and balance and must not survive a cancellation).
+    if (!q.commitment_paid_at && isReal(q.zoho_commitment_invoice_id)) {
+      try {
+        await voidInvoice(q.zoho_commitment_invoice_id!);
+        voidedInvoices++;
+        await sb.from("activities").insert({
+          lead_id: leadId,
+          client_id: current?.client_id ?? null,
+          actor_id: userId,
+          type: "note",
+          summary: `Commitment invoice ${q.zoho_commitment_invoice_number ?? ""} voided — booking cancelled`.trim(),
+          meta: { quote_id: q.id, invoice_id: q.zoho_commitment_invoice_id },
+        });
+      } catch (err) {
+        await sendOpsAlert(`Void on cancel FAILED — ${q.quote_ref}`, [
+          `Lead cancelled but voiding commitment invoice ${q.zoho_commitment_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}. Void it manually in Zoho.`,
+        ], "system");
+      }
+    }
     // Unpaid balance invoice → void.
     if (!current?.balance_paid_at && isReal(q.zoho_balance_invoice_id)) {
       try {
@@ -538,27 +564,63 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
         ], "system");
       }
     }
-    // Money already taken → a human decides the refund (deposit terms may keep it).
+    // Money already taken? (Recorded stamps; card money is caught below by the
+    // held snapshot even if a stamp is missing.)
     const paidBits = [
       q.deposit_paid_at ? `£${Number(q.deposit_amount ?? 0).toFixed(2)} deposit` : null,
+      q.commitment_paid_at ? `£${Number(q.commitment_invoice_amount ?? 0).toFixed(2)} commitment` : null,
       current?.balance_paid_at ? `£${Number(q.balance_invoice_amount ?? 0).toFixed(2)} balance` : null,
     ].filter(Boolean);
-    if (paidBits.length) {
-      refundTask = true;
-      await sb.from("follow_ups").insert({
-        lead_id: leadId,
-        client_id: q.client_id ?? current?.client_id ?? null,
-        quote_id: q.id,
-        reason: "custom",
-        due_at: new Date().toISOString(),
-        assigned_to: q.estimator_id ?? userId,
-        created_by: userId,
-        source: "cancellation",
-        notes: `Booking cancelled with ${paidBits.join(" + ")} already paid (${q.quote_ref}). Decide refund vs retained deposit per the terms, and record the outcome in Zoho.`,
-      } as never);
-      await sendOpsAlert(`Cancellation with money taken — ${q.quote_ref}`, [
-        `<strong>${current?.name ?? "Customer"}</strong> cancelled with ${paidBits.join(" + ")} already paid.`,
-        `A refund-decision task is in Follow-ups. Nothing was changed in Zoho for the paid amounts.`,
+    if (paidBits.length) anyMoneyTaken = true;
+  }
+
+  // Money already taken → ONE refund-queue row per cancellation (Payments
+  // Policy v2 — replaces the old "refund decision" follow-up task). The held
+  // snapshot reads ground truth (card_payments net of refunds + the recorded
+  // deposit/commitment/balance stamps — closes the old card-rail gap), and
+  // createRefundQueueEntry fires the accounts@ money alert + writes the
+  // timeline/audit pair. Service role: refund_queue has no insert policy by
+  // design, and only an office session can win the CAS above to reach here.
+  if (moneyQuotes?.length) {
+    const admin = createAdminClient();
+    const snapshot = await buildHeldSnapshot(admin, leadId);
+    if (snapshot.held.length) {
+      // Pre-confirmation the deposit never became non-refundable: everything
+      // is unconditional and the row goes straight to execution ("filled"
+      // semantics — refund it all). Post-confirmation it's a conditional row:
+      // the /refunds page asks "did the old day re-book?".
+      const dateConfirmed = !!(current as { date_confirmed_at?: string | null } | null)?.date_confirmed_at;
+      const amounts = queueAmountsFor(snapshot.split, dateConfirmed);
+      const cancelledRemoval = (cancelledAppts ?? [])
+        .filter((a) => a.appt_type === "removal")
+        .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
+      const moneyQuote = moneyQuotes.find((q) => q.id === snapshot.quote?.id) ?? moneyQuotes[0];
+      const res = await createRefundQueueEntry(admin, {
+        leadId,
+        quoteId: snapshot.quote?.id ?? moneyQuote?.id ?? null,
+        trigger: "customer_cancel",
+        held: snapshot.held,
+        conditionalAmount: amounts.conditional,
+        unconditionalAmount: amounts.unconditional,
+        originalMoveDate: moneyQuote?.moving_date ?? ukDayOf(cancelledRemoval?.starts_at ?? null),
+        oldAppointmentId: cancelledRemoval?.id ?? null,
+        determination: dateConfirmed ? null : "filled",
+        actorId: userId,
+        clientId: moneyQuote?.client_id ?? current?.client_id ?? null,
+        customerName: current?.name ?? null,
+        quoteRef: snapshot.quote?.quote_ref ?? moneyQuote?.quote_ref ?? null,
+        notes: dateConfirmed
+          ? null
+          : "Cancelled before the move date was confirmed — everything refunds in full.",
+      });
+      refundTask = res.ok;
+    } else if (anyMoneyTaken) {
+      // Paid stamps say money was taken but the snapshot resolved nothing held
+      // (e.g. a card payment sitting in needs_review). No silent loss: alert
+      // the money desk to reconcile by hand.
+      await sendOpsAlert(`Cancellation with money taken but nothing snapshotted — ${moneyQuotes[0]?.quote_ref ?? leadId}`, [
+        `<strong>${current?.name ?? "Customer"}</strong> cancelled with recorded payments, but the held-money snapshot resolved £0 — likely a card payment awaiting review.`,
+        `No refund-queue row was created. Reconcile the payments and raise the refund decision manually.`,
       ], "money");
     }
   }

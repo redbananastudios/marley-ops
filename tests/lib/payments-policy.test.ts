@@ -1,0 +1,291 @@
+import { describe, expect, it } from "vitest";
+import {
+  COMMITMENT_DUE_DAYS_BEFORE,
+  COMMITMENT_PCT,
+  commitmentAmount,
+  commitmentDueDate,
+  isInsideChangeWindow,
+  refundOutcome,
+  splitHeldMoney,
+  type HeldPayment,
+} from "@/lib/payments-policy";
+import { balanceReference, commitmentReference, depositReference } from "@/lib/quote/payments";
+import {
+  allDateConfirmAcksConfirmed,
+  DATE_CONFIRM_ACKS,
+  normalizeDateConfirmAcks,
+} from "@/lib/signatures";
+
+/**
+ * Payments Policy v2 engine (docs/payments-policy-v2-prd.md §3). Load-bearing:
+ * the commitment ladder, the 7-day boundary, and the 25%-cap chronological
+ * split all decide real customer money — every rule is locked on both sides
+ * of its boundary here.
+ */
+
+const held = (rail: HeldPayment["rail"], amount: number, at: string, label?: string): HeldPayment => ({
+  rail,
+  amount,
+  at,
+  label,
+});
+
+/* --------------------------------------------------------- commitmentAmount */
+
+describe("commitmentAmount", () => {
+  it("is 25% of gross minus the actual deposit (PRD worked example)", () => {
+    // £2,400 job, £100 deposit → £500 commitment.
+    expect(commitmentAmount(2400, 100)).toBe(500);
+  });
+
+  it("respects a per-quote deposit override — the deposit is never assumed £100", () => {
+    expect(commitmentAmount(2400, 250)).toBe(350);
+  });
+
+  it("suppresses to zero when 25% of gross does not exceed the deposit (small job)", () => {
+    // £360 job: 25% = £90 ≤ £100 deposit → nothing further to invoice.
+    expect(commitmentAmount(360, 100)).toBe(0);
+  });
+
+  it("suppresses at exact equality", () => {
+    expect(commitmentAmount(400, 100)).toBe(0); // 25% = exactly the deposit
+  });
+
+  it("never goes negative", () => {
+    expect(commitmentAmount(0, 100)).toBe(0);
+    expect(commitmentAmount(100, 500)).toBe(0);
+  });
+
+  it("rounds to 2dp", () => {
+    expect(commitmentAmount(1234.56, 100)).toBe(208.64); // 308.64 − 100
+    expect(commitmentAmount(1234.57, 0)).toBe(308.64); // 308.6425 → 308.64
+  });
+
+  it("treats null-ish inputs as zero", () => {
+    expect(commitmentAmount(Number.NaN, Number.NaN)).toBe(0);
+  });
+});
+
+/* -------------------------------------------------------- commitmentDueDate */
+
+describe("commitmentDueDate", () => {
+  it("is move date minus 7 days when confirmation is early", () => {
+    expect(commitmentDueDate("2026-08-20", new Date("2026-07-21T10:00:00Z"))).toBe("2026-08-13");
+  });
+
+  it("late collapse: confirmation inside move−7d is due TODAY", () => {
+    // Move 25 Jul, confirmed 21 Jul → move−7 = 18 Jul is already past → today.
+    expect(commitmentDueDate("2026-07-25", new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
+  });
+
+  it("exactly 7 days out lands due today without clamping", () => {
+    expect(commitmentDueDate("2026-07-28", new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
+  });
+
+  it("uses the UK wall-clock day, not the UTC day (BST 23:30Z is tomorrow)", () => {
+    // 21 Jul 23:30 UTC = 22 Jul 00:30 UK. Move 28 Jul: move−7 = 21 Jul, which
+    // is already behind the UK "today" → clamps to 22 Jul, not 21 Jul.
+    expect(commitmentDueDate("2026-07-28", new Date("2026-07-21T23:30:00Z"))).toBe("2026-07-22");
+    // And an early confirmation is unaffected.
+    expect(commitmentDueDate("2026-08-10", new Date("2026-07-21T23:30:00Z"))).toBe("2026-08-03");
+  });
+
+  it("winter (GMT): 23:30Z is still the same UK day", () => {
+    expect(commitmentDueDate("2026-01-20", new Date("2026-01-10T23:30:00Z"))).toBe("2026-01-13");
+  });
+
+  it("collapses to today when the move date is missing or malformed", () => {
+    expect(commitmentDueDate(null, new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
+    expect(commitmentDueDate("not-a-date", new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
+  });
+});
+
+/* ---------------------------------------------------- isInsideChangeWindow */
+
+describe("isInsideChangeWindow", () => {
+  const today = new Date("2026-07-21T10:00:00Z");
+
+  it("exactly 7 days out is OUTSIDE (free change) — boundary locked", () => {
+    expect(isInsideChangeWindow("2026-07-28", today)).toBe(false);
+  });
+
+  it("6 days out is inside — boundary locked on the other side", () => {
+    expect(isInsideChangeWindow("2026-07-27", today)).toBe(true);
+  });
+
+  it("8 days out is outside", () => {
+    expect(isInsideChangeWindow("2026-07-29", today)).toBe(false);
+  });
+
+  it("move day itself and past moves are inside", () => {
+    expect(isInsideChangeWindow("2026-07-21", today)).toBe(true);
+    expect(isInsideChangeWindow("2026-07-01", today)).toBe(true);
+  });
+
+  it("counts UK calendar days, not UTC (BST midnight straddle)", () => {
+    // 23:30Z on 21 Jul = 22 Jul in the UK → the 28 Jul move is 6 UK days off,
+    // INSIDE — a raw-UTC diff would call it 7/outside and skip the queue row.
+    expect(isInsideChangeWindow("2026-07-28", new Date("2026-07-21T23:30:00Z"))).toBe(true);
+  });
+
+  it("no move date → no window", () => {
+    expect(isInsideChangeWindow(null, today)).toBe(false);
+    expect(isInsideChangeWindow("garbage", today)).toBe(false);
+  });
+
+  it("window width and due offset share one constant", () => {
+    expect(COMMITMENT_DUE_DAYS_BEFORE).toBe(7);
+    expect(COMMITMENT_PCT).toBe(0.25);
+  });
+});
+
+/* ---------------------------------------------------------- splitHeldMoney */
+
+describe("splitHeldMoney", () => {
+  it("PRD example: £100 card + £350 bank on a £1,400 job → £250 of the bank held, £100 bank unconditional", () => {
+    const split = splitHeldMoney(
+      [held("card", 100, "2026-07-01T10:00:00Z"), held("bank_transfer", 350, "2026-07-10T10:00:00Z")],
+      1400,
+    );
+    expect(split.cap).toBe(350);
+    expect(split.conditional).toBe(350);
+    expect(split.unconditional).toBe(100);
+    expect(split.total).toBe(450);
+    expect(split.allocations).toEqual([
+      expect.objectContaining({ conditional: 100, unconditional: 0 }),
+      expect.objectContaining({ conditional: 250, unconditional: 100 }),
+    ]);
+    expect(split.byRail.card).toEqual({ conditional: 100, unconditional: 0, total: 100 });
+    expect(split.byRail.bank_transfer).toEqual({ conditional: 250, unconditional: 100, total: 350 });
+    expect(split.byRail.cash).toEqual({ conditional: 0, unconditional: 0, total: 0 });
+  });
+
+  it("fills the cap chronologically by `at`, never by array order", () => {
+    const split = splitHeldMoney(
+      [
+        // Listed card-first, but the bank transfer landed EARLIER.
+        held("card", 100, "2026-07-10T10:00:00Z"),
+        held("bank_transfer", 350, "2026-07-01T10:00:00Z"),
+      ],
+      1400,
+    );
+    // Bank (first in) soaks the whole £350 cap; the later card £100 is above it.
+    expect(split.byRail.bank_transfer.conditional).toBe(350);
+    expect(split.byRail.card.conditional).toBe(0);
+    expect(split.byRail.card.unconditional).toBe(100);
+  });
+
+  it("money above 25% of gross is ALWAYS unconditional, whatever the determination will be", () => {
+    const split = splitHeldMoney(
+      [held("bank_transfer", 100, "2026-07-01"), held("bank_transfer", 500, "2026-07-02")],
+      1000,
+    );
+    expect(split.cap).toBe(250);
+    expect(split.conditional).toBe(250);
+    expect(split.unconditional).toBe(350);
+  });
+
+  it("zero gross (no accepted price) → nothing is retainable", () => {
+    const split = splitHeldMoney([held("card", 100, "2026-07-01")], 0);
+    expect(split.conditional).toBe(0);
+    expect(split.unconditional).toBe(100);
+  });
+
+  it("empty payments → all zeros", () => {
+    const split = splitHeldMoney([], 2400);
+    expect(split.total).toBe(0);
+    expect(split.allocations).toEqual([]);
+  });
+
+  it("penny-exact: per payment, conditional + unconditional reconstruct the amount", () => {
+    const payments = [
+      held("card", 33.33, "2026-07-01"),
+      held("bank_transfer", 66.67, "2026-07-02"),
+      held("cash", 0.01, "2026-07-03"),
+    ];
+    const split = splitHeldMoney(payments, 133.34); // cap 33.34 (33.335 rounds)
+    for (const a of split.allocations) {
+      expect(Math.round((a.conditional + a.unconditional) * 100)).toBe(
+        Math.round(a.payment.amount * 100),
+      );
+    }
+    expect(Math.round((split.conditional + split.unconditional) * 100)).toBe(10001);
+  });
+});
+
+/* ------------------------------------------------------------ refundOutcome */
+
+describe("refundOutcome", () => {
+  const split = splitHeldMoney(
+    [held("card", 100, "2026-07-01T10:00:00Z"), held("bank_transfer", 350, "2026-07-10T10:00:00Z")],
+    1400,
+  );
+
+  it("filled (re-booked) → everything refunds, nothing retained", () => {
+    const out = refundOutcome("filled", split);
+    expect(out.refundTotal).toBe(450);
+    expect(out.retainTotal).toBe(0);
+    expect(out.byRail.card).toEqual({ refund: 100, retain: 0 });
+    expect(out.byRail.bank_transfer).toEqual({ refund: 350, retain: 0 });
+  });
+
+  it("not_filled → conditional retained per rail, unconditional refunds regardless", () => {
+    const out = refundOutcome("not_filled", split);
+    expect(out.retainTotal).toBe(350);
+    expect(out.refundTotal).toBe(100);
+    expect(out.byRail.card).toEqual({ refund: 0, retain: 100 });
+    expect(out.byRail.bank_transfer).toEqual({ refund: 100, retain: 250 });
+    // Per-payment mirror for the /refunds execute view.
+    expect(out.perPayment.map((p) => ({ refund: p.refund, retain: p.retain }))).toEqual([
+      { refund: 0, retain: 100 },
+      { refund: 100, retain: 250 },
+    ]);
+  });
+
+  it("refund + retain always reconstruct the held total", () => {
+    for (const det of ["filled", "not_filled"] as const) {
+      const out = refundOutcome(det, split);
+      expect(Math.round((out.refundTotal + out.retainTotal) * 100)).toBe(
+        Math.round(split.total * 100),
+      );
+    }
+  });
+});
+
+/* --------------------------------------------------------------- references */
+
+describe("commitmentReference", () => {
+  it("is quote-derived and distinct from the deposit/balance pair (orphan adoption never confuses them)", () => {
+    expect(commitmentReference("MMR001")).toBe("MMR001-COM");
+    const refs = [depositReference("X"), balanceReference("X"), commitmentReference("X")];
+    expect(new Set(refs).size).toBe(3);
+  });
+});
+
+/* ---------------------------------------------------- date-confirmation ack */
+
+describe("DATE_CONFIRM_ACKS (PRD §5A)", () => {
+  it("is a single ack whose key survives normalisation round-trip", () => {
+    expect(DATE_CONFIRM_ACKS).toHaveLength(1);
+    expect(allDateConfirmAcksConfirmed({ date_confirm: true })).toBe(true);
+    expect(allDateConfirmAcksConfirmed({ date_confirm: "yes" })).toBe(false);
+    expect(allDateConfirmAcksConfirmed(null)).toBe(false);
+    expect(normalizeDateConfirmAcks({ date_confirm: true, extra: true })).toEqual({
+      date_confirm: true,
+    });
+  });
+
+  it("never says the forbidden word — held/retained framing only", () => {
+    for (const ack of DATE_CONFIRM_ACKS) {
+      expect(ack.label.toLowerCase()).not.toContain("penalty");
+    }
+  });
+
+  it("states the load-bearing policy facts verbatim", () => {
+    const label = DATE_CONFIRM_ACKS[0].label;
+    expect(label).toContain("non-refundable");
+    expect(label).toContain("within 7 days");
+    expect(label).toContain("25%");
+    expect(label).toContain("refunded in full if the day is re-booked");
+  });
+});

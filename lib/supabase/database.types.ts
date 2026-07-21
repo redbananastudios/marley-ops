@@ -2288,6 +2288,8 @@ export type Database = {
           chase_paused: boolean
           client_id: string
           created_at: string
+          date_confirm_signature_id: string | null
+          date_confirmed_at: string | null
           deposit_amount: number | null
           deposit_chase_at: string | null
           deposit_chase_step: number
@@ -2353,6 +2355,8 @@ export type Database = {
           chase_paused?: boolean
           client_id: string
           created_at?: string
+          date_confirm_signature_id?: string | null
+          date_confirmed_at?: string | null
           deposit_amount?: number | null
           deposit_chase_at?: string | null
           deposit_chase_step?: number
@@ -2418,6 +2422,8 @@ export type Database = {
           chase_paused?: boolean
           client_id?: string
           created_at?: string
+          date_confirm_signature_id?: string | null
+          date_confirmed_at?: string | null
           deposit_amount?: number | null
           deposit_chase_at?: string | null
           deposit_chase_step?: number
@@ -2481,6 +2487,13 @@ export type Database = {
             columns: ["client_id"]
             isOneToOne: false
             referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leads_date_confirm_signature_id_fkey"
+            columns: ["date_confirm_signature_id"]
+            isOneToOne: false
+            referencedRelation: "signatures"
             referencedColumns: ["id"]
           },
           {
@@ -2755,10 +2768,17 @@ export type Database = {
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
+          commitment_chase_t10_at: string | null
+          commitment_due_date: string | null
+          commitment_invoice_amount: number | null
+          commitment_invoice_created_at: string | null
+          commitment_paid_at: string | null
+          commitment_paid_method: string | null
           created_at: string
           customer_email: string | null
           customer_name: string | null
           customer_phone: string | null
+          date_releasable_at: string | null
           declined_at: string | null
           declined_reason: string | null
           deposit_amount: number | null
@@ -2793,6 +2813,10 @@ export type Database = {
           zoho_balance_invoice_id: string | null
           zoho_balance_invoice_number: string | null
           zoho_balance_invoice_url: string | null
+          zoho_commitment_error: string | null
+          zoho_commitment_invoice_id: string | null
+          zoho_commitment_invoice_number: string | null
+          zoho_commitment_invoice_url: string | null
           zoho_contact_id: string | null
           zoho_deposit_error: string | null
           zoho_deposit_invoice_id: string | null
@@ -2810,10 +2834,17 @@ export type Database = {
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
+          commitment_chase_t10_at?: string | null
+          commitment_due_date?: string | null
+          commitment_invoice_amount?: number | null
+          commitment_invoice_created_at?: string | null
+          commitment_paid_at?: string | null
+          commitment_paid_method?: string | null
           created_at?: string
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          date_releasable_at?: string | null
           declined_at?: string | null
           declined_reason?: string | null
           deposit_amount?: number | null
@@ -2848,6 +2879,10 @@ export type Database = {
           zoho_balance_invoice_id?: string | null
           zoho_balance_invoice_number?: string | null
           zoho_balance_invoice_url?: string | null
+          zoho_commitment_error?: string | null
+          zoho_commitment_invoice_id?: string | null
+          zoho_commitment_invoice_number?: string | null
+          zoho_commitment_invoice_url?: string | null
           zoho_contact_id?: string | null
           zoho_deposit_error?: string | null
           zoho_deposit_invoice_id?: string | null
@@ -2865,10 +2900,17 @@ export type Database = {
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
+          commitment_chase_t10_at?: string | null
+          commitment_due_date?: string | null
+          commitment_invoice_amount?: number | null
+          commitment_invoice_created_at?: string | null
+          commitment_paid_at?: string | null
+          commitment_paid_method?: string | null
           created_at?: string
           customer_email?: string | null
           customer_name?: string | null
           customer_phone?: string | null
+          date_releasable_at?: string | null
           declined_at?: string | null
           declined_reason?: string | null
           deposit_amount?: number | null
@@ -2903,6 +2945,10 @@ export type Database = {
           zoho_balance_invoice_id?: string | null
           zoho_balance_invoice_number?: string | null
           zoho_balance_invoice_url?: string | null
+          zoho_commitment_error?: string | null
+          zoho_commitment_invoice_id?: string | null
+          zoho_commitment_invoice_number?: string | null
+          zoho_commitment_invoice_url?: string | null
           zoho_contact_id?: string | null
           zoho_deposit_error?: string | null
           zoho_deposit_invoice_id?: string | null
@@ -2929,6 +2975,124 @@ export type Database = {
             columns: ["lead_id"]
             isOneToOne: false
             referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      refund_queue: {
+        Row: {
+          cash_recipient_account: string | null
+          cash_recipient_name: string | null
+          cash_recipient_sort: string | null
+          conditional_amount: number
+          created_at: string
+          determination: string | null
+          determined_at: string | null
+          determined_by: string | null
+          executed_at: string | null
+          executed_by: string | null
+          held: Json
+          id: string
+          lead_id: string | null
+          new_appointment_id: string | null
+          notes: string | null
+          old_appointment_id: string | null
+          original_move_date: string | null
+          quote_id: string | null
+          shortfall_note: string | null
+          status: string
+          trigger: string
+          unconditional_amount: number
+        }
+        Insert: {
+          cash_recipient_account?: string | null
+          cash_recipient_name?: string | null
+          cash_recipient_sort?: string | null
+          conditional_amount?: number
+          created_at?: string
+          determination?: string | null
+          determined_at?: string | null
+          determined_by?: string | null
+          executed_at?: string | null
+          executed_by?: string | null
+          held?: Json
+          id?: string
+          lead_id?: string | null
+          new_appointment_id?: string | null
+          notes?: string | null
+          old_appointment_id?: string | null
+          original_move_date?: string | null
+          quote_id?: string | null
+          shortfall_note?: string | null
+          status?: string
+          trigger: string
+          unconditional_amount?: number
+        }
+        Update: {
+          cash_recipient_account?: string | null
+          cash_recipient_name?: string | null
+          cash_recipient_sort?: string | null
+          conditional_amount?: number
+          created_at?: string
+          determination?: string | null
+          determined_at?: string | null
+          determined_by?: string | null
+          executed_at?: string | null
+          executed_by?: string | null
+          held?: Json
+          id?: string
+          lead_id?: string | null
+          new_appointment_id?: string | null
+          notes?: string | null
+          old_appointment_id?: string | null
+          original_move_date?: string | null
+          quote_id?: string | null
+          shortfall_note?: string | null
+          status?: string
+          trigger?: string
+          unconditional_amount?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "refund_queue_determined_by_fkey"
+            columns: ["determined_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "refund_queue_executed_by_fkey"
+            columns: ["executed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "refund_queue_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "leads"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "refund_queue_new_appointment_id_fkey"
+            columns: ["new_appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "refund_queue_old_appointment_id_fkey"
+            columns: ["old_appointment_id"]
+            isOneToOne: false
+            referencedRelation: "appointments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "refund_queue_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]

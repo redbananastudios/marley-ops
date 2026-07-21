@@ -5,9 +5,11 @@ import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   acceptQuoteOnline,
+  confirmMoveDateOnline,
   declineQuoteOnline,
   reportDepositSent,
   type AcceptOutcome,
+  type DateConfirmOutcome,
 } from "@/lib/quote/accept-flow";
 import { startCardPayment } from "@/lib/payments/card-payments";
 
@@ -28,6 +30,31 @@ export async function acceptQuoteAction(
   const userAgent = h.get("user-agent");
 
   const result = await acceptQuoteOnline(sb, token, fullName, ip, { acks, userAgent, signatureImage });
+  if (result.ok) revalidatePath(`/q/${token}`);
+  return result;
+}
+
+/**
+ * Customer confirms their move date from the post-payment card (Payments
+ * Policy v2 §5A). Token-authed like the accept; the CAS on
+ * leads.date_confirmed_at makes replays a clean no-op.
+ */
+export async function confirmMoveDateAction(
+  token: string,
+  fullName: string,
+  acks?: Record<string, boolean>,
+  signatureImage?: string | null,
+): Promise<DateConfirmOutcome> {
+  const sb = createAdminClient();
+  const h = await headers();
+  const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
+  const userAgent = h.get("user-agent");
+
+  const result = await confirmMoveDateOnline(sb, token, fullName, ip, {
+    acks,
+    userAgent,
+    signatureImage,
+  });
   if (result.ok) revalidatePath(`/q/${token}`);
   return result;
 }

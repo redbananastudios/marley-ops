@@ -61,6 +61,37 @@ export const STORAGE_ACKS = [
 
 export type StorageAckKey = (typeof STORAGE_ACKS)[number]["key"];
 
+/** The date-confirmation acknowledgment (kind='date_confirm', Payments Policy
+ *  v2 — docs/payments-policy-v2-prd.md §5A). Single tick + signature on /q
+ *  (or collected in person) that flips the deposit non-refundable and arms
+ *  the commitment ladder. Wording is PROVISIONAL pending solicitor review —
+ *  this string and the published T&Cs clause must ALWAYS change in the same
+ *  commit. Deliberately "held/retained" framing; never "penalty". */
+export const DATE_CONFIRM_ACKS = [
+  {
+    key: "date_confirm",
+    label:
+      "I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and Marley Moves cannot re-book the day, amounts I've paid up to 25% of my job price may be retained — and are refunded in full if the day is re-booked.",
+  },
+] as const;
+
+export type DateConfirmAckKey = (typeof DATE_CONFIRM_ACKS)[number]["key"];
+
+export function allDateConfirmAcksConfirmed(
+  acks: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!acks) return false;
+  return DATE_CONFIRM_ACKS.every((a) => acks[a.key] === true);
+}
+
+export function normalizeDateConfirmAcks(
+  acks: Record<string, unknown> | null | undefined,
+): Record<DateConfirmAckKey, boolean> {
+  const out = {} as Record<DateConfirmAckKey, boolean>;
+  for (const a of DATE_CONFIRM_ACKS) out[a.key] = acks?.[a.key] === true;
+  return out;
+}
+
 export function allStorageAcksConfirmed(acks: Record<string, unknown> | null | undefined): boolean {
   if (!acks) return false;
   return STORAGE_ACKS.every((a) => acks[a.key] === true);

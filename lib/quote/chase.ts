@@ -15,6 +15,9 @@
  */
 
 import { capName, ownerFrom } from "@/lib/comms/sender";
+import { round2 } from "@/lib/quote/payments";
+import { COMMITMENT_DUE_DAYS_BEFORE, CONFIRM_CALL_DAYS_BEFORE } from "@/lib/payments-policy";
+import { ukDayOf } from "@/lib/sales-report";
 
 export const QUOTE_CHASE_DAYS = [2, 5, 10] as const;
 export const DEPOSIT_CHASE_DAYS = [1, 3] as const;
@@ -289,6 +292,134 @@ export function replyAddressFor(acceptToken: string): string {
 export function tokenFromReplyAddress(address: string): string | null {
   const m = /^\s*(?:.*<)?q-([A-Za-z0-9_-]{10,})@/i.exec(address);
   return m ? m[1] : null;
+}
+
+/* --------------------------------------------------- commitment ladder (v2)
+ * Payments Policy v2 (docs/payments-policy-v2-prd.md §5B): once a customer has
+ * confirmed their move date, a 25%-minus-deposit commitment invoice exists and
+ * the chase cron counts DOWN to the move (fleet-reminder style), not up from a
+ * send date:
+ *
+ *   T-10 (move − 10 UK days, commitment unpaid) → "chase": the commitment
+ *        chase email + a call task. Once, stamped in commitment_chase_t10_at
+ *        AFTER delivery. If the date is NOT yet confirmed at T-10, a
+ *        "confirm the move date" call task fires instead of any email
+ *        ("confirm_date_call") — same one-shot stamp.
+ *   T-7  (move − 7 UK days, still unpaid) → "flag": stamp date_releasable_at.
+ *        A discretion marker only — the "Dates at risk" dashboard card. NEVER
+ *        an automatic release and never a customer email.
+ *
+ * Day maths is UK wall-clock (a 23:30 UTC summer instant is already tomorrow
+ * in the UK). Both thresholds are inclusive (<=) so a late confirmation or a
+ * downed cron still catches up; past move days are the post-move sweep's job.
+ *
+ * chase_paused (customer replied / handed to a human) suppresses the
+ * customer-chasing actions (chase email + call tasks). It deliberately does
+ * NOT suppress the T-7 flag: the flag is internal money-risk visibility — a
+ * paused conversation must not hide an at-risk date from the office.
+ */
+
+export type CommitmentAction = "chase" | "flag" | "confirm_date_call";
+
+export interface CommitmentSweepInput {
+  /** quotes.moving_date (yyyy-mm-dd). */
+  movingDate: string | null;
+  /** leads.date_confirmed_at — null means the ladder isn't armed yet. */
+  dateConfirmedAt: string | null;
+  /** The never-create-twice claim column: null | 'pending' | real Zoho id. */
+  zohoCommitmentInvoiceId: string | null;
+  /** Frozen at raise (25% × gross − deposit at that moment). */
+  commitmentInvoiceAmount: number | null;
+  commitmentPaidAt: string | null;
+  commitmentChaseT10At: string | null;
+  dateReleasableAt: string | null;
+  chasePaused: boolean;
+}
+
+/** Today's UK calendar day (yyyy-mm-dd; en-CA = ISO date format). */
+const ukTodayDay = (now: Date): string =>
+  now.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+
+/** Whole UK-calendar days from today until `day` (negative = past).
+ *  Date strings carry no wall-clock component, so UTC maths on them is DST-safe. */
+function daysUntilUkDay(day: string, now: Date): number | null {
+  const target = Date.parse(`${day}T00:00:00Z`);
+  const today = Date.parse(`${ukTodayDay(now)}T00:00:00Z`);
+  if (Number.isNaN(target) || Number.isNaN(today)) return null;
+  return Math.round((target - today) / DAY_MS);
+}
+
+/**
+ * Which commitment-ladder actions are due for one confirmed lead's accepted
+ * quote right now. Pure — the cron route does the IO and stamps the columns
+ * only after each send/insert succeeds. Can return BOTH "chase" and "flag" in
+ * one run (a late confirmation lands inside both thresholds at once).
+ */
+export function dueCommitmentActions(
+  input: CommitmentSweepInput,
+  now: Date = new Date(),
+): CommitmentAction[] {
+  const moveDay = ukDayOf(input.movingDate);
+  if (!moveDay) return [];
+  const days = daysUntilUkDay(moveDay, now);
+  // Past (or unparseable) move days belong to the post-move sweep, and a
+  // chase email after the move date reads as tone-deaf automation.
+  if (days === null || days < 0) return [];
+
+  // Date not confirmed → nothing is invoiced yet. At T-10 a human calls to
+  // get the confirmation (one shot — commitment_chase_t10_at covers both
+  // T-10 variants); no customer email either way.
+  if (!input.dateConfirmedAt) {
+    return days <= CONFIRM_CALL_DAYS_BEFORE && !input.commitmentChaseT10At && !input.chasePaused
+      ? ["confirm_date_call"]
+      : [];
+  }
+
+  // Confirmed branch needs a genuinely raised, unpaid, non-zero commitment
+  // invoice ('pending' is the in-flight claim marker, never a real id; the
+  // zero-commitment edge raises no invoice, so there is nothing to chase).
+  const invoiceRaised =
+    !!input.zohoCommitmentInvoiceId && input.zohoCommitmentInvoiceId !== "pending";
+  const amount = Number(input.commitmentInvoiceAmount ?? 0);
+  if (!invoiceRaised || input.commitmentPaidAt || !(amount > 0)) return [];
+
+  const actions: CommitmentAction[] = [];
+  if (days <= CONFIRM_CALL_DAYS_BEFORE && !input.commitmentChaseT10At && !input.chasePaused) {
+    actions.push("chase");
+  }
+  if (days <= COMMITMENT_DUE_DAYS_BEFORE && !input.dateReleasableAt) {
+    actions.push("flag");
+  }
+  return actions;
+}
+
+/* ------------------------------------------------- post-move outstanding */
+
+export interface PostMoveMoney {
+  /** VAT-inclusive agreed price (agreed_price ?? grand_total). */
+  agreed: number;
+  depositAmount: number | null;
+  depositPaidAt: string | null;
+  /** quotes.commitment_invoice_amount — frozen at raise. */
+  commitmentInvoiceAmount: number | null;
+  commitmentPaidAt: string | null;
+  balancePaidAt: string | null;
+}
+
+/**
+ * What is still owed after move day: agreed − (deposit if PAID) − (commitment
+ * if PAID), zeroed outright by balance_paid_at (the office's "all settled"
+ * stamp) and never negative. Only money that actually landed reduces the
+ * figure — an unpaid deposit or unpaid commitment invoice is still owed, so a
+ * paid-commitment settled job auto-completes while an unpaid one alarms with
+ * the right amount (Payments Policy v2 fix — the old maths only knew the
+ * deposit and over-alarmed every commitment-paid job).
+ */
+export function postMoveOutstanding(m: PostMoveMoney): number {
+  if (m.balancePaidAt) return 0;
+  const deposit = m.depositPaidAt ? Number(m.depositAmount ?? 0) : 0;
+  const commitment = m.commitmentPaidAt ? Number(m.commitmentInvoiceAmount ?? 0) : 0;
+  return round2(Math.max(0, (m.agreed || 0) - deposit - commitment));
 }
 
 /** Customer-facing expiry label from the quote-email send date (30-day validity). */

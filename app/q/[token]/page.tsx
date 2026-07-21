@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
-import { CheckCircle2, PhoneCall, ShieldCheck } from "lucide-react";
+import { CalendarCheck2, CheckCircle2, PhoneCall, ShieldCheck } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  ensureCommitmentInvoice,
   ensureDepositInvoice,
   fetchQuoteByToken,
   syncZohoPayments,
@@ -10,6 +11,7 @@ import {
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
+import { DateConfirmCard } from "@/components/quote/date-confirm-card";
 import { AcceptForm } from "./accept-form";
 import { DeclineOption, DepositSentButton } from "./customer-actions";
 import { PayCardButton } from "./pay-card-button";
@@ -253,6 +255,31 @@ export default async function AcceptPage({
   }
 
   if (quote.deposit_paid_at) {
+    // Date-confirmation state (Payments Policy v2 §5A) lives on the LEAD —
+    // null = deposit still fully refundable, so the confirm card shows.
+    let dateConfirmedAt: string | null = null;
+    if (quote.lead_id) {
+      const { data: lead } = await sb
+        .from("leads")
+        .select("date_confirmed_at")
+        .eq("id", quote.lead_id)
+        .maybeSingle();
+      dateConfirmedAt = lead?.date_confirmed_at ?? null;
+    }
+    if (dateConfirmedAt) {
+      // Self-heal a missing commitment invoice (a prior partial failure) and
+      // pick up a commitment payment recorded in Zoho since the last visit.
+      quote = (await ensureCommitmentInvoice(sb, quote.id)) ?? quote;
+      if (quote.zoho_commitment_invoice_id && !quote.commitment_paid_at) {
+        quote = await syncZohoPayments(sb, quote);
+      }
+    }
+
+    const moveLbl = moveDateLabel(quote.moving_date);
+    const commitAmt = Number(quote.commitment_invoice_amount ?? 0);
+    const commitDueLbl = moveDateLabel(quote.commitment_due_date);
+    const showConfirmCard = !dateConfirmedAt && !!moveLbl && !!quote.lead_id;
+
     return (
       <Shell>
         <Card>
@@ -263,10 +290,10 @@ export default async function AcceptPage({
             </h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">
               Your {gbp(deposit)} deposit is received and your move
-              {moveDateLabel(quote.moving_date) ? (
+              {moveLbl ? (
                 <>
                   {" "}
-                  on <strong className="text-ink">{moveDateLabel(quote.moving_date)}</strong>
+                  on <strong className="text-ink">{moveLbl}</strong>
                 </>
               ) : null}{" "}
               is secured. We&apos;ve emailed your confirmation — the remaining balance is due
@@ -274,6 +301,84 @@ export default async function AcceptPage({
             </p>
           </div>
         </Card>
+
+        {showConfirmCard ? (
+          <div className="mt-6">
+            <Card>
+              <div className="p-6 sm:p-8">
+                <DateConfirmCard token={token} moveDateLabel={moveLbl!} />
+              </div>
+            </Card>
+          </div>
+        ) : null}
+
+        {dateConfirmedAt ? (
+          <div className="mt-6">
+            <Card>
+              <div className="space-y-5 p-6 sm:p-8">
+                <div className="flex items-start gap-3">
+                  <CalendarCheck2 className="mt-0.5 size-5 shrink-0 text-success" strokeWidth={1.75} />
+                  <div>
+                    <h2 className="font-brand text-xl font-semibold text-ink">
+                      Move date confirmed
+                    </h2>
+                    <p className="mt-1 text-sm leading-relaxed text-mist-500">
+                      {moveLbl ? (
+                        <>
+                          Your move on <strong className="text-ink">{moveLbl}</strong> is
+                          confirmed.{" "}
+                        </>
+                      ) : null}
+                      Your deposit is held against your booking and counts towards your final
+                      bill.
+                    </p>
+                  </div>
+                </div>
+
+                {commitAmt > 0 && !quote.commitment_paid_at ? (
+                  <>
+                    <p className="text-sm leading-relaxed text-mist-500">
+                      Your commitment payment of{" "}
+                      <strong className="text-ink">{gbp(commitAmt)}</strong> is{" "}
+                      {commitDueLbl ? (
+                        <>
+                          due by <strong className="text-ink">{commitDueLbl}</strong>
+                        </>
+                      ) : (
+                        "due now"
+                      )}
+                      . It counts towards your final bill.
+                    </p>
+                    <BankPanel reference={quote.quote_ref} />
+                    {quote.zoho_commitment_invoice_number && quote.zoho_commitment_invoice_url ? (
+                      <p className="text-center text-xs text-mist-400">
+                        Your commitment invoice{" "}
+                        <a
+                          href={quote.zoho_commitment_invoice_url}
+                          className="font-semibold text-ink underline underline-offset-2"
+                        >
+                          {quote.zoho_commitment_invoice_number}
+                        </a>{" "}
+                        is ready to view.
+                      </p>
+                    ) : null}
+                  </>
+                ) : commitAmt > 0 && quote.commitment_paid_at ? (
+                  <p className="text-sm leading-relaxed text-mist-500">
+                    Your {gbp(commitAmt)} commitment payment is received — thank you. The
+                    remaining balance is due in full before move day.
+                  </p>
+                ) : (
+                  <p className="text-sm leading-relaxed text-mist-500">
+                    Your deposit already covers the commitment for your booking, so there is
+                    nothing more to pay right now. The remaining balance is due in full before
+                    move day.
+                  </p>
+                )}
+              </div>
+            </Card>
+          </div>
+        ) : null}
       </Shell>
     );
   }

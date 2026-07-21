@@ -19,6 +19,9 @@ import { SurveyPhotos } from "@/components/quote/survey-photos";
 import { AddFollowUpDialog } from "@/components/leads/add-followup-dialog";
 import { PaymentsCard } from "@/components/leads/payments-card";
 import { CardPaymentsCard } from "@/components/leads/card-payments-card";
+import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
+import { CancelBookingButton } from "@/components/bookings/booking-policy-actions";
+import { moveDateLabel } from "@/lib/quote/payments";
 import {
   CompletionCard,
   ContractSignatureCard,
@@ -152,7 +155,9 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const { data: quotes } = await supabase
     .from("quotes")
-    .select("id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at")
+    .select(
+      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at",
+    )
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
@@ -358,6 +363,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               }}
             />
             <AddFollowUpDialog leadId={lead.id} />
+            {/* Deposit-paid leads route cancellation through the policy dialog
+                (customer vs Marley cancel, held-money snapshot, refund queue)
+                rather than a raw mark-lost. */}
+            {lead.deposit_paid_at && !["declined", "completed"].includes(lead.status) ? (
+              <CancelBookingButton leadId={lead.id} />
+            ) : null}
             <StatusChanger leadId={lead.id} status={lead.status} />
           </div>
         </div>
@@ -451,6 +462,23 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           {leadFollowUps.length ? (
             <div className="mt-5">
               <LeadFollowUpsCard rows={leadFollowUps} />
+            </div>
+          ) : null}
+
+          {acceptedQuote ? (
+            <div className="mt-5">
+              <Card className="p-5">
+                <p className="eyebrow mb-3">Move date confirmation</p>
+                <DateConfirmStatus
+                  leadId={lead.id}
+                  state={{
+                    dateConfirmedAt: lead.date_confirmed_at ?? null,
+                    movingDate: acceptedQuote.moving_date ?? null,
+                    moveDateLabel: moveDateLabel(acceptedQuote.moving_date ?? null),
+                    depositPaidAt: acceptedQuote.deposit_paid_at ?? null,
+                  }}
+                />
+              </Card>
             </div>
           ) : null}
 

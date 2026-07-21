@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Sparkles,
   Truck,
+  Undo2,
   UserCog,
   Users,
   Warehouse,
@@ -70,6 +71,9 @@ const OFFICE_NAV: NavGroup[] = [
     items: [
       { href: "/payments", label: "Payments", icon: Banknote },
       { href: "/finance", label: "Invoices & VAT", icon: ReceiptText },
+      // Refund review queue (Payments Policy v2). Nav is not the security
+      // boundary — the page + every action re-gate admin server-side.
+      { href: "/refunds", label: "Refunds", icon: Undo2 },
       { href: "/finance/statements", label: "Contractor pay", icon: HandCoins },
     ],
   },

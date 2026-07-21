@@ -29,6 +29,8 @@ import { IconBadge } from "@/components/ui/icon-badge";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { OverlayChart } from "@/components/dashboard/overlay-chart";
+import { DatesAtRiskCard, type DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
+import { RefundsWaitingCard } from "@/components/dashboard/refunds-waiting-card";
 import type { PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -74,7 +76,11 @@ export interface DashboardData {
     unsignedContracts: number;
     /** Claims still live (open / assessing / offer made). */
     openClaims: number;
+    /** Refund-queue rows waiting on a decision/execution (Payments Policy v2). */
+    refundsWaiting: number;
   };
+  /** Bookings with the commitment unpaid at 7 days out — discretion alarm. */
+  datesAtRisk: DateAtRiskItem[];
   recent: {
     id: string;
     name: string | null;
@@ -142,7 +148,15 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
           <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
           <ActionCard label="Open claims" count={data.needsAction.openClaims} href="/claims" accent empty="No open claims" />
+          <RefundsWaitingCard count={data.needsAction.refundsWaiting} />
         </div>
+        {/* Full-width alarm strip — only when something is actually at risk
+            (an empty wrapper would still add its margin). */}
+        {data.datesAtRisk.length > 0 ? (
+          <div className="mt-4">
+            <DatesAtRiskCard items={data.datesAtRisk} />
+          </div>
+        ) : null}
       </section>
 
       {/* recent enquiries */}

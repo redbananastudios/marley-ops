@@ -5,14 +5,17 @@
  *   sent → customer accepts at /q/<token> (typed name) → quote accepted +
  *   lead PROVISIONAL + £deposit Zoho invoice raised → deposit paid (card via
  *   Zoho, or BACS one-tap in ops) → lead CONFIRMED + confirmation email →
- *   pre-move "Final invoice" button → balance Zoho invoice + email →
- *   balance paid → all settled.
+ *   customer CONFIRMS THE MOVE DATE (tick + signature on /q, or collected in
+ *   person) → deposit becomes non-refundable + commitment invoice raised
+ *   (25% of gross minus deposit, due move−7d — Payments Policy v2) →
+ *   commitment paid → pre-move "Final invoice" button → balance Zoho invoice
+ *   (agreed minus payments received) + email → balance paid → all settled.
  *
  * Invoice idempotency (VAT liability — NEVER create twice): the zoho_*_invoice_id
  * column is claimed with a NULL→'pending' conditional update before any Zoho
  * call; only one caller can win the claim. A crash between Zoho-create and the
- * DB write-back is covered by reference-number orphan adoption (-DEP / -BAL).
- * Customer emails ride the content-hash duplicate guard in dispatchComm.
+ * DB write-back is covered by reference-number orphan adoption (-DEP / -BAL /
+ * -COM). Customer emails ride the content-hash duplicate guard in dispatchComm.
  */
 
 import { randomBytes } from "crypto";
@@ -25,7 +28,15 @@ import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
 import { accountsFrom, ownerIdentity } from "@/lib/comms/sender";
 import { sendPushForEvent } from "@/lib/push/send";
-import { allAcksConfirmed, isValidSignatureDataUri, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import {
+  allAcksConfirmed,
+  allDateConfirmAcksConfirmed,
+  channelLabel,
+  isValidSignatureDataUri,
+  normalizeAcks,
+  normalizeDateConfirmAcks,
+  TERMS_VERSION,
+} from "@/lib/signatures";
 import {
   buildDepositReceivedEmailHtml,
   buildBalanceInvoiceEmailHtml,
@@ -37,9 +48,19 @@ import {
   type BalanceInvoiceMeta,
 } from "@/lib/comms/payment-email";
 import {
+  buildCommitmentReceivedEmailHtml,
+  buildDateConfirmationEmailHtml,
+  commitmentReceivedTemplateVars,
+  dateConfirmationTemplateVars,
+  type CommitmentReceivedMeta,
+  type DateConfirmationMeta,
+} from "@/lib/comms/date-confirm-email";
+import { commitmentAmount, commitmentDueDate } from "@/lib/payments-policy";
+import {
   balanceDue,
   balanceDueDate,
   balanceReference,
+  commitmentReference,
   depositReference,
   isAcceptExpired,
   moveDateLabel,
@@ -66,7 +87,7 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at";
+  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -104,6 +125,17 @@ export type AcceptQuoteRow = {
   zoho_balance_invoice_url: string | null;
   balance_invoice_amount: number | null;
   balance_invoice_created_at: string | null;
+  zoho_commitment_invoice_id: string | null;
+  zoho_commitment_invoice_number: string | null;
+  zoho_commitment_invoice_url: string | null;
+  zoho_commitment_error: string | null;
+  commitment_invoice_amount: number | null;
+  commitment_invoice_created_at: string | null;
+  commitment_due_date: string | null;
+  commitment_paid_at: string | null;
+  commitment_paid_method: string | null;
+  commitment_chase_t10_at: string | null;
+  date_releasable_at: string | null;
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
@@ -245,6 +277,40 @@ async function supersedeSiblingQuotes(
           `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its unpaid deposit invoice ${old.zoho_deposit_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}.`,
           `Void it manually in Zoho — the new quote raises its own deposit invoice.`,
         ], "system");
+      }
+    }
+
+    // Commitment invoice (Payments Policy v2): the amount is 25% of the OLD
+    // gross, so it can't carry onto a re-priced quote.
+    //   unpaid → void it; the new quote re-raises at its own price the next
+    //            time the confirmation self-heal runs (the lead stays
+    //            date-confirmed — that flag lives on the lead, not the quote).
+    //   PAID   → money already settled against the old number is never touched
+    //            from code (deferred by design): alert a human to adjust the
+    //            commitment position manually in Zoho.
+    if (isRealZohoId(old.zoho_commitment_invoice_id)) {
+      if (old.commitment_paid_at) {
+        await sendOpsAlert(`Superseded quote has a PAID commitment — ${old.quote_ref}`, [
+          `${old.quote_ref} was superseded by ${quote.quote_ref}, but its £${(old.commitment_invoice_amount ?? 0).toFixed(2)} commitment invoice ${old.zoho_commitment_invoice_number ?? ""} is already paid.`.replace(/\s+/g, " "),
+          `Nothing was changed in Zoho — adjust the commitment invoice manually (the new quote's commitment is 25% of the NEW price).`,
+        ], "money");
+      } else {
+        try {
+          await voidInvoice(old.zoho_commitment_invoice_id);
+          await sb.from("activities").insert({
+            lead_id: quote.lead_id,
+            client_id: lead?.client_id ?? quote.client_id,
+            actor_id: actorId,
+            type: "note",
+            summary: `Commitment invoice ${old.zoho_commitment_invoice_number ?? ""} voided — quote ${old.quote_ref} superseded`.trim(),
+            meta: { superseded_quote_id: old.id, invoice_id: old.zoho_commitment_invoice_id },
+          });
+        } catch (err) {
+          await sendOpsAlert(`Void commitment invoice FAILED — ${old.quote_ref}`, [
+            `${old.quote_ref} was superseded by ${quote.quote_ref}, but voiding its unpaid commitment invoice ${old.zoho_commitment_invoice_number ?? ""} failed: ${err instanceof Error ? err.message : "unknown"}.`,
+            `Void it manually in Zoho — the new quote raises its own commitment invoice once confirmation self-heals.`,
+          ], "system");
+        }
       }
     }
 
@@ -482,6 +548,11 @@ export async function acceptQuoteOnline(
   }
 
   if (!carriedDeposit) await ensureDepositInvoice(sb, quote.id);
+  // Re-quote on an already date-confirmed lead (carried deposit): the old
+  // quote's commitment was voided by the supersede, so raise this quote's own
+  // commitment invoice at the NEW price. Self-guarded — no-op unless the lead
+  // is confirmed and 25% x gross exceeds the deposit.
+  await ensureCommitmentInvoice(sb, quote.id);
 
   await sendOpsAlert(`Quote ${quote.quote_ref} accepted online`, [
     `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> accepted quote <strong>${quote.quote_ref}</strong> (signed "${escapeHtml(name)}").`,
@@ -626,6 +697,9 @@ export async function acceptQuoteByStaff(
   if (carriedDeposit) {
     // Fully paid deposit came across with the supersede — nothing to invoice or
     // chase; the caller reports "price revised" rather than "deposit requested".
+    // A date-confirmed lead still gets its commitment re-raised at the new
+    // price (the supersede voided the old -COM; self-guarded no-op otherwise).
+    await ensureCommitmentInvoice(sb, quote.id);
     return { ok: true, alreadyAccepted: false, agreed, deposit, emailed: false };
   }
 
@@ -1050,6 +1124,519 @@ export async function markDepositPaid(
   return { ok: true };
 }
 
+/* ------------------------------------------------------- commitment invoice */
+
+/**
+ * Raise the commitment invoice (Payments Policy v2: 25% of the gross agreed
+ * price minus the deposit, ref <quoteRef>-COM) exactly once. Only fires after
+ * the lead's move date is CONFIRMED (leads.date_confirmed_at) — before that
+ * there is nothing to commit to. Zero-commitment suppression: when 25% x gross
+ * <= deposit, no invoice is raised (confirmation still stands).
+ *
+ * Same never-create-twice machinery as the deposit: NULL → 'pending' claim,
+ * reference-number orphan adoption, release-on-failure + ops alert. The amount
+ * and due date are FROZEN onto the quote at raise time so later price edits
+ * can't silently change what the customer was invoiced.
+ *
+ * BACS/cash only (disableOnlinePayments) — card stays deposit-only for now.
+ */
+export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<AcceptQuoteRow | null> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote || quote.status !== "accepted" || !quote.lead_id) return quote;
+  if (isRealZohoId(quote.zoho_commitment_invoice_id)) return quote;
+
+  // Confirmation gate — the invoice exists BECAUSE the date was confirmed.
+  const { data: lead } = await sb
+    .from("leads")
+    .select("date_confirmed_at")
+    .eq("id", quote.lead_id)
+    .maybeSingle();
+  if (!lead?.date_confirmed_at) return quote;
+
+  const settings = await getBusinessSettings(sb);
+  const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  const amount = commitmentAmount(agreed, deposit);
+  if (amount <= 0) return quote; // deposit covers it — nothing to invoice
+
+  const dueDate = commitmentDueDate(quote.moving_date);
+
+  // Claim the creation slot: NULL → 'pending'. Only one caller wins.
+  const { data: claimed } = await sb
+    .from("quotes")
+    .update({ zoho_commitment_invoice_id: "pending" } as never)
+    .eq("id", quoteId)
+    .is("zoho_commitment_invoice_id", null)
+    .select("id");
+  if (!claimed?.length) return quote; // another caller is on it (or just finished)
+
+  const ref = commitmentReference(quote.quote_ref);
+  try {
+    // Crash-recovery: adopt an orphan created on a previous attempt.
+    let inv = await findInvoiceByReference(ref);
+    let contactId = quote.zoho_contact_id;
+    if (!inv) {
+      if (!isRealZohoId(contactId)) {
+        contactId = await findOrCreateContact({
+          name: quote.customer_name ?? "Customer",
+          email: quote.customer_email,
+          phone: quote.customer_phone,
+        });
+      }
+      inv = await createInvoice({
+        customerId: contactId!,
+        reference: ref,
+        description: `Booking commitment — removal quote ${quote.quote_ref} (25% of your move price, less your £${deposit.toFixed(2)} deposit)`,
+        amount,
+        notes: `Commitment payment for your confirmed move date, quote ${quote.quote_ref}. Due by ${dueDate}. It counts towards your final bill; the remaining balance is due in full before move day. Payable by bank transfer (reference ${quote.quote_ref}) or cash.`,
+        disableOnlinePayments: true, // commitment is BACS/cash only — never card
+      });
+    }
+    await sb
+      .from("quotes")
+      .update({
+        zoho_contact_id: contactId,
+        zoho_commitment_invoice_id: inv.invoiceId,
+        zoho_commitment_invoice_number: inv.invoiceNumber,
+        zoho_commitment_invoice_url: inv.invoiceUrl,
+        zoho_commitment_error: null,
+        commitment_invoice_amount: amount,
+        commitment_invoice_created_at: new Date().toISOString(),
+        commitment_due_date: dueDate,
+      } as never)
+      .eq("id", quoteId);
+    return await fetchQuoteById(sb, quoteId);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Zoho commitment invoice failed";
+    // Release the claim so the next page view / cron pass retries.
+    await sb
+      .from("quotes")
+      .update({ zoho_commitment_invoice_id: null, zoho_commitment_error: msg } as never)
+      .eq("id", quoteId)
+      .eq("zoho_commitment_invoice_id", "pending");
+    await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
+      `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+      `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
+    ], "system");
+    return await fetchQuoteById(sb, quoteId);
+  }
+}
+
+/* ------------------------------------------------------- commitment paid */
+
+export interface CommitmentPaidOpts {
+  /** Commitment is BACS/cash only by policy (card stays deposit-only). */
+  method: "bank_transfer" | "cash";
+  actorId: string | null; // null = system (Zoho payment sync)
+  /** Record the payment against the Zoho commitment invoice too (ops one-tap).
+   *  Pass false when Zoho already knows (payment seen by the sync poll). */
+  recordInZoho: boolean;
+}
+
+/** Commitment landed: stamp the quote, record in Zoho (BACS one-tap), close
+ *  the commitment chase, email the customer, alert ops. Idempotent — the CAS
+ *  on commitment_paid_at means a second call is a no-op; a DB error is a
+ *  FAILURE, never "already paid". */
+export async function markCommitmentPaid(
+  sb: Sb,
+  quoteId: string,
+  opts: CommitmentPaidOpts,
+): Promise<{ ok: boolean; already?: boolean; error?: string }> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+  if (quote.commitment_paid_at) return { ok: true, already: true };
+
+  const amount = Number(quote.commitment_invoice_amount ?? 0);
+  const now = new Date().toISOString();
+
+  // Single-winner CAS. Paying the commitment also clears the T-7 "date at
+  // risk" discretion marker — a paid commitment is no longer at risk.
+  const { data: won, error: gateErr } = await sb
+    .from("quotes")
+    .update({
+      commitment_paid_at: now,
+      commitment_paid_method: opts.method,
+      date_releasable_at: null,
+    } as never)
+    .eq("id", quoteId)
+    .is("commitment_paid_at", null)
+    .select("id");
+  if (gateErr) return { ok: false, error: gateErr.message };
+  if (!won?.length) return { ok: true, already: true };
+
+  // Zoho payment record (BACS/cash one-tap path), guarded by invoice status
+  // so a repeat can never double-record.
+  if (
+    opts.recordInZoho &&
+    isRealZohoId(quote.zoho_commitment_invoice_id) &&
+    isRealZohoId(quote.zoho_contact_id)
+  ) {
+    try {
+      const status = await getInvoiceStatus(quote.zoho_commitment_invoice_id);
+      if (status.status !== "paid" && status.balance > 0) {
+        await recordInvoicePayment({
+          customerId: quote.zoho_contact_id,
+          invoiceId: quote.zoho_commitment_invoice_id,
+          amount: Math.min(amount || status.balance, status.balance),
+          mode: zohoMode(opts.method),
+          reference: quote.quote_ref,
+        });
+      }
+    } catch (err) {
+      await sendOpsAlert(`Zoho commitment payment record FAILED — ${quote.quote_ref}`, [
+        `The commitment for <strong>${quote.quote_ref}</strong> is marked paid in ops, but recording it against ${quote.zoho_commitment_invoice_number ?? "the Zoho invoice"} failed: ${err instanceof Error ? err.message : "unknown"}.`,
+        `Record the payment manually in Zoho.`,
+      ], "system");
+    }
+  }
+
+  if (quote.lead_id) {
+    // Close the commitment chase (reason 'custom' + source 'commitment_chase'
+    // — the chase cron's creation shape).
+    const { data: open } = await sb
+      .from("follow_ups")
+      .select("id")
+      .eq("lead_id", quote.lead_id)
+      .eq("reason", "custom")
+      .eq("source", "commitment_chase")
+      .eq("status", "open");
+    for (const fu of open ?? []) {
+      await sb.from("follow_ups").update({ status: "done", outcome: "paid" }).eq("id", fu.id);
+    }
+
+    // Money-state change: timeline activity + audit log, both (fail-soft).
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: opts.actorId,
+      type: "note",
+      summary: `Commitment £${amount.toFixed(2)} paid (${opts.method === "cash" ? "cash" : "bank transfer"}) — balance due before move day`,
+      meta: { quote_id: quoteId, method: opts.method, amount },
+    });
+  }
+  const { error: eventErr } = await sb.from("events_log").insert({
+    actor_id: opts.actorId,
+    entity_type: "quote",
+    entity_id: quoteId,
+    action: "commitment_paid",
+    diff: { amount, method: opts.method },
+  } as never);
+  if (eventErr) {
+    await sendOpsAlert(`Commitment payment missing its audit log — ${quote.quote_ref}`, [
+      `The commitment for ${quote.quote_ref} is marked paid but the events_log write failed: ${eventErr.message}`,
+    ], "system");
+  }
+
+  // Customer confirmation (duplicate-guarded; template preferred, in-repo
+  // fallback). Money mail comes from the accounts desk.
+  if (quote.customer_email && amount > 0) {
+    const meta: CommitmentReceivedMeta = {
+      firstName: quote.customer_name,
+      quoteRef: quote.quote_ref,
+      amount,
+      moveDateLabel: moveDateLabel(quote.moving_date),
+    };
+    const templateId = process.env.RESEND_TEMPLATE_COMMITMENT_RECEIVED;
+    await dispatchComm(sb, opts.actorId, {
+      channel: "email",
+      from: accountsFrom(),
+      to: quote.customer_email,
+      subject: `Payment received — commitment for your move (${quote.quote_ref})`,
+      bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. It counts towards your final bill; the remaining balance is due before move day.`,
+      ...(templateId
+        ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) } }
+        : { bodyHtml: buildCommitmentReceivedEmailHtml(meta) }),
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      leadId: quote.lead_id ?? undefined,
+      quoteId: quote.id,
+      clientId: quote.client_id ?? undefined,
+    });
+  }
+
+  await sendOpsAlert(`Commitment paid — ${quote.quote_ref}`, [
+    `£${amount.toFixed(2)} commitment received for <strong>${quote.quote_ref}</strong> (${quote.customer_name ?? "customer"}) via ${opts.method === "cash" ? "cash" : "bank transfer"}.`,
+    `The remaining balance is due before move day.`,
+  ], "money");
+
+  return { ok: true };
+}
+
+/* ------------------------------------------------------- date confirmation */
+
+export interface DateConfirmInput {
+  signerName: string;
+  acks?: Record<string, unknown>;
+  channel: "remote" | "in_person";
+  /** 'drawn' only when a real pad image was captured in person; typed names
+   *  stay the signature even when the script PNG render fails. */
+  method: "typed" | "drawn";
+  /** PNG data URI — the drawn signature, or the script rendering of the typed
+   *  name (evidence nicety, not the signature itself when typed). */
+  signatureImage?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+  /** Office actor collecting in person; null on the public path. */
+  collectedBy?: string | null;
+}
+
+export type DateConfirmOutcome =
+  | { ok: true; already: boolean }
+  | { ok: false; error: string };
+
+/**
+ * The date-confirmation pipeline (Payments Policy v2 §5A) — shared by the
+ * public /q card and the office "Confirm in person" dialog:
+ *
+ *   validate (accepted + deposit paid + move date set + ack ticked)
+ *   → CAS-stamp leads.date_confirmed_at (single winner; deposit becomes
+ *     non-refundable AT this instant — refundability is derived, no boolean)
+ *   → signatures row kind 'date_confirm' (23505-tolerant; non-duplicate
+ *     failure rolls the CAS back so state and evidence never split)
+ *   → leads.date_confirm_signature_id
+ *   → ensureCommitmentInvoice (zero-amount suppression inside)
+ *   → date-confirmation email (invoice PDF best-effort)
+ *   → activities + events_log + ops alert.
+ *
+ * Everything after the signature is fail-soft: the confirmation stands even
+ * if a secondary side effect fails (each failure alerts ops).
+ */
+export async function confirmMoveDate(
+  sb: Sb,
+  quoteId: string,
+  input: DateConfirmInput,
+): Promise<DateConfirmOutcome> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote || !quote.lead_id) return { ok: false, error: "This quote is no longer available." };
+  if (quote.status !== "accepted") {
+    return { ok: false, error: "The quote must be accepted before the move date is confirmed." };
+  }
+  if (!quote.deposit_paid_at) {
+    return { ok: false, error: "The deposit must be paid before the move date is confirmed." };
+  }
+  if (!quote.moving_date) {
+    return { ok: false, error: "There's no move date on this booking yet — nothing to confirm." };
+  }
+  const name = input.signerName.trim();
+  if (name.length < 2) return { ok: false, error: "Type your full name to confirm the date." };
+  if (!allDateConfirmAcksConfirmed(input.acks)) {
+    return { ok: false, error: "Please tick the confirmation box to confirm your move date." };
+  }
+  if (input.method === "drawn" && !isValidSignatureDataUri(input.signatureImage)) {
+    return { ok: false, error: "The signature didn't come through — please sign again." };
+  }
+
+  const { data: lead } = await sb
+    .from("leads")
+    .select("id, client_id, date_confirmed_at")
+    .eq("id", quote.lead_id)
+    .maybeSingle();
+  if (!lead) return { ok: false, error: "This quote is no longer available." };
+  if (lead.date_confirmed_at) return { ok: true, already: true };
+
+  // Single-winner CAS — the instant the deposit becomes non-refundable.
+  const confirmedAt = new Date().toISOString();
+  const { data: won, error: gateErr } = await sb
+    .from("leads")
+    .update({ date_confirmed_at: confirmedAt } as never)
+    .eq("id", quote.lead_id)
+    .is("date_confirmed_at", null)
+    .select("id");
+  if (gateErr) return { ok: false, error: "Something went wrong — please call 01747 637070." };
+  if (!won?.length) {
+    // Someone else won the race (two tabs, a replay) — that confirmation stands.
+    const { data: again } = await sb
+      .from("leads")
+      .select("date_confirmed_at")
+      .eq("id", quote.lead_id)
+      .maybeSingle();
+    if (again?.date_confirmed_at) return { ok: true, already: true };
+    return { ok: false, error: "Something went wrong — please call 01747 637070." };
+  }
+
+  // Evidence row. One per quote (partial unique index) — a 23505 means a
+  // parallel submit already recorded it; adopt that row.
+  let signatureId: string | null = null;
+  const { data: sigRow, error: sigErr } = await sb
+    .from("signatures")
+    .insert({
+      kind: "date_confirm",
+      quote_id: quote.id,
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      signer_name: name,
+      signature_data: isValidSignatureDataUri(input.signatureImage) ? input.signatureImage : null,
+      method: input.method,
+      channel: input.channel,
+      acknowledgments: normalizeDateConfirmAcks(input.acks),
+      terms_version: TERMS_VERSION,
+      ip: input.ip ?? null,
+      user_agent: input.userAgent ?? null,
+      collected_by: input.collectedBy ?? null,
+    } as never)
+    .select("id")
+    .single();
+  if (sigErr && sigErr.code === "23505") {
+    const { data: existing } = await sb
+      .from("signatures")
+      .select("id")
+      .eq("quote_id", quote.id)
+      .eq("kind", "date_confirm")
+      .limit(1)
+      .maybeSingle();
+    signatureId = existing?.id ?? null;
+  } else if (sigErr || !sigRow) {
+    // Keep the non-refundability flip and its evidence together: roll the CAS
+    // back, bound to OUR stamp so a later confirmation can't be undone.
+    const { data: rolledBack } = await sb
+      .from("leads")
+      .update({ date_confirmed_at: null } as never)
+      .eq("id", quote.lead_id)
+      .eq("date_confirmed_at", confirmedAt)
+      .select("id");
+    if (!rolledBack?.length) {
+      await sendOpsAlert(`Date-confirmation evidence FAILED — ${quote.quote_ref}`, [
+        `The move date on <strong>${quote.quote_ref}</strong> was confirmed but its signature record failed and the safe rollback did not win.`,
+        `Do not treat the deposit as non-refundable until the confirmation evidence is repaired.`,
+      ], "system").catch(() => {});
+    }
+    return { ok: false, error: "We couldn't save the confirmation — please try again or call 01747 637070." };
+  } else {
+    signatureId = sigRow.id;
+  }
+
+  if (signatureId) {
+    const { error: linkErr } = await sb
+      .from("leads")
+      .update({ date_confirm_signature_id: signatureId } as never)
+      .eq("id", quote.lead_id);
+    if (linkErr) {
+      await sendOpsAlert(`Date-confirmation signature link failed — ${quote.quote_ref}`, [
+        `leads.date_confirm_signature_id could not be written (${linkErr.message}); the signature row ${signatureId} exists and the confirmation stands.`,
+      ], "system");
+    }
+  }
+
+  // Raise the commitment invoice (fail-soft — it self-heals via /q + cron).
+  const refreshed = (await ensureCommitmentInvoice(sb, quote.id)) ?? quote;
+  const settings = await getBusinessSettings(sb);
+  const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  const commitAmt = refreshed.commitment_invoice_amount ?? commitmentAmount(agreed, deposit);
+  const dueDate = refreshed.commitment_due_date ?? commitmentDueDate(quote.moving_date);
+  const dueLabel = moveDateLabel(dueDate);
+
+  // Date-confirmation email — states the held/non-refundable position and the
+  // commitment (invoice PDF attached best-effort). Duplicate-guarded.
+  if (quote.customer_email) {
+    let pdfBase64: string | undefined;
+    if (commitAmt > 0 && isRealZohoId(refreshed.zoho_commitment_invoice_id)) {
+      try {
+        pdfBase64 = await getInvoicePdfBase64(refreshed.zoho_commitment_invoice_id);
+      } catch {
+        pdfBase64 = undefined; // send without the attachment rather than not at all
+      }
+    }
+    const meta: DateConfirmationMeta = {
+      firstName: quote.customer_name,
+      quoteRef: quote.quote_ref,
+      moveDateLabel: moveDateLabel(quote.moving_date),
+      depositAmount: deposit,
+      commitmentAmount: commitAmt,
+      commitmentDueLabel: dueLabel,
+      invoiceNumber: refreshed.zoho_commitment_invoice_number,
+      invoiceUrl: refreshed.zoho_commitment_invoice_url,
+    };
+    const templateId = process.env.RESEND_TEMPLATE_DATE_CONFIRMATION;
+    await dispatchComm(sb, input.collectedBy ?? null, {
+      channel: "email",
+      from: accountsFrom(),
+      to: quote.customer_email,
+      subject: `Move date confirmed — ${quote.quote_ref}`,
+      bodyText:
+        commitAmt > 0
+          ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${commitAmt.toFixed(2)} commitment payment is ${dueLabel ? `due by ${dueLabel}` : "due now"}.`
+          : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
+      ...(templateId
+        ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) } }
+        : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),
+      attachmentBase64: pdfBase64,
+      attachmentName: pdfBase64
+        ? `MarleyMoves-Invoice-${refreshed.zoho_commitment_invoice_number ?? "commitment"}.pdf`
+        : undefined,
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      leadId: quote.lead_id ?? undefined,
+      quoteId: quote.id,
+      clientId: quote.client_id ?? undefined,
+    });
+  }
+
+  // Money-state change: timeline + audit, both (fail-soft each).
+  await sb.from("activities").insert({
+    lead_id: quote.lead_id,
+    client_id: lead.client_id ?? quote.client_id,
+    actor_id: input.collectedBy ?? null,
+    type: "status_change",
+    summary: `Move date confirmed by "${name}" (${channelLabel(input.channel)}) — deposit now non-refundable${commitAmt > 0 ? `; £${commitAmt.toFixed(2)} commitment due ${dueLabel ?? "now"}` : ""}`,
+    meta: {
+      quote_id: quote.id,
+      signature_id: signatureId,
+      via: input.channel === "in_person" ? "office_collect" : "accept_page",
+      commitment_amount: commitAmt,
+      commitment_due_date: dueDate,
+    },
+  });
+  const { error: eventErr } = await sb.from("events_log").insert({
+    actor_id: input.collectedBy ?? null,
+    entity_type: "lead",
+    entity_id: quote.lead_id,
+    action: "date_confirmed",
+    diff: {
+      quote_id: quote.id,
+      channel: input.channel,
+      method: input.method,
+      commitment_amount: commitAmt,
+      commitment_due_date: dueDate,
+    },
+  } as never);
+  if (eventErr) {
+    await sendOpsAlert(`Date confirmation missing its audit log — ${quote.quote_ref}`, [
+      `The move date on ${quote.quote_ref} is confirmed but the events_log write failed: ${eventErr.message}`,
+    ], "system");
+  }
+
+  await sendOpsAlert(`Move date confirmed — ${quote.quote_ref}`, [
+    `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> confirmed their move${moveDateLabel(quote.moving_date) ? ` on <strong>${moveDateLabel(quote.moving_date)}</strong>` : ""} (signed "${escapeHtml(name)}", ${channelLabel(input.channel)}).`,
+    `The £${deposit.toFixed(2)} deposit is now non-refundable and counts towards the final bill.`,
+    commitAmt > 0
+      ? `Commitment invoice: £${commitAmt.toFixed(2)} ${dueLabel ? `due by ${dueLabel}` : "due now"}${refreshed.zoho_commitment_invoice_number ? ` (${refreshed.zoho_commitment_invoice_number})` : " — invoice creation will retry if it failed"}.`
+      : `No commitment invoice needed — the deposit already covers 25% of the job price.`,
+  ], "money");
+
+  return { ok: true, already: false };
+}
+
+/** Public wrapper — the customer confirms from the /q card. The unguessable
+ *  token is the credential, exactly like acceptQuoteOnline. */
+export async function confirmMoveDateOnline(
+  sb: Sb,
+  token: string,
+  fullName: string,
+  ip: string | null,
+  opts?: { acks?: Record<string, unknown>; userAgent?: string | null; signatureImage?: string | null },
+): Promise<DateConfirmOutcome> {
+  const quote = await fetchQuoteByToken(sb, token);
+  if (!quote) return { ok: false, error: "This link is no longer valid." };
+  return confirmMoveDate(sb, quote.id, {
+    signerName: fullName,
+    acks: opts?.acks,
+    channel: "remote",
+    method: "typed",
+    signatureImage: opts?.signatureImage ?? null,
+    ip,
+    userAgent: opts?.userAgent ?? null,
+  });
+}
+
 /* ------------------------------------------------------------- balance invoice */
 
 export type BalanceInvoiceOutcome =
@@ -1081,8 +1668,15 @@ export async function createBalanceInvoiceFlow(
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
-  const amount = balanceDue(agreed, deposit);
-  if (amount <= 0) return { ok: false, error: "Nothing left to invoice — the deposit covers the agreed price." };
+  // Payments Policy v2: the balance is what's left after money actually
+  // RECEIVED — the deposit and the commitment count only once paid (unpaid
+  // invoices are still owed in full, so deducting them would under-invoice).
+  const depositCredit = quote.deposit_paid_at ? deposit : 0;
+  const commitmentCredit = quote.commitment_paid_at ? Number(quote.commitment_invoice_amount ?? 0) : 0;
+  const amount = round2(Math.max(0, agreed - depositCredit - commitmentCredit));
+  if (amount <= 0) {
+    return { ok: false, error: "Nothing left to invoice — payments received cover the agreed price." };
+  }
 
   // Claim the creation slot (NULL → 'pending'); only one caller wins.
   const { data: claimed } = await sb
@@ -1107,12 +1701,17 @@ export async function createBalanceInvoiceFlow(
           phone: quote.customer_phone,
         });
       }
+      const credits = [
+        ...(depositCredit > 0 ? [`the £${depositCredit.toFixed(2)} booking deposit`] : []),
+        ...(commitmentCredit > 0 ? [`the £${commitmentCredit.toFixed(2)} commitment payment`] : []),
+      ];
+      const creditsClause = credits.length ? ` less ${credits.join(" and ")} already received` : "";
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
-        description: `Removal services — quote ${quote.quote_ref} (balance after £${deposit.toFixed(2)} booking deposit)`,
+        description: `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)} less the £${deposit.toFixed(2)} booking deposit already invoiced. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash.`,
+        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash.`,
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
@@ -1343,6 +1942,23 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
       const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
       if (s.status === "paid") {
         await markDepositPaid(sb, quote.id, { method: "card", actorId: null, recordInZoho: false });
+        changed = true;
+      }
+    } catch {
+      /* Zoho unreachable — next pass catches it */
+    }
+  }
+  if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
+    try {
+      const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id);
+      if (s.status === "paid") {
+        // Commitment is BACS/cash only; a payment Connor records in Zoho lands
+        // here. Method defaults to bank transfer (cash one-taps record in ops).
+        await markCommitmentPaid(sb, quote.id, {
+          method: "bank_transfer",
+          actorId: null,
+          recordInZoho: false,
+        });
         changed = true;
       }
     } catch {

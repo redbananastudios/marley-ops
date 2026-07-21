@@ -4,11 +4,13 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getBusinessSettings } from "@/lib/settings";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
-import { balanceDue } from "@/lib/quote/payments";
+import { balanceDue, moveDateLabel } from "@/lib/quote/payments";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 import { CopyLinkButton, MarkPaidButton } from "@/components/bookings/booking-actions";
+import { CancelBookingButton, ChangeDateButton } from "@/components/bookings/booking-policy-actions";
+import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
 
 /**
  * Bookings — the layer between "quote accepted" and "removal completed".
@@ -72,8 +74,16 @@ interface Row {
   balancePaidAt: string | null;
   balanceInvoiceNumber: string | null;
   balanceAmount: number;
+  apptId: string | null;
   apptStartsAt: string | null;
+  apptEndsAt: string | null;
   cardStatus: string | null;
+  /** The money quote's own moving_date (no preferred-date fallback) — drives
+   *  the date-confirmation chip, which must never claim a date the quote
+   *  doesn't carry. */
+  quoteMovingDate: string | null;
+  /** leads.date_confirmed_at — the Payments Policy v2 ladder flag. */
+  dateConfirmedAt: string | null;
 }
 
 function Section({
@@ -139,13 +149,13 @@ export default async function BookingsPage() {
     leadIds.length
       ? sb
           .from("leads")
-          .select("id, name, status, preferred_date, chase_paused, deposit_chase_step, balance_paid_at")
+          .select("id, name, status, preferred_date, chase_paused, deposit_chase_step, balance_paid_at, date_confirmed_at")
           .in("id", leadIds)
       : Promise.resolve({ data: [] as never[] }),
     leadIds.length
       ? sb
           .from("appointments")
-          .select("lead_id, starts_at, status")
+          .select("id, lead_id, starts_at, ends_at, status")
           .eq("appt_type", "removal")
           // Crew sign-off flips the appointment to 'completed' on move day —
           // the booking row must keep its move date (only cancelled drops out).
@@ -170,10 +180,18 @@ export default async function BookingsPage() {
   }
 
   const leadById = new Map((leads ?? []).map((l) => [l.id, l]));
-  const apptByLead = new Map<string, string>();
+  // Earliest removal appointment per lead — id + slot so the Booked rows can
+  // open the change-date dialog against the actual diary entry.
+  const apptByLead = new Map<string, { id: string; startsAt: string; endsAt: string | null }>();
   for (const a of appts ?? []) {
     const cur = apptByLead.get(a.lead_id as string);
-    if (!cur || (a.starts_at as string) < cur) apptByLead.set(a.lead_id as string, a.starts_at as string);
+    if (!cur || (a.starts_at as string) < cur.startsAt) {
+      apptByLead.set(a.lead_id as string, {
+        id: a.id as string,
+        startsAt: a.starts_at as string,
+        endsAt: (a.ends_at as string | null) ?? null,
+      });
+    }
   }
 
   // One row per lead: its most recently accepted quote drives the money.
@@ -207,8 +225,12 @@ export default async function BookingsPage() {
           ? (q.zoho_balance_invoice_number as string | null)
           : null,
       balanceAmount: Number(q.balance_invoice_amount ?? balanceDue(agreed, deposit)),
-      apptStartsAt: apptByLead.get(lead.id) ?? null,
+      apptId: apptByLead.get(lead.id)?.id ?? null,
+      apptStartsAt: apptByLead.get(lead.id)?.startsAt ?? null,
+      apptEndsAt: apptByLead.get(lead.id)?.endsAt ?? null,
       cardStatus: cardStatusByLead.get(lead.id) ?? null,
+      quoteMovingDate: (q.moving_date as string | null) ?? null,
+      dateConfirmedAt: (lead.date_confirmed_at as string | null) ?? null,
     });
   }
 
@@ -334,7 +356,8 @@ export default async function BookingsPage() {
           const days = daysUntil(r.apptStartsAt!);
           const soon = days <= 3 && !r.balancePaidAt && !r.balanceInvoiceNumber;
           return (
-            <div key={r.quoteId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+            <div key={r.quoteId} className="px-5 py-3.5">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <div className="min-w-0 flex-1">
                 <Link href={`/leads/${r.leadId}`} className="font-medium text-foreground hover:underline">
                   {r.customer}
@@ -385,6 +408,29 @@ export default async function BookingsPage() {
                   <BalanceInvoiceButton leadId={r.leadId} />
                 </>
               )}
+              </div>
+              {/* Payments Policy v2 strip: deposit → date-confirm → commitment
+                  in one place, plus the single change/cancel path. */}
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <DateConfirmStatus
+                  leadId={r.leadId}
+                  state={{
+                    dateConfirmedAt: r.dateConfirmedAt,
+                    movingDate: r.quoteMovingDate,
+                    moveDateLabel: moveDateLabel(r.quoteMovingDate),
+                    depositPaidAt: r.depositPaidAt,
+                  }}
+                />
+                {r.apptId && r.apptStartsAt && r.apptEndsAt ? (
+                  <ChangeDateButton
+                    appointmentId={r.apptId}
+                    leadId={r.leadId}
+                    startsAt={r.apptStartsAt}
+                    endsAt={r.apptEndsAt}
+                  />
+                ) : null}
+                <CancelBookingButton leadId={r.leadId} />
+              </div>
             </div>
           );
         })}

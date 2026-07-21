@@ -40,18 +40,42 @@ pack (name, method, IP, device, timestamp, terms version).
 
 ## 2. Money terms the flows enforce — terms must state the same rules
 
-- **Deposit**: £100 secures the booking. Acceptance is **provisional until the deposit
-  is received**; the date is only confirmed on payment. Payable by card or bank transfer.
-- **Balance**: bank transfer or cash, **due in full before the move day** (card is
-  deposit-only by policy). Final invoice = agreed price − deposit.
+**DECIDED 21 Jul 2026 (Peter + Connor) — the deposit-commitment ladder. The system
+now implements exactly this (docs/payments-policy-v2-prd.md); the terms must state it.**
+
+- **Deposit**: £100 secures the booking (card, bank transfer, or cash). **Fully
+  refundable, unconditionally, until the customer confirms their move date.**
+- **Date confirmation** (a signed step — tick + name, online or in person): from this
+  moment the deposit is **non-refundable**, and a second invoice is raised for **25%
+  of the gross price minus the deposit**, due **7 days before the move** (due
+  immediately if confirmed later than that).
+- **Balance**: gross − 25%, bank transfer or cash, **due in full before move day**
+  (card is deposit-only by policy). 
+- **Cancellation after confirmation — the fill rule**: money held is capped at 25% of
+  gross. If Marley **re-books the reserved day, everything is refunded in full**; if
+  the day stays unfilled, up to 25% is retained and anything paid above 25% is
+  refunded regardless. Refunds go back by the original payment method within **14
+  days** of the outcome being known. The clause must tie retention to the **unfilled
+  date** (loss-based), never frame it as a penalty — that framing is what makes it
+  defensible, and the word "penalty" appears nowhere in system copy by hard rule.
+- **Date changes**: free when made more than 7 days before the move (everything
+  rolls). Within 7 days, the change is treated as cancelling the old date (fill rule
+  applies to it) and booking a new one — money already held counts toward the new
+  booking, and only stops counting if the old day dies unfilled.
+- **Marley-initiated cancellation or reschedule**: full refund of everything, no
+  conditions.
+- **The date-confirmation acknowledgment** customers sign (wording provisional until
+  the solicitor signs off — the clause and this string must always change together):
+  > "I'm confirming this move date. I understand my deposit is now non-refundable and
+  > still counts towards my final bill. If I later cancel or move this date within 7
+  > days of the move and Marley Moves cannot re-book the day, amounts I've paid up to
+  > 25% of my job price may be retained — and are refunded in full if the day is
+  > re-booked."
 - **VAT**: prices are inclusive of VAT at 20% (VAT no. 520 2213 58 prints on invoices).
+  Retained (forfeited) sums keep their VAT treatment — no credit note is issued
+  (HMRC forfeited-deposit position, 2022; FRS counts them as turnover).
 - **Revised quotes**: a newly accepted quote supersedes earlier ones for the same move;
-  a deposit already paid carries over (never charged twice).
-- **Cancellation & refunds — NEEDS A DECISION**: the system has a refund/void flow but
-  no policy behind it. Decide the schedule with Connor, e.g. deposit refundable if
-  cancelled ≥N days before the move, retained inside N days; Marley-initiated
-  cancellation = full refund. Whatever is chosen, the /q payment page copy and the
-  chase emails should echo it.
+  money already paid carries over (never charged twice).
 - **Late/non-payment after the move**: the system raises an overdue alarm — terms
   should state interest/recovery costs position (or at minimum "payment due before
   completion of the move").

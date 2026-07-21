@@ -8,9 +8,12 @@
 export const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /** Zoho reference numbers — distinct per document so orphan-adoption after a
- *  crash can never confuse the deposit invoice with the balance invoice. */
+ *  crash can never confuse the deposit, commitment and balance invoices. */
 export const depositReference = (quoteRef: string): string => `${quoteRef}-DEP`;
 export const balanceReference = (quoteRef: string): string => `${quoteRef}-BAL`;
+/** Payments Policy v2: the 25%-minus-deposit commitment invoice raised at
+ *  date confirmation (docs/payments-policy-v2-prd.md). */
+export const commitmentReference = (quoteRef: string): string => `${quoteRef}-COM`;
 
 /** Balance due = agreed price minus the deposit, never negative. */
 export function balanceDue(agreedPrice: number, depositAmount: number): number {

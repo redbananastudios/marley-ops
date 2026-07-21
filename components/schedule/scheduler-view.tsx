@@ -46,6 +46,7 @@ import {
 } from "./appointment-dialog";
 import { AppointmentViewDialog } from "./appointment-view-dialog";
 import { RescheduleDialog } from "./reschedule-dialog";
+import { ChangeDateDialog } from "@/components/bookings/change-date-dialog";
 
 export type SchedulerKind = "survey" | "removal";
 
@@ -138,6 +139,10 @@ export function SchedulerView({
   const [reschedOpen, setReschedOpen] = useState(false);
   const [reschedTarget, setReschedTarget] = useState<EditTarget | null>(null);
   const [reschedPresetDate, setReschedPresetDate] = useState<Date | null>(null);
+  // Booked removals reschedule through the Payments Policy v2 ChangeDateDialog
+  // (single date-change path — inside the 7-day window it snapshots held money
+  // into the refund queue). This carries a dropped slot into that dialog.
+  const [reschedPresetSlot, setReschedPresetSlot] = useState<{ startsAt: string; endsAt: string } | null>(null);
   const [presetStart, setPresetStart] = useState<string | undefined>();
   const [presetEnd, setPresetEnd] = useState<string | undefined>();
   const [presetAllDay, setPresetAllDay] = useState<boolean | undefined>();
@@ -299,6 +304,8 @@ export function SchedulerView({
           title: string | null;
         };
         const original = events.find((e) => e.id === ev.id);
+        const originalStart = original?.starts_at ?? ev.start.toISOString();
+        const originalEnd = original?.ends_at ?? ev.end?.toISOString() ?? "";
         setReschedTarget({
           id: ev.id,
           apptType: ep.apptType,
@@ -308,10 +315,28 @@ export function SchedulerView({
           title: ep.title ?? ev.title,
           location: ep.location ?? null,
           notes: null,
-          startsAt: original?.starts_at ?? ev.start.toISOString(),
-          endsAt: original?.ends_at ?? ev.end?.toISOString() ?? "",
+          startsAt: originalStart,
+          endsAt: originalEnd,
         });
         setReschedPresetDate(ev.start);
+        if (ep.apptType === "removal" && ep.leadId) {
+          // Pre-fill the policy dialog with the dropped DAY at the original
+          // time of day (month drops carry no meaningful time).
+          const base = new Date(originalStart);
+          const baseEndMs = originalEnd ? new Date(originalEnd).getTime() : NaN;
+          const duration =
+            Number.isFinite(baseEndMs) && baseEndMs > base.getTime()
+              ? baseEndMs - base.getTime()
+              : 60 * 60 * 1000;
+          const preset = new Date(ev.start);
+          preset.setHours(base.getHours(), base.getMinutes(), 0, 0);
+          setReschedPresetSlot({
+            startsAt: preset.toISOString(),
+            endsAt: new Date(preset.getTime() + duration).toISOString(),
+          });
+        } else {
+          setReschedPresetSlot(null);
+        }
         arg.revert();
         setReschedOpen(true);
         return;
@@ -320,6 +345,33 @@ export function SchedulerView({
       if (!ev.end) {
         arg.revert();
         return;
+      }
+      {
+        // Booked removals go through the SINGLE date-change path (Payments
+        // Policy v2): revert the drag and open the policy dialog pre-filled
+        // with the dropped slot — inside the 7-day window it needs the warning
+        // + tick and a refund-queue snapshot, which a confirm() cannot carry.
+        const ep = ev.extendedProps as { apptType: ApptType; leadId: string | null; estimatorId: string | null; status: string | null; location: string | null; title: string | null };
+        if (ep.apptType === "removal" && ep.leadId) {
+          const original = events.find((e) => e.id === ev.id);
+          setReschedTarget({
+            id: ev.id,
+            apptType: ep.apptType,
+            leadId: ep.leadId,
+            estimatorId: ep.estimatorId ?? null,
+            status: ep.status ?? null,
+            title: ep.title ?? ev.title,
+            location: ep.location ?? null,
+            notes: null,
+            startsAt: original?.starts_at ?? ev.start.toISOString(),
+            endsAt: original?.ends_at ?? ev.end.toISOString(),
+          });
+          setReschedPresetDate(null);
+          setReschedPresetSlot({ startsAt: ev.start.toISOString(), endsAt: ev.end.toISOString() });
+          arg.revert();
+          setReschedOpen(true);
+          return;
+        }
       }
       if (!confirm("Move this appointment to the new time?")) {
         arg.revert();
@@ -442,18 +494,36 @@ export function SchedulerView({
           setViewOpen(false);
           setReschedTarget(viewTarget);
           setReschedPresetDate(null);
+          setReschedPresetSlot(null);
           setReschedOpen(true);
         }}
       />
 
-      <RescheduleDialog
-        open={reschedOpen}
-        onOpenChange={setReschedOpen}
-        target={reschedTarget}
-        estimatorName={reschedTarget?.estimatorId ? estimatorById.get(reschedTarget.estimatorId) ?? null : null}
-        events={events}
-        presetDate={reschedPresetDate}
-      />
+      {/* Booked removals (with a lead) reschedule through the Payments Policy
+          v2 dialog — the single date-change path (free outside the 7-day
+          window; warned cancel-and-rebook + refund-queue snapshot inside it).
+          Surveys and lead-less diary entries keep the plain reschedule. */}
+      {reschedTarget && reschedTarget.apptType === "removal" && reschedTarget.leadId ? (
+        <ChangeDateDialog
+          appointmentId={reschedTarget.id}
+          leadId={reschedTarget.leadId}
+          startsAt={reschedTarget.startsAt}
+          endsAt={reschedTarget.endsAt}
+          presetStartsAt={reschedPresetSlot?.startsAt ?? null}
+          presetEndsAt={reschedPresetSlot?.endsAt ?? null}
+          open={reschedOpen}
+          onOpenChange={setReschedOpen}
+        />
+      ) : (
+        <RescheduleDialog
+          open={reschedOpen}
+          onOpenChange={setReschedOpen}
+          target={reschedTarget}
+          estimatorName={reschedTarget?.estimatorId ? estimatorById.get(reschedTarget.estimatorId) ?? null : null}
+          events={events}
+          presetDate={reschedPresetDate}
+        />
+      )}
 
       <AppointmentDialog
         open={dialogOpen}

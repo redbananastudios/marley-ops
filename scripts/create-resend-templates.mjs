@@ -153,6 +153,210 @@ const paymentCard = (reference) => {
   </td></tr>`;
 };
 
+/** Bank-transfer-only payment card (no card button): the commitment and
+ *  balance rails are BACS/cash — card stays deposit-only for now. */
+const bankOnlyCard = (reference) => {
+  const row = (l, v) => `<tr>
+    <td style="padding:8px 0;border-bottom:1px solid #F0EDE8;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;width:42%;">${l}</td>
+    <td style="padding:8px 0;border-bottom:1px solid #F0EDE8;font-size:14px;color:${INK};font-weight:600;">${v}</td>
+  </tr>`;
+  return `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 24px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">Pay by bank transfer</div>
+        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, or cash if that is easier &mdash; whichever suits.</div>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${row("Account name", "MARLEYMOVES LTD")}
+          ${row("Sort code", "04-00-03")}
+          ${row("Account number", "12787423")}
+          <tr>
+            <td style="padding:8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Reference</td>
+            <td style="padding:8px 0;font-size:14px;color:${RED};font-weight:700;">${reference}</td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>`;
+};
+
+/** Itemised refund card: LINES_VAR is pre-rendered <tr> rows (one per rail)
+ *  from lib/comms/refund-emails.ts lineRows(); the total row closes it. */
+const refundLinesCard = (title, linesVar, totalLabel, totalVar) => `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 24px;">
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#8A857E;margin-bottom:10px;">${title}</div>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${linesVar}
+          <tr>
+            <td style="padding:10px 0 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">${totalLabel}</td>
+            <td align="right" style="padding:10px 0 0;font-size:16px;color:${RED};font-weight:700;white-space:nowrap;">${totalVar}</td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>`;
+
+/* ---- Payments Policy v2 money mail (docs/payments-policy-v2-prd.md §5E).
+   Sent from the accounts desk; the app passes From per send (accountsFrom()),
+   this is the template default. Variable composers live beside the fallback
+   builders in lib/comms/{date-confirm,commitment-chase,cancellation,refund}-
+   emails.ts — the template mirrors the fallback so the two paths never drift.
+   Copy rule (test-enforced): the word "penalty" appears NOWHERE; held money is
+   always "held against your original date, refunded in full if we re-book it". */
+const MONEY_FROM = "Marley Moves Accounts <accounts@marleymoves.co.uk>";
+
+const dateConfirmationHtml = shellHtml(
+  "Your move date is confirmed — here's what happens next with your booking.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("Your date is locked in."),
+    sublineRow(
+      `Thank you for confirming your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). Your <strong style="color:${INK};">{{{DEPOSIT_AMOUNT}}}</strong> deposit is now held against your booking: from this point it is non-refundable and still counts towards your final bill.`,
+    ),
+    "{{{COMMITMENT_BLOCK}}}",
+    sublineRow("{{{HELD_POSITION_LINE}}}", "0 36px 16px"),
+    sublineRow(
+      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const commitmentReceivedHtml = shellHtml(
+  "We've received your {{{AMOUNT}}} commitment payment — it counts towards your final bill.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("Commitment received &mdash; thank you."),
+    sublineRow(
+      `We've received your <strong style="color:${INK};">{{{AMOUNT}}}</strong> commitment payment for your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). It counts towards your final bill.`,
+    ),
+    amountCard("Commitment paid", "{{{AMOUNT}}}"),
+    sublineRow(
+      "Your remaining balance is due in full before move day, and we'll send the final invoice nearer the time.",
+      "0 36px 16px",
+    ),
+    sublineRow(
+      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const commitmentChaseHtml = shellHtml(
+  "Your commitment payment of {{{AMOUNT}}} is due {{{DUE_LABEL}}}.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("Your commitment payment."),
+    sublineRow(
+      `Thank you for confirming your move date of <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong>. The next step in your booking is your commitment payment, due <strong style="color:${INK};">{{{DUE_LABEL}}}</strong>. Your remaining balance is then due in full before move day.`,
+    ),
+    amountCard("Commitment due{{{INVOICE_META}}}", "{{{AMOUNT}}}"),
+    "{{{INVOICE_BUTTON}}}",
+    bankOnlyCard("{{{QUOTE_REF}}}"),
+    sublineRow(
+      `A quick reminder of what you agreed when you confirmed your date: &ldquo;{{{DATE_CONFIRM_ACK}}}&rdquo;`,
+      "0 36px 16px",
+    ),
+    sublineRow(
+      `If anything about your move has changed, or you would like to talk it through, reply to this email or call us on <strong style="color:${RED};">01747 637070</strong> and we will help.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const cancellationAckHtml = shellHtml(
+  "Your move date has changed — everything you've paid still counts towards your move.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("Your move date has changed."),
+    sublineRow(
+      `We've released your original date of <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> and booked you in for <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). No new deposit is needed &mdash; everything you've already paid still counts towards your move.`,
+    ),
+    amountCard("Already paid", "{{{HELD_TOTAL}}}", "{{{HELD_LINES}}}"),
+    sublineRow("{{{HELD_SENTENCES}}}", "0 36px 16px"),
+    sublineRow(
+      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const refundExecutedHtml = shellHtml(
+  "Your {{{TOTAL_REFUND}}} refund from Marley Moves is on its way.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("Your refund is on its way."),
+    sublineRow(
+      `We have now returned everything due back to you for booking {{{QUOTE_REF}}}. Each payment goes back the way it came in.`,
+    ),
+    refundLinesCard("Refunded to you", "{{{REFUND_LINES}}}", "Total refunded", "{{{TOTAL_REFUND}}}"),
+    sublineRow("{{{SLA_LINE}}}", "0 36px 16px"),
+    sublineRow(
+      `Any questions at all, just reply to this email or call us on <strong style="color:${RED};">01747 637070</strong>.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const retainedOutcomeHtml = shellHtml(
+  "An update on your booking {{{QUOTE_REF}}} and your original move date.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("About your original move date."),
+    sublineRow(
+      `Despite our best efforts, we were not able to re-book your original move date{{{ORIGINAL_DATE_CLAUSE}}}. As set out in your booking terms, <strong style="color:${INK};">{{{RETAINED_AMOUNT}}}</strong> of what you had paid has been held against that date (ref {{{QUOTE_REF}}}). Had the day re-booked, it would have been refunded in full.`,
+    ),
+    "{{{REFUND_SECTION}}}",
+    sublineRow(
+      `If anything here does not look right, or you would like to talk it through, just reply to this email or call us on <strong style="color:${RED};">01747 637070</strong>.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const marleyCancelHtml = shellHtml(
+  "We're sorry — we've had to cancel your move. Everything you've paid is refunded in full.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("We're sorry."),
+    sublineRow(
+      `We can't do your move{{{MOVE_DATE_CLAUSE}}} and have had to cancel your booking (ref {{{QUOTE_REF}}}). This one is on us, and we're sorry for the disruption.`,
+    ),
+    amountCard("Refunded in full", "{{{REFUND_TOTAL}}}", "{{{HELD_LINES}}}"),
+    sublineRow("{{{REFUND_SENTENCE}}}", "0 36px 16px"),
+    sublineRow(
+      `If we can help with your move on another date, call <strong style="color:${RED};">the team</strong> on 01747 637070 &mdash; we'd like to make it right.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
+const dateChangeConfirmationHtml = shellHtml(
+  "Your new move date is confirmed — your booking and everything you've paid roll straight over.",
+  [
+    greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
+    headlineRow("You're booked for {{{NEW_DATE_LABEL}}}."),
+    sublineRow(
+      `Your move has moved from <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> to <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). Your booking carries straight over &mdash; same team, same price, nothing to re-do.`,
+    ),
+    amountCard("Already paid", "{{{HELD_TOTAL}}}", "{{{HELD_LINES}}}"),
+    sublineRow("{{{HELD_SENTENCE}}}", "0 36px 16px"),
+    sublineRow("{{{COMMITMENT_SENTENCE}}}", "0 36px 16px"),
+    sublineRow(
+      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      "0 36px 6px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
 /* ================================================================= templates */
 
 const surveyConfirmationHtml = shellHtml(
@@ -579,6 +783,164 @@ const TEMPLATES = [
       closing: ["If your timing has changed or plans have shifted, just reply and let me know. I'd genuinely rather help than chase."],
     }),
     variables: CHASE_VARS,
+  },
+
+  /* ---- Payments Policy v2 (docs/payments-policy-v2-prd.md §5E) ------------ */
+  {
+    name: "date-confirmation",
+    envVar: "RESEND_TEMPLATE_DATE_CONFIRMATION",
+    subject: "Move date confirmed — {{{QUOTE_REF}}}",
+    from: MONEY_FROM,
+    html: dateConfirmationHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "MOVE_DATE_LABEL", type: "string", fallback_value: "your booked date" },
+      { key: "DEPOSIT_AMOUNT", type: "string", fallback_value: "£100" },
+      // Pre-rendered HTML block from lib/comms/date-confirm-email.ts —
+      // commitment amount + invoice button + bank details, or the
+      // zero-commitment "nothing more to pay right now" variant.
+      { key: "COMMITMENT_BLOCK", type: "string", fallback_value: "" },
+      {
+        key: "HELD_POSITION_LINE",
+        type: "string",
+        fallback_value:
+          "Amounts you have paid are held against your original date, and are refunded in full if the day is re-booked.",
+      },
+    ],
+  },
+  {
+    name: "commitment-received",
+    envVar: "RESEND_TEMPLATE_COMMITMENT_RECEIVED",
+    subject: "Payment received — commitment for your move ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: commitmentReceivedHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "AMOUNT", type: "string", fallback_value: "your commitment payment" },
+      { key: "MOVE_DATE_LABEL", type: "string", fallback_value: "your booked date" },
+    ],
+  },
+  {
+    name: "commitment-chase",
+    envVar: "RESEND_TEMPLATE_COMMITMENT_CHASE",
+    subject: "Your commitment payment is due {{{DUE_LABEL}}} ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: commitmentChaseHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "AMOUNT", type: "string", fallback_value: "your commitment payment" },
+      { key: "DUE_LABEL", type: "string", fallback_value: "now" },
+      { key: "MOVE_DATE_LABEL", type: "string", fallback_value: "your booked date" },
+      // " · Invoice INV-000123" or "" — folds into the amount-card label.
+      { key: "INVOICE_META", type: "string", fallback_value: "" },
+      // Pre-rendered red "View your invoice" button row, or "".
+      { key: "INVOICE_BUTTON", type: "string", fallback_value: "" },
+      // The verbatim acknowledgment the customer signed (HTML-escaped by the
+      // composer) — single source in lib/signatures.ts DATE_CONFIRM_ACKS.
+      {
+        key: "DATE_CONFIRM_ACK",
+        type: "string",
+        fallback_value: "the confirmation you signed when you confirmed your move date",
+      },
+    ],
+  },
+  {
+    name: "cancellation-ack",
+    envVar: "RESEND_TEMPLATE_CANCELLATION_ACK",
+    subject: "Your move date has changed ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: cancellationAckHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "OLD_DATE_LABEL", type: "string", fallback_value: "your original date" },
+      { key: "NEW_DATE_LABEL", type: "string", fallback_value: "your new date" },
+      { key: "HELD_TOTAL", type: "string", fallback_value: "£0" },
+      // "<br>"-joined per-payment lines ("£100 deposit by bank transfer").
+      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      // The held/refund position sentences, composed per the fill rule.
+      { key: "HELD_SENTENCES", type: "string", fallback_value: "" },
+    ],
+  },
+  {
+    name: "refund-executed",
+    envVar: "RESEND_TEMPLATE_REFUND_EXECUTED",
+    subject: "Your {{{TOTAL_REFUND}}} refund from Marley Moves ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: refundExecutedHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "TOTAL_REFUND", type: "string", fallback_value: "full" },
+      // Pre-rendered <tr> rows from lib/comms/refund-emails.ts lineRows() —
+      // one per rail, each "label · rail" with its amount.
+      { key: "REFUND_LINES", type: "string", fallback_value: "" },
+      {
+        key: "SLA_LINE",
+        type: "string",
+        fallback_value:
+          "Card refunds normally show on your statement within 3 to 5 working days and bank transfers usually arrive the same day, all well within the 14 days we promise.",
+      },
+    ],
+  },
+  {
+    name: "retained-outcome",
+    envVar: "RESEND_TEMPLATE_RETAINED_OUTCOME",
+    subject: "An update on your booking ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: retainedOutcomeHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      // " of <strong>Friday 14 August</strong>" or "".
+      { key: "ORIGINAL_DATE_CLAUSE", type: "string", fallback_value: "" },
+      { key: "RETAINED_AMOUNT", type: "string", fallback_value: "part" },
+      // Pre-rendered above-the-cap refund card + SLA line, or "".
+      { key: "REFUND_SECTION", type: "string", fallback_value: "" },
+    ],
+  },
+  {
+    name: "marley-cancel-refund",
+    envVar: "RESEND_TEMPLATE_MARLEY_CANCEL",
+    subject: "We're sorry — your move is cancelled ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: marleyCancelHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      // " on <strong>Friday 14 August</strong>" or "".
+      { key: "MOVE_DATE_CLAUSE", type: "string", fallback_value: "" },
+      { key: "REFUND_TOTAL", type: "string", fallback_value: "£0" },
+      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      {
+        key: "REFUND_SENTENCE",
+        type: "string",
+        fallback_value:
+          "Everything you've paid comes back to you in full, the same way you paid it. There's nothing you need to do.",
+      },
+    ],
+  },
+  {
+    name: "date-change-confirmation",
+    envVar: "RESEND_TEMPLATE_DATE_CHANGE_CONFIRMATION",
+    subject: "Your new move date is confirmed — {{{NEW_DATE_LABEL}}} ({{{QUOTE_REF}}})",
+    from: MONEY_FROM,
+    html: dateChangeConfirmationHtml,
+    variables: [
+      { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
+      { key: "OLD_DATE_LABEL", type: "string", fallback_value: "your original date" },
+      { key: "NEW_DATE_LABEL", type: "string", fallback_value: "your new date" },
+      { key: "HELD_TOTAL", type: "string", fallback_value: "£0" },
+      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      // "You've paid £X and it all still counts towards your move." or "".
+      { key: "HELD_SENTENCE", type: "string", fallback_value: "" },
+      // Unpaid-commitment restatement ("…moves with your date…") or "".
+      { key: "COMMITMENT_SENTENCE", type: "string", fallback_value: "" },
+    ],
   },
 ];
 

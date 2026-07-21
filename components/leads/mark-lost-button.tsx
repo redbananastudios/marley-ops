@@ -68,7 +68,7 @@ export function MarkLostDialog({
       ].filter(Boolean);
       toast.success(`Marked lost.${bits.length ? ` ${bits.join(" · ")}.` : ""}`);
       if (res.refundTask) {
-        toast.warning("Money was already paid on this job — a refund-decision task is in Follow-ups.");
+        toast.warning("Money was already paid on this job — the refund review is waiting on the Refunds page.");
       }
       onOpenChange(false);
       onDone?.();

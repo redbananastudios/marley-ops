@@ -20,6 +20,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, boxesFromItems, commissionCost } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
+import type { DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
 import { getSessionProfile } from "@/lib/auth";
@@ -86,6 +87,38 @@ export default async function DashboardPage() {
       .select("id", { count: "exact", head: true })
       .in("status", ["open", "assessing", "offer_made"]),
     supabase.from("follow_ups").select("due_at").eq("status", "open"),
+    // Refund review queue (Payments Policy v2): rows waiting on a decision or
+    // an execute press — the /refunds needs-action pointer.
+    supabase.from("refund_queue").select("id", { count: "exact", head: true }).eq("status", "pending"),
+    // "Dates at risk": commitment unpaid at 7 days out (chase cron stamped
+    // date_releasable_at). Joined with the lead's live status so cancelled/
+    // completed jobs drop out. Discretion state — nothing releases itself.
+    (async (): Promise<DateAtRiskItem[]> => {
+      const ukToday = new Date().toLocaleDateString("en-CA", { timeZone: UK_TZ });
+      const { data: riskQuotes } = await supabase
+        .from("quotes")
+        .select("lead_id, quote_ref, customer_name, moving_date, commitment_invoice_amount, date_releasable_at")
+        .eq("status", "accepted")
+        .not("date_releasable_at", "is", null)
+        .is("commitment_paid_at", null)
+        .gte("moving_date", ukToday)
+        .order("moving_date", { ascending: true });
+      const riskLeadIds = [...new Set((riskQuotes ?? []).map((q) => q.lead_id).filter(Boolean))] as string[];
+      const { data: riskLeads } = riskLeadIds.length
+        ? await supabase.from("leads").select("id, name, status").in("id", riskLeadIds).eq("status", "confirmed")
+        : { data: [] as { id: string; name: string | null; status: string }[] };
+      const riskLeadById = new Map((riskLeads ?? []).map((l) => [l.id, l]));
+      return (riskQuotes ?? [])
+        .filter((q) => q.lead_id && riskLeadById.has(q.lead_id))
+        .map((q) => ({
+          leadId: q.lead_id as string,
+          quoteRef: q.quote_ref,
+          customerName: q.customer_name ?? riskLeadById.get(q.lead_id as string)?.name ?? null,
+          movingDate: q.moving_date,
+          amountDue: Number(q.commitment_invoice_amount ?? 0),
+          releasableSince: q.date_releasable_at,
+        }));
+    })(),
   ]);
 
   // Unbounded, all-time tables → page through fetchAllRows (PostgREST caps a
@@ -216,7 +249,8 @@ export default async function DashboardPage() {
   /* needs-action (now) */
   const statusCounts = new Map<string, number>();
   for (const l of leads) statusCounts.set(l.status, (statusCounts.get(l.status) ?? 0) + 1);
-  const [fleetResult, [acceptedResult, signedResult], claimsResult, followUpsResult] = await attentionPromise;
+  const [fleetResult, [acceptedResult, signedResult], claimsResult, followUpsResult, refundQueueResult, datesAtRisk] =
+    await attentionPromise;
   const signedIds = new Set((signedResult.data ?? []).map((signature) => signature.quote_id));
   let followUpsOverdue = 0;
   let followUpsDueToday = 0;
@@ -248,6 +282,8 @@ export default async function DashboardPage() {
     // Accepted quotes with no contract signature — crew must collect on arrival.
     unsignedContracts: (acceptedResult.data ?? []).filter((quote) => !signedIds.has(quote.id)).length,
     openClaims: claimsResult.count ?? 0,
+    // Refund-queue rows waiting on a decision/execution (Payments Policy v2).
+    refundsWaiting: refundQueueResult.count ?? 0,
     followUpsOverdue,
     followUpsDueToday,
   };
@@ -280,6 +316,7 @@ export default async function DashboardPage() {
     periods,
     medianRespMins,
     needsAction,
+    datesAtRisk,
     recent,
     recentHeading: todays.length ? "Today's enquiries" : "Latest enquiries",
     dateLabel: new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),

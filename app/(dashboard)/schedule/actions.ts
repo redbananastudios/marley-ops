@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { balanceDueDate } from "@/lib/quote/payments";
+import { commitmentDueDate } from "@/lib/payments-policy";
+import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { ukInstant } from "@/lib/uk-time";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { ownerFrom } from "@/lib/comms/sender";
@@ -230,7 +232,9 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
     const newMoveDate = new Date(startsAt).toLocaleDateString("en-CA", { timeZone: UK_TZ });
     const { data: accepted } = await sb
       .from("quotes")
-      .select("id, moving_date")
+      .select(
+        "id, moving_date, quote_ref, commitment_paid_at, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number",
+      )
       .eq("lead_id", appt.lead_id)
       .eq("status", "accepted")
       .order("accepted_at", { ascending: false })
@@ -249,6 +253,46 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
           .eq("lead_id", appt.lead_id)
           .eq("reason", "balance")
           .eq("status", "open");
+      }
+
+      // Payments Policy v2: the commitment falls due move−7d (clamped to
+      // today), so an UNPAID commitment's due date rolls with the move. A paid
+      // commitment is history and never recomputes. Money-state change → the
+      // events_log audit row rides beside the timeline activity below; the
+      // Zoho -COM invoice (when one exists) has no update API, so the money
+      // desk gets a manual-adjustment alert. All fail-soft.
+      const hasCommitmentLadder =
+        !accepted.commitment_paid_at &&
+        (accepted.commitment_due_date ||
+          (accepted.zoho_commitment_invoice_id && accepted.zoho_commitment_invoice_id !== "pending"));
+      if (hasCommitmentLadder) {
+        const newDue = commitmentDueDate(newMoveDate);
+        if (newDue !== accepted.commitment_due_date) {
+          const { error: dueError } = await sb
+            .from("quotes")
+            .update({ commitment_due_date: newDue } as never)
+            .eq("id", accepted.id)
+            .is("commitment_paid_at", null);
+          if (dueError) {
+            await sendOpsAlert(`Commitment due-date recompute FAILED — ${accepted.quote_ref}`, [
+              `The move was rescheduled to ${newMoveDate} but updating the commitment due date failed: ${dueError.message}. Set it by hand.`,
+            ], "system");
+          } else {
+            await sb.from("events_log").insert({
+              actor_id: userId,
+              entity_type: "quote",
+              entity_id: accepted.id,
+              action: "commitment_due_date_recomputed",
+              diff: { moving_date: newMoveDate, from: accepted.commitment_due_date, to: newDue } as never,
+            });
+            if (accepted.zoho_commitment_invoice_id && accepted.zoho_commitment_invoice_id !== "pending") {
+              await sendOpsAlert(`Adjust commitment invoice due date — ${accepted.quote_ref}`, [
+                `The move date changed to ${newMoveDate}, so commitment invoice ${accepted.zoho_commitment_invoice_number ?? `${accepted.quote_ref}-COM`} is now due ${newDue}.`,
+                `Zoho invoice due dates can't be updated from the panel — adjust it manually in Zoho.`,
+              ], "money");
+            }
+          }
+        }
       }
       await sb.from("activities").insert({
         lead_id: appt.lead_id,
