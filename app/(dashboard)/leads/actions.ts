@@ -200,10 +200,6 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
 
   const estimate =
     v.estimate_given === "" || v.estimate_given == null ? null : Number(v.estimate_given);
-  const commission =
-    v.referral_commission === "" || v.referral_commission == null
-      ? null
-      : Number(v.referral_commission);
 
   const { error } = await sb
     .from("leads")
@@ -218,7 +214,12 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
       property_size: v.property_size || null,
       preferred_date: v.preferred_date || null,
       estimate_given: estimate,
-      referral_commission: commission,
+      // Only write the commission when the client actually SENT the field — a
+      // stale pre-deploy edit dialog (no such input) must not wipe a recorded
+      // commission to null on an unrelated save.
+      ...(v.referral_commission !== undefined
+        ? { referral_commission: v.referral_commission === "" ? null : Number(v.referral_commission) }
+        : {}),
       notes: v.notes || null,
     })
     .eq("id", leadId);
