@@ -136,9 +136,12 @@ function fmtLeadDate(d: string | null): string {
   if (!d) return "—";
   const t = new Date(d);
   if (Number.isNaN(t.getTime())) return "—";
+  // 2-digit year so a closed lead's "Received" date stays unambiguous once the
+  // data spans years — "25 Jun 26, 12:45".
   return t.toLocaleString("en-GB", {
     day: "numeric",
     month: "short",
+    year: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -357,7 +360,7 @@ export function LeadsBoard({
           </SelectContent>
         </Select>
         <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
-        <div className="ml-auto inline-flex rounded-md border border-[#E2E6EC] bg-[#F1F3F5] p-0.5" aria-label="Lead view">
+        <div role="group" className="ml-auto inline-flex rounded-md border border-[#E2E6EC] bg-[#F1F3F5] p-0.5" aria-label="Lead view">
           <button
             type="button"
             onClick={() => setView("board")}
@@ -415,18 +418,117 @@ export function LeadsBoard({
   );
 }
 
+/**
+ * Per-lead overflow menu — Open / WhatsApp / mark-(un)contacted / no-reply.
+ * Shared by the Board cards AND the Table rows so neither view loses the
+ * one-click contact-state actions.
+ */
+function LeadActionsMenu({ lead, className }: { lead: LeadCard; className?: string }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+  const wa = waNumber(lead.phone);
+  const active = !CLOSED.has(lead.status);
+  const uncontacted = active && !lead.first_contacted_at;
+  const contacted = active && !!lead.first_contacted_at;
+
+  function markContacted() {
+    start(async () => {
+      const res = await markLeadContactedAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not mark contacted.");
+      else {
+        toast.success("Marked contacted.");
+        router.refresh();
+      }
+    });
+  }
+
+  function markUncontacted() {
+    start(async () => {
+      const res = await markLeadUncontactedAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not revert.");
+      else {
+        toast.success("Back to uncontacted.");
+        router.refresh();
+      }
+    });
+  }
+
+  function logNoReply() {
+    start(async () => {
+      const res = await noReplyForLeadAction(lead.id);
+      if (!res.ok) toast.error(res.error || "Could not log the attempt.");
+      else {
+        toast.success("No-reply logged — follow-up queued for tomorrow.");
+        router.refresh();
+      }
+    });
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`More actions for ${lead.name ?? "lead"}`}
+          className={cn(
+            "focus-ring flex size-8 shrink-0 items-center justify-center rounded-md text-[#667085] hover:bg-[#F1F3F5] hover:text-[#172033]",
+            className,
+          )}
+        >
+          {pending ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-5" strokeWidth={1.75} />}
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-52">
+        <DropdownMenuItem asChild>
+          <Link href={`/leads/${lead.id}`}>
+            <ExternalLink />
+            Open lead
+          </Link>
+        </DropdownMenuItem>
+        {wa ? (
+          <DropdownMenuItem asChild>
+            <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer">
+              <MessageCircle />
+              WhatsApp
+            </a>
+          </DropdownMenuItem>
+        ) : null}
+        {(uncontacted || contacted || active) ? <DropdownMenuSeparator /> : null}
+        {uncontacted ? (
+          <DropdownMenuItem onSelect={markContacted} disabled={pending}>
+            <Check />
+            Mark contacted
+          </DropdownMenuItem>
+        ) : null}
+        {contacted ? (
+          <DropdownMenuItem onSelect={markUncontacted} disabled={pending}>
+            <Undo2 />
+            Mark uncontacted
+          </DropdownMenuItem>
+        ) : null}
+        {active ? (
+          <DropdownMenuItem onSelect={logNoReply} disabled={pending}>
+            <PhoneMissed />
+            No reply — retry tomorrow
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function LeadTable({ leads }: { leads: LeadCard[] }) {
   return (
     <div data-testid="leads-table" className="mt-3 overflow-x-auto rounded-[10px] border border-[#E2E6EC] bg-white">
       <table className="w-full min-w-[920px] border-collapse text-left">
         <thead className="bg-[#F7F8FA] text-[11px] font-bold uppercase tracking-[0.04em] text-[#667085]">
           <tr>
-            <th className="px-4 py-2.5">Customer</th>
-            <th className="px-4 py-2.5">Move</th>
-            <th className="px-4 py-2.5">Status</th>
-            <th className="px-4 py-2.5">Quote</th>
-            <th className="px-4 py-2.5">Next action</th>
-            <th className="px-4 py-2.5 text-right">Actions</th>
+            <th scope="col" className="px-4 py-2.5">Customer</th>
+            <th scope="col" className="px-4 py-2.5">Move</th>
+            <th scope="col" className="px-4 py-2.5">Status</th>
+            <th scope="col" className="px-4 py-2.5">Quote</th>
+            <th scope="col" className="px-4 py-2.5">Next action</th>
+            <th scope="col" className="px-4 py-2.5 text-right">Actions</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-[#E2E6EC]">
@@ -483,6 +585,7 @@ function LeadTable({ leads }: { leads: LeadCard[] }) {
                     <Link href={`/leads/${lead.id}`} aria-label={`Open ${lead.name ?? "lead"}`} className="focus-ring rounded-md p-2 text-[#667085] hover:bg-white hover:text-[#172033]">
                       <ExternalLink className="size-4" aria-hidden />
                     </Link>
+                    <LeadActionsMenu lead={lead} />
                   </div>
                 </td>
               </tr>
@@ -543,50 +646,12 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
 }
 
 function LeadCardItem({ lead }: { lead: LeadCard }) {
-  const router = useRouter();
-  const [pending, start] = useTransition();
   const route =
     lead.from_postcode || lead.to_postcode
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
       : "no postcodes";
-  const wa = waNumber(lead.phone);
   const active = !CLOSED.has(lead.status);
-  const uncontacted = active && !lead.first_contacted_at;
-  const contacted = active && !!lead.first_contacted_at;
   const statusStyle = BOARD_STATUS_STYLE[lead.status] ?? FALLBACK_STATUS_STYLE;
-
-  function markContacted() {
-    start(async () => {
-      const res = await markLeadContactedAction(lead.id);
-      if (!res.ok) toast.error(res.error || "Could not mark contacted.");
-      else {
-        toast.success("Marked contacted.");
-        router.refresh();
-      }
-    });
-  }
-
-  function markUncontacted() {
-    start(async () => {
-      const res = await markLeadUncontactedAction(lead.id);
-      if (!res.ok) toast.error(res.error || "Could not revert.");
-      else {
-        toast.success("Back to uncontacted.");
-        router.refresh();
-      }
-    });
-  }
-
-  function logNoReply() {
-    start(async () => {
-      const res = await noReplyForLeadAction(lead.id);
-      if (!res.ok) toast.error(res.error || "Could not log the attempt.");
-      else {
-        toast.success("No-reply logged — follow-up queued for tomorrow.");
-        router.refresh();
-      }
-    });
-  }
 
   return (
     <article
@@ -605,52 +670,7 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             <BoardStatusBadge status={lead.status} />
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label={`More actions for ${lead.name ?? "lead"}`}
-                className="focus-ring -mt-1 -mr-1 flex size-8 shrink-0 items-center justify-center rounded-md text-[#667085] hover:bg-[#F1F3F5] hover:text-[#172033]"
-              >
-                {pending ? <Loader2 className="size-4 animate-spin" /> : <MoreHorizontal className="size-5" strokeWidth={1.75} />}
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-52">
-              <DropdownMenuItem asChild>
-                <Link href={`/leads/${lead.id}`}>
-                  <ExternalLink />
-                  Open lead
-                </Link>
-              </DropdownMenuItem>
-              {wa ? (
-                <DropdownMenuItem asChild>
-                  <a href={`https://wa.me/${wa}`} target="_blank" rel="noopener noreferrer">
-                    <MessageCircle />
-                    WhatsApp
-                  </a>
-                </DropdownMenuItem>
-              ) : null}
-              {(uncontacted || contacted || active) ? <DropdownMenuSeparator /> : null}
-              {uncontacted ? (
-                <DropdownMenuItem onSelect={markContacted} disabled={pending}>
-                  <Check />
-                  Mark contacted
-                </DropdownMenuItem>
-              ) : null}
-              {contacted ? (
-                <DropdownMenuItem onSelect={markUncontacted} disabled={pending}>
-                  <Undo2 />
-                  Mark uncontacted
-                </DropdownMenuItem>
-              ) : null}
-              {active ? (
-                <DropdownMenuItem onSelect={logNoReply} disabled={pending}>
-                  <PhoneMissed />
-                  No reply — retry tomorrow
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <LeadActionsMenu lead={lead} className="-mt-1 -mr-1" />
         </div>
 
         <Link href={`/leads/${lead.id}`} className="focus-ring mt-1.5 flex flex-1 flex-col rounded-sm">
@@ -708,10 +728,15 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             Call
           </a>
         ) : (
-          <span aria-disabled="true" className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]">
+          <button
+            type="button"
+            disabled
+            title="No phone number on this lead"
+            className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]"
+          >
             <Phone className="size-4" strokeWidth={1.75} />
             Call
-          </span>
+          </button>
         )}
         {active ? (
           <Link
@@ -724,10 +749,15 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
             Survey
           </Link>
         ) : (
-          <span aria-disabled="true" className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]">
+          <button
+            type="button"
+            disabled
+            title="This lead is closed"
+            className="flex min-h-11 items-center justify-center gap-2 text-[13px] font-semibold text-[#98A2B3]"
+          >
             <CalendarPlus className="size-4" strokeWidth={1.75} />
             Survey
-          </span>
+          </button>
         )}
         <Link
           href={`/quotes/new?leadId=${lead.id}`}
