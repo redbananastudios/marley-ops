@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { getBusinessSettings } from "@/lib/settings";
-import { jobCost, marginPct, boxesFromItems } from "@/lib/margin";
+import { jobCost, marginPct, boxesFromItems, commissionCost } from "@/lib/margin";
 import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { SalesTab } from "@/components/performance/sales-tab";
@@ -225,7 +225,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       // leads + quotes are full-table lookups (name/status maps, accepted-value
       // map) — order-independent → page through fetchAllRows so they aren't
       // truncated at PostgREST's 1000-row cap once the business grows.
-      fetchAllRows((f, t) => sb.from("leads").select("id, name, status").order("id").range(f, t)),
+      fetchAllRows((f, t) => sb.from("leads").select("id, name, status, referral_commission").order("id").range(f, t)),
       fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total").order("id").range(f, t)),
     ]);
 
@@ -282,6 +282,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const stats = aggregateEstimators(visits, settings.estimatorFee);
   const totalFee = stats.reduce((s, e) => s + e.fee, 0);
 
+  // Lead-level 3rd-party referral fees — a real cost of the jobs they became.
+  const commissionByLead = new Map(
+    (leads ?? []).map((l) => [
+      l.id as string,
+      commissionCost((l as { referral_commission?: number | string | null }).referral_commission),
+    ]),
+  );
+
   // Per-job margin for the month's booked jobs (cost assumes 1-day jobs for now).
   const jobs = (acceptedQuotes ?? []).map((q) => {
     const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
@@ -297,15 +305,18 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       },
       settings,
     );
+    const commission = q.lead_id ? commissionByLead.get(q.lead_id) ?? 0 : 0;
+    const totalCost = cost.total + commission;
     return {
       id: q.id,
       ref: q.quote_ref,
       customer: q.customer_name || (q.lead_id ? leadName.get(q.lead_id) ?? "—" : "—"),
       leadId: q.lead_id,
       revenue,
-      cost: cost.total,
-      margin: revenue - cost.total,
-      marginPct: marginPct(revenue, cost.total),
+      commission,
+      cost: totalCost,
+      margin: revenue - totalCost,
+      marginPct: marginPct(revenue, totalCost),
     };
   });
   const jobTotals = jobs.reduce(
@@ -427,11 +438,11 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left">
-                  <th className="eyebrow px-5 py-3 font-semibold">Job</th>
-                  <th className="eyebrow px-2 py-3 text-right font-semibold">Revenue</th>
-                  <th className="eyebrow px-2 py-3 text-right font-semibold">Est. cost</th>
-                  <th className="eyebrow px-2 py-3 text-right font-semibold">Margin</th>
-                  <th className="eyebrow px-5 py-3 text-right font-semibold">Margin %</th>
+                  <th scope="col" className="eyebrow px-5 py-3 font-semibold">Job</th>
+                  <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Revenue</th>
+                  <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Est. cost</th>
+                  <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Margin</th>
+                  <th scope="col" className="eyebrow px-5 py-3 text-right font-semibold">Margin %</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -444,7 +455,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                       <p className="text-xs text-mist-400">{j.ref}</p>
                     </td>
                     <td className="tabular px-2 py-3 text-right text-foreground">{gbp(j.revenue)}</td>
-                    <td className="tabular px-2 py-3 text-right text-mist-500">{gbp(j.cost)}</td>
+                    <td className="tabular px-2 py-3 text-right text-mist-500">
+                      {gbp(j.cost)}
+                      {j.commission > 0 ? (
+                        <span className="block text-[11px] text-mist-400">incl. {gbp(j.commission)} commission</span>
+                      ) : null}
+                    </td>
                     <td className={"tabular px-2 py-3 text-right font-semibold " + (j.margin < 0 ? "text-danger" : "text-foreground")}>{gbp(j.margin)}</td>
                     <td className={"tabular px-5 py-3 text-right font-semibold " + (j.margin < 0 ? "text-danger" : j.marginPct < 25 ? "text-warn" : "text-success")}>{j.marginPct}%</td>
                   </tr>

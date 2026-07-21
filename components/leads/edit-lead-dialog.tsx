@@ -45,6 +45,7 @@ export interface EditLeadValues {
   property_size: string;
   preferred_date: string;
   estimate_given: string;
+  referral_commission: string;
   notes: string;
 }
 
@@ -188,6 +189,23 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               <Label htmlFor="ed-est">Estimate given (£)</Label>
               <Input id="ed-est" type="number" inputMode="decimal" min={0} value={v.estimate_given} onChange={set("estimate_given")} placeholder="e.g. 950" />
             </div>
+          </div>
+
+          <div className="grid gap-2">
+            <Label htmlFor="ed-commission">3rd-party commission (£)</Label>
+            <Input
+              id="ed-commission"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step="0.01"
+              value={v.referral_commission}
+              onChange={set("referral_commission")}
+              placeholder="e.g. 50"
+            />
+            <p className="text-xs text-mist-400">
+              Fee owed to a third party for this lead — counted as a job cost in profit and margin reports.
+            </p>
           </div>
 
           <div className="grid gap-2">

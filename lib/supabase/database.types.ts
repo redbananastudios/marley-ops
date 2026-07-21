@@ -2321,6 +2321,7 @@ export type Database = {
           property_size: string | null
           quote_chase_at: string | null
           quote_chase_step: number
+          referral_commission: number | null
           referrer_answer: string | null
           review_requested_at: string | null
           review_suppressed: boolean
@@ -2385,6 +2386,7 @@ export type Database = {
           property_size?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
+          referral_commission?: number | null
           referrer_answer?: string | null
           review_requested_at?: string | null
           review_suppressed?: boolean
@@ -2449,6 +2451,7 @@ export type Database = {
           property_size?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
+          referral_commission?: number | null
           referrer_answer?: string | null
           review_requested_at?: string | null
           review_suppressed?: boolean

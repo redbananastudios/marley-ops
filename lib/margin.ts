@@ -101,6 +101,18 @@ export function marginPct(revenue: number, cost: number): number {
   return revenue > 0 ? Math.round(((revenue - cost) / revenue) * 100) : 0;
 }
 
+/**
+ * A lead's 3rd-party referral commission as a job cost. Some manually-added
+ * leads carry a fee owed to whoever referred them — profit/margin surfaces
+ * (dashboard KPI, Performance "Jobs & margin") add it to the rate-card job
+ * cost so the margin shown is what the job REALLY makes. Defensive: absent,
+ * garbled or negative values cost 0 (Postgres numerics arrive as strings).
+ */
+export function commissionCost(value: number | string | null | undefined): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 /** Boxes supplied (the chargeable/cost-bearing box items) from wizard item state. */
 export function boxesFromItems(items: Record<string, number> | null | undefined): number {
   if (!items) return 0;

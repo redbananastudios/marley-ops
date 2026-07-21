@@ -47,6 +47,16 @@ export const newLeadSchema = z.object({
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
   preferred_date: z.string().trim().optional().or(z.literal("")),
+  /** 3rd-party referral fee owed for this lead (£) — counted as a cost of the
+   *  job in profit/margin reports. A string here (not z.coerce) so the schema's
+   *  input/output types stay identical for the react-hook-form resolver; the
+   *  regex forbids signs, so it's non-negative by construction. Empty = none. */
+  referral_commission: z
+    .string()
+    .trim()
+    .regex(/^(\d+(\.\d{1,2})?)?$/, "Enter a valid amount")
+    .optional()
+    .or(z.literal("")),
   notes: z.string().trim().optional().or(z.literal("")),
 })
   .refine((v) => (v.phone && v.phone.length > 0) || (v.email && v.email.length > 0), {
@@ -68,6 +78,9 @@ export const editLeadSchema = z.object({
   property_size: z.string().trim().optional().or(z.literal("")),
   preferred_date: z.string().trim().optional().or(z.literal("")),
   estimate_given: z
+    .union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")])
+    .optional(),
+  referral_commission: z
     .union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")])
     .optional(),
   notes: z.string().trim().optional().or(z.literal("")),

@@ -88,6 +88,11 @@ export async function createLeadAction(input: NewLeadInput) {
       to_address: v.to_address || null,
       property_size: v.property_size || null,
       preferred_date: v.preferred_date || null,
+      // 3rd-party referral fee for this lead — reports count it as a job cost.
+      referral_commission:
+        v.referral_commission === "" || v.referral_commission == null
+          ? null
+          : Number(v.referral_commission),
       notes: v.notes || null,
     })
     .select("id")
@@ -209,6 +214,12 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
       property_size: v.property_size || null,
       preferred_date: v.preferred_date || null,
       estimate_given: estimate,
+      // Only write the commission when the client actually SENT the field — a
+      // stale pre-deploy edit dialog (no such input) must not wipe a recorded
+      // commission to null on an unrelated save.
+      ...(v.referral_commission !== undefined
+        ? { referral_commission: v.referral_commission === "" ? null : Number(v.referral_commission) }
+        : {}),
       notes: v.notes || null,
     })
     .eq("id", leadId);

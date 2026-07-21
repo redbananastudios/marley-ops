@@ -112,6 +112,7 @@ export function AddLeadForm({
       to_postcode: "",
       property_size: "",
       preferred_date: "",
+      referral_commission: "",
       notes: "",
     },
   });
@@ -277,6 +278,27 @@ export function AddLeadForm({
           />
         </Field>
       ) : null}
+
+      <Field
+        htmlFor="referral_commission"
+        label="3rd-party commission (£)"
+        error={errors.referral_commission?.message}
+      >
+        <Input
+          id="referral_commission"
+          type="number"
+          inputMode="decimal"
+          min={0}
+          step="0.01"
+          className={INPUT_H}
+          placeholder="e.g. 50"
+          {...register("referral_commission")}
+        />
+        <p className="mt-1.5 text-xs text-mist-400">
+          Only if a fee is owed to a third party for this lead — it counts as a cost of the job in
+          the profit and margin reports.
+        </p>
+      </Field>
 
       {/* Full pickup + destination addresses — a postcode alone is enough to save,
           but the street lookup autofills everything for a complete record. */}

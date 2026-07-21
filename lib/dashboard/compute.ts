@@ -160,7 +160,8 @@ export interface ProgressSets {
   quoted: Set<string>;
   /** lead id -> accepted (agreed) value, for won leads */
   won: Map<string, number>;
-  /** lead id -> estimated job cost (from the accepted quote + rate card) */
+  /** lead id -> estimated job cost (accepted quote + rate card, PLUS any
+   *  3rd-party referral commission owed for the lead) */
   cost: Map<string, number>;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { crewSize, jobCost, marginPct, boxesFromItems } from "@/lib/margin";
+import { boxesFromItems, commissionCost, crewSize, jobCost, marginPct } from "@/lib/margin";
 import type { BusinessSettings } from "@/lib/settings";
 
 const RATES: BusinessSettings = {
@@ -160,5 +160,23 @@ describe("boxesFromItems", () => {
   it("sums the box-type items only", () => {
     expect(boxesFromItems({ wardrobeBoxes: 5, boxesBefore: 10, boxesOnCollection: 15, mirrorsQty: 3 })).toBe(30);
     expect(boxesFromItems(null)).toBe(0);
+  });
+});
+
+describe("commissionCost (3rd-party lead referral fee as a job cost)", () => {
+  it("passes positive commissions through, including Postgres numeric strings", () => {
+    expect(commissionCost(50)).toBe(50);
+    expect(commissionCost("75.50")).toBe(75.5);
+  });
+  it("absent, zero, negative or garbled values cost nothing", () => {
+    expect(commissionCost(null)).toBe(0);
+    expect(commissionCost(undefined)).toBe(0);
+    expect(commissionCost(0)).toBe(0);
+    expect(commissionCost(-10)).toBe(0);
+    expect(commissionCost("not-a-number")).toBe(0);
+  });
+  it("reduces the margin exactly by the commission", () => {
+    // £1,000 job, £650 rate-card cost, £100 referral fee → 25% not 35%.
+    expect(marginPct(1000, 650 + commissionCost(100))).toBe(25);
   });
 });
