@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { AutomationsLog } from "@/components/automations/automations-log";
 import type { CronRunRow } from "@/lib/cron/jobs";
 import { recentSendFailures } from "@/lib/crew-sheet/delivery-log";
+import type { OperationalIssueRow } from "@/lib/ops/issues";
 
 const fmtWhen = (iso: string): string =>
   new Date(iso).toLocaleString("en-GB", {
@@ -24,11 +25,17 @@ export const dynamic = "force-dynamic";
 
 export default async function AutomationsPage() {
   const sb = await createClient();
-  const [{ data }, sheetFailures] = await Promise.all([
+  const [{ data }, { data: issues }, sheetFailures] = await Promise.all([
     sb
       .from("cron_runs")
       .select("id, job, status, started_at, finished_at, duration_ms, summary, error")
       .order("started_at", { ascending: false })
+      .limit(100),
+    sb
+      .from("operational_issues")
+      .select("id,issue_key,severity,source,event,message,status,occurrence_count,first_seen_at,last_seen_at,last_checkpoint_at,resolved_at")
+      .eq("status", "open")
+      .order("last_seen_at", { ascending: false })
       .limit(100),
     recentSendFailures(sb).catch(() => []),
   ]);
@@ -61,7 +68,10 @@ export default async function AutomationsPage() {
         </div>
       ) : null}
 
-      <AutomationsLog initialRuns={(data ?? []) as CronRunRow[]} />
+      <AutomationsLog
+        initialRuns={(data ?? []) as CronRunRow[]}
+        initialIssues={(issues ?? []) as OperationalIssueRow[]}
+      />
     </main>
   );
 }

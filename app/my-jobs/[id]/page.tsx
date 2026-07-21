@@ -35,7 +35,7 @@ import { LastUpdated } from "@/components/pwa/last-updated";
 import { CollectContractButton } from "@/components/crew/collect-contract-button";
 import { CompleteJobButton } from "@/components/crew/complete-job-button";
 import { CrewActionBar } from "@/components/crew/crew-action-bar";
-import { CaptureFab } from "@/components/capture/capture-sheet";
+import { CaptureFab } from "@/components/capture/capture-launchers";
 
 /**
  * /my-jobs/[id] — the job sheet AS A WEB PAGE (Peter, 2026-07-10: "we should

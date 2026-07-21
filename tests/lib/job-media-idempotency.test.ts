@@ -15,7 +15,9 @@ const store = {
 };
 
 const LEAD = "11111111-1111-4111-8111-111111111111";
-const profile = { id: "p1", active: true, role: "crew", full_name: "Rob Pierce" };
+// A direct lead anchor is an office-only capture surface. Crew capture is
+// appointment-anchored and assignment-gated before this idempotency layer.
+const profile = { id: "p1", active: true, role: "admin", full_name: "Office Test" };
 
 function chain(handlers: Record<string, unknown>) {
   const q: any = {}; // eslint-disable-line @typescript-eslint/no-explicit-any

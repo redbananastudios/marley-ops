@@ -14,7 +14,15 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { createIndexedDbStore, outboxSupported } from "@/lib/offline/db";
-import { enqueue as enqueueCore, flushOutbox, type OutboxItem, type OutboxKind, type OutboxStore } from "@/lib/offline/outbox";
+import {
+  enqueue as enqueueCore,
+  flushOutbox,
+  retryFailed as retryFailedCore,
+  scopeOutboxStore,
+  type OutboxItem,
+  type OutboxKind,
+  type OutboxStore,
+} from "@/lib/offline/outbox";
 import { outboxRunners } from "./runners";
 
 interface EnqueueInput {
@@ -32,11 +40,13 @@ interface OutboxApi {
   enqueue: (input: EnqueueInput) => Promise<OutboxItem>;
   /** Drain the queue now (used by the "retry" affordance). */
   flush: () => Promise<void>;
+  /** Re-arm one/all permanently failed items, then drain them. */
+  retryFailed: (id?: string) => Promise<void>;
 }
 
 const OutboxContext = createContext<OutboxApi | null>(null);
 
-export function OutboxProvider({ children }: { children: ReactNode }) {
+export function OutboxProvider({ children, ownerId }: { children: ReactNode; ownerId: string }) {
   const [items, setItems] = useState<OutboxItem[]>([]);
   const [syncing, setSyncing] = useState(false);
   const [online, setOnline] = useState(true);
@@ -45,9 +55,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   const store = useCallback((): OutboxStore => {
-    if (!storeRef.current) storeRef.current = createIndexedDbStore();
+    if (!storeRef.current) storeRef.current = scopeOutboxStore(createIndexedDbStore(), ownerId);
     return storeRef.current;
-  }, []);
+  }, [ownerId]);
 
   const reload = useCallback(async () => {
     try {
@@ -81,6 +91,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       if (!outboxSupported()) throw new Error("This device can't save changes offline.");
       const item = await enqueueCore(store(), {
         id: crypto.randomUUID(),
+        ownerId,
         now: Date.now(),
         kind: input.kind,
         key: input.key,
@@ -90,6 +101,15 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
       await reload();
       void flush(); // if we're online, go straight away
       return item;
+    },
+    [store, reload, flush, ownerId],
+  );
+
+  const retryFailed = useCallback(
+    async (id?: string) => {
+      await retryFailedCore(store(), id);
+      await reload();
+      await flush();
     },
     [store, reload, flush],
   );
@@ -123,7 +143,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   }, [reload, flush]);
 
   return (
-    <OutboxContext.Provider value={{ items, syncing, online, enqueue, flush }}>{children}</OutboxContext.Provider>
+    <OutboxContext.Provider value={{ items, syncing, online, enqueue, flush, retryFailed }}>
+      {children}
+    </OutboxContext.Provider>
   );
 }
 

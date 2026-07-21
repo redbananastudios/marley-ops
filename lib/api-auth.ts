@@ -16,18 +16,11 @@ export async function requireApiUser(): Promise<string | null> {
 }
 
 /**
- * Guard for routes that a scheduled job may also call (e.g. a Vercel cron hitting
- * the Sanity sync). Accepts EITHER a signed-in session OR `Authorization: Bearer
- * <SYNC_CRON_SECRET>` when that env var is set.
+ * Backwards-compatible boolean guard for scheduled routes. Manual execution is
+ * restricted to active office profiles; crew and inactive sessions are refused.
  */
 export async function requireUserOrCronSecret(req: Request): Promise<boolean> {
-  // CRON_SECRET is what Vercel Cron sends automatically; SYNC_CRON_SECRET covers
-  // any other scheduled caller (e.g. an i9 task).
-  const auth = req.headers.get("authorization") ?? "";
-  for (const secret of [process.env.CRON_SECRET, process.env.SYNC_CRON_SECRET]) {
-    if (secret && auth === `Bearer ${secret}`) return true;
-  }
-  return (await requireApiUser()) !== null;
+  return (await requireOfficeOrCronSecret(req)) !== null;
 }
 
 /** Who a finance-cron caller is — routes gate admin-only affordances on it. */
@@ -49,7 +42,7 @@ export async function requireOfficeOrCronSecret(req: Request): Promise<CronCalle
     data: { user },
   } = await sb.auth.getUser();
   if (!user) return null;
-  const { data: profile } = await sb.from("profiles").select("role").eq("id", user.id).single();
-  if (profile?.role !== "admin" && profile?.role !== "estimator") return null;
+  const { data: profile } = await sb.from("profiles").select("role, active").eq("id", user.id).single();
+  if (!profile?.active || (profile.role !== "admin" && profile.role !== "estimator")) return null;
   return { via: "session", userId: user.id, role: profile.role };
 }

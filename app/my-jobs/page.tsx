@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BookOpen, CalendarCheck, ChevronRight, HandCoins, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
 import { apptWindow } from "@/lib/job-board";
@@ -81,7 +82,12 @@ export default async function MyJobsPage() {
 
   let jobs: Job[] = [];
   if (staffRow) {
-    const { data: myAssigns } = await sb
+    // 0069 deliberately removes direct crew reads from the CRM/resource tables.
+    // This server render has already authenticated the session and resolved the
+    // caller's own staff id; keep every service-role read bounded by assignments
+    // reached from that id, never by ids supplied by the browser.
+    const admin = createAdminClient();
+    const { data: myAssigns } = await admin
       .from("appointment_assignments")
       .select("appointment_id")
       .eq("staff_id", staffRow.id);
@@ -89,13 +95,13 @@ export default async function MyJobsPage() {
 
     if (apptIds.length) {
       const [{ data: appts }, { data: allAssigns }] = await Promise.all([
-        sb
+        admin
           .from("appointments")
           .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id")
           .in("id", apptIds)
           .neq("status", "cancelled")
           .order("starts_at"),
-        sb.from("appointment_assignments").select("appointment_id, staff_id, vehicle_id").in("appointment_id", apptIds),
+        admin.from("appointment_assignments").select("appointment_id, staff_id, vehicle_id").in("appointment_id", apptIds),
       ]);
 
       const leadIds = [...new Set((appts ?? []).map((a) => a.lead_id).filter(Boolean))] as string[];
@@ -103,13 +109,13 @@ export default async function MyJobsPage() {
       const vanIds = [...new Set((allAssigns ?? []).map((a) => a.vehicle_id).filter(Boolean))] as string[];
       const [{ data: leads }, { data: mates }, { data: vans }] = await Promise.all([
         leadIds.length
-          ? sb.from("leads").select("id, name, phone, from_postcode, to_postcode").in("id", leadIds)
+          ? admin.from("leads").select("id, name, phone, from_postcode, to_postcode").in("id", leadIds)
           : Promise.resolve({ data: [] as { id: string; name: string | null; phone: string | null; from_postcode: string | null; to_postcode: string | null }[] }),
         mateIds.length
-          ? sb.from("staff").select("id, full_name").in("id", mateIds)
+          ? admin.from("staff").select("id, full_name").in("id", mateIds)
           : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
         vanIds.length
-          ? sb.from("vehicles").select("id, name").in("id", vanIds)
+          ? admin.from("vehicles").select("id, name").in("id", vanIds)
           : Promise.resolve({ data: [] as { id: string; name: string }[] }),
       ]);
       const leadById = new Map((leads ?? []).map((l) => [l.id, l]));

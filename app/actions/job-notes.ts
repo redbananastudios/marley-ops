@@ -15,39 +15,30 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createMediaStore } from "@/lib/storage/media-store";
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
-import { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_UPLOAD_LABEL } from "@/lib/storage/upload-limits";
+import {
+  isValidDeclaredUploadSize,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_LABEL,
+} from "@/lib/storage/upload-limits";
 import { isValidJobPhotoPath, JOB_PHOTOS_BUCKET, validateJobNote } from "@/lib/job-notes";
+import { getActiveJobActor, isOfficeJobActor, requireAppointmentAccess } from "@/lib/job-access";
+import { crewAssignedToAppointment } from "@/lib/job-sheet-load";
 
 /** Media store bound to the job-photos bucket (its own R2 key prefix). */
 const jobPhotosStore = () => createMediaStore(process.env, { bucket: JOB_PHOTOS_BUCKET });
-
-async function requireActiveProfile() {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return null;
-  const { data: prof } = await sb
-    .from("profiles")
-    .select("id, active, role, full_name")
-    .eq("id", user.id)
-    .single();
-  if (!prof?.active) return null;
-  return prof;
-}
 
 export async function addJobNoteAction(
   appointmentId: string,
   input: { body: string; photoPaths: string[] },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const access = await requireAppointmentAccess(appointmentId);
+  if (!access) return { ok: false, error: "You are not assigned to this job." };
+  const { actor: prof, admin } = access;
 
   const v = validateJobNote(input.body ?? "", input.photoPaths ?? [], appointmentId);
   if (!v.ok) return v;
 
-  const admin = createAdminClient();
   const { data: appt } = await admin
     .from("appointments")
     .select("id, lead_id")
@@ -107,12 +98,12 @@ export async function discardJobPhotoAction(
   path: string,
 ): Promise<{ ok: boolean }> {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false };
+  const access = await requireAppointmentAccess(appointmentId);
+  if (!access) return { ok: false };
   const v = validateJobNote("x", [path], appointmentId);
   if (!v.ok) return { ok: false };
   // Never touch a photo a saved note already references.
-  const admin = createAdminClient();
+  const { admin } = access;
   const { data: claimed } = await admin
     .from("job_notes")
     .select("id")
@@ -135,7 +126,7 @@ export async function deleteJobNoteAction(
   noteId: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(noteId).success) return { ok: false, error: "Invalid note" };
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
 
   const admin = createAdminClient();
@@ -146,9 +137,13 @@ export async function deleteJobNoteAction(
     .single();
   if (!note) return { ok: true }; // already gone
 
-  const isOffice = prof.role === "admin" || prof.role === "estimator";
-  if (!isOffice && note.author_id !== prof.id) {
-    return { ok: false, error: "Only the note's author or the office can remove it." };
+  if (!isOfficeJobActor(prof)) {
+    const stillAssigned = note.appointment_id
+      ? await crewAssignedToAppointment(admin, prof.id, prof.email, note.appointment_id)
+      : false;
+    if (note.author_id !== prof.id || !stillAssigned) {
+      return { ok: false, error: "Only the assigned note author or the office can remove it." };
+    }
   }
 
   if (note.photo_paths?.length) {
@@ -175,11 +170,11 @@ export async function deleteJobNoteAction(
  *  uploadToMediaTarget. */
 export async function createJobPhotoUploadTargetAction(
   appointmentId: string,
-  input: { path: string; mime: string; bytes?: number },
+  input: { path: string; mime: string; bytes: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
   if (!z.string().uuid().safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
-  const prof = await requireActiveProfile();
-  if (!prof) return { ok: false, error: "Not signed in." };
+  const access = await requireAppointmentAccess(appointmentId);
+  if (!access) return { ok: false, error: "You are not assigned to this job." };
   const sb = await createClient();
   const {
     data: { session },
@@ -191,7 +186,7 @@ export async function createJobPhotoUploadTargetAction(
   }
   // Size ceiling: reject an over-cap declared size, and bind the presigned PUT to
   // it (R2 then rejects any other Content-Length) so the browser can't exceed it.
-  if (typeof input.bytes === "number" && (input.bytes <= 0 || input.bytes > MAX_IMAGE_UPLOAD_BYTES)) {
+  if (!isValidDeclaredUploadSize(input.bytes, MAX_IMAGE_UPLOAD_BYTES)) {
     return { ok: false, error: `That photo is too large — keep it under ${MAX_IMAGE_UPLOAD_LABEL}.` };
   }
   const contentType = input.mime?.startsWith("image/") ? input.mime : "image/jpeg";
@@ -200,7 +195,7 @@ export async function createJobPhotoUploadTargetAction(
       objectKey: input.path,
       contentType,
       accessToken: session.access_token,
-      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
+      sizeBytes: input.bytes,
     });
     return { ok: true, target };
   } catch {

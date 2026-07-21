@@ -62,4 +62,11 @@ describe("public/sw.js mirrors the rules", () => {
     expect(sw).toContain("/my-jobs/");
     expect(sw).toContain("/_next/static/");
   });
+
+  it("keeps cache writes and trims inside the fetch lifetime", () => {
+    expect(sw.match(/await cache\.put/g)).toHaveLength(2);
+    expect(sw).toContain("await trimCache(STATIC_CACHE, MAX_STATIC)");
+    expect(sw).toContain("await trimCache(JOBS_DOC_CACHE, MAX_JOB_DOCS)");
+    expect(sw).not.toMatch(/cache\.put\([^\n]+\.then\(/);
+  });
 });

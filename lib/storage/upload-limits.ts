@@ -13,3 +13,10 @@ export const MAX_IMAGE_UPLOAD_BYTES = 30 * 1024 * 1024;
 
 /** Human label for the cap, for error copy. */
 export const MAX_IMAGE_UPLOAD_LABEL = "30 MB";
+
+/** Presigned uploads must always carry a trustworthy, finite Content-Length.
+ * Optional or non-integer sizes would bypass the server-side cap and leave the
+ * storage provider to accept an unbounded body. */
+export function isValidDeclaredUploadSize(bytes: unknown, maxBytes: number): bytes is number {
+  return typeof bytes === "number" && Number.isSafeInteger(bytes) && bytes > 0 && bytes <= maxBytes;
+}

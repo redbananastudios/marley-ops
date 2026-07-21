@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Tie assets, navigations and Server Actions to one deployed image. Next.js
+  // hard-reloads a stale client when the SHA changes, preventing version-skew
+  // failures during the container handover.
+  deploymentId: process.env.NEXT_PUBLIC_BUILD_SHA,
+
   // Self-hosted on the OVH VPS via Docker: emit a standalone server bundle
   // (minimal runtime, no full node_modules) that `node server.js` runs.
   output: "standalone",

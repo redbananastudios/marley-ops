@@ -182,7 +182,7 @@ export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJo
     return (
       <button
         type="button"
-        onClick={() => queuedItem.status === "failed" && void outbox.flush()}
+        onClick={() => queuedItem.status === "failed" && void outbox.retryFailed(queuedItem.id)}
         className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md px-2"
         aria-label={queuedItem.status === "failed" ? "Retry syncing this completion" : "Completion saved, waiting to sync"}
       >

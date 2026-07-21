@@ -8,7 +8,7 @@
  * quick action. Responsive: table-ish on desktop, cards on mobile.
  */
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ClipboardCheck, Search, Users, X } from "lucide-react";
@@ -100,6 +100,8 @@ export function QuotesView({
   // The input is the source of truth for what's typed; the URL `q` (server-filtered)
   // is synced from it, debounced. `quotes` already arrives filtered by the server.
   const [search, setSearch] = useState(query);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const leavingListRef = useRef(false);
   // Stable clock for the age chips — lazy useState keeps render pure.
   const [now] = useState(() => Date.now());
 
@@ -107,15 +109,35 @@ export function QuotesView({
   // navigate when it differs from what the server already has, so a round-trip
   // returning the same `q` doesn't re-fire the effect into a loop.
   useEffect(() => {
-    const id = setTimeout(() => {
+    searchTimerRef.current = setTimeout(() => {
+      searchTimerRef.current = null;
+      if (leavingListRef.current) return;
       const next = search.trim();
       if (next === query) return;
       startTransition(() => {
         router.replace(next ? `${pathname}?q=${encodeURIComponent(next)}` : pathname, { scroll: false });
       });
     }, 300);
-    return () => clearTimeout(id);
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+      searchTimerRef.current = null;
+    };
   }, [search, query, pathname, router]);
+
+  function cancelPendingSearch() {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = null;
+  }
+
+  function leaveList(event: MouseEvent<HTMLAnchorElement>) {
+    // Keep the current tab fully interactive for Ctrl/Cmd/Shift-clicks that
+    // open the quote elsewhere.
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    // A fast click can otherwise race the debounced `router.replace` and be
+    // pulled back to /quotes?q=... after the detail navigation has started.
+    leavingListRef.current = true;
+    cancelPendingSearch();
+  }
 
   const stats = useMemo(() => {
     const nonDraft = quotes.filter((q) => q.status !== "draft");
@@ -220,8 +242,12 @@ export function QuotesView({
           </li>
         ) : (
           pager.paged.map((q) => (
-            <li key={q.id} className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5">
-              <Link href={`/quotes/${q.id}`} className="flex min-w-0 items-center gap-3 sm:flex-1">
+            <li
+              key={q.id}
+              onClickCapture={cancelPendingSearch}
+              className="flex flex-col gap-2 px-4 py-3 hover:bg-muted/60 sm:flex-row sm:items-center sm:gap-4 sm:px-5"
+            >
+              <Link href={`/quotes/${q.id}`} onClick={leaveList} className="flex min-w-0 items-center gap-3 sm:flex-1">
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold text-foreground">{q.customer_name?.trim() || "New quote"}</span>

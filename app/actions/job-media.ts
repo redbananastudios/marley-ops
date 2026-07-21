@@ -13,6 +13,12 @@ import { z } from "zod";
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getActiveJobActor,
+  isOfficeJobActor,
+  type JobActor,
+} from "@/lib/job-access";
+import { crewAssignedToAppointment } from "@/lib/job-sheet-load";
 import { createMediaStore } from "@/lib/storage/media-store";
 import type { MediaUploadTarget } from "@/lib/storage/media-store";
 import {
@@ -20,33 +26,22 @@ import {
   isValidJobMediaPath,
   JOB_MEDIA_BUCKET,
   JOB_MEDIA_TAGS,
+  MAX_VIDEO_BYTES,
   validateCaptureItems,
   type CaptureItemInput,
   type JobMediaKind,
   type JobMediaTag,
 } from "@/lib/job-media";
+import {
+  isValidDeclaredUploadSize,
+  MAX_IMAGE_UPLOAD_BYTES,
+  MAX_IMAGE_UPLOAD_LABEL,
+} from "@/lib/storage/upload-limits";
 
 /** Media store bound to the job-media bucket (its own R2 key prefix). */
 const jobMediaStore = () => createMediaStore(process.env, { bucket: JOB_MEDIA_BUCKET });
 
 const uuid = z.string().uuid();
-
-async function requireActiveProfile() {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return null;
-  const { data: prof } = await sb
-    .from("profiles")
-    .select("id, active, role, full_name")
-    .eq("id", user.id)
-    .single();
-  if (!prof?.active) return null;
-  return prof;
-}
-
-const isOffice = (role: string) => role === "admin" || role === "estimator";
 
 /** Resolve the capture anchor: a lead id directly (office surfaces) or an
  *  appointment id (crew job page) — appointment wins server-side. */
@@ -93,6 +88,20 @@ async function resolveAnchor(
   return null;
 }
 
+/** Crew capture is appointment-only and assignment-scoped. Direct lead anchors
+ * are an office capability because they expose the full customer record. */
+async function resolveAuthorizedAnchor(
+  actor: JobActor,
+  admin: ReturnType<typeof createAdminClient>,
+  anchor: { leadId?: string; appointmentId?: string },
+) {
+  if (isOfficeJobActor(actor)) return resolveAnchor(admin, anchor);
+  if (!anchor.appointmentId || anchor.leadId) return null;
+  const assigned = await crewAssignedToAppointment(admin, actor.id, actor.email, anchor.appointmentId);
+  if (!assigned) return null;
+  return resolveAnchor(admin, { appointmentId: anchor.appointmentId });
+}
+
 /** The lead id the CLIENT should upload under — resolved server-side so the
  *  capture sheet on a crew appointment gets its true anchor before uploading. */
 export async function getCaptureContextAction(anchor: {
@@ -102,10 +111,10 @@ export async function getCaptureContextAction(anchor: {
   | { ok: true; leadId: string; consent: string; captureCount: number }
   | { ok: false; error: string }
 > {
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
   const admin = createAdminClient();
-  const resolved = await resolveAnchor(admin, anchor);
+  const resolved = await resolveAuthorizedAnchor(prof, admin, anchor);
   if (!resolved) return { ok: false, error: "Job not found." };
   const { count } = await admin
     .from("job_media")
@@ -118,11 +127,11 @@ export async function recordJobMediaAction(
   anchor: { leadId?: string; appointmentId?: string },
   items: CaptureItemInput[],
 ): Promise<{ ok: true; count: number } | { ok: false; error: string }> {
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
 
   const admin = createAdminClient();
-  const resolved = await resolveAnchor(admin, anchor);
+  const resolved = await resolveAuthorizedAnchor(prof, admin, anchor);
   if (!resolved) return { ok: false, error: "Job not found." };
 
   const v = validateCaptureItems(items, resolved.leadId);
@@ -215,10 +224,10 @@ export async function discardJobMediaUploadAction(
   path: string,
   kind: "photo" | "video" | "audio",
 ): Promise<{ ok: boolean }> {
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false };
   const admin = createAdminClient();
-  const resolved = await resolveAnchor(admin, anchor);
+  const resolved = await resolveAuthorizedAnchor(prof, admin, anchor);
   if (!resolved || !isValidJobMediaPath(path, resolved.leadId, kind)) return { ok: false };
   const { data: claimed } = await admin
     .from("job_media")
@@ -238,20 +247,25 @@ export async function updateJobMediaAction(
   patch: { caption?: string; tag?: string | null },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!uuid.safeParse(id).success) return { ok: false, error: "Invalid item" };
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("job_media")
-    .select("id, lead_id, captured_by, marketing_approved_at")
+    .select("id, lead_id, appointment_id, captured_by, marketing_approved_at")
     .eq("id", id)
     .maybeSingle();
   if (!row) return { ok: false, error: "Item not found." };
-  if (!isOffice(prof.role) && row.captured_by !== prof.id) {
-    return { ok: false, error: "Only the office or the person who captured it can edit." };
+  if (!isOfficeJobActor(prof)) {
+    const stillAssigned = row.appointment_id
+      ? await crewAssignedToAppointment(admin, prof.id, prof.email, row.appointment_id)
+      : false;
+    if (row.captured_by !== prof.id || !stillAssigned) {
+      return { ok: false, error: "Only the assigned person who captured it or the office can edit." };
+    }
   }
   // Approval froze the snapshot — only the office may change an approved item.
-  if (row.marketing_approved_at && !isOffice(prof.role)) {
+  if (row.marketing_approved_at && !isOfficeJobActor(prof)) {
     return { ok: false, error: "This item is approved for marketing — ask the office to change it." };
   }
   const tag =
@@ -278,10 +292,10 @@ export async function setLeadMediaConsentAction(
   state: "granted" | "internal_only",
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (state !== "granted" && state !== "internal_only") return { ok: false, error: "Invalid state" };
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
   const admin = createAdminClient();
-  const resolved = await resolveAnchor(admin, anchor);
+  const resolved = await resolveAuthorizedAnchor(prof, admin, anchor);
   if (!resolved) return { ok: false, error: "Job not found." };
   const { error } = await admin
     .from("leads")
@@ -309,8 +323,8 @@ export async function approveJobMediaAction(
   approve: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!uuid.safeParse(id).success) return { ok: false, error: "Invalid item" };
-  const prof = await requireActiveProfile();
-  if (!prof || !isOffice(prof.role)) return { ok: false, error: "Office access required." };
+  const prof = await getActiveJobActor();
+  if (!prof || !isOfficeJobActor(prof)) return { ok: false, error: "Office access required." };
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("job_media")
@@ -351,8 +365,8 @@ export async function deleteJobMediaAction(
   id: string,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   if (!uuid.safeParse(id).success) return { ok: false, error: "Invalid item" };
-  const prof = await requireActiveProfile();
-  if (!prof || !isOffice(prof.role)) return { ok: false, error: "Office access required." };
+  const prof = await getActiveJobActor();
+  if (!prof || !isOfficeJobActor(prof)) return { ok: false, error: "Office access required." };
   const admin = createAdminClient();
   const { data: row } = await admin
     .from("job_media")
@@ -382,9 +396,9 @@ export async function deleteJobMediaAction(
  *  auth in the presigned URL and ignores it). */
 export async function createJobMediaUploadTargetAction(
   anchor: { leadId?: string; appointmentId?: string },
-  input: { path: string; mime: string; kind: JobMediaKind; bytes?: number },
+  input: { path: string; mime: string; kind: JobMediaKind; bytes: number },
 ): Promise<{ ok: true; target: MediaUploadTarget } | { ok: false; error: string }> {
-  const prof = await requireActiveProfile();
+  const prof = await getActiveJobActor();
   if (!prof) return { ok: false, error: "Not signed in." };
   const sb = await createClient();
   const {
@@ -397,18 +411,24 @@ export async function createJobMediaUploadTargetAction(
     return { ok: false, error: "Invalid upload type." };
   }
   const admin = createAdminClient();
-  const resolved = await resolveAnchor(admin, anchor);
+  const resolved = await resolveAuthorizedAnchor(prof, admin, anchor);
   if (!resolved || !isValidJobMediaPath(input.path, resolved.leadId, kind)) {
     return { ok: false, error: "Invalid upload path." };
   }
-  const contentType =
-    input.mime || (kind === "video" ? "video/mp4" : kind === "audio" ? "audio/mp4" : "image/jpeg");
+  const maxBytes = kind === "video" ? MAX_VIDEO_BYTES : MAX_IMAGE_UPLOAD_BYTES;
+  if (!isValidDeclaredUploadSize(input.bytes, maxBytes)) {
+    const label = kind === "video" ? "300 MB" : MAX_IMAGE_UPLOAD_LABEL;
+    return { ok: false, error: `That ${kind} is too large — keep it under ${label}.` };
+  }
+  const defaultContentType = kind === "video" ? "video/mp4" : kind === "audio" ? "audio/mp4" : "image/jpeg";
+  const expectedPrefix = `${kind === "photo" ? "image" : kind}/`;
+  const contentType = input.mime?.startsWith(expectedPrefix) ? input.mime : defaultContentType;
   try {
     const target = await jobMediaStore().createUploadTarget({
       objectKey: input.path,
       contentType,
       accessToken: session.access_token,
-      sizeBytes: typeof input.bytes === "number" && input.bytes > 0 ? input.bytes : undefined,
+      sizeBytes: input.bytes,
     });
     return { ok: true, target };
   } catch {
