@@ -17,7 +17,13 @@ export interface StorageInvoiceEmailInput {
   amountLabel: string; // "£25.00"
   invoiceNumber: string;
   invoiceUrl: string | null;
+  /** Kind-specific closing line (crate minimum/arrears/final differ from the
+   *  in-advance container copy). Defaults to the container wording. */
+  footerNote?: string;
 }
+
+const DEFAULT_FOOTER_NOTE =
+  "Storage is billed in advance each period and runs until you tell us you're done — reply to this email or call 01747 637070 to arrange collection.";
 
 export function storageInvoiceSubject(i: StorageInvoiceEmailInput): string {
   return `Your storage invoice — ${i.invoiceNumber} (${i.amountLabel})`;
@@ -32,6 +38,8 @@ export function storageInvoiceText(i: StorageInvoiceEmailInput): string {
     ``,
     `Pay by bank transfer to MARLEYMOVES LTD, sort code 04-00-03, account 12787423, using reference ${i.invoiceNumber}.`,
     i.invoiceUrl ? `View the invoice online: ${i.invoiceUrl}` : ``,
+    ``,
+    i.footerNote ?? DEFAULT_FOOTER_NOTE,
     ``,
     `Questions? Reply to this email or call 01747 637070.`,
   ]
@@ -76,7 +84,7 @@ export function buildStorageInvoiceEmailHtml(i: StorageInvoiceEmailInput): strin
       : ""
   }
   <tr><td style="padding:0 36px 28px;">
-    <p style="font-size:13px;color:#5A554F;line-height:1.65;margin:0;">Storage is billed in advance each period and runs until you tell us you&apos;re done — reply to this email or call <strong style="color:#C03838;">01747 637070</strong> to arrange collection.</p>
+    <p style="font-size:13px;color:#5A554F;line-height:1.65;margin:0;">${esc(i.footerNote ?? DEFAULT_FOOTER_NOTE)}</p>
   </td></tr>
   <tr><td style="padding:20px 36px;background:#1A1A1A;">
     <p style="margin:0;font-size:12px;color:#B8B3AC;line-height:1.7;">Marley Moves · Company No. 15914266 · 01747 637070<br>

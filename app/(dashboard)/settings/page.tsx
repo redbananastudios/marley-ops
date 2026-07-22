@@ -15,7 +15,9 @@ import { CardPaymentsCard } from "@/components/settings/card-payments-card";
 import { FleetRemindersCard } from "@/components/settings/fleet-reminders-card";
 import { SelfBillingCard } from "@/components/settings/self-billing-card";
 import { ContractorAgreementCard } from "@/components/settings/contractor-agreement-card";
+import { StorageRatesCard } from "@/components/settings/storage-rates-card";
 import { CONTRACTOR_AGREEMENT_VERSION } from "@/lib/contractor/agreement";
+import { getStorageRates, DEFAULT_STORAGE_RATES, type StorageRates } from "@/lib/storage-rates";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -77,6 +79,11 @@ export default async function SettingsPage() {
     selfBillingEnabled = fleetRow?.self_billing_enabled === true;
   }
 
+  // Storage rate card (admin only) — new lets copy these figures at creation,
+  // so edits here never disturb a running let's frozen rate.
+  let storageRates: StorageRates = DEFAULT_STORAGE_RATES;
+  if (canEdit) storageRates = await getStorageRates(sb);
+
   // Team management is admin-only — estimators don't see the card at all.
   let team: TeamMember[] = [];
   if (canEdit) {
@@ -119,6 +126,7 @@ export default async function SettingsPage() {
           { id: "fleet", label: "Fleet" },
           { id: "ai", label: "AI" },
           { id: "pricing", label: "Pricing" },
+          { id: "storage-rates", label: "Storage" },
           { id: "business", label: "Business" },
           { id: "margin", label: "Margin" },
           { id: "health", label: "Health" },
@@ -179,6 +187,9 @@ export default async function SettingsPage() {
             </section>
             <section id="pricing" className={sectionClass}>
               <PricingForm initial={pricing} canEdit={canEdit} />
+            </section>
+            <section id="storage-rates" className={sectionClass}>
+              <StorageRatesCard initial={storageRates} />
             </section>
             <section id="business" className={sectionClass}>
               <SettingsForm initial={settings} canEdit={canEdit} />

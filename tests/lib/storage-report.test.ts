@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildStorageCostReport,
   buildStorageReport,
   letWeeks,
   weeklyRate,
+  type CostReportLet,
   type ReportLet,
   type ReportUnit,
 } from "@/lib/storage-report";
@@ -119,5 +121,93 @@ describe("buildStorageReport", () => {
     expect(r.avgLetWeeks).toBeNull();
     expect(r.longestOpenWeeks).toBeNull();
     expect(r.earnedToDate).toBe(0);
+  });
+});
+
+describe("buildStorageCostReport", () => {
+  const supplier = { containerMonthCost: 174, containersCount: 2, crateDayCost: 2, handlingEventCost: 60 };
+  const crate = (o: Partial<ReportLet>): CostReportLet => ({ ...let_(o), billing_model: "crate_daily" });
+  const build = (over: Partial<Parameters<typeof buildStorageCostReport>[0]>) =>
+    buildStorageCostReport({
+      lets: [],
+      events: [],
+      units: [],
+      supplier,
+      monthStartIso: "2026-07-01",
+      monthEndIso: "2026-07-31",
+      ...over,
+    });
+
+  it("container rent is fixed — accrues with no lets at all", () => {
+    const r = build({});
+    expect(r.containersFixedCost).toBe(348); // 2 × £174, regardless of occupancy
+    expect(r.crateDays).toBe(0);
+    expect(r.handlingEvents).toBe(0);
+    expect(r.totalCost).toBe(348);
+    expect(r.containerUtilisationPct).toBeNull(); // no container units known
+  });
+
+  it("crate-day overlap clips each let to the month window (inclusive days)", () => {
+    const days = (l: CostReportLet) => build({ lets: [l] }).crateDays;
+    expect(days(crate({ start_date: "2026-05-01", end_date: null }))).toBe(31); // spans the whole month
+    expect(days(crate({ start_date: "2026-06-15", end_date: "2026-07-10" }))).toBe(10); // ends mid-month
+    expect(days(crate({ start_date: "2026-07-20", end_date: null }))).toBe(12); // starts mid-month, open
+    expect(days(crate({ start_date: "2026-07-05", end_date: "2026-07-05" }))).toBe(1); // same-day let
+    expect(days(crate({ start_date: "2026-06-01", end_date: "2026-06-30" }))).toBe(0); // ended before
+    expect(days(crate({ start_date: "2026-08-03", end_date: null }))).toBe(0); // starts after
+  });
+
+  it("open crate lets accrue only to the cut-off, not to month end", () => {
+    // Current month: the caller passes monthEndIso = today. 1st–10th = 10 days.
+    const r = build({ lets: [crate({ start_date: "2026-07-01", end_date: null })], monthEndIso: "2026-07-10" });
+    expect(r.crateDays).toBe(10);
+    expect(r.crateDaysCost).toBe(20);
+  });
+
+  it("period lets never accrue crate days", () => {
+    const lets: CostReportLet[] = [
+      { ...let_({ start_date: "2026-07-01" }), billing_model: "period" },
+      let_({ start_date: "2026-07-01" }), // billing_model absent (pre-v2 rows)
+    ];
+    expect(build({ lets }).crateDays).toBe(0);
+  });
+
+  it("handling events count inside the month boundaries, at the supplier rate", () => {
+    const r = build({
+      events: [
+        { event_date: "2026-06-30" }, // day before — out
+        { event_date: "2026-07-01" }, // first day — in
+        { event_date: "2026-07-31" }, // last day — in
+        { event_date: "2026-08-01" }, // day after — out
+      ],
+    });
+    expect(r.handlingEvents).toBe(2);
+    expect(r.handlingCost).toBe(120); // 2 × £60 supplier cost, NOT the customer amount
+  });
+
+  it("sums the three cost lines and rounds to 2dp", () => {
+    const r = build({
+      lets: [crate({ start_date: "2026-07-01", end_date: "2026-07-03" })], // 3 days
+      events: [{ event_date: "2026-07-02" }],
+      supplier: { ...supplier, crateDayCost: 1.7143 },
+    });
+    expect(r.crateDaysCost).toBe(5.14); // 3 × 1.7143 = 5.1429 → 5.14
+    expect(r.totalCost).toBe(413.14); // 348 + 5.14 + 60
+  });
+
+  it("container utilisation counts occupied of ACTIVE container units only", () => {
+    const units = [
+      unit({ id: "c1", unit_type: "container_20ft" }),
+      unit({ id: "c2", unit_type: "container_40ft" }),
+      unit({ id: "c3", unit_type: "container_20ft", is_active: false }), // archived — excluded
+      unit({ id: "k1", unit_type: "crate_250" }), // not a container
+    ];
+    const lets = [
+      let_({ id: "a", unit_id: "c1" }), // open → c1 occupied
+      let_({ id: "b", unit_id: "c2", start_date: "2026-05-01", end_date: "2026-06-01" }), // ended
+      let_({ id: "c", unit_id: "k1" }), // crate occupancy doesn't count
+    ];
+    expect(build({ units, lets }).containerUtilisationPct).toBe(50);
+    expect(build({ units: [unit({ id: "k1" })], lets }).containerUtilisationPct).toBeNull();
   });
 });

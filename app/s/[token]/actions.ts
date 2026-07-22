@@ -4,8 +4,10 @@ import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  allCrateStorageAcksConfirmed,
   allStorageAcksConfirmed,
   isValidSignatureDataUri,
+  normalizeCrateStorageAcks,
   normalizeStorageAcks,
   TERMS_VERSION,
 } from "@/lib/signatures";
@@ -24,15 +26,19 @@ export async function signStorageAgreementRemoteAction(
   if (!/^[\w-]{10,64}$/.test(token)) return { ok: false, error: "This link is no longer valid." };
   const name = fullName.trim();
   if (name.length < 2) return { ok: false, error: "Type your full name to sign the agreement." };
-  if (!allStorageAcksConfirmed(acks)) return { ok: false, error: "Please tick each confirmation box." };
 
   const admin = createAdminClient();
   const { data: let_ } = await admin
     .from("storage_lets")
-    .select("id, client_id, lead_id")
+    .select("id, client_id, lead_id, billing_model")
     .eq("sign_token", token)
     .maybeSingle();
   if (!let_) return { ok: false, error: "This link is no longer valid." };
+
+  // The ack set follows the product (crate billing schedule vs container rate).
+  const isCrate = (let_ as { billing_model?: string }).billing_model === "crate_daily";
+  const acksOk = isCrate ? allCrateStorageAcksConfirmed(acks) : allStorageAcksConfirmed(acks);
+  if (!acksOk) return { ok: false, error: "Please tick each confirmation box." };
 
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
@@ -46,7 +52,7 @@ export async function signStorageAgreementRemoteAction(
     signature_data: isValidSignatureDataUri(signatureImage) ? signatureImage : null,
     method: "typed",
     channel: "remote",
-    acknowledgments: normalizeStorageAcks(acks),
+    acknowledgments: isCrate ? normalizeCrateStorageAcks(acks) : normalizeStorageAcks(acks),
     terms_version: TERMS_VERSION,
     ip,
     user_agent: h.get("user-agent"),

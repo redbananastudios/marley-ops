@@ -54,6 +54,7 @@ import {
   type UnitInput,
 } from "@/app/(dashboard)/storage/actions";
 import { defaultCuft, occupiedUnitIds, siteOccupancy, UNIT_TYPES, type UnitType } from "@/lib/storage-units";
+import { letDefaultsForUnitType, type StorageRates } from "@/lib/storage-rates";
 import { ManageLetDialog } from "@/components/storage/manage-let-dialog";
 
 export interface SiteRow {
@@ -80,8 +81,18 @@ export interface LetInvoice {
   period_start: string;
   amount: number;
   status: string;
+  /** period | minimum | arrears | final (crate daily-arrears model). */
+  kind: string;
   zoho_invoice_number: string | null;
   zoho_invoice_url: string | null;
+}
+
+export interface HandlingEventRow {
+  id: string;
+  event_date: string;
+  kind: string; // in | out | access
+  amount: number;
+  billed: boolean;
 }
 
 export interface LetRow {
@@ -95,6 +106,10 @@ export interface LetRow {
   end_date: string | null;
   rate: number | null;
   rate_period: string;
+  /** 'period' (containers/rooms) | 'crate_daily' (28-day min + daily arrears). */
+  billing_model: string;
+  min_days: number | null;
+  min_amount: number | null;
   notes: string | null;
   billing_paused: boolean;
   /** kind='storage' signature on this let, if collected. */
@@ -103,6 +118,8 @@ export interface LetRow {
   next_invoice: string | null;
   /** Most recent invoices, newest first. */
   invoices: LetInvoice[];
+  /** Handling events (crate lets), newest first. */
+  handling_events: HandlingEventRow[];
 }
 
 export interface PickerClient {
@@ -132,11 +149,13 @@ export function StorageView({
   units,
   lets,
   clients,
+  rates,
 }: {
   sites: SiteRow[];
   units: UnitRow[];
   lets: LetRow[];
   clients: PickerClient[];
+  rates: StorageRates;
 }) {
   const firstActive = sites.find((s) => s.is_active) ?? sites[0] ?? null;
   const [siteId, setSiteId] = useState<string | null>(firstActive?.id ?? null);
@@ -313,9 +332,11 @@ export function StorageView({
           onClose={() => setUnitEdit(null)}
         />
       ) : null}
-      {letFor ? <LetDialog unit={letFor} clients={clients} onClose={() => setLetFor(null)} /> : null}
-      {endFor ? <EndLetDialog unit={endFor.unit} let_={endFor.let} onClose={() => setEndFor(null)} /> : null}
-      {manageFor ? <ManageLetDialog unit={manageFor.unit} let_={manageFor.let} onClose={() => setManageFor(null)} /> : null}
+      {letFor ? <LetDialog unit={letFor} clients={clients} rates={rates} onClose={() => setLetFor(null)} /> : null}
+      {endFor ? <EndLetDialog unit={endFor.unit} let_={endFor.let} rates={rates} onClose={() => setEndFor(null)} /> : null}
+      {manageFor ? (
+        <ManageLetDialog unit={manageFor.unit} let_={manageFor.let} rates={rates} onClose={() => setManageFor(null)} />
+      ) : null}
     </div>
   );
 }
@@ -567,7 +588,9 @@ function UnitCard({
           </p>
           <p className="mt-0.5 text-mist-500">
             since {fmtDate(openLet.start_date)}
-            {openLet.rate != null ? ` · ${gbp(openLet.rate)}/${openLet.rate_period === "month" ? "mo" : "wk"}` : ""}
+            {openLet.rate != null
+              ? ` · ${gbp(openLet.rate)}/${openLet.rate_period === "month" ? "mo" : openLet.rate_period === "day" ? "day" : "wk"}`
+              : ""}
           </p>
           <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
             {openLet.agreement ? (
@@ -792,17 +815,30 @@ function UnitDialog({
 function LetDialog({
   unit,
   clients,
+  rates,
   onClose,
 }: {
   unit: UnitRow;
   clients: PickerClient[];
+  rates: StorageRates;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [clientId, setClientId] = useState<string | null>(null);
-  const [v, setV] = useState({ start_date: todayIso(), rate: "", rate_period: "week" as "week" | "month", notes: "" });
+  // Product defaults from the Settings rate card — crates bill a day rate with
+  // a 28-day minimum upfront; containers bill the monthly card rate in advance.
+  const defaults = useMemo(() => letDefaultsForUnitType(unit.unit_type, rates), [unit.unit_type, rates]);
+  const isCrate = defaults.billingModel === "crate_daily";
+  const [v, setV] = useState({
+    start_date: todayIso(),
+    rate: defaults.rate != null ? String(defaults.rate) : "",
+    rate_period: defaults.ratePeriod as "week" | "month" | "day",
+    notes: "",
+  });
+  const [handlingIn, setHandlingIn] = useState(isCrate);
+  const [handlingAmount, setHandlingAmount] = useState(String(rates.handlingEventInc));
 
   const matches = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -826,6 +862,11 @@ function LetDialog({
       start_date: v.start_date,
       rate: v.rate === "" ? "" : Number(v.rate),
       rate_period: v.rate_period,
+      billing_model: defaults.billingModel,
+      min_days: isCrate ? rates.crateMinDays : "",
+      min_amount: isCrate ? rates.crateMinInc : "",
+      record_handling_in: isCrate && handlingIn,
+      handling_amount: handlingAmount === "" ? "" : Number(handlingAmount),
       notes: v.notes,
     });
     setBusy(false);
@@ -833,6 +874,7 @@ function LetDialog({
       toast.error(res.error);
       return;
     }
+    if (res.warning) toast.warning(res.warning);
     toast.success("Unit assigned.");
     onClose();
     router.refresh();
@@ -844,7 +886,9 @@ function LetDialog({
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Assign {unit.code || unit.name || "unit"}</DialogTitle>
           <DialogDescription>
-            Who is storing with us, from when, and at what rate. Invoicing stays manual in Zoho for now.
+            {isCrate
+              ? `Crate storage: ${rates.crateMinDays}-day minimum (${gbp(rates.crateMinInc)}) invoiced upfront, then charged to the exact day in arrears. Handling bills per event.`
+              : "Billed in advance each period; the invoice raises automatically each morning."}
           </DialogDescription>
         </DialogHeader>
 
@@ -909,17 +953,52 @@ function LetDialog({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="sl-period">Per</Label>
-              <Select value={v.rate_period} onValueChange={(val) => setV({ ...v, rate_period: val as "week" | "month" })}>
-                <SelectTrigger id="sl-period" className="h-11 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="week">Week</SelectItem>
-                  <SelectItem value="month">Month</SelectItem>
-                </SelectContent>
-              </Select>
+              {isCrate ? (
+                <div className="flex h-11 items-center rounded-md border border-input bg-muted/60 px-3 text-sm text-mist-500">
+                  Day (crate)
+                </div>
+              ) : (
+                <Select value={v.rate_period} onValueChange={(val) => setV({ ...v, rate_period: val as "week" | "month" })}>
+                  <SelectTrigger id="sl-period" className="h-11 w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="week">Week</SelectItem>
+                    <SelectItem value="month">Month</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
             </div>
           </div>
+
+          {isCrate ? (
+            <div className="rounded-md border border-input bg-muted/40 p-3">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={handlingIn}
+                  onChange={(e) => setHandlingIn(e.target.checked)}
+                  className="size-5 shrink-0 accent-mm-red"
+                />
+                <span className="text-sm text-foreground">Record handling in (bills on the first invoice)</span>
+              </label>
+              {handlingIn ? (
+                <div className="mt-2 grid gap-1.5">
+                  <Label htmlFor="sl-handling">Handling charge (£, inc VAT)</Label>
+                  <Input
+                    id="sl-handling"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    className="h-11"
+                    value={handlingAmount}
+                    onChange={(e) => setHandlingAmount(e.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="grid gap-1.5">
             <Label htmlFor="sl-notes">Notes</Label>
@@ -948,20 +1027,45 @@ function LetDialog({
   );
 }
 
-function EndLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: LetRow; onClose: () => void }) {
+function EndLetDialog({
+  unit,
+  let_,
+  rates,
+  onClose,
+}: {
+  unit: UnitRow;
+  let_: LetRow;
+  rates: StorageRates;
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [endDate, setEndDate] = useState(todayIso());
+  const isCrate = let_.billing_model === "crate_daily";
+  const [handlingOut, setHandlingOut] = useState(isCrate);
+  const [handlingAmount, setHandlingAmount] = useState(String(rates.handlingEventInc));
 
   async function save() {
     setBusy(true);
-    const res = await endLetAction(let_.id, endDate);
+    const res = await endLetAction(let_.id, endDate, {
+      recordHandlingOut: isCrate && handlingOut,
+      handlingAmount: handlingAmount === "" ? 0 : Number(handlingAmount),
+    });
     setBusy(false);
     if (!res.ok) {
       toast.error(res.error);
       return;
     }
-    toast.success("Let ended — unit is available again.");
+    if (res.billingError) {
+      toast.warning(`Let ended, but the settlement invoice failed (${res.billingError}) — the billing run retries tomorrow morning.`);
+    } else if (res.raised?.length) {
+      const total = res.raised.reduce((s, r) => s + r.amount, 0);
+      toast.success(
+        `Let ended — settlement raised: ${res.raised.map((r) => `${r.invoiceNumber} (${gbp(r.amount)})`).join(", ")}. ${gbp(total)} to settle before release.`,
+      );
+    } else {
+      toast.success("Let ended — nothing further to bill; the unit is available again.");
+    }
     onClose();
     router.refresh();
   }
@@ -970,16 +1074,46 @@ function EndLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: LetRow; on
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="font-display text-xl">End let</DialogTitle>
+          <DialogTitle className="font-display text-xl">{isCrate ? "Release crate" : "End let"}</DialogTitle>
           <DialogDescription>
-            {let_.client_name} moves out of {unit.code || unit.name || "this unit"} — it becomes available again.
-            Billing stops automatically; periods already invoiced are not pro-rated, and any unpaid invoices stay
-            collectable.
+            {isCrate
+              ? `${let_.client_name} is releasing ${unit.code || unit.name || "this crate"}. The final invoice — unbilled days to the release day plus handling out — is raised now, and everything is settled before the goods leave.`
+              : `${let_.client_name} moves out of ${unit.code || unit.name || "this unit"} — it becomes available again. Billing stops automatically; periods already invoiced are not pro-rated, and any unpaid invoices stay collectable.`}
           </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-1.5 py-2">
-          <Label htmlFor="el-date">End date</Label>
-          <Input id="el-date" type="date" className="h-11" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <div className="grid gap-4 py-2">
+          <div className="grid gap-1.5">
+            <Label htmlFor="el-date">{isCrate ? "Release date" : "End date"}</Label>
+            <Input id="el-date" type="date" className="h-11" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          </div>
+          {isCrate ? (
+            <div className="rounded-md border border-input bg-muted/40 p-3">
+              <label className="flex cursor-pointer items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={handlingOut}
+                  onChange={(e) => setHandlingOut(e.target.checked)}
+                  className="size-5 shrink-0 accent-mm-red"
+                />
+                <span className="text-sm text-foreground">Charge handling out (on the final invoice)</span>
+              </label>
+              {handlingOut ? (
+                <div className="mt-2 grid gap-1.5">
+                  <Label htmlFor="el-handling">Handling charge (£, inc VAT)</Label>
+                  <Input
+                    id="el-handling"
+                    type="number"
+                    inputMode="decimal"
+                    min={0}
+                    step="0.01"
+                    className="h-11"
+                    value={handlingAmount}
+                    onChange={(e) => setHandlingAmount(e.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={busy}>
@@ -987,7 +1121,7 @@ function EndLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: LetRow; on
           </Button>
           <Button onClick={save} disabled={busy} className="bg-mm-red text-white hover:bg-mm-red-deep">
             {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
-            End let
+            {isCrate ? "Release & raise final invoice" : "End let"}
           </Button>
         </DialogFooter>
       </DialogContent>

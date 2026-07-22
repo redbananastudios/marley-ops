@@ -218,6 +218,10 @@ export async function createInvoice(input: {
    *  Peter, 2026-07-09): strip online gateways so even the hosted page can't
    *  take a card once Stripe is connected. Deposit invoices keep the default. */
   disableOnlinePayments?: boolean;
+  /** Line-item name — the accountant's income-separation handle (Zoho Invoice
+   *  has no chart of accounts). Storage invoices pass "Storage" so storage
+   *  income never mixes with Removals Income (standing policy 2026-07-22). */
+  itemName?: string;
 }): Promise<ZohoInvoiceRef> {
   const taxId = await getVatTaxId();
   const line: Record<string, unknown> = {
@@ -225,6 +229,7 @@ export async function createInvoice(input: {
     rate: Math.round(input.amount * 100) / 100,
     quantity: 1,
   };
+  if (input.itemName) line.name = input.itemName;
   if (taxId) line.tax_id = taxId;
 
   const created = await zoho("POST", "/invoices", {

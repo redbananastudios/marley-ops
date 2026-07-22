@@ -2,9 +2,11 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukPhone } from "@/lib/phone";
-import { nextInvoiceDate, type BillableLet } from "@/lib/storage-billing";
+import { nextInvoiceDateFor, type BillableLet } from "@/lib/storage-billing";
+import { getStorageRates } from "@/lib/storage-rates";
 import {
   StorageView,
+  type HandlingEventRow,
   type LetInvoice,
   type LetRow,
   type PickerClient,
@@ -24,7 +26,9 @@ export default async function StoragePage() {
     fetchAllRows((f, t) =>
       supabase
         .from("storage_lets")
-        .select("id, unit_id, client_id, start_date, end_date, rate, rate_period, notes, billing_paused")
+        .select(
+          "id, unit_id, client_id, start_date, end_date, rate, rate_period, notes, billing_paused, billing_model, min_days, min_amount",
+        )
         .order("id")
         .range(f, t),
     ),
@@ -39,9 +43,10 @@ export default async function StoragePage() {
     ),
   ]);
 
-  // Phase 2 context: each let's agreement signature + its raised invoices.
+  // Phase 2 context: each let's agreement signature + its raised invoices,
+  // plus v2's handling events and the editable rate card.
   const letIds = lets.map((l) => l.id);
-  const [{ data: agreements }, { data: invoices }] = await Promise.all([
+  const [{ data: agreements }, { data: invoices }, { data: handlingEvents }, rates] = await Promise.all([
     letIds.length
       ? supabase
           .from("signatures")
@@ -52,10 +57,18 @@ export default async function StoragePage() {
     letIds.length
       ? supabase
           .from("storage_invoices")
-          .select("id, let_id, period_start, amount, status, zoho_invoice_number, zoho_invoice_url")
+          .select("id, let_id, period_start, amount, status, kind, zoho_invoice_number, zoho_invoice_url")
           .in("let_id", letIds)
           .order("period_start", { ascending: false })
       : Promise.resolve({ data: [] as never[] }),
+    letIds.length
+      ? supabase
+          .from("storage_handling_events")
+          .select("id, let_id, event_date, kind, amount, billed_invoice_id")
+          .in("let_id", letIds)
+          .order("event_date", { ascending: false })
+      : Promise.resolve({ data: [] as never[] }),
+    getStorageRates(supabase),
   ]);
   const agreementByLet = new Map(
     (agreements ?? []).filter((a) => a.storage_let_id).map((a) => [a.storage_let_id as string, a]),
@@ -70,6 +83,7 @@ export default async function StoragePage() {
         period_start: inv.period_start,
         amount: Number(inv.amount),
         status: inv.status,
+        kind: inv.kind ?? "period",
         zoho_invoice_number: inv.zoho_invoice_number,
         zoho_invoice_url: inv.zoho_invoice_url,
       });
@@ -78,6 +92,18 @@ export default async function StoragePage() {
     const starts = invoicedStartsByLet.get(inv.let_id) ?? new Set<string>();
     starts.add(inv.period_start.slice(0, 10));
     invoicedStartsByLet.set(inv.let_id, starts);
+  }
+  const eventsByLet = new Map<string, HandlingEventRow[]>();
+  for (const ev of handlingEvents ?? []) {
+    const list = eventsByLet.get(ev.let_id) ?? [];
+    list.push({
+      id: ev.id,
+      event_date: ev.event_date,
+      kind: ev.kind,
+      amount: Number(ev.amount),
+      billed: ev.billed_invoice_id != null,
+    });
+    eventsByLet.set(ev.let_id, list);
   }
 
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -88,12 +114,16 @@ export default async function StoragePage() {
     return {
       ...l,
       rate: l.rate == null ? null : Number(l.rate),
+      min_days: l.min_days == null ? null : Number(l.min_days),
+      min_amount: l.min_amount == null ? null : Number(l.min_amount),
+      billing_model: l.billing_model ?? "period",
       billing_paused: !!l.billing_paused,
       client_name: clientName.get(l.client_id) ?? "Unknown client",
       client_email: clientEmail.get(l.client_id) ?? null,
       agreement: agr ? { signer: agr.signer_name, channel: agr.channel } : null,
-      next_invoice: nextInvoiceDate(l as BillableLet, invoicedStartsByLet.get(l.id) ?? new Set(), today),
+      next_invoice: nextInvoiceDateFor(l as BillableLet, invoicedStartsByLet.get(l.id) ?? new Set(), today),
       invoices: invoicesByLet.get(l.id) ?? [],
+      handling_events: eventsByLet.get(l.id) ?? [],
     };
   });
 
@@ -112,6 +142,7 @@ export default async function StoragePage() {
         units={(units ?? []) as UnitRow[]}
         lets={letRows}
         clients={picker}
+        rates={rates}
       />
     </main>
   );

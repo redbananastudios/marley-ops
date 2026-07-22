@@ -68,50 +68,59 @@ sign-off; this string and the terms clause must always change together):
 
 ---
 
-## B. Storage — what the system enforces today
+## B. Storage — the standing policy (Peter, 22 Jul 2026) — the system enforces this
 
-Each storage let has a **signed storage agreement** (in person, or remotely via a
-signing link) with three acknowledgments the terms must back verbatim:
+Two storage products with different billing schedules. All customer-facing
+figures **gross (VAT-inclusive)**. Full spec: `docs/storage-billing-v2-prd.md`.
 
-1. *"I agree to the storage rate shown, billed in advance each period until I end
-   the storage."*
-2. *"I understand that if invoices stay unpaid for 60+ days, Marley Moves may,
-   after written notice, dispose of or sell stored items to recover the charges."*
-   (the lien clause)
-3. *"Nothing stored is hazardous, perishable, illegal, or irreplaceable without my
-   own insurance."*
+**Container — £348 inc VAT per calendar month.**
+- Billed monthly **in advance**; first month invoiced at commencement.
+- End any time; **the final month bills in full — no pro-rata refund**. Billing
+  stops immediately once storage ends.
+- One customer per container. **No handling fees.**
 
-**Billing rules (built into the engine — terms must match):**
-- Invoiced **in advance**, weekly or monthly, one invoice per period, by **bank
-  transfer or cash only** (no card for storage).
-- **No storage deposit** is taken.
-- **Ending storage: the final period bills in full — no pro-rata refund** for
-  leaving mid-period. Billing stops immediately once the let ends; no further
-  invoices.
-- No notice period is required to end storage (see open question 1 below).
+**Crate — £21 inc VAT per week ⇒ £3 per day.**
+- **28-day minimum (£84 inc VAT), invoiced upfront** at commencement — 2 days'
+  use still pays £84.
+- **Day 29 onward is charged to the exact day, in arrears, on a 4-weekly cycle.**
+- **Handling: £72 inc VAT per crate per event** — in, out, and any access.
+- **Release: the final invoice (unbilled days to the release day + handling out)
+  is settled before goods leave.** Charges accrue until goods physically leave.
+- Redelivery/collection transport is quoted as a normal removals job.
 
-**Non-payment:** overdue invoices are tracked; after **60+ days unpaid and written
-notice**, Marley may sell or dispose of stored items to recover charges (the lien).
+**Both products:**
+- Bank transfer or cash only (no card for storage). No storage deposit.
+- **Release/access by appointment, subject to availability — no notice promise.
+  Access to stored goods only ever through Marley Moves.**
+- **Price changes: 30 days' written notice, with free exit before the change
+  takes effect.**
+- **Arrears:** 60+ days unpaid → written notice → **statutory 3-month minimum
+  period** → sale/disposal to recover charges, **any surplus returned** (≈5-month
+  end-to-end timeline).
+
+**Signed acknowledgments (terms must back these verbatim):**
+- Container (unchanged): *"I agree to the storage rate shown, billed in advance
+  each period until I end the storage."*
+- Crate (new): *"I agree to the crate storage terms: 28-day minimum, then charged
+  to the day; handling £72 inc VAT per crate in and out; all charges settled
+  before release."* (The £72 and 28 render live from the ops rate card — a rate
+  change must update the terms clause in the same breath.)
+- Both: the lien ack (*"…if invoices stay unpaid for 60+ days… after written
+  notice, dispose of or sell stored items to recover the charges"*) and the
+  prohibited-items ack (*"Nothing stored is hazardous, perishable, illegal, or
+  irreplaceable without my own insurance."*)
 
 ---
 
-## C. Open points needing a decision (storage clarification)
+## C. Storage points still needing the solicitor / insurer
 
-These are NOT yet decided — the terms agent should leave slots or flag them; the
-system will follow whatever is decided:
-
-1. **Notice to end storage.** The system lets a customer end anytime (final period
-   bills in full, no pro-rata). Confirm the terms say exactly that — or, if a
-   notice period is wanted, decide it and the system needs a small change.
-2. **Lien procedure.** Solicitor to specify how written notice is served and how
-   long before sale/disposal, so the 60-day lien is actually enforceable.
-3. **Insurance of stored goods.** Goods-in-Transit is £50k per load *in transit*;
+1. **Lien procedure.** The policy is 60 days → written notice → statutory
+   3-month minimum → sale with surplus returned. Solicitor to confirm the notice
+   mechanics (how served, to which address) so it's enforceable, and that the
+   ack wording above matches the clause.
+2. **Insurance of stored goods.** Goods-in-Transit is £50k per load *in transit*;
    whether stored goods are covered must be confirmed with the insurer. Terms
-   currently push irreplaceable items to the customer's own insurance (ack 3).
-4. **Rate changes on an ongoing let.** Ops can edit the rate, but no notice period
-   is defined anywhere. Suggest the terms state e.g. "rates may change with 30
-   days' written notice".
-5. **Access to stored goods.** Nothing stated — suggest "access by appointment".
+   currently push irreplaceable items to the customer's own insurance.
 
 ## D. Open points on the removals side (already flagged, restated for completeness)
 

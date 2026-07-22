@@ -67,6 +67,7 @@ const TABLES = [
   "staff_statements",
   "contractor_agreements",
   // money artefacts
+  "refund_queue", // references leads + quotes — before both
   "card_payments", // references quotes — before quotes
   "bank_transactions", // Monzo feed re-imports current sheet rows as unconfirmed
   // availability + reminder ledgers (wiping re-arms fleet reminders — correct at go-live)
@@ -91,7 +92,9 @@ const TABLES = [
   "surveys",
   "communications",
   "activities",
-  // storage billing (lets reference clients; sites/units are config and stay)
+  // storage billing (lets reference clients; sites/units are config and stay).
+  // Handling events RESTRICT their let, so they go before invoices/lets.
+  "storage_handling_events",
   "storage_invoices",
   "storage_lets",
   // core

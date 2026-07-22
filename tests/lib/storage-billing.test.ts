@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  crateInvoicesDue,
+  crateNextInvoiceDate,
+  invoicesDue,
   MAX_PERIODS_PER_RUN,
   nextInvoiceDate,
   nextPeriodStart,
@@ -7,6 +10,7 @@ import {
   periodsDue,
   storageInvoiceReference,
   type BillableLet,
+  type HandlingEventLite,
 } from "@/lib/storage-billing";
 
 const weekly = (over: Partial<BillableLet> = {}): BillableLet => ({
@@ -126,5 +130,209 @@ describe("storageInvoiceReference", () => {
     expect(storageInvoiceReference("11111111-2222-4333-8444-555555555555", "2026-07-01")).toBe(
       "MMS-11111111-2026-07-01",
     );
+  });
+});
+
+/* ------------------------------------------------------------- crate_daily */
+
+// Start 1 Jul: minimum covers 1-28 Jul; cycle 1 = 29 Jul-25 Aug (raise 26 Aug);
+// cycle 2 = 26 Aug-22 Sep (raise 23 Sep).
+const crate = (over: Partial<BillableLet> = {}): BillableLet => ({
+  id: "aaaaaaaa-2222-4333-8444-555555555555",
+  start_date: "2026-07-01",
+  end_date: null,
+  rate: 3,
+  rate_period: "day",
+  billing_paused: false,
+  billing_model: "crate_daily",
+  min_days: 28,
+  min_amount: 84,
+  ...over,
+});
+
+const ev = (over: Partial<HandlingEventLite> = {}): HandlingEventLite => ({
+  id: "e1",
+  event_date: "2026-07-01",
+  kind: "in",
+  amount: 72,
+  ...over,
+});
+
+describe("crateInvoicesDue — the 28-day minimum", () => {
+  it("is due in advance on the commencement day, in full", () => {
+    const due = crateInvoicesDue(crate(), new Set(), [], "2026-07-01");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-07-01",
+      period_end: "2026-07-28",
+      kind: "minimum",
+      usageAmount: 84,
+      amount: 84,
+      days: 28,
+    });
+  });
+
+  it("is not due before the start day, and not re-raised once claimed", () => {
+    expect(crateInvoicesDue(crate(), new Set(), [], "2026-06-30")).toHaveLength(0);
+    expect(crateInvoicesDue(crate(), new Set(["2026-07-01"]), [], "2026-07-05")).toHaveLength(0);
+  });
+
+  it("still bills in full on an early release — 2 days of use pays the whole minimum", () => {
+    const due = crateInvoicesDue(crate({ end_date: "2026-07-02" }), new Set(), [], "2026-07-02");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ kind: "minimum", amount: 84, period_end: "2026-07-28" });
+  });
+
+  it("sweeps the ingress handling event onto the minimum invoice", () => {
+    const due = crateInvoicesDue(crate(), new Set(), [ev()], "2026-07-01");
+    expect(due[0]).toMatchObject({ amount: 156, usageAmount: 84, handlingAmount: 72 });
+    expect(due[0].handlingEvents.map((e) => e.id)).toEqual(["e1"]);
+  });
+
+  it("nothing raises when paused or unpriced", () => {
+    expect(crateInvoicesDue(crate({ billing_paused: true }), new Set(), [], "2026-08-30")).toHaveLength(0);
+    expect(crateInvoicesDue(crate({ rate: 0 }), new Set(), [], "2026-08-30")).toHaveLength(0);
+  });
+});
+
+describe("crateInvoicesDue — day 29+ in arrears on a 28-day cycle", () => {
+  it("a cycle is NOT due while it is still running", () => {
+    const due = crateInvoicesDue(crate(), new Set(["2026-07-01"]), [], "2026-08-25");
+    expect(due).toHaveLength(0);
+  });
+
+  it("bills the day after the cycle completes, at days × day rate", () => {
+    const due = crateInvoicesDue(crate(), new Set(["2026-07-01"]), [], "2026-08-26");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-07-29",
+      period_end: "2026-08-25",
+      kind: "arrears",
+      amount: 84, // 28 days × £3
+      days: 28,
+    });
+  });
+
+  it("later cycles chain exactly 28 days apart", () => {
+    const due = crateInvoicesDue(crate(), new Set(["2026-07-01", "2026-07-29"]), [], "2026-09-23");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ period_start: "2026-08-26", period_end: "2026-09-22", days: 28 });
+  });
+
+  it("a mid-cycle access event rides that cycle's invoice", () => {
+    const access = ev({ id: "e2", event_date: "2026-08-05", kind: "access" });
+    const due = crateInvoicesDue(crate(), new Set(["2026-07-01"]), [access], "2026-08-26");
+    expect(due[0]).toMatchObject({ amount: 156, usageAmount: 84, handlingAmount: 72 });
+  });
+
+  it("an event recorded late (dated inside the already-billed minimum) rides the next invoice", () => {
+    const late = ev({ id: "e3", event_date: "2026-07-10" });
+    const due = crateInvoicesDue(crate(), new Set(["2026-07-01"]), [late], "2026-08-26");
+    expect(due[0].handlingEvents.map((e) => e.id)).toEqual(["e3"]);
+    expect(due[0].amount).toBe(156);
+  });
+
+  it("caps runaway backfill at MAX_PERIODS_PER_RUN", () => {
+    const due = crateInvoicesDue(crate(), new Set(), [], "2030-01-01");
+    expect(due).toHaveLength(MAX_PERIODS_PER_RUN);
+  });
+});
+
+describe("crateInvoicesDue — release settlement", () => {
+  it("a set end date makes the truncated remainder due IMMEDIATELY, charging the departure day", () => {
+    // Released 10 Aug: final = 29 Jul-10 Aug inclusive = 13 days × £3 = £39.
+    const due = crateInvoicesDue(crate({ end_date: "2026-08-10" }), new Set(["2026-07-01"]), [], "2026-08-10");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-07-29",
+      period_end: "2026-08-10",
+      kind: "final",
+      amount: 39,
+      days: 13,
+    });
+  });
+
+  it("the egress event rides the final invoice", () => {
+    const out = ev({ id: "e4", event_date: "2026-08-10", kind: "out" });
+    const due = crateInvoicesDue(crate({ end_date: "2026-08-10" }), new Set(["2026-07-01"]), [out], "2026-08-10");
+    expect(due[0]).toMatchObject({ amount: 111, usageAmount: 39, handlingAmount: 72 });
+  });
+
+  it("release inside the minimum window owes no day charges — a handling-only final carries the egress", () => {
+    const out = ev({ id: "e5", event_date: "2026-07-15", kind: "out" });
+    const due = crateInvoicesDue(crate({ end_date: "2026-07-15" }), new Set(["2026-07-01"]), [out], "2026-07-15");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-07-16", // claimed at end+1 — no cycle can ever start there
+      kind: "final",
+      usageAmount: 0,
+      handlingAmount: 72,
+      amount: 72,
+      days: 0,
+    });
+  });
+
+  it("release inside the minimum window with no unbilled events raises nothing further", () => {
+    const due = crateInvoicesDue(crate({ end_date: "2026-07-15" }), new Set(["2026-07-01"]), [], "2026-07-15");
+    expect(due).toHaveLength(0);
+  });
+
+  it("the handling-only settlement is never raised twice (end+1 claim honoured)", () => {
+    const out = ev({ id: "e6", event_date: "2026-07-15", kind: "out" });
+    const due = crateInvoicesDue(
+      crate({ end_date: "2026-07-15" }),
+      new Set(["2026-07-01", "2026-07-16"]),
+      [out],
+      "2026-07-16",
+    );
+    expect(due).toHaveLength(0);
+  });
+
+  it("same-day release: minimum bills with both handling events, nothing else", () => {
+    const events = [ev({ id: "in1" }), ev({ id: "out1", event_date: "2026-07-01", kind: "out" })];
+    const due = crateInvoicesDue(crate({ end_date: "2026-07-01" }), new Set(), events, "2026-07-01");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ kind: "minimum", amount: 84 + 144, handlingAmount: 144 });
+  });
+
+  it("no cycles ever start after departure", () => {
+    // Released 30 Aug: cycle 1 (29 Jul-25 Aug) full, final 26-30 Aug (5 days), then nothing.
+    const due = crateInvoicesDue(crate({ end_date: "2026-08-30" }), new Set(["2026-07-01"]), [], "2026-12-01");
+    expect(due.map((d) => [d.period_start, d.period_end, d.kind, d.amount])).toEqual([
+      ["2026-07-29", "2026-08-25", "arrears", 84],
+      ["2026-08-26", "2026-08-30", "final", 15],
+    ]);
+  });
+});
+
+describe("crateNextInvoiceDate / invoicesDue router", () => {
+  it("minimum unclaimed → the start day; then each cycle's raise day (window end + 1)", () => {
+    expect(crateNextInvoiceDate(crate(), new Set(), "2026-06-25")).toBe("2026-07-01");
+    expect(crateNextInvoiceDate(crate(), new Set(["2026-07-01"]), "2026-07-10")).toBe("2026-08-26");
+    expect(crateNextInvoiceDate(crate(), new Set(["2026-07-01", "2026-07-29"]), "2026-08-27")).toBe("2026-09-23");
+  });
+
+  it("null for ended, paused or unpriced crate lets", () => {
+    expect(crateNextInvoiceDate(crate({ end_date: "2026-07-15" }), new Set(), "2026-07-10")).toBeNull();
+    expect(crateNextInvoiceDate(crate({ billing_paused: true }), new Set(), "2026-07-10")).toBeNull();
+    expect(crateNextInvoiceDate(crate({ rate: null }), new Set(), "2026-07-10")).toBeNull();
+  });
+
+  it("invoicesDue routes period lets through the in-advance engine unchanged", () => {
+    const due = invoicesDue(weekly(), new Set(), [], "2026-07-01");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-07-01",
+      period_end: "2026-07-07",
+      kind: "period",
+      amount: 25,
+      handlingAmount: 0,
+      days: 7,
+    });
+  });
+
+  it("invoicesDue routes crate lets through the daily-arrears engine", () => {
+    const due = invoicesDue(crate(), new Set(), [], "2026-07-01");
+    expect(due[0].kind).toBe("minimum");
   });
 });

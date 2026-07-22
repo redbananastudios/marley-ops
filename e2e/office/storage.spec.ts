@@ -48,24 +48,30 @@ test.describe("Office — Storage", () => {
       await expect(page.getByText(unitCode).first()).toBeVisible();
     });
 
-    await step("assign the seeded storage client at £25/week", page, async () => {
+    await step("assign the seeded storage client at the crate day rate", page, async () => {
       const dialog = await openDialog(page, page.getByRole("button", { name: "Assign client" }));
+      // The default unit type is a crate, so the dialog carries the standing
+      // policy: day rate pre-filled from the rate card, period locked to Day,
+      // the minimum spelled out, and handling-in ticked by default.
+      await expect(dialog.getByText(/28-day minimum/i)).toBeVisible();
+      await expect(dialog.getByText("Day (crate)")).toBeVisible();
+      await expect(dialog.getByText(/Record handling in/i)).toBeVisible();
       // Search the picker and pick the existing client (picking proves hydration,
-      // so the rate fill + Start let below are safe plain interactions).
+      // so the Start let below is a safe plain interaction).
       await dialog.getByPlaceholder(/Search by name, phone or email/i).fill(SEED.storageAgreement.client);
       await dialog.getByRole("button", { name: new RegExp(SEED.storageAgreement.client) }).click();
       await expect(dialog.getByText(SEED.storageAgreement.client).first()).toBeVisible();
-      await dialog.getByLabel(/Rate/i).fill("25");
+      await expect(dialog.getByLabel(/^Rate/i)).toHaveValue("3");
       await dialog.getByRole("button", { name: "Start let" }).click();
       await expect(dialog).toBeHidden();
     });
 
-    await step("the unit is now occupied by that client at the rate", page, async () => {
+    await step("the unit is now occupied by that client at the day rate", page, async () => {
       // Scope to the unit's card so the assertions can't match the seeded let.
       const card = page.locator("div", { hasText: unitCode }).filter({ hasText: SEED.storageAgreement.client }).last();
       await expect(card.getByText("Occupied")).toBeVisible();
       await expect(card.getByText(SEED.storageAgreement.client)).toBeVisible();
-      await expect(card.getByText(/£25\/wk/)).toBeVisible();
+      await expect(card.getByText(/£3\/day/)).toBeVisible();
     });
   });
 });

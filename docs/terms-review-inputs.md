@@ -22,16 +22,40 @@ and the tick-box wording must stay consistent with the clause.
    → clause: prohibited items list; Marley may refuse carriage; customer liable for
    consequences of undeclared hazardous goods.
 
-**Storage-agreement acknowledgments (signed once per let, in person or via /s link):**
+**Storage-agreement acknowledgments (signed once per let, in person or via /s link).
+Two products since the 22 Jul 2026 standing policy (docs/storage-billing-v2-prd.md +
+docs/policy-confirmation-for-terms.md §B) — the ack set follows the product:**
+
+*Container lets:*
 1. "I agree to the storage rate shown, billed in advance each period until I end the storage."
-   → clause: billing in advance weekly/monthly; **the final period bills in full — no
-   pro-rata refund on release** (the billing engine works this way by design).
+   → clause: £348 inc VAT per calendar month, billed in advance; **the final month
+   bills in full — no pro-rata refund on release** (the billing engine works this
+   way by design). No handling fees on containers.
+
+*Crate lets:*
+1. "I agree to the crate storage terms: 28-day minimum, then charged to the day;
+   handling £72 inc VAT per crate in and out; all charges settled before release."
+   → clause: £84 inc VAT 28-day minimum invoiced upfront (2 days' use still pays it);
+   day 29+ charged to the exact day in arrears on a 4-weekly cycle at £3/day;
+   handling £72 inc VAT per crate per event (in, out, access); the final invoice
+   settles before goods are released. (The figures render live from the ops rate
+   card — a rate change must update this clause in the same breath.)
+
+*Both products:*
 2. "I understand that if invoices stay unpaid for 60+ days, Marley Moves may, after
    written notice, dispose of or sell stored items to recover the charges."
-   → the **lien clause** — this is the one with real teeth; solicitor should confirm
-   the notice procedure (how served, how long) so it's enforceable.
+   → the **lien clause** — policy: 60 days → written notice → **statutory 3-month
+   minimum** → sale with any surplus returned (≈5-month timeline). Solicitor to
+   confirm the notice procedure (how served, how long) so it's enforceable.
 3. "Nothing stored is hazardous, perishable, illegal, or irreplaceable without my own insurance."
    → clause: prohibited stored items + customer's own insurance for irreplaceables.
+
+*Further storage clauses the terms need (all enforced or assumed by the system):*
+- Release/access **by appointment, subject to availability — no notice promise**;
+  access to stored goods only ever through Marley Moves.
+- **Price changes on 30 days' written notice, free exit before effect.**
+- Storage is payable by bank transfer or cash only; no storage deposit is taken.
+- Redelivery/collection transport is quoted separately as a removals job.
 
 **E-signature validity:** signatures are typed-name or finger-drawn (UK eIDAS simple
 e-signature). Add a clause: "typing your name or signing on screen constitutes your

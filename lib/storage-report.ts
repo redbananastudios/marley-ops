@@ -6,7 +6,12 @@
  * invoicing stays manual in Zoho until billing phase 2, so "earned to date" is
  * an estimate of what should have been billed, and "recurring" is the run-rate
  * of everything currently let. The UI says so on the cards.
+ *
+ * buildStorageCostReport is the SUPPLIER side of the ledger (storage billing v2,
+ * docs/storage-billing-v2-prd.md §6) — what Sandys should charge us this month.
  */
+
+import type { StorageSupplierCosts } from "./storage-rates";
 
 export interface ReportSite {
   id: string;
@@ -201,5 +206,90 @@ export function buildStorageReport(
     earnedToDate: round2(earned),
     avgLetWeeks,
     longestOpenWeeks,
+  };
+}
+
+/* ----------------------------------------------------- supplier cost (§6) */
+
+export interface CostReportLet extends ReportLet {
+  /** 'period' | 'crate_daily' — only crate_daily lets accrue per-day costs. */
+  billing_model?: string | null;
+}
+
+export interface StorageCostReport {
+  /** containersCount × containerMonthCost — accrues regardless of occupancy. */
+  containersFixedCost: number;
+  /** Inclusive days crate lets were stored inside the month window. */
+  crateDays: number;
+  crateDaysCost: number;
+  /** Handling events (in/out/access) dated inside the month window. */
+  handlingEvents: number;
+  handlingCost: number;
+  totalCost: number;
+  /** Occupied ÷ total ACTIVE container units; null when none exist. */
+  containerUtilisationPct: number | null;
+}
+
+const DAY_MS = 86_400_000;
+
+/** Inclusive whole days [start, end] overlaps [winFrom, winTo] (0 when disjoint). */
+function overlapDaysInclusive(start: string, end: string, winFrom: string, winTo: string): number {
+  const from = Math.max(dayMs(start), dayMs(winFrom));
+  const to = Math.min(dayMs(end), dayMs(winTo));
+  if (Number.isNaN(from) || Number.isNaN(to) || to < from) return 0;
+  return Math.round((to - from) / DAY_MS) + 1;
+}
+
+/**
+ * "Supplier cost — this month": what Sandys should bill us for the window.
+ * Container rent is fixed (utilisation is the metric, not the cost driver);
+ * crate days accrue only while goods are actually stored, so the CALLER passes
+ * `monthEndIso` as the accrual cut-off — today for the current month, the last
+ * calendar day for a closed month. Handling costs use the CURRENT supplier
+ * rate: `storage_handling_events.amount` is the customer charge, not the cost.
+ */
+export function buildStorageCostReport(input: {
+  lets: CostReportLet[];
+  events: { event_date: string }[];
+  units: ReportUnit[];
+  supplier: StorageSupplierCosts;
+  /** First day of the month, yyyy-mm-dd. */
+  monthStartIso: string;
+  /** Inclusive accrual cut-off, yyyy-mm-dd (today for the current month). */
+  monthEndIso: string;
+}): StorageCostReport {
+  const { lets, events, units, supplier, monthStartIso, monthEndIso } = input;
+
+  const containersFixedCost = round2(supplier.containersCount * supplier.containerMonthCost);
+
+  let crateDays = 0;
+  for (const l of lets) {
+    if (l.billing_model !== "crate_daily") continue;
+    crateDays += overlapDaysInclusive(l.start_date, l.end_date ?? monthEndIso, monthStartIso, monthEndIso);
+  }
+  const crateDaysCost = round2(crateDays * supplier.crateDayCost);
+
+  let handlingEvents = 0;
+  for (const e of events) {
+    const d = e.event_date.slice(0, 10);
+    if (d >= monthStartIso && d <= monthEndIso) handlingEvents++;
+  }
+  const handlingCost = round2(handlingEvents * supplier.handlingEventCost);
+
+  // Utilisation of the fixed-cost containers — occupied now, of active units.
+  const openUnitIds = new Set(lets.filter((l) => l.end_date == null).map((l) => l.unit_id));
+  const containers = units.filter((u) => u.is_active && u.unit_type.startsWith("container_"));
+  const occupiedContainers = containers.filter((u) => openUnitIds.has(u.id)).length;
+
+  return {
+    containersFixedCost,
+    crateDays,
+    crateDaysCost,
+    handlingEvents,
+    handlingCost,
+    totalCost: round2(containersFixedCost + crateDaysCost + handlingCost),
+    containerUtilisationPct: containers.length
+      ? Math.round((occupiedContainers / containers.length) * 100)
+      : null,
   };
 }

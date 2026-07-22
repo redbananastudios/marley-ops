@@ -580,6 +580,7 @@ export type Database = {
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
           self_billing_enabled: boolean
+          storage_rates: Json | null
           updated_at: string
           vat_default: boolean
           vat_flat_rate_pct: number
@@ -624,6 +625,7 @@ export type Database = {
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           self_billing_enabled?: boolean
+          storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean
           vat_flat_rate_pct?: number
@@ -668,6 +670,7 @@ export type Database = {
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           self_billing_enabled?: boolean
+          storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean
           vat_flat_rate_pct?: number
@@ -3470,6 +3473,74 @@ export type Database = {
           },
         ]
       }
+      storage_handling_events: {
+        Row: {
+          amount: number
+          billed_invoice_id: string | null
+          client_id: string | null
+          created_at: string
+          created_by: string | null
+          event_date: string
+          id: string
+          kind: string
+          let_id: string
+          notes: string | null
+        }
+        Insert: {
+          amount: number
+          billed_invoice_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_date: string
+          id?: string
+          kind: string
+          let_id: string
+          notes?: string | null
+        }
+        Update: {
+          amount?: number
+          billed_invoice_id?: string | null
+          client_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          event_date?: string
+          id?: string
+          kind?: string
+          let_id?: string
+          notes?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storage_handling_events_billed_invoice_id_fkey"
+            columns: ["billed_invoice_id"]
+            isOneToOne: false
+            referencedRelation: "storage_invoices"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_handling_events_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_handling_events_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storage_handling_events_let_id_fkey"
+            columns: ["let_id"]
+            isOneToOne: false
+            referencedRelation: "storage_lets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       storage_invoices: {
         Row: {
           amount: number
@@ -3477,7 +3548,9 @@ export type Database = {
           created_at: string
           emailed_at: string | null
           error: string | null
+          handling_amount: number
           id: string
+          kind: string
           let_id: string
           period_end: string
           period_start: string
@@ -3493,7 +3566,9 @@ export type Database = {
           created_at?: string
           emailed_at?: string | null
           error?: string | null
+          handling_amount?: number
           id?: string
+          kind?: string
           let_id: string
           period_end: string
           period_start: string
@@ -3509,7 +3584,9 @@ export type Database = {
           created_at?: string
           emailed_at?: string | null
           error?: string | null
+          handling_amount?: number
           id?: string
+          kind?: string
           let_id?: string
           period_end?: string
           period_start?: string
@@ -3538,12 +3615,15 @@ export type Database = {
       }
       storage_lets: {
         Row: {
+          billing_model: string
           billing_paused: boolean
           client_id: string
           created_at: string
           end_date: string | null
           id: string
           lead_id: string | null
+          min_amount: number | null
+          min_days: number | null
           notes: string | null
           rate: number | null
           rate_period: string
@@ -3553,12 +3633,15 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          billing_model?: string
           billing_paused?: boolean
           client_id: string
           created_at?: string
           end_date?: string | null
           id?: string
           lead_id?: string | null
+          min_amount?: number | null
+          min_days?: number | null
           notes?: string | null
           rate?: number | null
           rate_period?: string
@@ -3568,12 +3651,15 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          billing_model?: string
           billing_paused?: boolean
           client_id?: string
           created_at?: string
           end_date?: string | null
           id?: string
           lead_id?: string | null
+          min_amount?: number | null
+          min_days?: number | null
           notes?: string | null
           rate?: number | null
           rate_period?: string

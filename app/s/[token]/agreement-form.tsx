@@ -6,16 +6,21 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { STORAGE_ACKS, type StorageAckKey } from "@/lib/signatures";
 import { ScriptSignature, renderNameToPng } from "@/lib/signature-script";
 import { signStorageAgreementRemoteAction } from "./actions";
 
-const NONE: Record<StorageAckKey, boolean> = { rate_advance: false, lien: false, no_prohibited: false };
-
-export function StorageAgreementForm({ token }: { token: string }) {
+/** The server page passes the product's ack set (container vs crate) — the
+ *  form renders and enforces whatever it's given; the action re-validates. */
+export function StorageAgreementForm({
+  token,
+  ackList,
+}: {
+  token: string;
+  ackList: { key: string; label: string }[];
+}) {
   const router = useRouter();
   const [name, setName] = useState("");
-  const [acks, setAcks] = useState(NONE);
+  const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -23,7 +28,7 @@ export function StorageAgreementForm({ token }: { token: string }) {
     e.preventDefault();
     setError(null);
     if (name.trim().length < 2) return setError("Type your full name to sign the agreement.");
-    if (!STORAGE_ACKS.every((a) => acks[a.key])) return setError("Please tick each confirmation box.");
+    if (!ackList.every((a) => acks[a.key])) return setError("Please tick each confirmation box.");
     start(async () => {
       const sigImage = await renderNameToPng(name);
       const res = await signStorageAgreementRemoteAction(token, name.trim(), acks, sigImage);
@@ -35,14 +40,14 @@ export function StorageAgreementForm({ token }: { token: string }) {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div className="space-y-2.5">
-        {STORAGE_ACKS.map((a) => (
+        {ackList.map((a) => (
           <label
             key={a.key}
             className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border border-mist-200 bg-white px-4 py-3 transition has-[:checked]:border-mm-red/50 has-[:checked]:bg-mm-red/[0.03]"
           >
             <input
               type="checkbox"
-              checked={acks[a.key]}
+              checked={!!acks[a.key]}
               onChange={(e) => {
                 setAcks((s) => ({ ...s, [a.key]: e.target.checked }));
                 setError(null);

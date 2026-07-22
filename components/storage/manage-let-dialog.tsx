@@ -7,9 +7,9 @@
  *  Details    rate / period / start date / notes (anchors lock once invoiced)
  */
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, FileDown, Loader2, Mail, Pause, PenLine, Play } from "lucide-react";
+import { Copy, FileDown, Loader2, Mail, Pause, PenLine, Play, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
@@ -21,17 +21,18 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
-import { STORAGE_ACKS, type StorageAckKey } from "@/lib/signatures";
+import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { gbpInc, type StorageRates } from "@/lib/storage-rates";
 import {
+  deleteHandlingEventAction,
   editLetAction,
   emailStorageSignLinkAction,
   getStorageSignLinkAction,
+  recordHandlingEventAction,
   setBillingPausedAction,
   signStorageAgreementAction,
 } from "@/app/(dashboard)/storage/actions";
 import type { LetRow, UnitRow } from "@/components/storage/storage-view";
-
-const NONE: Record<StorageAckKey, boolean> = { rate_advance: false, lien: false, no_prohibited: false };
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\.00$/, "");
 
@@ -53,10 +54,31 @@ const INV_STATUS: Record<string, string> = {
   error: "bg-danger-bg text-danger",
 };
 
-export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: LetRow; onClose: () => void }) {
+export function ManageLetDialog({
+  unit,
+  let_,
+  rates,
+  onClose,
+}: {
+  unit: UnitRow;
+  let_: LetRow;
+  rates: StorageRates;
+  onClose: () => void;
+}) {
   const router = useRouter();
+  const isCrate = let_.billing_model === "crate_daily";
+  // The ack set follows the product: crates sign the billing schedule (min
+  // days + handling figure rendered live from the rate card), containers keep
+  // the original rate ack (standing policy 2026-07-22).
+  const ackList = useMemo(
+    () =>
+      isCrate
+        ? crateStorageAcks(let_.min_days ?? rates.crateMinDays, gbpInc(rates.handlingEventInc))
+        : [...STORAGE_ACKS],
+    [isCrate, let_.min_days, rates],
+  );
   const [signing, setSigning] = useState(false);
-  const [acks, setAcks] = useState(NONE);
+  const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [signerName, setSignerName] = useState(let_.client_name);
   const [sig, setSig] = useState<string | null>(null);
   const [rate, setRate] = useState(let_.rate == null ? "" : String(let_.rate));
@@ -65,7 +87,7 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
   const [notes, setNotes] = useState(let_.notes ?? "");
   const [pending, start] = useTransition();
 
-  const signReady = STORAGE_ACKS.every((a) => acks[a.key]) && !!sig && signerName.trim().length >= 2;
+  const signReady = ackList.every((a) => acks[a.key]) && !!sig && signerName.trim().length >= 2;
 
   function signNow() {
     start(async () => {
@@ -117,7 +139,7 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
     start(async () => {
       const res = await editLetAction(let_.id, {
         rate: rate === "" ? "" : Number(rate),
-        rate_period: period as "week" | "month",
+        rate_period: period as "week" | "month" | "day",
         start_date: startDate,
         notes,
       });
@@ -136,7 +158,12 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
           </DialogTitle>
           <DialogDescription>
             Since {fmtDay(let_.start_date)}
-            {let_.rate != null ? ` · ${gbp(let_.rate)}/${let_.rate_period === "month" ? "month" : "week"}` : " · unpriced"}
+            {let_.rate != null
+              ? ` · ${gbp(let_.rate)}/${let_.rate_period === "month" ? "month" : let_.rate_period === "day" ? "day" : "week"}`
+              : " · unpriced"}
+            {isCrate && let_.min_days != null && let_.min_amount != null
+              ? ` · ${let_.min_days}-day minimum ${gbp(let_.min_amount)}`
+              : ""}
           </DialogDescription>
         </DialogHeader>
 
@@ -150,14 +177,14 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
             </p>
           ) : signing ? (
             <div className="space-y-3">
-              {STORAGE_ACKS.map((a) => (
+              {ackList.map((a) => (
                 <label
                   key={a.key}
                   className="flex min-h-12 cursor-pointer items-center gap-3 rounded-md border border-input bg-card px-3 py-2.5 transition has-[:checked]:border-mm-red/50 has-[:checked]:bg-mm-red-tint/30"
                 >
                   <input
                     type="checkbox"
-                    checked={acks[a.key]}
+                    checked={!!acks[a.key]}
                     onChange={(e) => setAcks((s) => ({ ...s, [a.key]: e.target.checked }))}
                     className="size-5 shrink-0 accent-mm-red"
                   />
@@ -225,6 +252,12 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
               {let_.billing_paused ? "Resume billing" : "Pause billing"}
             </Button>
           </div>
+          {isCrate ? (
+            <p className="mb-1 text-xs text-mist-400">
+              {let_.min_days ?? rates.crateMinDays}-day minimum billed upfront; further days charge to the exact day, in
+              arrears, every 4 weeks. Handling bills per event. The final invoice settles before release.
+            </p>
+          ) : null}
           {let_.rate == null || Number(let_.rate) <= 0 ? (
             <p className="text-sm text-warn">No rate set — nothing bills until a rate is saved below.</p>
           ) : let_.billing_paused ? (
@@ -265,6 +298,9 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
           )}
         </section>
 
+        {/* ---- handling events (crate lets) ---- */}
+        {isCrate ? <HandlingEventsSection let_={let_} rates={rates} /> : null}
+
         {/* ---- details ---- */}
         <section className="rounded-md border border-border p-4">
           <p className="eyebrow mb-2">Let details</p>
@@ -287,15 +323,21 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
               <label htmlFor="let-period" className="eyebrow mb-1.5 block">
                 Per
               </label>
-              <select
-                id="let-period"
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
-              >
-                <option value="week">Week</option>
-                <option value="month">Month</option>
-              </select>
+              {isCrate ? (
+                <div className="flex h-11 items-center rounded-md border border-input bg-muted/60 px-3 text-sm text-mist-500">
+                  Day (crate)
+                </div>
+              ) : (
+                <select
+                  id="let-period"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+                >
+                  <option value="week">Week</option>
+                  <option value="month">Month</option>
+                </select>
+              )}
             </div>
             <div>
               <label htmlFor="let-start" className="eyebrow mb-1.5 block">
@@ -336,5 +378,151 @@ export function ManageLetDialog({ unit, let_, onClose }: { unit: UnitRow; let_: 
         </section>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/* ---------------------------------------------------------- handling events */
+
+const EVENT_LABEL: Record<string, string> = { in: "In", out: "Out", access: "Access" };
+
+function HandlingEventsSection({ let_, rates }: { let_: LetRow; rates: StorageRates }) {
+  const router = useRouter();
+  const [adding, setAdding] = useState(false);
+  const [v, setV] = useState({
+    event_date: new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" }),
+    kind: "access" as "in" | "out" | "access",
+    amount: String(rates.handlingEventInc),
+    notes: "",
+  });
+  const [pending, start] = useTransition();
+
+  function add() {
+    start(async () => {
+      const res = await recordHandlingEventAction({
+        let_id: let_.id,
+        event_date: v.event_date,
+        kind: v.kind,
+        amount: Number(v.amount),
+        notes: v.notes,
+      });
+      if (!res.ok) return void toast.error(res.error);
+      toast.success("Handling event recorded — it bills on the next invoice.");
+      setAdding(false);
+      router.refresh();
+    });
+  }
+
+  function remove(id: string) {
+    start(async () => {
+      const res = await deleteHandlingEventAction(id);
+      if (!res.ok) return void toast.error(res.error);
+      toast.success("Handling event removed.");
+      router.refresh();
+    });
+  }
+
+  return (
+    <section className="rounded-md border border-border p-4">
+      <div className="mb-2 flex items-center justify-between">
+        <p className="eyebrow">Handling</p>
+        {!adding ? (
+          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+            <Plus className="size-4" strokeWidth={1.75} />
+            Add event
+          </Button>
+        ) : null}
+      </div>
+      {adding ? (
+        <div className="mb-3 grid gap-3 rounded-md border border-input bg-muted/40 p-3">
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label htmlFor="he-date" className="eyebrow mb-1.5 block">
+                Date
+              </label>
+              <input
+                id="he-date"
+                type="date"
+                value={v.event_date}
+                onChange={(e) => setV({ ...v, event_date: e.target.value })}
+                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+              />
+            </div>
+            <div>
+              <label htmlFor="he-kind" className="eyebrow mb-1.5 block">
+                Kind
+              </label>
+              <select
+                id="he-kind"
+                value={v.kind}
+                onChange={(e) => setV({ ...v, kind: e.target.value as "in" | "out" | "access" })}
+                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+              >
+                <option value="in">In</option>
+                <option value="out">Out</option>
+                <option value="access">Access</option>
+              </select>
+            </div>
+            <div>
+              <label htmlFor="he-amount" className="eyebrow mb-1.5 block">
+                Charge (£)
+              </label>
+              <input
+                id="he-amount"
+                type="number"
+                min="0"
+                step="0.01"
+                value={v.amount}
+                onChange={(e) => setV({ ...v, amount: e.target.value })}
+                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={add} disabled={pending} className="bg-mm-red text-white hover:bg-mm-red-deep">
+              {pending ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
+              Record event
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setAdding(false)} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {let_.handling_events.length ? (
+        <ul className="divide-y border-t">
+          {let_.handling_events.map((ev) => (
+            <li key={ev.id} className="flex items-center gap-2 py-2 text-sm">
+              <span className="tabular min-w-0 flex-1 truncate text-foreground">
+                {fmtDay(ev.event_date)} · {EVENT_LABEL[ev.kind] ?? ev.kind} · {gbp(ev.amount)}
+              </span>
+              <span
+                className={cn(
+                  "rounded-pill px-2 py-0.5 text-[11px] font-semibold",
+                  ev.billed ? "bg-success-bg text-success" : "bg-muted text-mist-500",
+                )}
+              >
+                {ev.billed ? "Billed" : "To bill"}
+              </span>
+              {!ev.billed ? (
+                <button
+                  type="button"
+                  onClick={() => remove(ev.id)}
+                  disabled={pending}
+                  aria-label="Remove handling event"
+                  className="focus-ring flex size-8 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-danger"
+                >
+                  <Trash2 className="size-4" strokeWidth={1.75} />
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-xs text-mist-400">
+          No handling events yet. Each crate movement (in, out, or access) is a chargeable event — it bills on the next
+          invoice.
+        </p>
+      )}
+    </section>
   );
 }

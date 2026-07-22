@@ -61,6 +61,41 @@ export const STORAGE_ACKS = [
 
 export type StorageAckKey = (typeof STORAGE_ACKS)[number]["key"];
 
+/** Crate storage acknowledgments (standing policy 2026-07-22 —
+ *  docs/storage-billing-v2-prd.md). Containers keep STORAGE_ACKS verbatim;
+ *  crates replace the rate ack with the crate billing schedule. The minimum
+ *  days and handling figure render LIVE from the Settings rate card so the
+ *  signed wording always matches what's actually charged (PRD D1/D5) — a
+ *  rate-card edit must be mirrored in the published terms clause. */
+export function crateStorageAcks(minDays: number, handlingIncLabel: string) {
+  const lien = STORAGE_ACKS.find((a) => a.key === "lien")!;
+  const prohibited = STORAGE_ACKS.find((a) => a.key === "no_prohibited")!;
+  return [
+    {
+      key: "crate_billing" as const,
+      label: `I agree to the crate storage terms: ${minDays}-day minimum, then charged to the day; handling ${handlingIncLabel} inc VAT per crate in and out; all charges settled before release.`,
+    },
+    lien,
+    prohibited,
+  ];
+}
+
+export const CRATE_STORAGE_ACK_KEYS = ["crate_billing", "lien", "no_prohibited"] as const;
+export type CrateStorageAckKey = (typeof CRATE_STORAGE_ACK_KEYS)[number];
+
+export function allCrateStorageAcksConfirmed(acks: Record<string, unknown> | null | undefined): boolean {
+  if (!acks) return false;
+  return CRATE_STORAGE_ACK_KEYS.every((k) => acks[k] === true);
+}
+
+export function normalizeCrateStorageAcks(
+  acks: Record<string, unknown> | null | undefined,
+): Record<CrateStorageAckKey, boolean> {
+  const out = {} as Record<CrateStorageAckKey, boolean>;
+  for (const k of CRATE_STORAGE_ACK_KEYS) out[k] = acks?.[k] === true;
+  return out;
+}
+
 /** The date-confirmation acknowledgment (kind='date_confirm', Payments Policy
  *  v2 — docs/payments-policy-v2-prd.md §5A). Single tick + signature on /q
  *  (or collected in person) that flips the deposit non-refundable and arms

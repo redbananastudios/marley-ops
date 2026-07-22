@@ -10,6 +10,7 @@ import { sendEmail } from "@/lib/comms/send";
 import { fleetDigestHtml, fleetDigestSubject, type DigestItem } from "@/lib/fleet/reminder-email";
 import { sendPushForEvent } from "@/lib/push/send";
 import { fleetExpiryDigestPush } from "@/lib/push/categories";
+import { storageRatesToDb } from "@/lib/storage-rates";
 
 async function requireAdmin() {
   const sb = await createClient();
@@ -131,6 +132,46 @@ export async function saveFleetRemindersAction(input: FleetRemindersInput) {
   if (dbErr) return { ok: false as const, error: dbErr.message };
   revalidatePath("/settings");
   return { ok: true as const, recipients };
+}
+
+/* --------------------------------------------------------- storage rates (admin) */
+
+const storageMoney = z.coerce.number().nonnegative("Must be 0 or more");
+const storageRatesSchema = z.object({
+  containerMonthInc: storageMoney,
+  crateWeekInc: storageMoney,
+  crateDayInc: storageMoney,
+  crateMinDays: z.coerce.number().int("Minimum days must be a whole number").positive("Minimum days must be at least 1"),
+  crateMinInc: storageMoney,
+  handlingEventInc: storageMoney,
+  supplier: z.object({
+    containerMonthCost: storageMoney,
+    containersCount: z.coerce.number().int("Containers held must be a whole number").nonnegative("Must be 0 or more"),
+    crateDayCost: storageMoney,
+    handlingEventCost: storageMoney,
+  }),
+});
+export type StorageRatesInput = z.infer<typeof storageRatesSchema>;
+
+/** Save the storage rate card (admin only). New lets COPY these figures at
+ *  creation — running lets keep their frozen rate, so this never disturbs live
+ *  billing (docs/storage-billing-v2-prd.md §1). */
+export async function saveStorageRatesAction(input: StorageRatesInput) {
+  const parsed = storageRatesSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid rates" };
+  }
+  const { sb, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+  const { error: dbErr } = await sb
+    .from("business_settings")
+    // Record<string, unknown> → the generated Json column type (plain data).
+    .update({ storage_rates: storageRatesToDb(parsed.data) as never })
+    .eq("id", true);
+  if (dbErr) return { ok: false as const, error: dbErr.message };
+  revalidatePath("/settings");
+  revalidatePath("/storage");
+  return { ok: true as const };
 }
 
 /** The sink the test alert always uses — never a real customer or an unverified

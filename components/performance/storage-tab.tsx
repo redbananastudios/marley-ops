@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Card } from "@/components/ui/card";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import type { StorageBillingStats, StorageReport } from "@/lib/storage-report";
+import type { StorageBillingStats, StorageCostReport, StorageReport } from "@/lib/storage-report";
 
 /**
  * Performance → Storage tab (iMVE Storage Analysis clone-and-improve; numbers
@@ -47,14 +47,31 @@ function fmtDate(d: string): string {
     : t.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 }
 
+function CostCell({ label, value, sub, definition }: { label: string; value: string; sub?: string; definition: string }) {
+  return (
+    <div className="p-5">
+      <p className="eyebrow">{label}</p>
+      <p className="font-display text-2xl font-bold tabular text-foreground">
+        {value}
+        {sub ? <span className="ml-2 align-middle font-sans text-sm font-normal text-mist-400">{sub}</span> : null}
+      </p>
+      <p className="text-xs leading-snug text-mist-400">{definition}</p>
+    </div>
+  );
+}
+
 export function StorageTab({
   report,
   currentLets,
   billing,
+  cost,
+  costMonthLabel,
 }: {
   report: StorageReport;
   currentLets: CurrentLetRow[];
   billing: StorageBillingStats;
+  cost: StorageCostReport;
+  costMonthLabel: string;
 }) {
   const r = report;
   const hasStorage = r.sites > 0 || r.units.total > 0;
@@ -161,6 +178,46 @@ export function StorageTab({
           definition="Unpaid invoices whose billing period started 14+ days ago."
         />
       </div>
+
+      {/* supplier cost — the Sandys side of the ledger (storage billing v2 §6) */}
+      <Card className="p-0">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
+          <h2 className="font-display text-lg font-semibold text-foreground">Supplier cost — this month</h2>
+          <span className="text-xs text-mist-400">{costMonthLabel}, accrued to today</span>
+        </div>
+        <div className="grid grid-cols-2 divide-y sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+          <CostCell
+            label="Containers fixed"
+            value={gbp(cost.containersFixedCost)}
+            sub={cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}% utilised` : undefined}
+            definition="Monthly container rent, charged occupied or not."
+          />
+          <CostCell
+            label="Crate days"
+            value={gbp(cost.crateDaysCost)}
+            sub={`${cost.crateDays} day${cost.crateDays === 1 ? "" : "s"}`}
+            definition="Actual days crates were stored this month so far."
+          />
+          <CostCell
+            label="Handling"
+            value={gbp(cost.handlingCost)}
+            sub={`${cost.handlingEvents} event${cost.handlingEvents === 1 ? "" : "s"}`}
+            definition="Crate in, out and access events at the supplier rate."
+          />
+          <CostCell
+            label="Total cost"
+            value={gbp(cost.totalCost)}
+            definition="What the supplier should charge us for the month so far."
+          />
+        </div>
+        <div className="border-t px-5 py-3">
+          <p className="text-xs text-mist-400">
+            Container utilisation{" "}
+            {cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}%` : "—"} (occupied of active
+            container units). Reconcile monthly against the Sandys invoice.
+          </p>
+        </div>
+      </Card>
 
       {/* durations + by-type */}
       <div className="grid gap-4 lg:grid-cols-2">

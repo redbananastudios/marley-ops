@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import { TERMS_URL } from "@/lib/signatures";
+import { crateStorageAcks, STORAGE_ACKS, TERMS_URL } from "@/lib/signatures";
+import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { StorageAgreementForm } from "./agreement-form";
 
 /**
@@ -33,7 +34,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const admin = createAdminClient();
   const { data: let_ } = await admin
     .from("storage_lets")
-    .select("id, client_id, unit_id, start_date, end_date, rate, rate_period")
+    .select("id, client_id, unit_id, start_date, end_date, rate, rate_period, billing_model, min_days, min_amount")
     .eq("sign_token", token)
     .maybeSingle();
   if (!let_) notFound();
@@ -56,6 +57,16 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const unitLabel = `${typeLabel}${unit?.code ? ` ${unit.code}` : ""}${site?.name ? ` at ${site.name}` : ""}`;
   const firstName = (client?.display_name ?? "").trim().split(/\s+/)[0] || "there";
   const rateLabel = let_.rate ? `${gbp(Number(let_.rate))} per ${let_.rate_period}` : "as agreed";
+
+  // The ack set follows the product: crates sign the billing schedule
+  // (minimum + day-rate arrears + handling), containers keep the rate ack.
+  const isCrate = (let_ as { billing_model?: string }).billing_model === "crate_daily";
+  const rates = await getStorageRates(admin);
+  const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
+  const minAmount = Number((let_ as { min_amount?: number | null }).min_amount ?? rates.crateMinInc);
+  const ackList = (isCrate ? crateStorageAcks(minDays, gbpInc(rates.handlingEventInc)) : [...STORAGE_ACKS]).map(
+    (a) => ({ key: a.key as string, label: a.label }),
+  );
 
   return (
     <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10">
@@ -83,10 +94,19 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
               <p>
                 <strong>{unitLabel}</strong>
               </p>
-              <p>
-                From <strong>{prettyDay(let_.start_date)}</strong> · Rate <strong>{rateLabel}</strong>, billed in
-                advance each period until you end the storage. The final period is not part-refunded.
-              </p>
+              {isCrate ? (
+                <p>
+                  From <strong>{prettyDay(let_.start_date)}</strong> · <strong>{minDays}-day minimum</strong> (
+                  {gbp(minAmount)}, invoiced upfront), then <strong>{rateLabel}</strong> charged to the exact day in
+                  arrears. Handling is {gbpInc(rates.handlingEventInc)} per crate movement.
+                  All charges are settled before your items are released.
+                </p>
+              ) : (
+                <p>
+                  From <strong>{prettyDay(let_.start_date)}</strong> · Rate <strong>{rateLabel}</strong>, billed in
+                  advance each period until you end the storage. The final period is not part-refunded.
+                </p>
+              )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-mist-400">
               This agreement is with Marley Moves Ltd (Company No. 15914266) under our{" "}
@@ -97,7 +117,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
             </p>
 
             <div className="mt-6">
-              <StorageAgreementForm token={token} />
+              <StorageAgreementForm token={token} ackList={ackList} />
             </div>
           </>
         )}

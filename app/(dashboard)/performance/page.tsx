@@ -13,7 +13,8 @@ import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { SalesTab } from "@/components/performance/sales-tab";
 import { StorageTab, type CurrentLetRow } from "@/components/performance/storage-tab";
 import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
-import { buildStorageBillingStats, buildStorageReport, letWeeks } from "@/lib/storage-report";
+import { buildStorageBillingStats, buildStorageCostReport, buildStorageReport, letWeeks } from "@/lib/storage-report";
+import { getStorageRates } from "@/lib/storage-rates";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
@@ -80,17 +81,41 @@ function TabBar({ active }: { active: "overview" | "sales" | "storage" }) {
 
 async function StorageTabPage() {
   const sb = await createClient();
-  const [{ data: sites }, { data: units }, lets, { data: clients }] = await Promise.all([
+
+  // Supplier-cost window = the current UK calendar month, accrued to TODAY —
+  // crate days beyond today haven't been stored yet (PRD §6 "capped at end/today").
+  const nowUk = ukParts();
+  const today = `${nowUk.year}-${pad(nowUk.month)}-${pad(nowUk.day)}`;
+  const monthStart = `${nowUk.year}-${pad(nowUk.month)}-01`;
+  const costMonthLabel = new Date(`${monthStart}T00:00:00Z`).toLocaleDateString("en-GB", {
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+
+  const [{ data: sites }, { data: units }, lets, { data: clients }, rates, handlingEvents] = await Promise.all([
     sb.from("storage_sites").select("id, name, is_active"),
     sb.from("storage_units").select("id, site_id, code, name, unit_type, is_active"),
     fetchAllRows((f, t) =>
       sb
         .from("storage_lets")
-        .select("id, unit_id, client_id, start_date, end_date, rate, rate_period")
+        .select("id, unit_id, client_id, start_date, end_date, rate, rate_period, billing_model")
         .order("id")
         .range(f, t),
     ),
     sb.from("clients").select("id, display_name"),
+    getStorageRates(sb),
+    // This month's handling events — counted × the CURRENT supplier rate (the
+    // row's amount is the customer charge, not the cost).
+    fetchAllRows((f, t) =>
+      sb
+        .from("storage_handling_events")
+        .select("event_date")
+        .gte("event_date", monthStart)
+        .lte("event_date", today)
+        .order("id")
+        .range(f, t),
+    ),
   ]);
   // Full storage-invoice history feeds the billing stats (aggregation only, so
   // order-independent) → page through fetchAllRows past PostgREST's 1000-row cap.
@@ -98,30 +123,42 @@ async function StorageTabPage() {
     sb.from("storage_invoices").select("amount, status, period_start").order("id").range(f, t),
   );
 
-  const today = (() => {
-    const p = ukParts();
-    return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
-  })();
-
   const billing = buildStorageBillingStats(
     (storageInvoices ?? []).map((i) => ({ ...i, amount: Number(i.amount) })),
-    (() => {
-      const p = ukParts();
-      return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
-    })(),
+    today,
   );
+
+  const letRows = lets.map((l) => ({
+    id: l.id,
+    unit_id: l.unit_id,
+    client_id: l.client_id,
+    start_date: l.start_date,
+    end_date: l.end_date,
+    rate: l.rate == null ? null : Number(l.rate),
+    rate_period: l.rate_period,
+    billing_model: (l as { billing_model?: string | null }).billing_model ?? null,
+  }));
 
   const report = buildStorageReport(
     (sites ?? []).map((s) => ({ id: s.id, is_active: s.is_active })),
     units ?? [],
-    lets.map((l) => ({ ...l, rate: l.rate == null ? null : Number(l.rate) })),
+    letRows,
     today,
   );
+
+  const cost = buildStorageCostReport({
+    lets: letRows,
+    events: (handlingEvents ?? []) as { event_date: string }[],
+    units: units ?? [],
+    supplier: rates.supplier,
+    monthStartIso: monthStart,
+    monthEndIso: today,
+  });
 
   const clientName = new Map((clients ?? []).map((c) => [c.id, c.display_name as string]));
   const unitById = new Map((units ?? []).map((u) => [u.id, u]));
   const siteName = new Map((sites ?? []).map((s) => [s.id, s.name as string]));
-  const currentLets: CurrentLetRow[] = lets
+  const currentLets: CurrentLetRow[] = letRows
     .filter((l) => l.end_date == null)
     .map((l) => {
       const u = unitById.get(l.unit_id);
@@ -132,7 +169,7 @@ async function StorageTabPage() {
         unit_label: u ? u.code || u.name || "Unit" : "Unit",
         site_name: u ? siteName.get(u.site_id) ?? "—" : "—",
         start_date: l.start_date,
-        rate: l.rate == null ? null : Number(l.rate),
+        rate: l.rate,
         rate_period: l.rate_period,
         weeks: letWeeks(l.start_date, today),
       };
@@ -143,7 +180,7 @@ async function StorageTabPage() {
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Reports" title="Performance" />
       <TabBar active="storage" />
-      <StorageTab report={report} currentLets={currentLets} billing={billing} />
+      <StorageTab report={report} currentLets={currentLets} billing={billing} cost={cost} costMonthLabel={costMonthLabel} />
     </main>
   );
 }

@@ -108,6 +108,7 @@ const die = (msg, err) => {
 const LEAD_CHILD_TABLES = [
   "claims",
   "job_completions",
+  "refund_queue", // payments v2 — RESTRICTs leads/quotes; one blocked row aborts the whole lead delete
   "card_payments",
   "communications",
   "activities",
@@ -152,6 +153,9 @@ async function wipe() {
       const letIds = (eLets ?? []).map((l) => l.id);
       if (letIds.length) {
         await sb.from("signatures").delete().in("storage_let_id", letIds);
+        // Handling events RESTRICT their let — clear them before the lets.
+        const { error: evErr } = await sb.from("storage_handling_events").delete().in("let_id", letIds);
+        if (evErr && !/does not exist|find the table/i.test(evErr.message)) die("wipe storage_handling_events", evErr);
         const { error: invErr } = await sb.from("storage_invoices").delete().in("let_id", letIds);
         if (invErr && !/does not exist|find the table/i.test(invErr.message)) die("wipe storage_invoices", invErr);
         await sb.from("storage_lets").delete().in("id", letIds);
