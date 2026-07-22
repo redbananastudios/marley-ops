@@ -1751,8 +1751,6 @@ export async function createBalanceInvoiceFlow(
   }
 
   const { agreed, depositCredit, commitmentCredit, forfeited, amount } = await computeBalanceCredits(sb, quote);
-  const settings = await getBusinessSettings(sb);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
   if (amount <= 0) {
     return { ok: false, error: "Nothing left to invoice — payments received cover the agreed price." };
   }
