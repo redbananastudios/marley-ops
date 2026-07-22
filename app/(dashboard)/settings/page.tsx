@@ -17,7 +17,12 @@ import { SelfBillingCard } from "@/components/settings/self-billing-card";
 import { ContractorAgreementCard } from "@/components/settings/contractor-agreement-card";
 import { StorageRatesCard } from "@/components/settings/storage-rates-card";
 import { CONTRACTOR_AGREEMENT_VERSION } from "@/lib/contractor/agreement";
-import { getStorageRates, DEFAULT_STORAGE_RATES, type StorageRates } from "@/lib/storage-rates";
+import { mapStorageRates, DEFAULT_STORAGE_RATES, type StorageRates } from "@/lib/storage-rates";
+import {
+  getSupplierRates,
+  DEFAULT_SUPPLIER_COSTS,
+  type StorageSupplierCosts,
+} from "@/lib/storage-supplier";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -80,9 +85,28 @@ export default async function SettingsPage() {
   }
 
   // Storage rate card (admin only) — new lets copy these figures at creation,
-  // so edits here never disturb a running let's frozen rate.
+  // so edits here never disturb a running let's frozen rate. Supplier costs
+  // come from the admin-only storage_supplier_rates singleton, read with the
+  // USER client so RLS stays the authority (null = no row yet → defaults).
+  // STRICT reads: a failed read must show an error, not defaults — a save on
+  // top of silently-defaulted figures would overwrite the real rate card.
   let storageRates: StorageRates = DEFAULT_STORAGE_RATES;
-  if (canEdit) storageRates = await getStorageRates(sb);
+  let supplierRates: StorageSupplierCosts = DEFAULT_SUPPLIER_COSTS;
+  let storageRatesLoadError = false;
+  if (canEdit) {
+    try {
+      const { data: bsRow, error: bsErr } = await sb
+        .from("business_settings")
+        .select("storage_rates")
+        .eq("id", true)
+        .maybeSingle();
+      if (bsErr) throw new Error(bsErr.message);
+      storageRates = mapStorageRates((bsRow as { storage_rates?: unknown } | null)?.storage_rates);
+      supplierRates = (await getSupplierRates(sb)) ?? DEFAULT_SUPPLIER_COSTS;
+    } catch {
+      storageRatesLoadError = true;
+    }
+  }
 
   // Team management is admin-only — estimators don't see the card at all.
   let team: TeamMember[] = [];
@@ -189,7 +213,14 @@ export default async function SettingsPage() {
               <PricingForm initial={pricing} canEdit={canEdit} />
             </section>
             <section id="storage-rates" className={sectionClass}>
-              <StorageRatesCard initial={storageRates} />
+              {storageRatesLoadError ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                  The storage rate card could not be loaded. Reload the page before editing rates —
+                  saving now would overwrite the live figures with defaults.
+                </div>
+              ) : (
+                <StorageRatesCard initial={{ customer: storageRates, supplier: supplierRates }} />
+              )}
             </section>
             <section id="business" className={sectionClass}>
               <SettingsForm initial={settings} canEdit={canEdit} />

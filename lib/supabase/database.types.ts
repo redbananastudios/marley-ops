@@ -3105,6 +3105,7 @@ export type Database = {
       }
       signatures: {
         Row: {
+          ack_labels: Json | null
           acknowledgments: Json
           channel: string
           client_id: string | null
@@ -3124,6 +3125,7 @@ export type Database = {
           user_agent: string | null
         }
         Insert: {
+          ack_labels?: Json | null
           acknowledgments?: Json
           channel: string
           client_id?: string | null
@@ -3143,6 +3145,7 @@ export type Database = {
           user_agent?: string | null
         }
         Update: {
+          ack_labels?: Json | null
           acknowledgments?: Json
           channel?: string
           client_id?: string | null
@@ -3549,6 +3552,7 @@ export type Database = {
           emailed_at: string | null
           error: string | null
           handling_amount: number
+          handling_event_ids: string[]
           id: string
           kind: string
           let_id: string
@@ -3567,6 +3571,7 @@ export type Database = {
           emailed_at?: string | null
           error?: string | null
           handling_amount?: number
+          handling_event_ids?: string[]
           id?: string
           kind?: string
           let_id: string
@@ -3585,6 +3590,7 @@ export type Database = {
           emailed_at?: string | null
           error?: string | null
           handling_amount?: number
+          handling_event_ids?: string[]
           id?: string
           kind?: string
           let_id?: string
@@ -3718,6 +3724,24 @@ export type Database = {
           is_active?: boolean
           name?: string
           notes?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      storage_supplier_rates: {
+        Row: {
+          data: Json
+          id: boolean
+          updated_at: string
+        }
+        Insert: {
+          data?: Json
+          id?: boolean
+          updated_at?: string
+        }
+        Update: {
+          data?: Json
+          id?: boolean
           updated_at?: string
         }
         Relationships: []

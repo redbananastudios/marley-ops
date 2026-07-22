@@ -6,11 +6,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import {
   allCrateStorageAcksConfirmed,
   allStorageAcksConfirmed,
+  crateStorageAcks,
   isValidSignatureDataUri,
   normalizeCrateStorageAcks,
   normalizeStorageAcks,
+  STORAGE_ACKS,
   TERMS_VERSION,
 } from "@/lib/signatures";
+import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 
@@ -30,7 +33,7 @@ export async function signStorageAgreementRemoteAction(
   const admin = createAdminClient();
   const { data: let_ } = await admin
     .from("storage_lets")
-    .select("id, client_id, lead_id, billing_model")
+    .select("id, client_id, lead_id, billing_model, min_days")
     .eq("sign_token", token)
     .maybeSingle();
   if (!let_) return { ok: false, error: "This link is no longer valid." };
@@ -39,6 +42,18 @@ export async function signStorageAgreementRemoteAction(
   const isCrate = (let_ as { billing_model?: string }).billing_model === "crate_daily";
   const acksOk = isCrate ? allCrateStorageAcksConfirmed(acks) : allStorageAcksConfirmed(acks);
   if (!acksOk) return { ok: false, error: "Please tick each confirmation box." };
+
+  // Evidence: store the exact ack WORDING beside the ticked keys — the same
+  // derivation the /s page renders (the let's frozen min_days + the live
+  // rate-card handling figure), so the record shows what was agreed even
+  // after the rate card changes.
+  let ackDefs: ReadonlyArray<{ key: string; label: string }> = STORAGE_ACKS;
+  if (isCrate) {
+    const rates = await getStorageRates(admin);
+    const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
+    ackDefs = crateStorageAcks(minDays, gbpInc(rates.handlingEventInc));
+  }
+  const ackLabels = Object.fromEntries(ackDefs.map((a) => [a.key, a.label]));
 
   const h = await headers();
   const ip = (h.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
@@ -53,6 +68,7 @@ export async function signStorageAgreementRemoteAction(
     method: "typed",
     channel: "remote",
     acknowledgments: isCrate ? normalizeCrateStorageAcks(acks) : normalizeStorageAcks(acks),
+    ack_labels: ackLabels,
     terms_version: TERMS_VERSION,
     ip,
     user_agent: h.get("user-agent"),

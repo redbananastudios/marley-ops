@@ -44,34 +44,48 @@ export default async function StoragePage() {
   ]);
 
   // Phase 2 context: each let's agreement signature + its raised invoices,
-  // plus v2's handling events and the editable rate card.
+  // plus v2's handling events and the editable rate card. These grow with the
+  // let history → page through fetchAllRows past PostgREST's 1000-row cap
+  // (stable order + id tiebreaker so windows never skip or repeat rows).
   const letIds = lets.map((l) => l.id);
-  const [{ data: agreements }, { data: invoices }, { data: handlingEvents }, rates] = await Promise.all([
+  const [agreements, invoices, handlingEvents, rates] = await Promise.all([
     letIds.length
-      ? supabase
-          .from("signatures")
-          .select("storage_let_id, signer_name, channel")
-          .eq("kind", "storage")
-          .in("storage_let_id", letIds)
-      : Promise.resolve({ data: [] as { storage_let_id: string | null; signer_name: string; channel: string }[] }),
+      ? fetchAllRows((f, t) =>
+          supabase
+            .from("signatures")
+            .select("storage_let_id, signer_name, channel")
+            .eq("kind", "storage")
+            .in("storage_let_id", letIds)
+            .order("id")
+            .range(f, t),
+        )
+      : Promise.resolve([] as { storage_let_id: string | null; signer_name: string; channel: string }[]),
     letIds.length
-      ? supabase
-          .from("storage_invoices")
-          .select("id, let_id, period_start, amount, status, kind, zoho_invoice_number, zoho_invoice_url")
-          .in("let_id", letIds)
-          .order("period_start", { ascending: false })
-      : Promise.resolve({ data: [] as never[] }),
+      ? fetchAllRows((f, t) =>
+          supabase
+            .from("storage_invoices")
+            .select("id, let_id, period_start, amount, status, kind, zoho_invoice_number, zoho_invoice_url")
+            .in("let_id", letIds)
+            .order("period_start", { ascending: false })
+            .order("id")
+            .range(f, t),
+        )
+      : Promise.resolve([] as never[]),
     letIds.length
-      ? supabase
-          .from("storage_handling_events")
-          .select("id, let_id, event_date, kind, amount, billed_invoice_id")
-          .in("let_id", letIds)
-          .order("event_date", { ascending: false })
-      : Promise.resolve({ data: [] as never[] }),
+      ? fetchAllRows((f, t) =>
+          supabase
+            .from("storage_handling_events")
+            .select("id, let_id, event_date, kind, amount, billed_invoice_id")
+            .in("let_id", letIds)
+            .order("event_date", { ascending: false })
+            .order("id")
+            .range(f, t),
+        )
+      : Promise.resolve([] as never[]),
     getStorageRates(supabase),
   ]);
   const agreementByLet = new Map(
-    (agreements ?? []).filter((a) => a.storage_let_id).map((a) => [a.storage_let_id as string, a]),
+    agreements.filter((a) => a.storage_let_id).map((a) => [a.storage_let_id as string, a]),
   );
   const invoicesByLet = new Map<string, LetInvoice[]>();
   const invoicedStartsByLet = new Map<string, Set<string>>();

@@ -1,23 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 /**
- * Storage rate card (business_settings.storage_rates) — the standing policy's
- * billing config (docs/storage-billing-v2-prd.md §1). Customer figures are
- * VAT-INCLUSIVE; supplier figures are GROSS (FRS: no input VAT recovery, the
- * gross column is the real cost). Lets FREEZE their rate/min at creation, so
- * editing the card never disturbs a running let.
+ * Storage rate card — the standing policy's billing config
+ * (docs/storage-billing-v2-prd.md §1). CUSTOMER figures only, VAT-INCLUSIVE,
+ * from business_settings.storage_rates. This module is imported by client
+ * components (letDefaultsForUnitType, gbpInc), so the admin-only supplier
+ * cost side deliberately lives elsewhere — lib/storage-supplier.ts, which
+ * must never be value-imported client-side. Lets FREEZE their rate/min at
+ * creation, so editing the card never disturbs a running let.
  */
-
-export interface StorageSupplierCosts {
-  /** Gross monthly cost per container held (accrues regardless of occupancy). */
-  containerMonthCost: number;
-  /** How many containers Marley pays for each month. */
-  containersCount: number;
-  /** Gross cost per crate per day at Sandys. */
-  crateDayCost: number;
-  /** Gross cost per handling event (crate in/out/access) charged by Sandys. */
-  handlingEventCost: number;
-}
 
 export interface StorageRates {
   /** Container, per calendar month, VAT-inclusive. */
@@ -32,7 +23,6 @@ export interface StorageRates {
   crateMinInc: number;
   /** Handling, per crate per event (in/out/access), VAT-inclusive. */
   handlingEventInc: number;
-  supplier: StorageSupplierCosts;
 }
 
 export const DEFAULT_STORAGE_RATES: StorageRates = {
@@ -42,12 +32,6 @@ export const DEFAULT_STORAGE_RATES: StorageRates = {
   crateMinDays: 28,
   crateMinInc: 84,
   handlingEventInc: 60, // £50 ex — pass-through of Sandys' charge, no markup (Peter, 22 Jul; PRD D1)
-  supplier: {
-    containerMonthCost: 174,
-    containersCount: 2,
-    crateDayCost: 1.7143,
-    handlingEventCost: 60,
-  },
 };
 
 const num = (v: unknown, fallback: number): number => {
@@ -57,9 +41,8 @@ const num = (v: unknown, fallback: number): number => {
 
 export function mapStorageRates(raw: unknown): StorageRates {
   const d = DEFAULT_STORAGE_RATES;
-  if (!raw || typeof raw !== "object") return { ...d, supplier: { ...d.supplier } };
+  if (!raw || typeof raw !== "object") return { ...d };
   const o = raw as Record<string, unknown>;
-  const s = (o.supplier && typeof o.supplier === "object" ? o.supplier : {}) as Record<string, unknown>;
   return {
     containerMonthInc: num(o.container_month_inc, d.containerMonthInc),
     crateWeekInc: num(o.crate_week_inc, d.crateWeekInc),
@@ -67,12 +50,6 @@ export function mapStorageRates(raw: unknown): StorageRates {
     crateMinDays: Math.max(1, Math.trunc(num(o.crate_min_days, d.crateMinDays)) || d.crateMinDays),
     crateMinInc: num(o.crate_min_inc, d.crateMinInc),
     handlingEventInc: num(o.handling_event_inc, d.handlingEventInc),
-    supplier: {
-      containerMonthCost: num(s.container_month_cost, d.supplier.containerMonthCost),
-      containersCount: Math.max(0, Math.trunc(num(s.containers_count, d.supplier.containersCount))),
-      crateDayCost: num(s.crate_day_cost, d.supplier.crateDayCost),
-      handlingEventCost: num(s.handling_event_cost, d.supplier.handlingEventCost),
-    },
   };
 }
 
@@ -85,12 +62,6 @@ export function storageRatesToDb(r: StorageRates): Record<string, unknown> {
     crate_min_days: r.crateMinDays,
     crate_min_inc: r.crateMinInc,
     handling_event_inc: r.handlingEventInc,
-    supplier: {
-      container_month_cost: r.supplier.containerMonthCost,
-      containers_count: r.supplier.containersCount,
-      crate_day_cost: r.supplier.crateDayCost,
-      handling_event_cost: r.supplier.handlingEventCost,
-    },
   };
 }
 

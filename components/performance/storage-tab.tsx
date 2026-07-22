@@ -70,7 +70,9 @@ export function StorageTab({
   report: StorageReport;
   currentLets: CurrentLetRow[];
   billing: StorageBillingStats;
-  cost: StorageCostReport;
+  /** Null when the viewer can't read supplier costs (admin-only RLS) — the
+   *  supplier-cost card hides; revenue figures stay. */
+  cost: StorageCostReport | null;
   costMonthLabel: string;
 }) {
   const r = report;
@@ -179,45 +181,48 @@ export function StorageTab({
         />
       </div>
 
-      {/* supplier cost — the Sandys side of the ledger (storage billing v2 §6) */}
-      <Card className="p-0">
-        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
-          <h2 className="font-display text-lg font-semibold text-foreground">Supplier cost — this month</h2>
-          <span className="text-xs text-mist-400">{costMonthLabel}, accrued to today</span>
-        </div>
-        <div className="grid grid-cols-2 divide-y sm:grid-cols-4 sm:divide-x sm:divide-y-0">
-          <CostCell
-            label="Containers fixed"
-            value={gbp(cost.containersFixedCost)}
-            sub={cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}% utilised` : undefined}
-            definition="Monthly container rent, charged occupied or not."
-          />
-          <CostCell
-            label="Crate days"
-            value={gbp(cost.crateDaysCost)}
-            sub={`${cost.crateDays} day${cost.crateDays === 1 ? "" : "s"}`}
-            definition="Actual days crates were stored this month so far."
-          />
-          <CostCell
-            label="Handling"
-            value={gbp(cost.handlingCost)}
-            sub={`${cost.handlingEvents} event${cost.handlingEvents === 1 ? "" : "s"}`}
-            definition="Crate in, out and access events at the supplier rate."
-          />
-          <CostCell
-            label="Total cost"
-            value={gbp(cost.totalCost)}
-            definition="What the supplier should charge us for the month so far."
-          />
-        </div>
-        <div className="border-t px-5 py-3">
-          <p className="text-xs text-mist-400">
-            Container utilisation{" "}
-            {cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}%` : "—"} (occupied of active
-            container units). Reconcile monthly against the Sandys invoice.
-          </p>
-        </div>
-      </Card>
+      {/* supplier cost — the Sandys side of the ledger (storage billing v2 §6).
+          Hidden entirely when the viewer can't read supplier costs. */}
+      {cost ? (
+        <Card className="p-0">
+          <div className="flex flex-wrap items-baseline justify-between gap-2 border-b px-5 py-3.5">
+            <h2 className="font-display text-lg font-semibold text-foreground">Supplier cost — this month</h2>
+            <span className="text-xs text-mist-400">{costMonthLabel}, accrued to today</span>
+          </div>
+          <div className="grid grid-cols-2 divide-y sm:grid-cols-4 sm:divide-x sm:divide-y-0">
+            <CostCell
+              label="Containers fixed"
+              value={gbp(cost.containersFixedCost)}
+              sub={cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}% utilised` : undefined}
+              definition="Monthly container rent, charged occupied or not."
+            />
+            <CostCell
+              label="Crate days"
+              value={gbp(cost.crateDaysCost)}
+              sub={`${cost.crateDays} day${cost.crateDays === 1 ? "" : "s"}`}
+              definition="Actual days crates were stored this month so far."
+            />
+            <CostCell
+              label="Handling"
+              value={gbp(cost.handlingCost)}
+              sub={`${cost.handlingEvents} event${cost.handlingEvents === 1 ? "" : "s"}`}
+              definition="Crate in, out and access events at the supplier rate."
+            />
+            <CostCell
+              label="Total cost"
+              value={gbp(cost.totalCost)}
+              definition="What the supplier should charge us for the month so far."
+            />
+          </div>
+          <div className="border-t px-5 py-3">
+            <p className="text-xs text-mist-400">
+              Container utilisation{" "}
+              {cost.containerUtilisationPct != null ? `${cost.containerUtilisationPct}%` : "—"} (occupied of active
+              container units). Reconcile monthly against the Sandys invoice.
+            </p>
+          </div>
+        </Card>
+      ) : null}
 
       {/* durations + by-type */}
       <div className="grid gap-4 lg:grid-cols-2">

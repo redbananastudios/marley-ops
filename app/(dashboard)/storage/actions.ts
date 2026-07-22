@@ -11,12 +11,15 @@ import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import {
   allCrateStorageAcksConfirmed,
   allStorageAcksConfirmed,
+  crateStorageAcks,
   isValidSignatureDataUri,
   normalizeCrateStorageAcks,
   normalizeStorageAcks,
+  STORAGE_ACKS,
   TERMS_VERSION,
 } from "@/lib/signatures";
-import { raiseDueStorageInvoices } from "@/lib/storage/raise-storage-invoices";
+import { getStorageRates, gbpInc } from "@/lib/storage-rates";
+import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
 
 const UK_TODAY = (): string => new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
@@ -182,10 +185,34 @@ export async function startLetAction(input: StartLetInput) {
   const minAmount = asNum(v.min_amount);
   if (v.billing_model === "crate_daily") {
     if (v.rate_period !== "day") return { ok: false as const, error: "Crate storage bills a day rate." };
+    // An unpriced crate would bill £0/day forever — the engine has no
+    // "as agreed" fallback for the daily-arrears model.
+    const dayRate = asNum(v.rate);
+    if (!dayRate || dayRate <= 0) return { ok: false as const, error: "Set the day rate — crate storage bills per day." };
     if (!minDays || minDays < 1) return { ok: false as const, error: "Set the minimum-stay days." };
     if (minAmount == null || minAmount < 0) return { ok: false as const, error: "Set the minimum-stay charge." };
+    // Ticked handling-in with no amount must fail loudly, not silently skip
+    // the event (the charge would quietly never bill).
+    if (v.record_handling_in) {
+      const handling = asNum(v.handling_amount);
+      if (!handling || handling <= 0) {
+        return { ok: false as const, error: "Enter the handling charge (or untick record handling in)." };
+      }
+    }
   } else if (v.rate_period === "day") {
     return { ok: false as const, error: "Day rates are for crate storage — pick weekly or monthly." };
+  }
+
+  // The billing model must match the physical product — crates bill per day
+  // in arrears, everything else per period in advance. A mismatch here would
+  // mis-route the billing engine for the life of the let.
+  const { data: unit } = await sb.from("storage_units").select("unit_type").eq("id", v.unit_id).single();
+  if (!unit) return { ok: false as const, error: "Unit not found." };
+  if (v.billing_model === "crate_daily" && unit.unit_type !== "crate_250") {
+    return { ok: false as const, error: "Day-rate crate billing is only for crate units — this unit bills per period." };
+  }
+  if (unit.unit_type === "crate_250" && v.billing_model !== "crate_daily") {
+    return { ok: false as const, error: "Crates bill per day in arrears — start this let on the crate billing model." };
   }
 
   // App-level guard; the partial unique index (one open let per unit) is the backstop.
@@ -247,8 +274,41 @@ export interface EndLetOptions {
   billNow?: boolean;
 }
 
+// The dialog omits handlingAmount when the charge is unticked (older callers
+// sent 0), so the schema tolerates absent/0; strict positivity is enforced
+// below only when recordHandlingOut is actually on.
+const endLetInputSchema = z.object({
+  letId: z.string().uuid("Let not found."),
+  endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick an end date."),
+  opts: z
+    .object({
+      recordHandlingOut: z.boolean().optional(),
+      handlingAmount: z.coerce
+        .number()
+        .nonnegative("Enter the handling charge")
+        .max(100_000, "Handling charge is too large.")
+        .optional(),
+      billNow: z.boolean().optional(),
+    })
+    .optional(),
+});
+
+/** "10 Aug" — office-facing note dates (year omitted; the note is immediate). */
+const shortDay = (iso: string): string =>
+  new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  });
+
 export async function endLetAction(letId: string, endDate: string, opts?: EndLetOptions) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(endDate)) return { ok: false as const, error: "Pick an end date." };
+  const parsed = endLetInputSchema.safeParse({ letId, endDate, opts });
+  if (!parsed.success) return { ok: false as const, error: parsed.error.issues[0]?.message ?? "Invalid input" };
+  const v = parsed.data;
+  const handlingAmount = v.opts?.handlingAmount ?? 0;
+  if (v.opts?.recordHandlingOut && handlingAmount <= 0) {
+    return { ok: false as const, error: "Enter the handling charge (or untick charge handling out)." };
+  }
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
   // The inline settlement runs on the admin client (Zoho + claim writes), so
@@ -259,46 +319,91 @@ export async function endLetAction(letId: string, endDate: string, opts?: EndLet
   const { data: row } = await sb
     .from("storage_lets")
     .select("start_date, end_date, client_id, billing_model")
-    .eq("id", letId)
+    .eq("id", v.letId)
     .single();
   if (!row) return { ok: false as const, error: "Let not found." };
   if (row.end_date) return { ok: false as const, error: "This let is already ended." };
-  if (endDate < row.start_date) return { ok: false as const, error: "End date can't be before the start date." };
+  if (v.endDate < row.start_date) return { ok: false as const, error: "End date can't be before the start date." };
 
-  const { error } = await sb.from("storage_lets").update({ end_date: endDate }).eq("id", letId);
+  // Backdated-release check — CRATE day-exact charges only. A crate arrears or
+  // final invoice whose window passes the chosen end date billed days the
+  // goods weren't stored, which the agreement doesn't cover. The crate MINIMUM
+  // and every period-let invoice bill in full by policy (no pro-rata on
+  // release), so an end date inside those windows is normal, not an overbill.
+  // The end still proceeds — the goods left, and blocking would force a wrong
+  // date — but the office is told to square the books.
+  let overbilledNote: string | undefined;
+  if ((row as { billing_model?: string }).billing_model === "crate_daily") {
+    const { data: invRows, error: invErr } = await sb
+      .from("storage_invoices")
+      .select("period_end")
+      .eq("let_id", v.letId)
+      .neq("status", "void")
+      .in("kind", ["arrears", "final"])
+      .order("period_end", { ascending: false })
+      .limit(1);
+    if (invErr) return { ok: false as const, error: invErr.message };
+    const maxPeriodEnd = invRows?.[0]?.period_end?.slice(0, 10);
+    if (maxPeriodEnd && v.endDate < maxPeriodEnd) {
+      overbilledNote = `Days after ${shortDay(v.endDate)} were already invoiced (cycle to ${shortDay(maxPeriodEnd)}) — raise a credit note in Zoho for the difference.`;
+    }
+  }
+
+  const { error } = await sb.from("storage_lets").update({ end_date: v.endDate }).eq("id", v.letId);
   if (error) return { ok: false as const, error: error.message };
 
   // Egress event AFTER the end date lands — an event without the release would
   // ride a future cycle invoice as a stray charge. If this insert fails the let
-  // is still ended; the office adds the event from Manage and the cron settles.
+  // is still ended; ended lets no longer take panel events, so the charge is
+  // added in Zoho by hand.
   let eventError: string | undefined;
   if (
     (row as { billing_model?: string }).billing_model === "crate_daily" &&
-    opts?.recordHandlingOut &&
-    (opts.handlingAmount ?? 0) > 0
+    v.opts?.recordHandlingOut &&
+    handlingAmount > 0
   ) {
     const { error: evErr } = await sb.from("storage_handling_events").insert({
-      let_id: letId,
+      let_id: v.letId,
       client_id: row.client_id,
-      event_date: endDate,
+      event_date: v.endDate,
       kind: "out",
-      amount: opts.handlingAmount,
+      amount: handlingAmount,
       created_by: userId,
     } as never);
-    if (evErr) eventError = `handling-out event failed (${evErr.message}) — add it from Manage`;
+    if (evErr) eventError = `handling-out event failed (${evErr.message}) — add the charge in Zoho manually`;
   }
 
   // Release settlement: raise the final invoice(s) now rather than waiting for
   // the 08:00 cron — the policy is "settled before goods leave". Fail-soft:
   // the claim machinery releases on failure and the cron retries tomorrow.
+  // settlementChecked is true ONLY when the run completed with no fatal and no
+  // thrown exception — the UI must never report an unverified settlement.
   let raised: { invoiceNumber: string; amount: number; kind: string }[] = [];
   let billingError: string | undefined = eventError;
-  if (opts?.billNow !== false) {
+  let settlementChecked = false;
+  if (v.opts?.billNow !== false) {
+    const adminSb = createAdminClient();
+    // Complete any claim stranded 'pending' by an earlier crash FIRST. The
+    // raise core already refuses to re-sweep a claimed event, so money stays
+    // right either way — but adopting here links the invoice and surfaces its
+    // alerts before the goods leave rather than at tomorrow's cron.
     try {
-      const summary = await raiseDueStorageInvoices(createAdminClient(), { todayIso: UK_TODAY(), letId });
+      const rep = await repairPendingStorageClaims(adminSb, { todayIso: UK_TODAY(), letId: v.letId });
+      if (rep.alerts.length) billingError = [billingError, ...rep.alerts].filter(Boolean).join("; ");
+    } catch {
+      // best-effort — claimed-event exclusion in the raise keeps money safe
+    }
+    try {
+      const summary = await raiseDueStorageInvoices(adminSb, { todayIso: UK_TODAY(), letId: v.letId });
       raised = summary.invoices.map(({ invoiceNumber, amount, kind }) => ({ invoiceNumber, amount, kind }));
-      if (summary.billingFailures.length) {
-        billingError = [eventError, ...summary.billingFailures].filter(Boolean).join("; ");
+      if (summary.fatal) {
+        // A ledger read failed and nothing was raised — the cron retries.
+        billingError = [eventError, summary.fatal].filter(Boolean).join("; ");
+      } else {
+        settlementChecked = true;
+        if (summary.billingFailures.length) {
+          billingError = [eventError, ...summary.billingFailures].filter(Boolean).join("; ");
+        }
       }
     } catch (e) {
       billingError = [eventError, e instanceof Error ? e.message : "billing failed"].filter(Boolean).join("; ");
@@ -306,7 +411,7 @@ export async function endLetAction(letId: string, endDate: string, opts?: EndLet
   }
 
   revalidatePath("/storage");
-  return { ok: true as const, raised, billingError };
+  return { ok: true as const, raised, billingError, settlementChecked, overbilledNote };
 }
 
 /* -------------------------------------------------------- handling events */
@@ -339,7 +444,13 @@ export async function recordHandlingEventAction(input: HandlingEventInput) {
   if ((let_ as { billing_model?: string }).billing_model !== "crate_daily") {
     return { ok: false as const, error: "Handling fees apply to crate storage only — containers have none." };
   }
+  // An ended let has raised (or is about to raise) its final settlement — a
+  // late event would sit unbilled forever (the engine never revisits it).
+  if (let_.end_date) {
+    return { ok: false as const, error: "This let has ended and billing is settled — add one-off charges in Zoho instead." };
+  }
   if (v.event_date < let_.start_date) return { ok: false as const, error: "Event can't be before the let started." };
+  if (v.event_date > UK_TODAY()) return { ok: false as const, error: "The event date can't be in the future." };
 
   const { error } = await sb.from("storage_handling_events").insert({
     let_id: v.let_id,
@@ -355,21 +466,27 @@ export async function recordHandlingEventAction(input: HandlingEventInput) {
   return { ok: true as const };
 }
 
-/** Remove a mis-recorded handling event — only while it hasn't billed. */
+/** Remove a mis-recorded handling event — only while it hasn't billed. The
+ *  unbilled predicate rides the delete itself (and the DELETE RLS policy), so
+ *  a concurrent billing run can never race us into removing an invoiced
+ *  charge — the delete simply hits 0 rows and we say so honestly. */
 export async function deleteHandlingEventAction(eventId: string) {
+  if (!z.string().uuid().safeParse(eventId).success) return { ok: false as const, error: "Event not found." };
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
-  const { data: ev } = await sb
+  const { data: deleted, error } = await sb
     .from("storage_handling_events")
-    .select("id, billed_invoice_id")
+    .delete()
     .eq("id", eventId)
-    .single();
-  if (!ev) return { ok: false as const, error: "Event not found." };
-  if (ev.billed_invoice_id) {
-    return { ok: false as const, error: "This event is already on an invoice — adjust it in Zoho instead." };
-  }
-  const { error } = await sb.from("storage_handling_events").delete().eq("id", eventId);
+    .is("billed_invoice_id", null)
+    .select("id");
   if (error) return { ok: false as const, error: error.message };
+  if (!deleted?.length) {
+    return {
+      ok: false as const,
+      error: "Could not remove it — it may have just been billed, or it was already removed. Check the invoice list.",
+    };
+  }
   revalidatePath("/storage");
   return { ok: true as const };
 }
@@ -394,7 +511,7 @@ export async function editLetAction(letId: string, input: EditLetInput) {
 
   const { data: row } = await sb
     .from("storage_lets")
-    .select("start_date, rate_period, end_date, billing_model")
+    .select("start_date, rate_period, end_date, billing_model, rate")
     .eq("id", letId)
     .single();
   if (!row) return { ok: false as const, error: "Let not found." };
@@ -410,15 +527,35 @@ export async function editLetAction(letId: string, input: EditLetInput) {
   }
 
   const anchorsChanged = v.start_date !== row.start_date || v.rate_period !== row.rate_period;
-  if (anchorsChanged) {
+  const newRate = v.rate === "" || v.rate == null ? null : v.rate;
+  // A crate let must always carry a positive day rate — clearing it would make
+  // the engine silently skip the let (rate > 0 filter), including its minimum.
+  if (isCrate && (newRate == null || newRate <= 0)) {
+    return { ok: false as const, error: "Crate storage needs a positive day rate." };
+  }
+  const storedRate = row.rate == null ? null : Number(row.rate);
+  const rateChanged =
+    newRate == null || storedRate == null ? newRate !== storedRate : Math.abs(newRate - storedRate) > 0.005;
+  if (anchorsChanged || (isCrate && rateChanged)) {
     const { count } = await sb
       .from("storage_invoices")
       .select("id", { count: "exact", head: true })
       .eq("let_id", letId);
     if ((count ?? 0) > 0) {
+      if (anchorsChanged) {
+        return {
+          ok: false as const,
+          error: "Invoices exist on this let — the start date and billing period are locked. Rate and notes can still change.",
+        };
+      }
+      // Crate arrears windows bill retrospectively AT THE LET'S RATE — a
+      // mid-let rate change would reprice days the customer has already used
+      // under the signed schedule. Period lets are safe (in advance; future
+      // periods simply bill at the new rate).
       return {
         ok: false as const,
-        error: "Invoices exist on this let — the start date and billing period are locked. Rate and notes can still change.",
+        error:
+          "Invoices exist on this let — the day rate is locked (open arrears windows bill at the let's rate). End the let and start a new one at the new rate.",
       };
     }
   }
@@ -444,9 +581,34 @@ export async function editLetAction(letId: string, input: EditLetInput) {
 export async function reopenLetAction(letId: string) {
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
-  const { data: row } = await sb.from("storage_lets").select("unit_id, end_date").eq("id", letId).single();
+  const { data: row } = await sb
+    .from("storage_lets")
+    .select("unit_id, end_date, billing_model")
+    .eq("id", letId)
+    .single();
   if (!row) return { ok: false as const, error: "Let not found." };
   if (!row.end_date) return { ok: false as const, error: "This let is already open." };
+
+  // Crate billing settles to the exact release day (unbilled days + handling
+  // out on the final invoice) — reopening after ANY invoice exists would
+  // corrupt that day-exact history. Period lets bill whole periods in
+  // advance, so reopening them stays safe; so does a crate with no invoices.
+  if ((row as { billing_model?: string }).billing_model === "crate_daily") {
+    const { count, error: cntErr } = await sb
+      .from("storage_invoices")
+      .select("id", { count: "exact", head: true })
+      .eq("let_id", letId);
+    // Fail CLOSED — a failed count read returns null, and treating that as
+    // "no invoices" would let the reopen corrupt day-exact billing history.
+    if (cntErr) return { ok: false as const, error: cntErr.message };
+    if ((count ?? 0) > 0) {
+      return {
+        ok: false as const,
+        error:
+          "Crate billing has already settled to the release day — reopening would corrupt the day-exact invoices. Start a new let on the unit instead.",
+      };
+    }
+  }
 
   const { error } = await sb.from("storage_lets").update({ end_date: null }).eq("id", letId);
   if (error) {
@@ -488,7 +650,7 @@ export async function signStorageAgreementAction(
 
   const { data: let_ } = await sb
     .from("storage_lets")
-    .select("id, client_id, lead_id, billing_model")
+    .select("id, client_id, lead_id, billing_model, min_days")
     .eq("id", letId)
     .single();
   if (!let_) return { ok: false as const, error: "Let not found." };
@@ -501,6 +663,18 @@ export async function signStorageAgreementAction(
     return { ok: false as const, error: "Tick each confirmation with the customer first." };
   }
 
+  // Evidence: store the exact ack WORDING beside the ticked keys. Derived
+  // server-side from the same sources the dialog renders (the let's frozen
+  // min_days + the live rate-card handling figure — mirrors /s), so the
+  // record shows what was agreed even after the rate card changes.
+  let ackDefs: ReadonlyArray<{ key: string; label: string }> = STORAGE_ACKS;
+  if (isCrate) {
+    const rates = await getStorageRates(sb);
+    const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
+    ackDefs = crateStorageAcks(minDays, gbpInc(rates.handlingEventInc));
+  }
+  const ackLabels = Object.fromEntries(ackDefs.map((a) => [a.key, a.label]));
+
   const { error } = await sb.from("signatures").insert({
     kind: "storage",
     storage_let_id: let_.id,
@@ -511,6 +685,7 @@ export async function signStorageAgreementAction(
     method: "drawn",
     channel: "in_person",
     acknowledgments: isCrate ? normalizeCrateStorageAcks(input.acks) : normalizeStorageAcks(input.acks),
+    ack_labels: ackLabels,
     terms_version: TERMS_VERSION,
     collected_by: userId,
   } as never);

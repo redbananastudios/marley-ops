@@ -14,7 +14,7 @@ import { SalesTab } from "@/components/performance/sales-tab";
 import { StorageTab, type CurrentLetRow } from "@/components/performance/storage-tab";
 import { buildSalesReport, type SalesLead, type SalesQuote } from "@/lib/sales-report";
 import { buildStorageBillingStats, buildStorageCostReport, buildStorageReport, letWeeks } from "@/lib/storage-report";
-import { getStorageRates } from "@/lib/storage-rates";
+import { getSupplierRates } from "@/lib/storage-supplier";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukInstant, ukParts, UK_TZ } from "@/lib/uk-time";
 
@@ -93,7 +93,7 @@ async function StorageTabPage() {
     timeZone: "UTC",
   });
 
-  const [{ data: sites }, { data: units }, lets, { data: clients }, rates, handlingEvents] = await Promise.all([
+  const [{ data: sites }, { data: units }, lets, { data: clients }, supplier, handlingEvents] = await Promise.all([
     sb.from("storage_sites").select("id, name, is_active"),
     sb.from("storage_units").select("id, site_id, code, name, unit_type, is_active"),
     fetchAllRows((f, t) =>
@@ -104,7 +104,10 @@ async function StorageTabPage() {
         .range(f, t),
     ),
     sb.from("clients").select("id, display_name"),
-    getStorageRates(sb),
+    // Supplier costs are admin-only (storage_supplier_rates RLS) — read with
+    // the USER client so an estimator gets null and the cost card simply hides.
+    // A transient read ERROR also hides the card (display-only surface).
+    getSupplierRates(sb).catch(() => null),
     // This month's handling events — counted × the CURRENT supplier rate (the
     // row's amount is the customer charge, not the cost).
     fetchAllRows((f, t) =>
@@ -146,14 +149,16 @@ async function StorageTabPage() {
     today,
   );
 
-  const cost = buildStorageCostReport({
-    lets: letRows,
-    events: (handlingEvents ?? []) as { event_date: string }[],
-    units: units ?? [],
-    supplier: rates.supplier,
-    monthStartIso: monthStart,
-    monthEndIso: today,
-  });
+  const cost = supplier
+    ? buildStorageCostReport({
+        lets: letRows,
+        events: (handlingEvents ?? []) as { event_date: string }[],
+        units: units ?? [],
+        supplier,
+        monthStartIso: monthStart,
+        monthEndIso: today,
+      })
+    : null;
 
   const clientName = new Map((clients ?? []).map((c) => [c.id, c.display_name as string]));
   const unitById = new Map((units ?? []).map((u) => [u.id, u]));

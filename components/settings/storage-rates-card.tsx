@@ -3,9 +3,10 @@
 /**
  * Settings › Storage rates (admin). The rate card new storage lets copy at
  * creation (docs/storage-billing-v2-prd.md §1). Customer figures are
- * VAT-INCLUSIVE; supplier figures are GROSS (FRS — no input VAT recovery, so
- * the gross column is the real cost). Editing here never touches a running
- * let — the rate froze onto the let when it opened.
+ * VAT-INCLUSIVE (business_settings.storage_rates); supplier figures are GROSS
+ * (FRS — no input VAT recovery, so the gross column is the real cost) and live
+ * in the admin-only storage_supplier_rates singleton. Editing here never
+ * touches a running let — the rate froze onto the let when it opened.
  */
 
 import { useState } from "react";
@@ -17,6 +18,9 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { saveStorageRatesAction } from "@/app/(dashboard)/settings/actions";
 import type { StorageRates } from "@/lib/storage-rates";
+// Type-only import — erased at compile time, so no supplier VALUES enter the
+// client bundle (lib/storage-supplier.ts is server-side only).
+import type { StorageSupplierCosts } from "@/lib/storage-supplier";
 
 type FieldKey =
   | "containerMonthInc"
@@ -79,6 +83,9 @@ function RateField({
         step={def.step ?? (isMoney ? "0.01" : "1")}
         value={value}
         disabled={disabled}
+        // Every rate is required — a cleared field must not submit (the server
+        // schema rejects "" too; this just fails fast in the browser).
+        required
         onChange={(e) => onChange(e.target.value)}
         className="tabular h-full w-full bg-transparent text-sm text-foreground focus:outline-none disabled:cursor-not-allowed"
       />
@@ -87,45 +94,57 @@ function RateField({
   );
 }
 
-export function StorageRatesCard({ initial }: { initial: StorageRates }) {
+export function StorageRatesCard({
+  initial,
+}: {
+  initial: { customer: StorageRates; supplier: StorageSupplierCosts };
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState<Record<FieldKey, string>>({
-    containerMonthInc: String(initial.containerMonthInc),
-    crateWeekInc: String(initial.crateWeekInc),
-    crateDayInc: String(initial.crateDayInc),
-    crateMinDays: String(initial.crateMinDays),
-    crateMinInc: String(initial.crateMinInc),
-    handlingEventInc: String(initial.handlingEventInc),
+    containerMonthInc: String(initial.customer.containerMonthInc),
+    crateWeekInc: String(initial.customer.crateWeekInc),
+    crateDayInc: String(initial.customer.crateDayInc),
+    crateMinDays: String(initial.customer.crateMinDays),
+    crateMinInc: String(initial.customer.crateMinInc),
+    handlingEventInc: String(initial.customer.handlingEventInc),
     supplierContainerMonthCost: String(initial.supplier.containerMonthCost),
     supplierContainersCount: String(initial.supplier.containersCount),
     supplierCrateDayCost: String(initial.supplier.crateDayCost),
     supplierHandlingEventCost: String(initial.supplier.handlingEventCost),
   });
 
-  async function onSave() {
+  async function onSave(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setBusy(true);
-    const res = await saveStorageRatesAction({
-      containerMonthInc: Number(v.containerMonthInc),
-      crateWeekInc: Number(v.crateWeekInc),
-      crateDayInc: Number(v.crateDayInc),
-      crateMinDays: Number(v.crateMinDays),
-      crateMinInc: Number(v.crateMinInc),
-      handlingEventInc: Number(v.handlingEventInc),
-      supplier: {
-        containerMonthCost: Number(v.supplierContainerMonthCost),
-        containersCount: Number(v.supplierContainersCount),
-        crateDayCost: Number(v.supplierCrateDayCost),
-        handlingEventCost: Number(v.supplierHandlingEventCost),
-      },
-    });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error || "Could not save storage rates.");
-      return;
+    try {
+      // Raw field strings — the action's schema rejects "" before coercing, so
+      // an empty field can never silently save as £0.
+      const res = await saveStorageRatesAction({
+        containerMonthInc: v.containerMonthInc,
+        crateWeekInc: v.crateWeekInc,
+        crateDayInc: v.crateDayInc,
+        crateMinDays: v.crateMinDays,
+        crateMinInc: v.crateMinInc,
+        handlingEventInc: v.handlingEventInc,
+        supplier: {
+          containerMonthCost: v.supplierContainerMonthCost,
+          containersCount: v.supplierContainersCount,
+          crateDayCost: v.supplierCrateDayCost,
+          handlingEventCost: v.supplierHandlingEventCost,
+        },
+      });
+      if (!res.ok) {
+        toast.error(res.error || "Could not save storage rates.");
+        return;
+      }
+      toast.success("Storage rates saved.");
+      router.refresh();
+    } catch {
+      toast.error("Something went wrong — check whether the change landed before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success("Storage rates saved.");
-    router.refresh();
   }
 
   const group = (title: string, hint: string, fields: FieldDef[]) => (
@@ -151,39 +170,41 @@ export function StorageRatesCard({ initial }: { initial: StorageRates }) {
 
   return (
     <Card className="p-0">
-      <div className="flex items-center gap-3 border-b px-5 py-3.5">
-        <Warehouse className="size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
-        <div>
-          <h2 className="font-display text-lg font-semibold text-foreground">Storage rates</h2>
-          <p className="mt-0.5 text-xs text-mist-400">
-            What customers pay and what Sandys charges us. New lets copy these figures when they open.
+      <form onSubmit={onSave}>
+        <div className="flex items-center gap-3 border-b px-5 py-3.5">
+          <Warehouse className="size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
+          <div>
+            <h2 className="font-display text-lg font-semibold text-foreground">Storage rates</h2>
+            <p className="mt-0.5 text-xs text-mist-400">
+              What customers pay and what Sandys charges us. New lets copy these figures when they open.
+            </p>
+          </div>
+        </div>
+
+        <div className="space-y-5 p-5">
+          {group(
+            "Customer rates (inc VAT)",
+            "Containers bill per calendar month in advance; crates bill daily in arrears with a minimum stay.",
+            CUSTOMER_FIELDS,
+          )}
+          {group(
+            "Supplier costs (gross — FRS, no VAT recovery)",
+            "Container cost accrues per container held, occupied or not. Crate + handling costs follow usage.",
+            SUPPLIER_FIELDS,
+          )}
+          <p className="text-xs text-mist-400">
+            New lets copy these rates at creation — running lets keep their frozen rate. The crate agreement
+            wording renders the live handling figure, so a change here must be mirrored in the published terms.
           </p>
         </div>
-      </div>
 
-      <div className="space-y-5 p-5">
-        {group(
-          "Customer rates (inc VAT)",
-          "Containers bill per calendar month in advance; crates bill daily in arrears with a minimum stay.",
-          CUSTOMER_FIELDS,
-        )}
-        {group(
-          "Supplier costs (gross — FRS, no VAT recovery)",
-          "Container cost accrues per container held, occupied or not. Crate + handling costs follow usage.",
-          SUPPLIER_FIELDS,
-        )}
-        <p className="text-xs text-mist-400">
-          New lets copy these rates at creation — running lets keep their frozen rate. The crate agreement
-          wording renders the live handling figure, so a change here must be mirrored in the published terms.
-        </p>
-      </div>
-
-      <div className="flex justify-end border-t px-5 py-4">
-        <Button onClick={onSave} disabled={busy} className="h-11">
-          {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
-          Save storage rates
-        </Button>
-      </div>
+        <div className="flex justify-end border-t px-5 py-4">
+          <Button type="submit" disabled={busy} className="h-11">
+            {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : null}
+            Save storage rates
+          </Button>
+        </div>
+      </form>
     </Card>
   );
 }

@@ -11,6 +11,7 @@ import { fleetDigestHtml, fleetDigestSubject, type DigestItem } from "@/lib/flee
 import { sendPushForEvent } from "@/lib/push/send";
 import { fleetExpiryDigestPush } from "@/lib/push/categories";
 import { storageRatesToDb } from "@/lib/storage-rates";
+import { supplierCostsToDb } from "@/lib/storage-supplier";
 
 async function requireAdmin() {
   const sb = await createClient();
@@ -136,24 +137,40 @@ export async function saveFleetRemindersAction(input: FleetRemindersInput) {
 
 /* --------------------------------------------------------- storage rates (admin) */
 
-const storageMoney = z.coerce.number().nonnegative("Must be 0 or more");
+// Empty string is checked BEFORE numeric coercion (the optNum lesson in
+// app/(dashboard)/storage/actions.ts: z.coerce.number() turns "" into 0). Every
+// rate is REQUIRED here — a cleared field must reject loudly, never save a £0
+// rate that would silently flow onto the next let.
+const requiredRate = z
+  .union([z.string().trim(), z.number()])
+  .refine((v) => v !== "", "Enter a value for every rate.")
+  .transform((v) => Number(v))
+  .refine((n) => Number.isFinite(n) && n >= 0, "Must be 0 or more");
+const requiredCount = requiredRate.refine((n) => Number.isInteger(n), "Containers held must be a whole number");
+const requiredDays = requiredRate.refine(
+  (n) => Number.isInteger(n) && n >= 1,
+  "Minimum days must be a whole number of at least 1",
+);
 const storageRatesSchema = z.object({
-  containerMonthInc: storageMoney,
-  crateWeekInc: storageMoney,
-  crateDayInc: storageMoney,
-  crateMinDays: z.coerce.number().int("Minimum days must be a whole number").positive("Minimum days must be at least 1"),
-  crateMinInc: storageMoney,
-  handlingEventInc: storageMoney,
+  containerMonthInc: requiredRate,
+  crateWeekInc: requiredRate,
+  crateDayInc: requiredRate,
+  crateMinDays: requiredDays,
+  crateMinInc: requiredRate,
+  handlingEventInc: requiredRate,
   supplier: z.object({
-    containerMonthCost: storageMoney,
-    containersCount: z.coerce.number().int("Containers held must be a whole number").nonnegative("Must be 0 or more"),
-    crateDayCost: storageMoney,
-    handlingEventCost: storageMoney,
+    containerMonthCost: requiredRate,
+    containersCount: requiredCount,
+    crateDayCost: requiredRate,
+    handlingEventCost: requiredRate,
   }),
 });
-export type StorageRatesInput = z.infer<typeof storageRatesSchema>;
+// z.input — the card submits raw field strings; the schema rejects "" and coerces.
+export type StorageRatesInput = z.input<typeof storageRatesSchema>;
 
-/** Save the storage rate card (admin only). New lets COPY these figures at
+/** Save the storage rate card (admin only): customer rates to
+ *  business_settings.storage_rates, supplier costs to the admin-only
+ *  storage_supplier_rates singleton. New lets COPY the customer figures at
  *  creation — running lets keep their frozen rate, so this never disturbs live
  *  billing (docs/storage-billing-v2-prd.md §1). */
 export async function saveStorageRatesAction(input: StorageRatesInput) {
@@ -163,14 +180,20 @@ export async function saveStorageRatesAction(input: StorageRatesInput) {
   }
   const { sb, error } = await requireAdmin();
   if (error) return { ok: false as const, error };
+  const { supplier, ...customer } = parsed.data;
   const { error: dbErr } = await sb
     .from("business_settings")
     // Record<string, unknown> → the generated Json column type (plain data).
-    .update({ storage_rates: storageRatesToDb(parsed.data) as never })
+    .update({ storage_rates: storageRatesToDb(customer) as never })
     .eq("id", true);
   if (dbErr) return { ok: false as const, error: dbErr.message };
+  const { error: supErr } = await sb
+    .from("storage_supplier_rates")
+    .upsert({ id: true, data: supplierCostsToDb(supplier) as never, updated_at: new Date().toISOString() });
+  if (supErr) return { ok: false as const, error: supErr.message };
   revalidatePath("/settings");
   revalidatePath("/storage");
+  revalidatePath("/performance");
   return { ok: true as const };
 }
 

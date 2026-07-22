@@ -191,7 +191,9 @@ export interface ZohoInvoiceStatus extends ZohoInvoiceRef {
 /** Adopt an existing invoice by our reference number — the belt-and-braces half
  *  of the never-create-twice contract (covers a crash between Zoho-create and
  *  the DB write-back). */
-export async function findInvoiceByReference(reference: string): Promise<ZohoInvoiceRef | null> {
+export async function findInvoiceByReference(
+  reference: string,
+): Promise<(ZohoInvoiceRef & { total?: number }) | null> {
   const res = await zoho("GET", `/invoices?reference_number=${encodeURIComponent(reference)}`);
   const inv = (res.invoices ?? []).find((i: any) => i.status !== "void");
   if (!inv) return null;
@@ -199,6 +201,9 @@ export async function findInvoiceByReference(reference: string): Promise<ZohoInv
     invoiceId: inv.invoice_id,
     invoiceNumber: inv.invoice_number,
     invoiceUrl: (inv.invoice_url as string | undefined)?.trim() || null,
+    // Zoho returns the document total on list rows — adopters use it to verify
+    // an orphan actually bills what we computed (never adopt a mismatch).
+    ...(inv.total != null ? { total: Number(inv.total) } : {}),
   };
 }
 

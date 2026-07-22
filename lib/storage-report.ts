@@ -11,7 +11,7 @@
  * docs/storage-billing-v2-prd.md §6) — what Sandys should charge us this month.
  */
 
-import type { StorageSupplierCosts } from "./storage-rates";
+import type { StorageSupplierCosts } from "./storage-supplier";
 
 export interface ReportSite {
   id: string;

@@ -89,8 +89,21 @@ export function ManageLetDialog({
 
   const signReady = ackList.every((a) => acks[a.key]) && !!sig && signerName.trim().length >= 2;
 
-  function signNow() {
+  // Guard every transition against a rejected server action (dropped signal,
+  // stale action id after a deploy): without the catch the rejection escapes
+  // to the error boundary and the dialog reads as stuck mid-operation.
+  function run(fn: () => Promise<void>) {
     start(async () => {
+      try {
+        await fn();
+      } catch {
+        toast.error("Something went wrong — check whether the change landed before retrying.");
+      }
+    });
+  }
+
+  function signNow() {
+    run(async () => {
       const res = await signStorageAgreementAction(let_.id, {
         signerName: signerName.trim(),
         signatureDataUri: sig!,
@@ -104,7 +117,7 @@ export function ManageLetDialog({
   }
 
   function copyLink() {
-    start(async () => {
+    run(async () => {
       const res = await getStorageSignLinkAction(let_.id);
       if (!res.ok) return void toast.error(res.error);
       try {
@@ -117,7 +130,7 @@ export function ManageLetDialog({
   }
 
   function emailLink() {
-    start(async () => {
+    run(async () => {
       const res = await emailStorageSignLinkAction(let_.id);
       if ("duplicate" in res) return void toast.info("That signing link was already emailed to the customer.");
       if (!res.ok) return void toast.error(res.error);
@@ -127,7 +140,7 @@ export function ManageLetDialog({
   }
 
   function togglePause() {
-    start(async () => {
+    run(async () => {
       const res = await setBillingPausedAction(let_.id, !let_.billing_paused);
       if (!res.ok) return void toast.error(res.error);
       toast.success(let_.billing_paused ? "Billing resumed." : "Billing paused — no new invoices until resumed.");
@@ -136,7 +149,7 @@ export function ManageLetDialog({
   }
 
   function saveDetails() {
-    start(async () => {
+    run(async () => {
       const res = await editLetAction(let_.id, {
         rate: rate === "" ? "" : Number(rate),
         rate_period: period as "week" | "month" | "day",
@@ -316,7 +329,11 @@ export function ManageLetDialog({
                 step="0.01"
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
-                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+                // Crate arrears bill retrospectively at the let's rate, so the
+                // server locks the rate once any invoice exists — mirror that
+                // here rather than letting an edit fail at Save.
+                disabled={isCrate && let_.invoices.length > 0}
+                className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm disabled:bg-muted/60 disabled:text-mist-500"
               />
             </div>
             <div>
@@ -372,7 +389,9 @@ export function ManageLetDialog({
           </div>
           {let_.invoices.length ? (
             <p className="mt-2 text-xs text-mist-400">
-              Invoices exist, so the start date and billing period are locked — rate and notes still change.
+              {isCrate
+                ? "Invoices exist, so the start date, billing period and day rate are locked (arrears bill at the let's rate) — notes still change. For a new rate, end this let and start a new one."
+                : "Invoices exist, so the start date and billing period are locked — rate and notes still change."}
             </p>
           ) : null}
         </section>
@@ -396,8 +415,20 @@ function HandlingEventsSection({ let_, rates }: { let_: LetRow; rates: StorageRa
   });
   const [pending, start] = useTransition();
 
-  function add() {
+  // Same guarded-transition pattern as the parent dialog: a rejection must
+  // surface as a toast, never strand the section's pending state.
+  function run(fn: () => Promise<void>) {
     start(async () => {
+      try {
+        await fn();
+      } catch {
+        toast.error("Something went wrong — check whether the change landed before retrying.");
+      }
+    });
+  }
+
+  function add() {
+    run(async () => {
       const res = await recordHandlingEventAction({
         let_id: let_.id,
         event_date: v.event_date,
@@ -413,9 +444,15 @@ function HandlingEventsSection({ let_, rates }: { let_: LetRow; rates: StorageRa
   }
 
   function remove(id: string) {
-    start(async () => {
+    run(async () => {
       const res = await deleteHandlingEventAction(id);
-      if (!res.ok) return void toast.error(res.error);
+      if (!res.ok) {
+        // Honest failure ("may have just been billed") — refresh so the row
+        // shows its real billed state instead of a still-deletable one.
+        toast.error(res.error);
+        router.refresh();
+        return;
+      }
       toast.success("Handling event removed.");
       router.refresh();
     });

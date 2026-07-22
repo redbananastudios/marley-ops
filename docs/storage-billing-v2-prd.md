@@ -143,3 +143,53 @@ reconciliation number. Container utilisation % (occupied/total container units).
 - Price-change notices (30 days, free exit) — manual comms.
 - Redelivery/collection — quoted as a normal transport job through the quote flow.
 - Zoho income ACCOUNT mapping (Books concept) — accountant maps by item "Storage".
+
+## 8. Hardening (2026-07-22, migration 0076 — pre-go-live review sweep)
+
+A three-lens review (money / security-RLS / concurrency) plus a 15-agent
+adversarial verification pass hardened the v2 ship. Everything below is live:
+
+- **Ledger reads are strict + paged** (`fetchAllRows`, no 1000-row cap, no
+  long `in.()` URLs): any read failure sets `RaiseSummary.fatal` and NOTHING
+  raises — surfaced as a money alert by the cron and an unverified-settlement
+  warning on release.
+- **Claims record their swept events** (`storage_invoices.handling_event_ids`);
+  marking and the repair sweep use the stored set, and the raise NEVER
+  re-sweeps an event already on any claim row — closes the crash/double-sweep
+  class. Zoho **orphan adoption verifies the amount** (±£0.005;
+  `classifyPendingClaim`) — a mismatch alerts and never adopts.
+- **`repairPendingStorageClaims`**: pending claims >1h old are adopted
+  (write-back + marks + deduped email), released, or alerted — run by the
+  daily cron before the raise AND (let-scoped) by the release flow.
+- **Cron alerts**: fatal ledger failure (money), non-fatal errors incl. email
+  sends (system), stranded unbilled events on lets ended >3 days (money), and
+  the stranded check's own failure (system).
+- **Action guards**: crate reopen blocked once any invoice exists (fail-closed
+  on the count read); handling events only on OPEN crate lets, dated
+  start..today; crate lets must always carry a positive day rate (start AND
+  edit); crate day rate locks once invoiced (UI mirrors it); the release's
+  overbilled note fires ONLY for crate arrears/final windows past the end date
+  (minimum + period lets bill in full by policy — no false credit-note
+  prompts); `deleteHandlingEventAction` is atomic (`billed_invoice_id IS
+  NULL` predicate + rowcount) and honest about why a delete didn't happen.
+- **RLS (0076)**: events UPDATE policy dropped (no app path — pure tamper
+  surface); events DELETE = office + unbilled; events INSERT pins
+  `created_by = auth.uid()`; `check (amount > 0)` + min_days/handling_amount
+  checks; **storage_invoices office INSERT/UPDATE dropped** (claims are
+  service-role-authored only — a fake/patched claim was the same tamper class).
+- **Supplier costs are admin-only end to end**: moved to the RLS-gated
+  `storage_supplier_rates` singleton and the server-side-only
+  `lib/storage-supplier.ts` (never value-imported client-side); Performance
+  hides the cost card for estimators; the Settings card refuses to render on a
+  failed read (a save over silently-defaulted figures would overwrite the
+  real card).
+- **Signature evidence**: `signatures.ack_labels` stores the rendered ack
+  wording (the crate ack quotes live rate-card figures) on both signing paths.
+- Verified: 1135 vitest + e2e storage spec + live dev-server cron smoke
+  (minimum £144 = £84 + £60 swept ingress, event marked, idempotent re-fire).
+
+Accepted residuals (documented, not bugs): ack labels are re-derived server-
+side at submit (a rate edit in the seconds between render and sign can differ
+— capture-from-client would be spoofable); repair has no mutex against a
+manually-fired overlapping cron (worst case one duplicate email); a crate rate
+remains editable before the first invoice by design.

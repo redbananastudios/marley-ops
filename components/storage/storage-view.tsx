@@ -455,23 +455,30 @@ function SiteDialog({ row, onClose }: { row: SiteRow | null; onClose: () => void
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ name: row?.name ?? "", address: row?.address ?? "", notes: row?.notes ?? "" });
 
+  // try/finally: a rejected server action (dropped signal, stale action id
+  // after a deploy) must still clear busy — otherwise the dialog spins forever.
   async function save() {
     setBusy(true);
-    const res = await saveSiteAction({
-      id: row?.id,
-      name: v.name,
-      address: v.address,
-      notes: v.notes,
-      is_active: row?.is_active ?? true,
-    } satisfies SiteInput);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+    try {
+      const res = await saveSiteAction({
+        id: row?.id,
+        name: v.name,
+        address: v.address,
+        notes: v.notes,
+        is_active: row?.is_active ?? true,
+      } satisfies SiteInput);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(row ? "Site updated." : "Site added.");
+      onClose();
+      router.refresh();
+    } catch {
+      toast.error("Something went wrong — check whether the change landed before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success(row ? "Site updated." : "Site added.");
-    onClose();
-    router.refresh();
   }
 
   return (
@@ -723,26 +730,33 @@ function UnitDialog({
     setV({ ...v, unit_type: val, size_cuft: keepCustom ? v.size_cuft : String(defaultCuft(val) ?? "") });
   }
 
+  // try/finally: a rejected server action must still clear busy (stuck-dialog
+  // class from the 2026-07-20 sweep).
   async function save() {
     setBusy(true);
-    const res = await saveUnitAction({
-      id: row?.id,
-      site_id: row ? row.site_id : siteId,
-      code: v.code,
-      name: v.name,
-      unit_type: v.unit_type,
-      size_cuft: v.size_cuft === "" ? "" : Number(v.size_cuft),
-      notes: v.notes,
-      is_active: row?.is_active ?? true,
-    } satisfies UnitInput);
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
+    try {
+      const res = await saveUnitAction({
+        id: row?.id,
+        site_id: row ? row.site_id : siteId,
+        code: v.code,
+        name: v.name,
+        unit_type: v.unit_type,
+        size_cuft: v.size_cuft === "" ? "" : Number(v.size_cuft),
+        notes: v.notes,
+        is_active: row?.is_active ?? true,
+      } satisfies UnitInput);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(row ? "Unit updated." : "Unit added.");
+      onClose();
+      router.refresh();
+    } catch {
+      toast.error("Something went wrong — check whether the change landed before retrying.");
+    } finally {
+      setBusy(false);
     }
-    toast.success(row ? "Unit updated." : "Unit added.");
-    onClose();
-    router.refresh();
   }
 
   return (
@@ -839,6 +853,7 @@ function LetDialog({
   });
   const [handlingIn, setHandlingIn] = useState(isCrate);
   const [handlingAmount, setHandlingAmount] = useState(String(rates.handlingEventInc));
+  const [handlingError, setHandlingError] = useState<string | null>(null);
 
   const matches = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -855,29 +870,40 @@ function LetDialog({
       toast.error("Pick a client first.");
       return;
     }
-    setBusy(true);
-    const res = await startLetAction({
-      unit_id: unit.id,
-      client_id: clientId,
-      start_date: v.start_date,
-      rate: v.rate === "" ? "" : Number(v.rate),
-      rate_period: v.rate_period,
-      billing_model: defaults.billingModel,
-      min_days: isCrate ? rates.crateMinDays : "",
-      min_amount: isCrate ? rates.crateMinInc : "",
-      record_handling_in: isCrate && handlingIn,
-      handling_amount: handlingAmount === "" ? "" : Number(handlingAmount),
-      notes: v.notes,
-    });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error);
+    // Client-side gate: a ticked handling-in with no figure would otherwise
+    // start the let with the ingress charge silently skipped.
+    if (isCrate && handlingIn && !(Number(handlingAmount) > 0)) {
+      setHandlingError("Enter the handling charge (or untick record handling in).");
       return;
     }
-    if (res.warning) toast.warning(res.warning);
-    toast.success("Unit assigned.");
-    onClose();
-    router.refresh();
+    setBusy(true);
+    try {
+      const res = await startLetAction({
+        unit_id: unit.id,
+        client_id: clientId,
+        start_date: v.start_date,
+        rate: v.rate === "" ? "" : Number(v.rate),
+        rate_period: v.rate_period,
+        billing_model: defaults.billingModel,
+        min_days: isCrate ? rates.crateMinDays : "",
+        min_amount: isCrate ? rates.crateMinInc : "",
+        record_handling_in: isCrate && handlingIn,
+        handling_amount: handlingAmount === "" ? "" : Number(handlingAmount),
+        notes: v.notes,
+      });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      if (res.warning) toast.warning(res.warning, { duration: 10000 });
+      toast.success("Unit assigned.");
+      onClose();
+      router.refresh();
+    } catch {
+      toast.error("Something went wrong — check whether the change landed before retrying.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -977,7 +1003,10 @@ function LetDialog({
                 <input
                   type="checkbox"
                   checked={handlingIn}
-                  onChange={(e) => setHandlingIn(e.target.checked)}
+                  onChange={(e) => {
+                    setHandlingIn(e.target.checked);
+                    setHandlingError(null);
+                  }}
                   className="size-5 shrink-0 accent-mm-red"
                 />
                 <span className="text-sm text-foreground">Record handling in (bills on the first invoice)</span>
@@ -993,8 +1022,13 @@ function LetDialog({
                     step="0.01"
                     className="h-11"
                     value={handlingAmount}
-                    onChange={(e) => setHandlingAmount(e.target.value)}
+                    onChange={(e) => {
+                      setHandlingAmount(e.target.value);
+                      setHandlingError(null);
+                    }}
+                    aria-invalid={handlingError ? true : undefined}
                   />
+                  {handlingError ? <p className="text-xs text-danger">{handlingError}</p> : null}
                 </div>
               ) : null}
             </div>
@@ -1044,30 +1078,62 @@ function EndLetDialog({
   const isCrate = let_.billing_model === "crate_daily";
   const [handlingOut, setHandlingOut] = useState(isCrate);
   const [handlingAmount, setHandlingAmount] = useState(String(rates.handlingEventInc));
+  const [handlingError, setHandlingError] = useState<string | null>(null);
 
   async function save() {
-    setBusy(true);
-    const res = await endLetAction(let_.id, endDate, {
-      recordHandlingOut: isCrate && handlingOut,
-      handlingAmount: handlingAmount === "" ? 0 : Number(handlingAmount),
-    });
-    setBusy(false);
-    if (!res.ok) {
-      toast.error(res.error);
+    // Client-side gate: a ticked handling-out with no figure would release the
+    // goods with the egress charge silently skipped — force a decision first.
+    if (isCrate && handlingOut && !(Number(handlingAmount) > 0)) {
+      setHandlingError("Enter the handling charge (or untick charge handling out).");
       return;
     }
-    if (res.billingError) {
-      toast.warning(`Let ended, but the settlement invoice failed (${res.billingError}) — the billing run retries tomorrow morning.`);
-    } else if (res.raised?.length) {
-      const total = res.raised.reduce((s, r) => s + r.amount, 0);
-      toast.success(
-        `Let ended — settlement raised: ${res.raised.map((r) => `${r.invoiceNumber} (${gbp(r.amount)})`).join(", ")}. ${gbp(total)} to settle before release.`,
-      );
-    } else {
-      toast.success("Let ended — nothing further to bill; the unit is available again.");
+    setBusy(true);
+    try {
+      const res = await endLetAction(let_.id, endDate, {
+        recordHandlingOut: isCrate && handlingOut,
+        handlingAmount: isCrate && handlingOut ? Number(handlingAmount) : undefined,
+      });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      const raisedList = res.raised?.length
+        ? res.raised.map((r) => `${r.invoiceNumber} (${gbp(r.amount)})`).join(", ")
+        : null;
+      // Backdated end past an already-invoiced period — the credit note is a
+      // manual Zoho step, so this must never scroll past unseen.
+      if (res.overbilledNote) toast.warning(res.overbilledNote, { duration: 10000 });
+      if (!res.settlementChecked) {
+        // The settlement didn't run to a verified completion (ledger read
+        // failed or the raise threw) — anything MAY or may not have raised.
+        // billingError can carry a non-retryable instruction (a failed
+        // handling-out event must be added in Zoho by hand), so it shows too.
+        toast.warning(
+          `Let ended — couldn't verify the final billing.${raisedList ? ` Raised so far: ${raisedList}.` : ""}${res.billingError ? ` ${res.billingError}.` : ""} The 08:00 run will retry; check the invoice list before releasing the goods.`,
+          { duration: 10000 },
+        );
+      } else if (res.billingError) {
+        // Partial failure: always name what DID raise so the office never
+        // settles against a total that silently missed an invoice.
+        toast.warning(
+          raisedList
+            ? `Let ended — settlement raised: ${raisedList}, but part of it failed (${res.billingError}). The billing run retries tomorrow morning.`
+            : `Let ended, but the settlement invoice failed (${res.billingError}) — the billing run retries tomorrow morning.`,
+          { duration: 10000 },
+        );
+      } else if (res.raised?.length) {
+        const total = res.raised.reduce((s, r) => s + r.amount, 0);
+        toast.success(`Let ended — settlement raised: ${raisedList}. ${gbp(total)} to settle before release.`);
+      } else {
+        toast.success("Let ended — nothing further to bill; the unit is available again.");
+      }
+      onClose();
+      router.refresh();
+    } catch {
+      toast.error("Something went wrong — check whether the change landed before retrying.");
+    } finally {
+      setBusy(false);
     }
-    onClose();
-    router.refresh();
   }
 
   return (
@@ -1092,7 +1158,10 @@ function EndLetDialog({
                 <input
                   type="checkbox"
                   checked={handlingOut}
-                  onChange={(e) => setHandlingOut(e.target.checked)}
+                  onChange={(e) => {
+                    setHandlingOut(e.target.checked);
+                    setHandlingError(null);
+                  }}
                   className="size-5 shrink-0 accent-mm-red"
                 />
                 <span className="text-sm text-foreground">Charge handling out (on the final invoice)</span>
@@ -1108,8 +1177,13 @@ function EndLetDialog({
                     step="0.01"
                     className="h-11"
                     value={handlingAmount}
-                    onChange={(e) => setHandlingAmount(e.target.value)}
+                    onChange={(e) => {
+                      setHandlingAmount(e.target.value);
+                      setHandlingError(null);
+                    }}
+                    aria-invalid={handlingError ? true : undefined}
                   />
+                  {handlingError ? <p className="text-xs text-danger">{handlingError}</p> : null}
                 </div>
               ) : null}
             </div>
