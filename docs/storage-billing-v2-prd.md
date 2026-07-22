@@ -64,8 +64,10 @@ itemises the VAT.
   wording: "I agree to the crate storage terms: 28-day minimum, then charged to
   the day; handling £72 inc VAT per crate in and out; all charges settled
   before release." Solicitor should confirm alongside the terms clause.
-- **D6 — supplier confirms outstanding** (no ops blocker; cost card editable):
-  Sandys imposes no minimum on us; £145 ex is per container and payable on both.
+- **D6 — supplier facts CONFIRMED by Peter 22 Jul 2026**: £145 ex VAT is per
+  container and payable on both (£174 gross × 2 fixed monthly cost); Sandys
+  imposes no minimum on us (crate cost accrues purely per day). Matches the
+  seeded cost card exactly — nothing changed.
 
 ## 3. Data model — migration 0075
 
