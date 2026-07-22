@@ -160,6 +160,29 @@ function subline(html: string): string {
 }
 
 /** The "already paid / refunded" amount card with the per-payment lines. */
+/**
+ * Amount-card fragment for the REGISTERED Resend templates ({{{HELD_CARD}}} /
+ * {{{REFUND_CARD}}}) — injected only when money was actually paid, so a £0
+ * card never renders. Markup mirrors `amountCard` in
+ * scripts/create-resend-templates.mjs EXACTLY (Montserrat, warm-grey border)
+ * so the fragment is indistinguishable from the template's own cards — keep
+ * the two in lockstep like the branded-shell constants.
+ */
+export function templateAmountCard(caption: string, amount: number, lines: string[]): string {
+  const font = "'Montserrat','Segoe UI',Helvetica,Arial,sans-serif";
+  const note = lines.length
+    ? `\n        <div style="font-size:11px;color:#8A857E;margin-top:8px;">${lines.map((l) => escapeHtml(l)).join("<br>")}</div>`
+    : "";
+  return `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#8A857E;margin-bottom:6px;">${escapeHtml(caption)}</div>
+        <div style="font-family:${font};font-size:34px;font-weight:300;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(amount)}</div>${note}
+      </td></tr>
+    </table>
+  </td></tr>`;
+}
+
 function amountCard(caption: string, amount: number, lines: string[]): string {
   const lineHtml = lines.length
     ? `<div style="font-size:12px;color:#6E6A65;margin-top:8px;line-height:1.8;">${lines
@@ -249,8 +272,7 @@ export function cancellationAckTemplateVars(m: CancellationAckMeta): Record<stri
     QUOTE_REF: escapeHtml(m.quoteRef),
     OLD_DATE_LABEL: escapeHtml(m.oldDateLabel ?? "your original date"),
     NEW_DATE_LABEL: escapeHtml(m.newDateLabel ?? "your new date"),
-    HELD_TOTAL: gbp(m.heldTotal),
-    HELD_LINES: m.heldLines.map((l) => escapeHtml(l)).join("<br>"),
+    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines) : "",
     HELD_SENTENCES: ackHeldSentences(m)
       .map((s) => escapeHtml(s))
       .join(" "),
@@ -323,8 +345,7 @@ export function marleyCancelTemplateVars(m: MarleyCancelMeta): Record<string, st
     MOVE_DATE_CLAUSE: m.moveDateLabel
       ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
       : "",
-    REFUND_TOTAL: gbp(m.refundTotal),
-    HELD_LINES: m.heldLines.map((l) => escapeHtml(l)).join("<br>"),
+    REFUND_CARD: m.refundTotal > 0 ? templateAmountCard("Refunded in full", m.refundTotal, m.heldLines) : "",
     REFUND_SENTENCE:
       m.refundTotal > 0
         ? `Everything you've paid comes back to you in full, the same way you paid it, within ${REFUND_CUSTOMER_SLA_DAYS} days. There's nothing you need to do.`
@@ -411,8 +432,7 @@ export function dateChangeConfirmationTemplateVars(
     QUOTE_REF: escapeHtml(m.quoteRef),
     OLD_DATE_LABEL: escapeHtml(m.oldDateLabel ?? "your original date"),
     NEW_DATE_LABEL: escapeHtml(m.newDateLabel ?? "your new date"),
-    HELD_TOTAL: gbp(m.heldTotal),
-    HELD_LINES: m.heldLines.map((l) => escapeHtml(l)).join("<br>"),
+    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines) : "",
     HELD_SENTENCE:
       m.heldTotal > 0
         ? `You've paid ${gbp(m.heldTotal)} and it all still counts towards your move.`

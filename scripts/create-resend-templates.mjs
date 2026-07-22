@@ -275,7 +275,7 @@ const cancellationAckHtml = shellHtml(
     sublineRow(
       `We've released your original date of <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> and booked you in for <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). No new deposit is needed &mdash; everything you've already paid still counts towards your move.`,
     ),
-    amountCard("Already paid", "{{{HELD_TOTAL}}}", "{{{HELD_LINES}}}"),
+    "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCES}}}", "0 36px 16px"),
     sublineRow(
       `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
@@ -328,7 +328,7 @@ const marleyCancelHtml = shellHtml(
     sublineRow(
       `We can't do your move{{{MOVE_DATE_CLAUSE}}} and have had to cancel your booking (ref {{{QUOTE_REF}}}). This one is on us, and we're sorry for the disruption.`,
     ),
-    amountCard("Refunded in full", "{{{REFUND_TOTAL}}}", "{{{HELD_LINES}}}"),
+    "{{{REFUND_CARD}}}",
     sublineRow("{{{REFUND_SENTENCE}}}", "0 36px 16px"),
     sublineRow(
       `If we can help with your move on another date, call <strong style="color:${RED};">the team</strong> on 01747 637070 &mdash; we'd like to make it right.`,
@@ -346,7 +346,7 @@ const dateChangeConfirmationHtml = shellHtml(
     sublineRow(
       `Your move has moved from <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> to <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). Your booking carries straight over &mdash; same team, same price, nothing to re-do.`,
     ),
-    amountCard("Already paid", "{{{HELD_TOTAL}}}", "{{{HELD_LINES}}}"),
+    "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCE}}}", "0 36px 16px"),
     sublineRow("{{{COMMITMENT_SENTENCE}}}", "0 36px 16px"),
     sublineRow(
@@ -858,9 +858,9 @@ const TEMPLATES = [
       { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
       { key: "OLD_DATE_LABEL", type: "string", fallback_value: "your original date" },
       { key: "NEW_DATE_LABEL", type: "string", fallback_value: "your new date" },
-      { key: "HELD_TOTAL", type: "string", fallback_value: "£0" },
-      // "<br>"-joined per-payment lines ("£100 deposit by bank transfer").
-      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      // Pre-composed "Already paid" amount card (full HTML fragment), or ""
+      // when nothing has been paid — never render a £0 card.
+      { key: "HELD_CARD", type: "string", fallback_value: "" },
       // The held/refund position sentences, composed per the fill rule.
       { key: "HELD_SENTENCES", type: "string", fallback_value: "" },
     ],
@@ -913,8 +913,9 @@ const TEMPLATES = [
       { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
       // " on <strong>Friday 14 August</strong>" or "".
       { key: "MOVE_DATE_CLAUSE", type: "string", fallback_value: "" },
-      { key: "REFUND_TOTAL", type: "string", fallback_value: "£0" },
-      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      // Pre-composed "Refunded in full" amount card, or "" when nothing was
+      // paid — never render a £0 card.
+      { key: "REFUND_CARD", type: "string", fallback_value: "" },
       {
         key: "REFUND_SENTENCE",
         type: "string",
@@ -934,8 +935,8 @@ const TEMPLATES = [
       { key: "QUOTE_REF", type: "string", fallback_value: "your booking" },
       { key: "OLD_DATE_LABEL", type: "string", fallback_value: "your original date" },
       { key: "NEW_DATE_LABEL", type: "string", fallback_value: "your new date" },
-      { key: "HELD_TOTAL", type: "string", fallback_value: "£0" },
-      { key: "HELD_LINES", type: "string", fallback_value: "" },
+      // Pre-composed "Already paid" amount card, or "" when nothing paid.
+      { key: "HELD_CARD", type: "string", fallback_value: "" },
       // "You've paid £X and it all still counts towards your move." or "".
       { key: "HELD_SENTENCE", type: "string", fallback_value: "" },
       // Unpaid-commitment restatement ("…moves with your date…") or "".

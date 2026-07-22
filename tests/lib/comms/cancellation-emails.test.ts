@@ -200,9 +200,13 @@ describe("cancellation-ack (inside-window date change)", () => {
     expect(text).toContain("£450");
     expect(text).toContain("£350");
     const vars = cancellationAckTemplateVars(ackMeta);
-    expect(vars.HELD_TOTAL).toBe("£450");
+    // The card is a pre-composed fragment: full house-style card when money is
+    // held, EMPTY when nothing was paid (a £0 card must never render).
+    expect(vars.HELD_CARD).toContain("£450");
+    expect(vars.HELD_CARD).toContain("Already paid");
+    expect(vars.HELD_CARD).toContain("£100 deposit by bank transfer");
     expect(vars.QUOTE_REF).toBe("MMR001");
-    expect(vars.HELD_LINES).toContain("£100 deposit by bank transfer");
+    expect(cancellationAckTemplateVars({ ...ackMeta, heldTotal: 0, heldLines: [] }).HELD_CARD).toBe("");
     expect(cancellationAckSubject(ackMeta)).toContain("MMR001");
   });
 
@@ -230,7 +234,10 @@ describe("marley-cancel (apology + full refund)", () => {
 
   it("text + template vars agree", () => {
     expect(marleyCancelText(marleyMeta)).toContain("£450");
-    expect(marleyCancelTemplateVars(marleyMeta).REFUND_TOTAL).toBe("£450");
+    const vars = marleyCancelTemplateVars(marleyMeta);
+    expect(vars.REFUND_CARD).toContain("£450");
+    expect(vars.REFUND_CARD).toContain("Refunded in full");
+    expect(marleyCancelTemplateVars({ ...marleyMeta, refundTotal: 0, heldLines: [] }).REFUND_CARD).toBe("");
     expect(marleyCancelSubject(marleyMeta)).toContain("MMR001");
   });
 });
