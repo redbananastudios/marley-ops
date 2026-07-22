@@ -83,7 +83,8 @@ figures **gross (VAT-inclusive)**. Full spec: `docs/storage-billing-v2-prd.md`.
 - **28-day minimum (£84 inc VAT), invoiced upfront** at commencement — 2 days'
   use still pays £84.
 - **Day 29 onward is charged to the exact day, in arrears, on a 4-weekly cycle.**
-- **Handling: £72 inc VAT per crate per event** — in, out, and any access.
+- **Handling: £60 inc VAT per crate per event** — in, out, and any access
+  (a straight pass-through of the storage partner's charge, no markup).
 - **Release: the final invoice (unbilled days to the release day + handling out)
   is settled before goods leave.** Charges accrue until goods physically leave.
 - Redelivery/collection transport is quoted as a normal removals job.
@@ -102,8 +103,8 @@ figures **gross (VAT-inclusive)**. Full spec: `docs/storage-billing-v2-prd.md`.
 - Container (unchanged): *"I agree to the storage rate shown, billed in advance
   each period until I end the storage."*
 - Crate (new): *"I agree to the crate storage terms: 28-day minimum, then charged
-  to the day; handling £72 inc VAT per crate in and out; all charges settled
-  before release."* (The £72 and 28 render live from the ops rate card — a rate
+  to the day; handling £60 inc VAT per crate in and out; all charges settled
+  before release."* (The £60 and 28 render live from the ops rate card — a rate
   change must update the terms clause in the same breath.)
 - Both: the lien ack (*"…if invoices stay unpaid for 60+ days… after written
   notice, dispose of or sell stored items to recover the charges"*) and the

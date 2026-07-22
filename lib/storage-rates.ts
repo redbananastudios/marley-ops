@@ -41,7 +41,7 @@ export const DEFAULT_STORAGE_RATES: StorageRates = {
   crateDayInc: 3,
   crateMinDays: 28,
   crateMinInc: 84,
-  handlingEventInc: 72, // £60 ex — the analysis's recommendation (PRD D1)
+  handlingEventInc: 60, // £50 ex — pass-through of Sandys' charge, no markup (Peter, 22 Jul; PRD D1)
   supplier: {
     containerMonthCost: 174,
     containersCount: 2,

@@ -22,7 +22,7 @@ itemises the VAT.
   (2 days' use still pays £84).
 - **Day 29+ charged to the exact day, in arrears, on a 4-weekly (28-day) cycle.**
 - **Handling: per crate per event** (in and out, and any mid-let access):
-  £60 ex / **£72 inc** — see decision D1.
+  £50 ex / **£60 inc** — a straight pass-through of Sandys' charge, see D1.
 - **Release:** final invoice = unbilled days + egress handling (+ redelivery
   quoted as a normal transport job) — **settled before goods leave**.
 - Charges accrue until goods physically leave (departure day is chargeable).
@@ -43,11 +43,14 @@ itemises the VAT.
 
 ## 2. Decisions taken in this build (flag list for Peter)
 
-- **D1 — handling charge £60 ex / £72 inc — CONFIRMED by Peter 22 Jul 2026**
-  (the analysis's recommendation; £55/£66 is break-even — a same-price
-  pass-through of Sandys' £60 gross loses £5.40/event under FRS). Lives in
-  Settings → Storage rates, editable without deploy; the crate ack wording
-  renders the live figure.
+- **D1 — handling charge £50 ex / £60 inc — Peter's FINAL call, 22 Jul 2026:
+  a straight pass-through of Sandys' charge, deliberately no markup.** This
+  supersedes the same-day £72 confirmation. The FRS consequence was flagged and
+  accepted: we keep ~£54.60 of the customer's £60 but pay Sandys £60 gross, so
+  each event loses ~£5.40 (~£6.00 at 10% FRS); break-even would be £55 ex/£66
+  inc. Lives in Settings → Storage rates (DB set to 60 on prod + dev, 22 Jul —
+  the 0075 seed was 72), editable without deploy; the crate ack wording renders
+  the live figure.
 - **D2 — FRS % NOT changed.** The analysis assumes 9% to 31 May 2027; ops
   Finance is set to 10% and the first-year-discount question is still with the
   accountant (go-live checklist). Flip in Settings → VAT scheme when confirmed.

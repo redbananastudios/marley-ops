@@ -34,12 +34,13 @@ docs/policy-confirmation-for-terms.md §B) — the ack set follows the product:*
 
 *Crate lets:*
 1. "I agree to the crate storage terms: 28-day minimum, then charged to the day;
-   handling £72 inc VAT per crate in and out; all charges settled before release."
+   handling £60 inc VAT per crate in and out; all charges settled before release."
    → clause: £84 inc VAT 28-day minimum invoiced upfront (2 days' use still pays it);
    day 29+ charged to the exact day in arrears on a 4-weekly cycle at £3/day;
-   handling £72 inc VAT per crate per event (in, out, access); the final invoice
-   settles before goods are released. (The figures render live from the ops rate
-   card — a rate change must update this clause in the same breath.)
+   handling £60 inc VAT per crate per event (in, out, access — a pass-through of
+   the storage partner's charge); the final invoice settles before goods are
+   released. (The figures render live from the ops rate card — a rate change must
+   update this clause in the same breath.)
 
 *Both products:*
 2. "I understand that if invoices stay unpaid for 60+ days, Marley Moves may, after
