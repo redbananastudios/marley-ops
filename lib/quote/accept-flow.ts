@@ -1662,43 +1662,42 @@ export type BalanceInvoiceOutcome =
   | { ok: true; invoiceNumber: string; amount: number; emailed: boolean }
   | { ok: false; error: string };
 
-/**
- * Raise the pre-move balance invoice exactly once and email it (branded email +
- * Zoho's own VAT invoice PDF attached). Triggered by the manual button in the
- * schedule / lead payments card; date-based automation can call this later.
- */
-export async function createBalanceInvoiceFlow(
-  sb: Sb,
-  quoteId: string,
-  actorId: string | null,
-): Promise<BalanceInvoiceOutcome> {
-  const quote = await fetchQuoteById(sb, quoteId);
-  if (!quote) return { ok: false, error: "Quote not found" };
-  if (quote.status !== "accepted") {
-    return { ok: false, error: "The quote must be accepted before the final invoice is raised." };
-  }
-  if (isRealZohoId(quote.zoho_balance_invoice_id)) {
-    return {
-      ok: false,
-      error: `Final invoice ${quote.zoho_balance_invoice_number ?? ""} already exists — it will not be created twice.`.trim(),
-    };
-  }
+export interface BalanceCredits {
+  agreed: number;
+  depositCredit: number;
+  commitmentCredit: number;
+  forfeited: number;
+  amount: number;
+}
 
+/**
+ * The ONE balance-invoice computation — used by both the confirm dialog
+ * (getBalanceInvoiceInfo) and createBalanceInvoiceFlow so the figure the
+ * office approves is always the figure that lands in Zoho.
+ *
+ * The invoices PARTITION the agreed price (header doctrine: they must sum
+ * exactly to agreed_price). A -DEP invoice always exists for an accepted
+ * quote and still demands its amount while unpaid, so the deposit is ALWAYS
+ * carved out; the commitment is carved out once its -COM invoice has been
+ * RAISED (paid or not — an outstanding -COM still demands it). Gating these
+ * on payment would double-invoice: an outstanding -DEP/-COM plus a balance
+ * that includes the same money.
+ *
+ * Rebook forfeit (PRD §1): money RETAINED on a date-change queue row (the
+ * old day died unfilled) has STOPPED counting toward this booking — without
+ * this exclusion the balance would silently credit money the customer
+ * forfeited, netting Marley £0 from the retention. Chronological first-in:
+ * the forfeit consumes the deposit credit first, then the commitment credit.
+ */
+export async function computeBalanceCredits(sb: Sb, quote: AcceptQuoteRow): Promise<BalanceCredits> {
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
-  // Payments Policy v2: the balance is what's left after money actually
-  // RECEIVED — the deposit and the commitment count only once paid (unpaid
-  // invoices are still owed in full, so deducting them would under-invoice).
-  let depositCredit = quote.deposit_paid_at ? deposit : 0;
-  let commitmentCredit = quote.commitment_paid_at ? Number(quote.commitment_invoice_amount ?? 0) : 0;
+  let depositCredit = deposit;
+  let commitmentCredit = isRealZohoId(quote.zoho_commitment_invoice_id)
+    ? Number(quote.commitment_invoice_amount ?? 0)
+    : 0;
 
-  // Rebook forfeit (PRD §1): money RETAINED on a date-change queue row (the
-  // old day died unfilled) has STOPPED counting toward this booking — the
-  // paid stamps still stand, so without this exclusion the balance would
-  // silently credit money the customer forfeited, netting Marley £0 from the
-  // retention. Chronological first-in: the forfeit consumes the deposit
-  // credit first, then the commitment credit.
   let forfeited = 0;
   if (quote.lead_id) {
     // Service role: refund_queue reads are admin-RLS'd, but this exclusion
@@ -1726,6 +1725,34 @@ export async function createBalanceInvoiceFlow(
   }
 
   const amount = round2(Math.max(0, agreed - depositCredit - commitmentCredit));
+  return { agreed, depositCredit, commitmentCredit, forfeited, amount };
+}
+
+/**
+ * Raise the pre-move balance invoice exactly once and email it (branded email +
+ * Zoho's own VAT invoice PDF attached). Triggered by the manual button in the
+ * schedule / lead payments card; date-based automation can call this later.
+ */
+export async function createBalanceInvoiceFlow(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+): Promise<BalanceInvoiceOutcome> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+  if (quote.status !== "accepted") {
+    return { ok: false, error: "The quote must be accepted before the final invoice is raised." };
+  }
+  if (isRealZohoId(quote.zoho_balance_invoice_id)) {
+    return {
+      ok: false,
+      error: `Final invoice ${quote.zoho_balance_invoice_number ?? ""} already exists — it will not be created twice.`.trim(),
+    };
+  }
+
+  const { agreed, depositCredit, commitmentCredit, forfeited, amount } = await computeBalanceCredits(sb, quote);
+  const settings = await getBusinessSettings(sb);
+  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
   if (amount <= 0) {
     return { ok: false, error: "Nothing left to invoice — payments received cover the agreed price." };
   }
