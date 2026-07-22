@@ -11,6 +11,11 @@
 
 ## House conventions
 
+- **Before ANY push: `npm run lint` locally, always** — the CI gate enforces ESLint
+  rules tsc never sees (react-hooks, no-unused-vars, no-unescaped-entities). Running
+  only tsc+vitest has now broken the pipeline twice (session 32 agents; 2026-07-22
+  balance refactor). All four gates or it doesn't ship: lint, tsc, vitest, build.
+
 - **Page shell (2026-07-16, Peter caught /content hugging the edge):** every `app/(dashboard)/**` page's top-level element must be `<main className="flex-1 p-6 md:p-8">` (or the deliberate `page-shell` variant used by the dashboard/estimator views). The shared layout adds NO padding on purpose — a bare `<div>` root renders flush against the viewport. Full 34-page audit passed 2026-07-16; keep it true for new pages.
 
 ## Current State
