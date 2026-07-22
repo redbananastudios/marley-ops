@@ -43,9 +43,11 @@ itemises the VAT.
 
 ## 2. Decisions taken in this build (flag list for Peter)
 
-- **D1 — handling charge seeded at £60 ex / £72 inc** (the analysis's
-  recommendation; £55/£66 is break-even). Lives in Settings → Storage rates,
-  editable without deploy; the crate ack wording renders the live figure.
+- **D1 — handling charge £60 ex / £72 inc — CONFIRMED by Peter 22 Jul 2026**
+  (the analysis's recommendation; £55/£66 is break-even — a same-price
+  pass-through of Sandys' £60 gross loses £5.40/event under FRS). Lives in
+  Settings → Storage rates, editable without deploy; the crate ack wording
+  renders the live figure.
 - **D2 — FRS % NOT changed.** The analysis assumes 9% to 31 May 2027; ops
   Finance is set to 10% and the first-year-discount question is still with the
   accountant (go-live checklist). Flip in Settings → VAT scheme when confirmed.
