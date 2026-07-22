@@ -151,8 +151,18 @@ export function buildHeldFromSources(input: {
     }
   }
 
+  // The balance stamp lives on the LEAD and carries no persisted method, so it
+  // defaults to the bank rail. If a HELD card row of kind 'balance' exists the
+  // stamp is the SAME money as that card row (mirroring the deposit/commitment
+  // dedupe rule) — skip it, or a card-paid balance would be snapshotted twice
+  // (once net-of-refunds on the card rail, once at full value on the bank
+  // rail). Card-for-balance is a flagged fast-follow; this keeps the trap
+  // disarmed before it ships.
+  const cardBalanceHeld = input.cardRows.some(
+    (r) => !r.is_test && CARD_HELD_STATUSES.has(r.status) && r.kind === "balance",
+  );
   const lead = input.lead;
-  if (lead?.balance_paid_at) {
+  if (lead?.balance_paid_at && !cardBalanceHeld) {
     const amount = Number(lead.balance_amount ?? quote?.balance_invoice_amount ?? 0);
     if (amount > 0) {
       held.push({
@@ -167,6 +177,44 @@ export function buildHeldFromSources(input: {
 
   held.sort((a, b) => a.at.localeCompare(b.at));
   return held;
+}
+
+/** Executed bank/cash payouts already made for this lead, in pence per rail. */
+export interface ExecutedRefundTotals {
+  bank_transfer: number;
+  cash: number;
+}
+
+/**
+ * Net EXECUTED bank/cash refunds out of the held list. The card rail is
+ * ground-truthed by card_payments.refunded_pence (already netted above), but a
+ * bank/cash payout only exists as a 'rail_refunded' events_log mark — without
+ * this step a second trigger over the same lead would re-snapshot money that
+ * has already been returned and present it as refundable a second time.
+ * Chronological first-in absorption per rail; fully-returned payments drop out.
+ * Pure — unit-tested in tests/lib/refunds.test.ts.
+ */
+export function netExecutedRefunds(
+  held: HeldPayment[],
+  executed: ExecutedRefundTotals,
+): HeldPayment[] {
+  const left: Record<"bank_transfer" | "cash", number> = {
+    bank_transfer: Math.max(0, Math.round(executed.bank_transfer || 0)),
+    cash: Math.max(0, Math.round(executed.cash || 0)),
+  };
+  const out: HeldPayment[] = [];
+  for (const p of [...held].sort((a, b) => a.at.localeCompare(b.at))) {
+    if (p.rail === "card") {
+      out.push(p);
+      continue;
+    }
+    const pence = Math.max(0, Math.round(p.amount * 100));
+    const take = Math.min(left[p.rail], pence);
+    left[p.rail] -= take;
+    const remaining = pence - take;
+    if (remaining > 0) out.push({ ...p, amount: remaining / 100 });
+  }
+  return out;
 }
 
 /* --------------------------------------------------------------- IO shell */
@@ -214,7 +262,33 @@ export async function buildHeldSnapshot(sb: Sb, leadId: string): Promise<HeldSna
 
   const quote = (quoteRow as SnapshotQuote | null) ?? null;
   const lead = (leadRow as SnapshotLead | null) ?? null;
-  const held = buildHeldFromSources({ cardRows, quote, lead });
+
+  // Bank/cash refunds already EXECUTED for this lead (rail_refunded marks on
+  // any of its queue rows — the 0074 unique index guarantees one mark per
+  // rail per row, so summing is safe). Without this, a second trigger would
+  // re-list already-returned money as held. Card money self-heals via
+  // refunded_pence and is excluded here.
+  const executed: ExecutedRefundTotals = { bank_transfer: 0, cash: 0 };
+  const { data: queueRows } = await sb
+    .from("refund_queue")
+    .select("id")
+    .eq("lead_id", leadId);
+  if (queueRows?.length) {
+    const { data: markRows } = await sb
+      .from("events_log")
+      .select("diff")
+      .eq("entity_type", "refund_queue")
+      .eq("action", "rail_refunded")
+      .in("entity_id", queueRows.map((r) => r.id));
+    for (const m of markRows ?? []) {
+      const diff = (m.diff ?? null) as { rail?: unknown; amount_pence?: unknown } | null;
+      if (diff?.rail === "bank_transfer" || diff?.rail === "cash") {
+        executed[diff.rail] += Math.max(0, Math.round(Number(diff.amount_pence) || 0));
+      }
+    }
+  }
+
+  const held = netExecutedRefunds(buildHeldFromSources({ cardRows, quote, lead }), executed);
   const grossAgreed = Number(quote?.agreed_price ?? quote?.grand_total ?? 0);
   return { held, split: splitHeldMoney(held, grossAgreed), grossAgreed, quote, lead };
 }
@@ -270,7 +344,12 @@ const TRIGGER_LABEL: Record<RefundQueueTrigger, string> = {
 /**
  * Insert a refund_queue row + alert accounts@ + write the timeline/audit pair.
  * Callers gate single-winner upstream (the cancel/date-change CAS) so exactly
- * one row exists per trigger event.
+ * one row exists per trigger event — and this function enforces ONE LIVE
+ * decision per LEAD: any older pending row is CAS-closed as 'superseded'
+ * before the insert (a later trigger re-snapshots the same held money, and
+ * two live rows would each demand the full payout — the double-refund hole).
+ * The 0074 partial unique index backs this at the DB; a 23505 means a
+ * concurrent creator just won, and their row is adopted.
  */
 export async function createRefundQueueEntry(
   sb: Sb,
@@ -278,6 +357,35 @@ export async function createRefundQueueEntry(
 ): Promise<CreateRefundQueueOutcome> {
   const now = new Date().toISOString();
   const determination = input.determination ?? null;
+
+  // Supersede any still-pending row for this lead (single-winner per row; a
+  // 0-row CAS means another writer got there first — fine either way). The new
+  // snapshot already nets out anything executed on the old row, so no money is
+  // lost or double-listed by folding forward.
+  if (input.leadId) {
+    const { data: pendingRows } = await sb
+      .from("refund_queue")
+      .select("id, trigger")
+      .eq("lead_id", input.leadId)
+      .eq("status", "pending");
+    for (const prev of pendingRows ?? []) {
+      const { data: closed } = await sb
+        .from("refund_queue")
+        .update({ status: "superseded" })
+        .eq("id", prev.id)
+        .eq("status", "pending")
+        .select("id");
+      if (closed?.length) {
+        await sb.from("events_log").insert({
+          actor_id: input.actorId ?? null,
+          entity_type: "refund_queue",
+          entity_id: prev.id,
+          action: "superseded",
+          diff: { superseded_by_trigger: input.trigger, previous_trigger: prev.trigger } as unknown as Json,
+        });
+      }
+    }
+  }
 
   const { data: row, error: insertError } = await sb
     .from("refund_queue")
@@ -300,6 +408,19 @@ export async function createRefundQueueEntry(
     .select("id")
     .single();
 
+  if (insertError?.code === "23505" && input.leadId) {
+    // One-pending-per-lead index: a concurrent creator won the race between our
+    // supersede pass and our insert. Their row is the live decision — adopt it
+    // (they already fired the alert + trail).
+    const { data: existing } = await sb
+      .from("refund_queue")
+      .select("id")
+      .eq("lead_id", input.leadId)
+      .eq("status", "pending")
+      .limit(1)
+      .maybeSingle();
+    if (existing?.id) return { ok: true, id: existing.id };
+  }
   if (insertError || !row) {
     // LOUD failure — money is held with no queue row tracking it. The cancel
     // flow itself must not abort (fail-soft), but accounts must chase by hand.

@@ -242,3 +242,46 @@ describe("postMoveOutstanding — the post-move sweep maths (PRD §8.5/8.6)", ()
     expect(postMoveOutstanding({ ...money, agreed: 999.99, commitmentPaidAt: null })).toBe(899.99);
   });
 });
+
+describe("dueCommitmentActions — stamps reset on a date change re-arm the ladder", () => {
+  // The ladder's one-shot stamps are per MOVE DATE: both date-change paths
+  // (rescheduleAppointment + the inside-window rebook) null
+  // commitment_chase_t10_at and date_releasable_at whenever an unpaid
+  // commitment's move date changes. These lock the pure consequence: cleared
+  // stamps mean the NEW date chases and flags again at its own thresholds.
+  it("a cleared T-10 stamp chases again for the rescheduled date", () => {
+    expect(
+      dueCommitmentActions(
+        { ...base, movingDate: "2026-08-11", commitmentChaseT10At: null, dateReleasableAt: null },
+        NOW,
+      ),
+    ).toEqual(["chase"]);
+  });
+
+  it("a cleared T-7 flag re-flags when the new date reaches move-7d unpaid", () => {
+    expect(
+      dueCommitmentActions(
+        {
+          ...base,
+          movingDate: "2026-08-08",
+          commitmentChaseT10At: "2026-07-30T09:00:00Z", // chase already sent for the new date
+          dateReleasableAt: null, // reset by the date change
+        },
+        NOW,
+      ),
+    ).toEqual(["flag"]);
+  });
+
+  it("stale stamps (NOT reset) silence the ladder — the failure mode the reset closes", () => {
+    expect(
+      dueCommitmentActions(
+        {
+          ...base,
+          movingDate: "2026-08-11",
+          commitmentChaseT10At: "2026-07-01T09:00:00Z", // stamped against the OLD date
+        },
+        NOW,
+      ),
+    ).toEqual([]);
+  });
+});

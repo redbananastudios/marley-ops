@@ -318,7 +318,7 @@ function MarkRailDialog({
 
 /* ------------------------------------------------------------- terminals */
 
-function CompleteDialog({ item }: { item: QueueItemView }) {
+function CompleteDialog({ item, isDateChange }: { item: QueueItemView; isDateChange: boolean }) {
   const [open, setOpen] = useState(false);
   const { processing, busy, run } = useRun();
   return (
@@ -331,17 +331,34 @@ function CompleteDialog({ item }: { item: QueueItemView }) {
     >
       <DialogTrigger asChild>
         <Button size="sm" disabled={processing || !item.allExecuted}>
-          {processing ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : "Complete — send the refund email"}
+          {processing ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          ) : isDateChange ? (
+            "Close — money stays on the booking"
+          ) : (
+            "Complete — send the refund email"
+          )}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Complete this refund</DialogTitle>
+          <DialogTitle>{isDateChange ? "Close this entry" : "Complete this refund"}</DialogTitle>
         </DialogHeader>
         <p className="text-sm leading-relaxed text-mist-500">
-          This closes the entry and sends the customer ONE itemised email confirming {gbpPence(item.refundDuePence)}{" "}
-          has been returned across {item.rails.filter((r) => r.refundDuePence > 0).length}{" "}
-          {item.rails.filter((r) => r.refundDuePence > 0).length === 1 ? "payment" : "payments"}.
+          {isDateChange ? (
+            <>
+              The old day re-booked, so everything held ({gbpPence(item.heldPence)}) keeps counting toward the
+              rebooked move. Nothing is paid out and no email is sent — the customer was already told everything
+              paid moves with them.
+            </>
+          ) : (
+            <>
+              This closes the entry and sends the customer ONE itemised email confirming{" "}
+              {gbpPence(item.refundDuePence)} has been returned across{" "}
+              {item.rails.filter((r) => r.refundDuePence > 0).length}{" "}
+              {item.rails.filter((r) => r.refundDuePence > 0).length === 1 ? "payment" : "payments"}.
+            </>
+          )}
         </p>
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={busy}>
@@ -349,13 +366,23 @@ function CompleteDialog({ item }: { item: QueueItemView }) {
           </Button>
           <Button
             disabled={processing}
-            onClick={() => run(() => completeRefundQueueAction(item.id), "Refund completed — customer emailed.", () => setOpen(false))}
+            onClick={() =>
+              run(
+                () => completeRefundQueueAction(item.id),
+                isDateChange
+                  ? "Entry closed — held money keeps counting toward the new booking."
+                  : "Refund completed — customer emailed.",
+                () => setOpen(false),
+              )
+            }
             className="bg-mm-red text-white hover:bg-mm-red-deep"
           >
             {processing ? (
               <span className="inline-flex items-center gap-2">
-                <Loader2 className="size-4 animate-spin" strokeWidth={2} /> Completing…
+                <Loader2 className="size-4 animate-spin" strokeWidth={2} /> {isDateChange ? "Closing…" : "Completing…"}
               </span>
+            ) : isDateChange ? (
+              "Close"
             ) : (
               "Complete"
             )}
@@ -366,7 +393,7 @@ function CompleteDialog({ item }: { item: QueueItemView }) {
   );
 }
 
-function RetainDialog({ item }: { item: QueueItemView }) {
+function RetainDialog({ item, isDateChange }: { item: QueueItemView; isDateChange: boolean }) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
   const { processing, busy, run } = useRun();
@@ -397,6 +424,9 @@ function RetainDialog({ item }: { item: QueueItemView }) {
               ? ` The ${gbpPence(item.refundDuePence)} refunded above the held amount is itemised in the email.`
               : ""}{" "}
             The customer receives the outcome email when you confirm.
+            {isDateChange
+              ? ` It stops counting toward the rebooked move — the shortfall is recorded on this entry and the balance invoice for the new date will be ${gbpPence(item.retainPence)} higher.`
+              : ""}
           </p>
           <label className="block">
             <span className="eyebrow mb-1.5 block">Type the retained amount to confirm</span>
@@ -442,6 +472,10 @@ function RetainDialog({ item }: { item: QueueItemView }) {
 
 export function ExecuteCard({ item }: { item: QueueItemView }) {
   const isRetainRow = item.determination === "not_filled";
+  // A date-change row's booking is STILL LIVE: nothing ever pays out of it —
+  // "filled" closes as released (money keeps counting), "not filled" retains
+  // the conditional slice. The badge + terminals say so instead of "refund".
+  const isDateChange = item.trigger === "customer_date_change";
   return (
     <div className="space-y-3 px-5 py-4">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
@@ -464,9 +498,19 @@ export function ExecuteCard({ item }: { item: QueueItemView }) {
             (isRetainRow ? "bg-warn-bg text-warn" : "bg-success/10 text-success")
           }
         >
-          {isRetainRow ? `${gbpPence(item.retainPence)} held · refund ${gbpPence(item.refundDuePence)}` : `Full refund ${gbpPence(item.refundDuePence)}`}
+          {isDateChange
+            ? isRetainRow
+              ? `${gbpPence(item.retainPence)} retained · rest counts toward the booking`
+              : "Counts toward the new booking"
+            : isRetainRow
+              ? `${gbpPence(item.retainPence)} held · refund ${gbpPence(item.refundDuePence)}`
+              : `Full refund ${gbpPence(item.refundDuePence)}`}
         </span>
       </div>
+
+      {item.notes ? (
+        <p className="rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-mist-500">{item.notes}</p>
+      ) : null}
 
       {item.shortfallNote ? (
         <p className="rounded-md bg-warn-bg px-3 py-2 text-xs leading-relaxed text-warn">{item.shortfallNote}</p>
@@ -527,7 +571,11 @@ export function ExecuteCard({ item }: { item: QueueItemView }) {
       </ul>
 
       <div className="flex flex-wrap items-center gap-2.5">
-        {isRetainRow ? <RetainDialog item={item} /> : <CompleteDialog item={item} />}
+        {isRetainRow ? (
+          <RetainDialog item={item} isDateChange={isDateChange} />
+        ) : (
+          <CompleteDialog item={item} isDateChange={isDateChange} />
+        )}
         {item.outstandingPence > 0 ? (
           <span className="text-xs text-mist-400">
             Still to pay out: {gbpPence(item.outstandingPence)} — execute every line above first.

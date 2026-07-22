@@ -190,15 +190,28 @@ export interface RailPlan {
  * 25% cap absorbed. Then the determination decides refund vs retain:
  *   filled     → everything refunds;
  *   not_filled → conditional slices retain, unconditional refunds regardless.
+ *
+ * TRIGGER-AWARE (PRD §1): a customer_date_change row belongs to a booking that
+ * is STILL LIVE — held money "provisionally counts toward the new booking", so
+ * NOTHING ever pays out of these rows while the rebooked job stands:
+ *   filled     → refund due £0 everywhere (money keeps counting; the row
+ *                closes as 'released');
+ *   not_filled → the conditional slice is RETAINED (it stops counting toward
+ *                the new booking — the shortfall is stated for the balance
+ *                invoice) and the unconditional slice keeps counting: refund
+ *                due £0 on every rail. If the rebooked job later dies, the
+ *                cancel unwind snapshots afresh and THAT row pays out.
  */
 export function planForRow(
   held: HeldPayment[],
   conditionalPence: number,
   determination: FillDetermination,
+  trigger?: string,
 ): { payments: PaymentPlan[]; rails: RailPlan[] } {
   const ordered = [...held].sort((a, b) => a.at.localeCompare(b.at));
   let capLeft = Math.max(0, Math.round(conditionalPence));
   const retainConditional = determination === "not_filled";
+  const bookingStillLive = trigger === "customer_date_change";
 
   const payments: PaymentPlan[] = ordered.map((payment) => {
     const amountPence = Math.max(0, toPence(payment.amount));
@@ -211,7 +224,7 @@ export function planForRow(
       amountPence,
       conditionalPence: cond,
       unconditionalPence: uncond,
-      refundDuePence: amountPence - retain,
+      refundDuePence: bookingStillLive ? 0 : amountPence - retain,
       retainPence: retain,
     };
   });
@@ -229,6 +242,17 @@ export function planForRow(
     });
   }
   return { payments, rails };
+}
+
+/**
+ * The pence a not_filled decision retains for a row (the chronological
+ * conditional fill) — shared by the retain action and, for date-change
+ * forfeits, by the balance-invoice flow (which must stop crediting money
+ * that no longer counts toward the rebooked job).
+ */
+export function retainedPenceFor(held: HeldPayment[], conditionalPence: number): number {
+  const { payments } = planForRow(held, conditionalPence, "not_filled");
+  return payments.reduce((s, p) => s + p.retainPence, 0);
 }
 
 /* --------------------------------------------------------------- execution */
@@ -415,7 +439,7 @@ export function buildRefundQueueView(input: QueueViewInput): RefundQueueView {
     // "filled" purely so the per-rail held display exists (nothing executes
     // from that section).
     const planDet: FillDetermination = effective ?? "filled";
-    const { rails } = planForRow(held, conditionalPence, planDet);
+    const { rails } = planForRow(held, conditionalPence, planDet, row.trigger);
     const railViews = executionForPlan(
       rails,
       input.cardStatesById,

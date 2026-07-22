@@ -81,8 +81,20 @@ function Section({
   );
 }
 
+const HISTORY_LABELS: Record<string, string> = {
+  refunded: "Refunded",
+  retained: "Retained",
+  // Date-change row whose old day re-booked: held money keeps counting toward
+  // the rebooked job — nothing was paid out.
+  released: "Counts toward booking",
+  // Closed because a later trigger (e.g. an outright cancel after a date
+  // change) re-snapshotted the lead's held money into a fresh live row.
+  superseded: "Superseded",
+};
+
 function HistoryRow({ item, byName }: { item: QueueItemView; byName: string | null }) {
   const refunded = item.status === "refunded";
+  const retained = item.status === "retained";
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <div className="min-w-0 flex-1">
@@ -106,12 +118,16 @@ function HistoryRow({ item, byName }: { item: QueueItemView; byName: string | nu
           (refunded ? "bg-success/10 text-success" : "bg-mist-100 text-mist-500")
         }
       >
-        {refunded ? "Refunded" : "Retained"}
+        {HISTORY_LABELS[item.status] ?? item.status}
       </span>
       <div className="text-right">
         <p className="tabular text-sm font-semibold text-foreground">
-          {refunded ? gbpPence(item.refundDuePence) : gbpPence(item.retainPence)}
-          {!refunded && item.refundDuePence > 0 ? (
+          {refunded
+            ? gbpPence(item.refundDuePence)
+            : retained
+              ? gbpPence(item.retainPence)
+              : gbpPence(item.heldPence)}
+          {retained && item.refundDuePence > 0 ? (
             <span className="ml-1 font-normal text-mist-400">+ {gbpPence(item.refundDuePence)} refunded</span>
           ) : null}
         </p>

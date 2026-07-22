@@ -177,6 +177,13 @@ export async function changeBookingDateAction(
   appointmentId: string,
   newStartsAt: string,
   newEndsAt: string,
+  opts?: {
+    /** The dialog's inside-window warning tick. SERVER-ENFORCED: the mode is
+     *  recomputed here at submit time, so a tab opened before a UK-day
+     *  boundary (client showed "free change", no tick rendered) can never
+     *  slide into the destructive cancel-and-rebook unacknowledged. */
+    acknowledgedInsideWindow?: boolean;
+  },
 ): Promise<ChangeBookingDateResult> {
   if (!uuid.safeParse(appointmentId).success) return { ok: false, error: "Invalid appointment" };
   const office = await requireOfficeProfile();
@@ -281,6 +288,19 @@ export async function changeBookingDateAction(
 
   /* ------------------------ INSIDE the window: cancel-and-rebook ---------- */
 
+  // 0. The acknowledgment is a server contract, not a client-render artifact:
+  // if the caller didn't tick the inside-window warning (their tab computed
+  // "outside" before the day ticked over), refuse BEFORE any state flips so
+  // the dialog can re-render the warning + checkbox and ask properly.
+  if (!opts?.acknowledgedInsideWindow) {
+    return {
+      ok: false,
+      stale: true,
+      error:
+        "This booking is now within 7 days of its move date — the change releases the original day and holds money against it. Review the warning and tick the confirmation box to go ahead.",
+    };
+  }
+
   // 1. Single-winner CAS on the old appointment (cancelled, never deleted —
   // signed completions FK-RESTRICT the row). 0 rows = another window won.
   const { data: flipped, error: casError } = await admin
@@ -365,6 +385,20 @@ export async function changeBookingDateAction(
     .update({ reminded_at: null } as never)
     .eq("appointment_id", newAppt.id);
 
+  // The commitment ladder's one-shot stamps are per MOVE DATE, not per quote:
+  // moving the date re-arms the T-10 chase (email/call task fires again for
+  // the new date) and drops the now-stale T-7 "date at risk" flag — the cron
+  // re-stamps both at the new date's thresholds. A paid commitment is history
+  // and never touched.
+  if (quote && !quote.commitment_paid_at && newMoveDay && newMoveDay !== oldMoveDay) {
+    const { error: stampError } = await admin
+      .from("quotes")
+      .update({ commitment_chase_t10_at: null, date_releasable_at: null } as never)
+      .eq("id", quote.id)
+      .is("commitment_paid_at", null);
+    if (stampError) sideEffectFailures.push(`commitment chase stamps: ${stampError.message}`);
+  }
+
   // 4. Commitment due date recomputes against the NEW date (unpaid only — a
   // paid commitment is history). Zoho has no invoice-update helper, so a real
   // -COM invoice gets a manual-adjustment alert to the money desk.
@@ -408,9 +442,15 @@ export async function changeBookingDateAction(
   // booking (no second deposit, ever).
   const snapshot = await buildHeldSnapshot(admin, leadId);
   let queued = false;
-  if (snapshot.held.length) {
-    const dateConfirmed = !!lead.date_confirmed_at;
-    const amounts = queueAmountsFor(snapshot.split, dateConfirmed);
+  // A queue row exists to answer the fill question — which only matters once
+  // the date was CONFIRMED (pre-confirmation nothing is ever retainable, so
+  // there is no decision to make and no rail may ever pay out on a live
+  // booking: the money simply keeps counting toward the new date, PRD §1).
+  // Creating a row there put £0-conditional entries straight into "To
+  // execute" as a full cash refund of a live booking — the exact defect the
+  // trigger-aware plan + this gate close.
+  if (snapshot.held.length && lead.date_confirmed_at) {
+    const amounts = queueAmountsFor(snapshot.split, true);
     const res = await createRefundQueueEntry(admin, {
       leadId,
       quoteId: snapshot.quote?.id ?? quote?.id ?? null,
@@ -426,9 +466,8 @@ export async function changeBookingDateAction(
       clientId: lead.client_id ?? quote?.client_id ?? null,
       customerName: lead.name ?? quote?.customer_name ?? null,
       quoteRef: snapshot.quote?.quote_ref ?? quote?.quote_ref ?? null,
-      notes: dateConfirmed
-        ? "Inside-window date change — held money provisionally counts toward the new booking. If the old day stays empty, the retained amount stops counting and the shortfall needs a manual balance adjustment."
-        : "Date was never confirmed — nothing is retainable; everything counts toward the new booking whatever happens to the old day.",
+      notes:
+        "Inside-window date change — held money provisionally counts toward the new booking. Re-booked: it all keeps counting (nothing pays out). Stayed empty: the retained slice stops counting and the shortfall is stated for the balance invoice.",
     });
     queued = res.ok;
   }
@@ -587,19 +626,47 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
   const quote = await acceptedQuoteFor(admin, leadId);
 
   // Free the diary (single-winner by construction — only scheduled rows flip)
-  // and capture what we cancelled for the queue row's old-date anchor.
+  // and capture what we cancelled for the queue row's old-date anchor. The
+  // window starts at the UK DAY start, not "now": a move-day cancel after the
+  // slot's start time must still free the row, or the post-move sweep later
+  // auto-completes (and review-requests) a move Marley pulled.
+  const nowIso = new Date().toISOString();
+  const todayUkDay = ukDayOf(nowIso) ?? nowIso.slice(0, 10);
+  const dm2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayUkDay);
+  const dayStartIso = dm2
+    ? ukInstant(Number(dm2[1]), Number(dm2[2]), Number(dm2[3]), 0, 0).toISOString()
+    : nowIso;
   const { data: cancelledAppts, error: cancelError } = await admin
     .from("appointments")
     .update({ status: "cancelled" as never })
     .eq("lead_id", leadId)
     .eq("status", "scheduled")
-    .gte("starts_at", new Date().toISOString())
+    .gte("starts_at", dayStartIso)
     .select("id, appt_type, starts_at");
   if (cancelError) return { ok: false, error: cancelError.message };
   const apptsCancelled = cancelledAppts?.length ?? 0;
   const cancelledRemoval = (cancelledAppts ?? [])
     .filter((a) => a.appt_type === "removal")
     .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))[0];
+
+  // Idempotency gate: nothing flipped this call AND a Marley-cancel row
+  // already exists for this lead → this cancellation already ran (double
+  // press, a retry after an alert, or a colleague repeating it days later).
+  // Re-running the unwind would re-snapshot, re-email and re-queue the same
+  // money — skip everything and report the earlier run's outcome.
+  if (apptsCancelled === 0) {
+    const { data: priorMarley } = await admin
+      .from("refund_queue")
+      .select("id")
+      .eq("lead_id", leadId)
+      .eq("trigger", "marley_cancel")
+      .limit(1)
+      .maybeSingle();
+    if (priorMarley) {
+      revalidateBookingSurfaces(leadId);
+      return { ok: true, apptsCancelled: 0, voidedInvoices: 0, refundQueued: false };
+    }
+  }
 
   // Stop every chase — we cancelled; the customer must never be chased for
   // commitment/balance on a move we pulled. Fail-soft.
@@ -611,6 +678,24 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
     await sendOpsAlert(`Chase pause failed on Marley cancel — ${quote?.quote_ref ?? leadId}`, [
       `Marley cancelled but pausing the chase engine failed: ${pauseError.message}. Pause it manually on the lead.`,
     ], "system");
+  }
+
+  // Disarm the money quote: booking_cancelled_at is the cancellation marker
+  // every money surface reads — /q stops rendering payment panels against the
+  // voided invoices, and the chase cron's commitment sweep / T-7 flag skip the
+  // dead booking (chase_paused deliberately does NOT suppress the T-7 flag,
+  // so the pause alone is not enough). Fail-soft.
+  if (quote) {
+    const { error: cancelMarkError } = await admin
+      .from("quotes")
+      .update({ booking_cancelled_at: nowIso } as never)
+      .eq("id", quote.id)
+      .is("booking_cancelled_at", null);
+    if (cancelMarkError) {
+      await sendOpsAlert(`Cancellation marker failed on Marley cancel — ${quote.quote_ref}`, [
+        `booking_cancelled_at could not be stamped (${cancelMarkError.message}) — the /q page may still show payment panels for this cancelled booking. Fix the quote row by hand.`,
+      ], "system");
+    }
   }
   const { data: openFus } = await admin
     .from("follow_ups")

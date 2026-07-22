@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildHeldFromSources,
+  netExecutedRefunds,
   type SnapshotCardRow,
   type SnapshotLead,
   type SnapshotQuote,
 } from "@/lib/refunds";
-import { splitHeldMoney } from "@/lib/payments-policy";
+import { splitHeldMoney, type HeldPayment } from "@/lib/payments-policy";
 
 /**
  * The pure held-money snapshot core (Payments Policy v2). This closes the old
@@ -227,5 +228,82 @@ describe("snapshot → split integration (the queue-row numbers)", () => {
     expect(split.conditional).toBe(350);
     expect(split.unconditional).toBe(100);
     expect(split.byRail.bank_transfer.total).toBe(450);
+  });
+});
+
+/* --------------------------------------- card-paid balance dedupe (latent) */
+
+describe("buildHeldFromSources — card-paid balance never double-counts", () => {
+  it("a held card row of kind 'balance' suppresses the method-less lead balance stamp", () => {
+    // When card-for-balance ships, the office still stamps balance_paid_at
+    // (no method column exists) — the stamp is the SAME money as the card row
+    // and must not appear a second time on the bank rail.
+    const held = buildHeldFromSources({
+      cardRows: [card({ kind: "balance", amount_pence: 170000 })],
+      quote: quote(),
+      lead: lead({ balance_paid_at: "2026-07-10T09:00:00Z", balance_amount: 1700 }),
+    });
+    expect(held).toHaveLength(1);
+    expect(held[0]).toMatchObject({ rail: "card", amount: 1700, label: "card balance" });
+  });
+
+  it("a bank-paid balance still snapshots when no card balance row exists", () => {
+    const held = buildHeldFromSources({
+      cardRows: [],
+      quote: quote(),
+      lead: lead({ balance_paid_at: "2026-07-10T09:00:00Z", balance_amount: 1700 }),
+    });
+    expect(held).toEqual([expect.objectContaining({ rail: "bank_transfer", amount: 1700, label: "balance" })]);
+  });
+});
+
+/* ------------------------------------------- executed bank/cash netting */
+
+describe("netExecutedRefunds — executed payouts never re-snapshot as held", () => {
+  const bank = (amount: number, at: string, label = "deposit"): HeldPayment => ({
+    rail: "bank_transfer",
+    amount,
+    at,
+    label,
+  });
+
+  it("subtracts an executed bank refund chronologically and drops zeroed payments", () => {
+    const out = netExecutedRefunds(
+      [bank(100, "2026-07-01T09:00:00Z"), bank(500, "2026-07-05T09:00:00Z", "commitment")],
+      { bank_transfer: 10000, cash: 0 },
+    );
+    // The £100 deposit was already paid back — only the commitment remains.
+    expect(out).toEqual([expect.objectContaining({ amount: 500, label: "commitment" })]);
+  });
+
+  it("partially absorbs into the next payment on the same rail", () => {
+    const out = netExecutedRefunds(
+      [bank(100, "2026-07-01T09:00:00Z"), bank(500, "2026-07-05T09:00:00Z", "commitment")],
+      { bank_transfer: 30000, cash: 0 },
+    );
+    expect(out).toEqual([expect.objectContaining({ amount: 300, label: "commitment" })]);
+  });
+
+  it("rails never blend: a cash payout leaves bank money held, and card rows are untouched", () => {
+    const cardHeld: HeldPayment = {
+      rail: "card",
+      amount: 100,
+      at: "2026-07-01T08:00:00Z",
+      label: "card deposit",
+      card_payment_id: "cp-1",
+    };
+    const out = netExecutedRefunds(
+      [cardHeld, bank(100, "2026-07-01T09:00:00Z"), { rail: "cash", amount: 50, at: "2026-07-02T09:00:00Z" }],
+      { bank_transfer: 0, cash: 5000 },
+    );
+    expect(out).toEqual([
+      expect.objectContaining({ rail: "card", amount: 100 }),
+      expect.objectContaining({ rail: "bank_transfer", amount: 100 }),
+    ]);
+  });
+
+  it("zero executed totals return the held list unchanged", () => {
+    const heldList = [bank(100, "2026-07-01T09:00:00Z")];
+    expect(netExecutedRefunds(heldList, { bank_transfer: 0, cash: 0 })).toEqual(heldList);
   });
 });

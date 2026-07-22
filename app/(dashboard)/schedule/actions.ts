@@ -242,6 +242,18 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
       .maybeSingle();
     if (accepted && accepted.moving_date !== newMoveDate) {
       await sb.from("quotes").update({ moving_date: newMoveDate } as never).eq("id", accepted.id);
+
+      // The commitment ladder's one-shot stamps are per MOVE DATE: a new date
+      // re-arms the T-10 chase and drops the stale T-7 "Dates at risk" flag —
+      // the cron re-stamps both at the new date's thresholds. Paid
+      // commitments are history and never touched.
+      if (!accepted.commitment_paid_at) {
+        await sb
+          .from("quotes")
+          .update({ commitment_chase_t10_at: null, date_releasable_at: null } as never)
+          .eq("id", accepted.id)
+          .is("commitment_paid_at", null);
+      }
       const dueDate = balanceDueDate(newMoveDate);
       await sb.from("leads").update({ balance_due_date: dueDate } as never).eq("id", appt.lead_id);
       const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);

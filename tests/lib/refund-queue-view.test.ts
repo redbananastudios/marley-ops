@@ -8,6 +8,7 @@ import {
   outstandingSummary,
   parseHeld,
   planForRow,
+  retainedPenceFor,
   sectionFor,
   type CardStateIn,
   type QueueRowIn,
@@ -321,5 +322,92 @@ describe("totals", () => {
     expect(item.retainPence).toBe(35000);
     expect(item.refundDuePence).toBe(10000);
     expect(item.heldPence).toBe(45000);
+  });
+});
+
+/* -------------------------------------- date-change rows (booking still live) */
+
+describe("planForRow — customer_date_change (PRD §1: money keeps counting)", () => {
+  const prdHeld: HeldPayment[] = [
+    held({ amount: 100, at: "2026-07-01T09:00:00Z", label: "deposit" }),
+    held({ amount: 500, at: "2026-07-05T09:00:00Z", label: "commitment" }),
+  ];
+
+  it("filled → refund due £0 on EVERY payment (held money counts toward the new booking)", () => {
+    const { payments, rails } = planForRow(prdHeld, 60000, "filled", "customer_date_change");
+    expect(payments.map((p) => p.refundDuePence)).toEqual([0, 0]);
+    expect(payments.map((p) => p.retainPence)).toEqual([0, 0]);
+    expect(rails.every((r) => r.refundDuePence === 0)).toBe(true);
+  });
+
+  it("not_filled → the conditional slice retains, the unconditional slice keeps counting (never a cash payout)", () => {
+    // £2,400 job: 25% cap = £600 → deposit £100 + commitment £500 all conditional.
+    const { payments } = planForRow(prdHeld, 60000, "not_filled", "customer_date_change");
+    expect(payments[0]).toMatchObject({ retainPence: 10000, refundDuePence: 0 });
+    expect(payments[1]).toMatchObject({ retainPence: 50000, refundDuePence: 0 });
+  });
+
+  it("not_filled with money above the cap: the above-cap slice is NOT force-refunded on a live booking", () => {
+    const over: HeldPayment[] = [
+      held({ amount: 100, at: "2026-07-01T09:00:00Z", label: "deposit" }),
+      held({ amount: 700, at: "2026-07-05T09:00:00Z", label: "commitment" }),
+    ];
+    const { payments } = planForRow(over, 60000, "not_filled", "customer_date_change");
+    // Retained = the £600 conditional fill; the £200 above the cap keeps
+    // counting toward the rebooked job — refund due stays £0 everywhere.
+    expect(payments.reduce((s, p) => s + p.retainPence, 0)).toBe(60000);
+    expect(payments.every((p) => p.refundDuePence === 0)).toBe(true);
+  });
+
+  it("cancel triggers are untouched by the trigger parameter", () => {
+    const { payments } = planForRow(prdHeld, 60000, "filled", "customer_cancel");
+    expect(payments.map((p) => p.refundDuePence)).toEqual([10000, 50000]);
+  });
+
+  it("a filled date-change row is closable with zero payouts (allExecuted from the To execute section)", () => {
+    const v = view([
+      row({
+        trigger: "customer_date_change",
+        determination: "filled",
+        held: [held({ amount: 100 }), held({ amount: 500, at: "2026-07-05T09:00:00Z", label: "commitment" })],
+        conditional_amount: 600,
+        unconditional_amount: 0,
+      }),
+    ]);
+    const item = v.toExecute[0];
+    expect(item.refundDuePence).toBe(0);
+    expect(item.outstandingPence).toBe(0);
+    expect(item.allExecuted).toBe(true); // Complete/Close needs no rail execution
+  });
+});
+
+describe("retainedPenceFor", () => {
+  it("is the chronological conditional fill (what a not_filled decision retains)", () => {
+    const heldList: HeldPayment[] = [
+      held({ amount: 100, at: "2026-07-01T09:00:00Z", label: "deposit" }),
+      held({ amount: 500, at: "2026-07-05T09:00:00Z", label: "commitment" }),
+    ];
+    expect(retainedPenceFor(heldList, 60000)).toBe(60000);
+    expect(retainedPenceFor(heldList, 35000)).toBe(35000);
+    expect(retainedPenceFor(heldList, 0)).toBe(0);
+    expect(retainedPenceFor([], 60000)).toBe(0);
+  });
+});
+
+describe("terminal statuses — released / superseded", () => {
+  it("released and superseded rows land in History, never in a working section", () => {
+    const v = view([
+      row({ id: "rel", status: "released", trigger: "customer_date_change", determination: "filled" }),
+      row({ id: "sup", status: "superseded" }),
+      row({ id: "pen", status: "pending", determination: "filled" }),
+    ]);
+    expect(v.history.map((i) => i.id).sort()).toEqual(["rel", "sup"]);
+    expect(v.toExecute.map((i) => i.id)).toEqual(["pen"]);
+    expect(v.totals.pendingCount).toBe(1);
+  });
+
+  it("sectionFor routes any non-pending status to history", () => {
+    expect(sectionFor("released", "filled")).toBe("history");
+    expect(sectionFor("superseded", null)).toBe("history");
   });
 });

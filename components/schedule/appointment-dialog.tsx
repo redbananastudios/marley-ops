@@ -291,6 +291,14 @@ export function AppointmentDialog({
   // books removals) — never a form choice.
   const apptType: ApptType = edit?.apptType ?? defaultType;
 
+  // A BOOKED removal's date never changes through this edit form: it must go
+  // through the ChangeDateDialog / changeBookingDateAction single path so the
+  // 7-day-window policy applies (warning + tick, held-money snapshot, refund
+  // queue, customer email). This form editing times directly was a silent
+  // bypass of the whole date-change policy. Surveys and lead-less entries keep
+  // the plain reschedule (mirrors changeBookingDateAction's removal-only guard).
+  const lockTiming = isEdit && apptType === "removal" && !!edit?.leadId;
+
   const [leadId, setLeadId] = useState<string>(NO_LEAD);
   const [estimatorId, setEstimatorId] = useState<string>(NO_EST);
   const [start, setStart] = useState<string>("");
@@ -384,8 +392,10 @@ export function AppointmentDialog({
           toast.error(meta.error || "Could not save appointment.");
           return;
         }
-        // If timing changed, route it through the reschedule action.
-        if (startsAt !== edit.startsAt || endsAt !== edit.endsAt) {
+        // If timing changed, route it through the reschedule action — except a
+        // booked removal, whose date only moves via ChangeDateDialog (the
+        // inputs are read-only for it, this guard is belt-and-braces).
+        if (!lockTiming && (startsAt !== edit.startsAt || endsAt !== edit.endsAt)) {
           const r = await rescheduleAppointment(edit.id, startsAt, endsAt);
           if (!r.ok) {
             toast.error(r.error || "Could not update the time.");
@@ -507,18 +517,38 @@ export function AppointmentDialog({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="appt-start">Starts</Label>
-              <Input id="appt-start" type="datetime-local" step={900} value={start} onChange={(e) => onStartChange(e.target.value)} />
+              <Input
+                id="appt-start"
+                type="datetime-local"
+                step={900}
+                value={start}
+                onChange={(e) => onStartChange(e.target.value)}
+                disabled={lockTiming}
+              />
             </div>
             {apptType === "removal" ? (
               <div className="grid gap-2">
                 <Label htmlFor="appt-end">Ends</Label>
-                <Input id="appt-end" type="datetime-local" step={900} value={end} onChange={(e) => setEnd(e.target.value)} />
+                <Input
+                  id="appt-end"
+                  type="datetime-local"
+                  step={900}
+                  value={end}
+                  onChange={(e) => setEnd(e.target.value)}
+                  disabled={lockTiming}
+                />
               </div>
             ) : null}
           </div>
           {apptType === "survey" ? (
             <p className="-mt-2 text-xs text-mist-400">
               Surveys are 1 hour{surveyEndLabel ? ` — ends ${surveyEndLabel}` : ""}. Who does the visit drives their pay + win stats.
+            </p>
+          ) : null}
+          {lockTiming ? (
+            <p className="-mt-2 text-xs text-mist-400">
+              This is a booked removal — move its date with the <strong>Change date</strong> button
+              (Bookings page or the diary) so what&apos;s been paid is handled correctly.
             </p>
           ) : null}
 

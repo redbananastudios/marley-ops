@@ -46,7 +46,16 @@ import {
 type Sb = SupabaseClient<Database>;
 type QueueRow = Database["public"]["Tables"]["refund_queue"]["Row"];
 
-export type RefundActionResult = { ok: true; already?: boolean } | { ok: false; error: string };
+export type RefundActionResult =
+  | {
+      ok: true;
+      already?: boolean;
+      /** On `already`: what is ACTUALLY recorded on the row, so a stale tab's
+       *  conflicting answer can be surfaced truthfully instead of echoing the
+       *  click that lost. */
+      recorded?: FillDetermination | null;
+    }
+  | { ok: false; error: string };
 
 /* ---------------------------------------------------------------- gates */
 
@@ -135,7 +144,7 @@ async function loadExecution(
   effective: FillDetermination,
 ): Promise<{ rails: RailView[]; cardStates: Map<string, CardStateWithMask> }> {
   const held = parseHeld(row.held);
-  const { rails } = planForRow(held, Math.round(Number(row.conditional_amount) * 100), effective);
+  const { rails } = planForRow(held, Math.round(Number(row.conditional_amount) * 100), effective, row.trigger);
   const cardIds = held.map((h) => h.card_payment_id).filter(Boolean) as string[];
   const [cardStates, markedRails] = await Promise.all([
     loadCardStates(admin, cardIds),
@@ -263,11 +272,15 @@ export async function determineRefundQueueAction(
   const admin = createAdminClient();
   const row = await loadRow(admin, id);
   if (!row) return { ok: false, error: "Refund entry not found." };
-  if (row.status !== "pending") return { ok: true, already: true };
+  const recordedOf = (r: QueueRow): FillDetermination | null =>
+    r.determination === "filled" || r.determination === "not_filled"
+      ? r.determination
+      : effectiveDetermination(r);
+  if (row.status !== "pending") return { ok: true, already: true, recorded: recordedOf(row) };
   if (row.trigger === "marley_cancel") {
     return { ok: false, error: "Marley cancellations refund everything — there is no fill question." };
   }
-  if (row.determination) return { ok: true, already: true };
+  if (row.determination) return { ok: true, already: true, recorded: recordedOf(row) };
   if (determination === "not_filled" && !notFilledAllowed(row.original_move_date, todayUk())) {
     return {
       ok: false,
@@ -285,17 +298,26 @@ export async function determineRefundQueueAction(
     .is("determination", null)
     .select("id");
   if (casError) return { ok: false, error: casError.message };
-  if (!claimed?.length) return { ok: true, already: true };
+  if (!claimed?.length) {
+    // Lost the race — report what the WINNER recorded, not what we clicked.
+    const again = await loadRow(admin, id);
+    return { ok: true, already: true, recorded: again ? recordedOf(again) : null };
+  }
 
   const quote = await loadQuote(admin, row.quote_id);
   const dateLabel = ukDateLabel(row.original_move_date) ?? "the original date";
   const conditional = gbpPence(Math.round(Number(row.conditional_amount) * 100));
+  const isDateChange = row.trigger === "customer_date_change";
   await writeQueueTrail(admin, row, quote, prof.id, {
     activityType: "note",
     summary:
       determination === "filled"
-        ? `Refund decision — ${dateLabel} re-booked, everything held becomes refundable`
-        : `Refund decision — ${dateLabel} stayed empty, ${conditional} held per the terms`,
+        ? isDateChange
+          ? `Refund decision — ${dateLabel} re-booked, held money keeps counting toward the new booking`
+          : `Refund decision — ${dateLabel} re-booked, everything held becomes refundable`
+        : isDateChange
+          ? `Refund decision — ${dateLabel} stayed empty, ${conditional} retained and no longer counts toward the new booking`
+          : `Refund decision — ${dateLabel} stayed empty, ${conditional} held per the terms`,
     action: "determined",
     diff: { determination, original_move_date: row.original_move_date },
   });
@@ -451,8 +473,11 @@ export async function markRailRefundedAction(
   }
 
   // The mark IS the money record for this action — an insert error is a
-  // failure, never "already done". (A duplicate row from a photo-finish race
-  // is harmless: execution reads EXISTS per rail, not a sum.)
+  // failure, never "already done", EXCEPT a 23505 from the 0074 unique index
+  // ((entity, rail) for rail_refunded): that means a concurrent press already
+  // recorded this exact rail, making the mark single-winner like every other
+  // money transition here. The second operator sees "already recorded" and
+  // knows to check before making any transfer of their own.
   const { error: markError } = await admin.from("events_log").insert({
     actor_id: prof.id,
     entity_type: "refund_queue",
@@ -460,6 +485,7 @@ export async function markRailRefundedAction(
     action: "rail_refunded",
     diff: { rail, amount_pence: amount } as unknown as Json,
   });
+  if (markError?.code === "23505") return { ok: true, already: true };
   if (markError) return { ok: false, error: markError.message };
 
   const quote = await loadQuote(admin, row.quote_id);
@@ -512,11 +538,19 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
     return { ok: false, error: `Still to pay out: ${outstanding}. Execute every rail, then complete.` };
   }
 
-  // Single-winner CAS — whoever flips pending→refunded sends the email.
+  // A date-change row belongs to a booking that is STILL LIVE: "filled" means
+  // the old day re-booked and everything held simply KEEPS counting toward the
+  // rebooked job (PRD §1). Nothing pays out, no refund email — the row closes
+  // as 'released'. (If the rebooked job later dies, the cancel unwind
+  // snapshots afresh and that row handles the money.)
+  const isDateChange = row.trigger === "customer_date_change";
+  const terminalStatus = isDateChange ? "released" : "refunded";
+
+  // Single-winner CAS — whoever flips pending→terminal sends the email.
   const now = new Date().toISOString();
   const { data: claimed, error: casError } = await admin
     .from("refund_queue")
-    .update({ status: "refunded", executed_by: prof.id, executed_at: now })
+    .update({ status: terminalStatus, executed_by: prof.id, executed_at: now })
     .eq("id", id)
     .eq("status", "pending")
     .select("id");
@@ -524,6 +558,22 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
   if (!claimed?.length) return { ok: true, already: true };
 
   const quote = await loadQuote(admin, row.quote_id);
+
+  if (isDateChange) {
+    // No customer email: the cancellation-ack already told them everything
+    // paid still counts toward the new date — a "refund" email here would be
+    // false. Timeline + audit only.
+    const heldPence = rails.reduce((s, r) => s + r.heldPence, 0);
+    await writeQueueTrail(admin, row, quote, prof.id, {
+      activityType: "note",
+      summary: `Held money released — ${gbpPence(heldPence)} continues to count toward the rebooked move (${ukDateLabel(row.original_move_date) ?? "original date"} re-booked)`,
+      action: "released",
+      diff: { held_pence: heldPence, trigger: row.trigger },
+    });
+    revalidateQueueSurfaces();
+    return { ok: true };
+  }
+
   const { lines, totalPence } = refundLinesFor(rails, cardStates);
 
   // ONE itemised customer email (duplicate-guarded by dispatchComm). Fail-soft:
@@ -621,17 +671,42 @@ export async function retainRefundQueueAction(
     };
   }
 
+  const quote = await loadQuote(admin, row.quote_id);
+  const dateLbl = ukDateLabel(row.original_move_date) ?? "the original date";
+
+  // Rebook forfeit (PRD §1/§2): on a date-change row the retained slice STOPS
+  // counting toward the still-live rebooked job — the queue entry must state
+  // the shortfall for the balance adjustment, written atomically with the
+  // close so it can never be lost.
+  const isDateChange = row.trigger === "customer_date_change";
+  const shortfallNote = isDateChange
+    ? `${gbpPence(retainPence)} retained against ${dateLbl} no longer counts toward the rebooked job — the balance invoice for ${quote?.quote_ref ?? "this booking"} must be ${gbpPence(retainPence)} higher (the panel excludes it automatically when the balance invoice is raised; adjust manually if it already exists).`
+    : null;
+
   const now = new Date().toISOString();
   const { data: claimed, error: casError } = await admin
     .from("refund_queue")
-    .update({ status: "retained", executed_by: prof.id, executed_at: now })
+    .update({
+      status: "retained",
+      executed_by: prof.id,
+      executed_at: now,
+      ...(shortfallNote ? { shortfall_note: shortfallNote } : {}),
+    })
     .eq("id", id)
     .eq("status", "pending")
     .select("id");
   if (casError) return { ok: false, error: casError.message };
   if (!claimed?.length) return { ok: true, already: true };
 
-  const quote = await loadQuote(admin, row.quote_id);
+  if (shortfallNote) {
+    // Money-desk alert: the retained amount must not be re-credited on the
+    // rebooked job's balance. Fail-soft — the note on the row is the record.
+    await sendOpsAlert(`Rebook shortfall — ${quote?.quote_ref ?? row.id.slice(0, 8)}`, [
+      `${gbpPence(retainPence)} retained against ${dateLbl} no longer counts toward the new booking.`,
+      `The balance invoice must be ${gbpPence(retainPence)} higher than a simple "agreed minus payments received". The panel excludes the retained amount automatically when the balance invoice is raised from the quote — adjust manually in Zoho if it was already raised.`,
+    ], "money");
+  }
+
   const { lines, totalPence: refundedPence } = refundLinesFor(rails, cardStates);
 
   if (quote?.customer_email) {

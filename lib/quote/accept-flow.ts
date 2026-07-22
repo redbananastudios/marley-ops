@@ -56,6 +56,8 @@ import {
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
 import { commitmentAmount, commitmentDueDate } from "@/lib/payments-policy";
+import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   balanceDue,
   balanceDueDate,
@@ -87,7 +89,7 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at";
+  "id, quote_ref, status, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -136,6 +138,10 @@ export type AcceptQuoteRow = {
   commitment_paid_method: string | null;
   commitment_chase_t10_at: string | null;
   date_releasable_at: string | null;
+  /** Stamped when the booking behind this accepted quote was cancelled (Marley
+   *  cancel / mark-lost). Money surfaces must go quiet: no payment panels on
+   *  /q, no date confirmation, no commitment invoice, no chases. */
+  booking_cancelled_at: string | null;
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
@@ -1143,15 +1149,19 @@ export async function markDepositPaid(
 export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<AcceptQuoteRow | null> {
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote || quote.status !== "accepted" || !quote.lead_id) return quote;
+  // A cancelled booking never raises money paperwork (belt-and-braces beside
+  // the confirmMoveDate guard — this self-heals from /q too).
+  if (quote.booking_cancelled_at) return quote;
   if (isRealZohoId(quote.zoho_commitment_invoice_id)) return quote;
 
   // Confirmation gate — the invoice exists BECAUSE the date was confirmed.
+  // A declined (cancelled) lead never invoices either.
   const { data: lead } = await sb
     .from("leads")
-    .select("date_confirmed_at")
+    .select("status, date_confirmed_at")
     .eq("id", quote.lead_id)
     .maybeSingle();
-  if (!lead?.date_confirmed_at) return quote;
+  if (!lead?.date_confirmed_at || lead.status === "declined") return quote;
 
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
@@ -1410,6 +1420,9 @@ export async function confirmMoveDate(
   if (quote.status !== "accepted") {
     return { ok: false, error: "The quote must be accepted before the move date is confirmed." };
   }
+  if (quote.booking_cancelled_at) {
+    return { ok: false, error: "This booking has been cancelled — call 01747 637070 if you'd like to rebook." };
+  }
   if (!quote.deposit_paid_at) {
     return { ok: false, error: "The deposit must be paid before the move date is confirmed." };
   }
@@ -1427,10 +1440,16 @@ export async function confirmMoveDate(
 
   const { data: lead } = await sb
     .from("leads")
-    .select("id, client_id, date_confirmed_at")
+    .select("id, client_id, status, date_confirmed_at")
     .eq("id", quote.lead_id)
     .maybeSingle();
   if (!lead) return { ok: false, error: "This quote is no longer available." };
+  // A dead lead's emailed /q link must not flip the deposit non-refundable or
+  // raise a fresh commitment invoice for a cancelled job — the pending refund
+  // row and a signed non-refundability record would contradict each other.
+  if (lead.status === "declined") {
+    return { ok: false, error: "This booking has been cancelled — call 01747 637070 if you'd like to rebook." };
+  }
   if (lead.date_confirmed_at) return { ok: true, already: true };
 
   // Single-winner CAS — the instant the deposit becomes non-refundable.
@@ -1671,8 +1690,41 @@ export async function createBalanceInvoiceFlow(
   // Payments Policy v2: the balance is what's left after money actually
   // RECEIVED — the deposit and the commitment count only once paid (unpaid
   // invoices are still owed in full, so deducting them would under-invoice).
-  const depositCredit = quote.deposit_paid_at ? deposit : 0;
-  const commitmentCredit = quote.commitment_paid_at ? Number(quote.commitment_invoice_amount ?? 0) : 0;
+  let depositCredit = quote.deposit_paid_at ? deposit : 0;
+  let commitmentCredit = quote.commitment_paid_at ? Number(quote.commitment_invoice_amount ?? 0) : 0;
+
+  // Rebook forfeit (PRD §1): money RETAINED on a date-change queue row (the
+  // old day died unfilled) has STOPPED counting toward this booking — the
+  // paid stamps still stand, so without this exclusion the balance would
+  // silently credit money the customer forfeited, netting Marley £0 from the
+  // retention. Chronological first-in: the forfeit consumes the deposit
+  // credit first, then the commitment credit.
+  let forfeited = 0;
+  if (quote.lead_id) {
+    // Service role: refund_queue reads are admin-RLS'd, but this exclusion
+    // must hold no matter which office session raises the invoice.
+    const { data: forfeitRows } = await createAdminClient()
+      .from("refund_queue")
+      .select("held, conditional_amount")
+      .eq("lead_id", quote.lead_id)
+      .eq("trigger", "customer_date_change")
+      .eq("status", "retained");
+    let forfeitedPence = 0;
+    for (const row of forfeitRows ?? []) {
+      forfeitedPence += retainedPenceFor(
+        parseHeld(row.held),
+        Math.round(Number(row.conditional_amount) * 100),
+      );
+    }
+    forfeited = round2(forfeitedPence / 100);
+    let left = forfeited;
+    const fromDeposit = Math.min(depositCredit, left);
+    depositCredit = round2(depositCredit - fromDeposit);
+    left = round2(left - fromDeposit);
+    const fromCommitment = Math.min(commitmentCredit, left);
+    commitmentCredit = round2(commitmentCredit - fromCommitment);
+  }
+
   const amount = round2(Math.max(0, agreed - depositCredit - commitmentCredit));
   if (amount <= 0) {
     return { ok: false, error: "Nothing left to invoice — payments received cover the agreed price." };
@@ -1705,7 +1757,12 @@ export async function createBalanceInvoiceFlow(
         ...(depositCredit > 0 ? [`the £${depositCredit.toFixed(2)} booking deposit`] : []),
         ...(commitmentCredit > 0 ? [`the £${commitmentCredit.toFixed(2)} commitment payment`] : []),
       ];
-      const creditsClause = credits.length ? ` less ${credits.join(" and ")} already received` : "";
+      const forfeitClause =
+        forfeited > 0
+          ? ` (£${forfeited.toFixed(2)} previously paid is held against a released move date per the booking terms and does not count toward this balance)`
+          : "";
+      const creditsClause =
+        (credits.length ? ` less ${credits.join(" and ")} already received` : "") + forfeitClause;
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,

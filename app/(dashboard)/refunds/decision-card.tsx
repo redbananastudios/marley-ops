@@ -39,6 +39,9 @@ export function DecisionCard({ item }: { item: QueueItemView }) {
   const [refreshing, startRefresh] = useTransition();
   const processing = busy || refreshing;
   const when = dateLabel(item.originalMoveDate);
+  // A date-change row belongs to a STILL-LIVE booking: held money keeps
+  // counting toward the new date — nothing ever pays out of this row.
+  const isDateChange = item.trigger === "customer_date_change";
 
   async function answer(determination: "filled" | "not_filled") {
     setBusy(true);
@@ -48,11 +51,28 @@ export function DecisionCard({ item }: { item: QueueItemView }) {
         toast.error(res.error || "Couldn't record the decision.");
         return;
       }
-      toast.success(
-        determination === "filled"
-          ? "Recorded — everything held is now refundable. Pay it out from the To execute list."
-          : "Recorded — the held amount stays with the booking terms. Settle the entry from the To execute list.",
-      );
+      if (res.already) {
+        // Someone answered first (or a stale tab re-asked): report what is
+        // ACTUALLY recorded, never the click that lost.
+        const recorded = res.recorded;
+        toast.warning(
+          recorded === "filled"
+            ? "Already answered — recorded as re-booked. Refreshing."
+            : recorded === "not_filled"
+              ? "Already answered — recorded as stayed empty. Refreshing."
+              : "Already settled — refreshing.",
+        );
+      } else {
+        toast.success(
+          determination === "filled"
+            ? isDateChange
+              ? "Recorded — everything held keeps counting toward the new booking. Close the entry from the To execute list."
+              : "Recorded — everything held is now refundable. Pay it out from the To execute list."
+            : isDateChange
+              ? "Recorded — the held amount is retained and stops counting toward the new booking. Settle the entry from the To execute list."
+              : "Recorded — the held amount stays with the booking terms. Settle the entry from the To execute list.",
+        );
+      }
       setConfirming(null);
       startRefresh(() => router.refresh());
     } catch {
@@ -93,12 +113,29 @@ export function DecisionCard({ item }: { item: QueueItemView }) {
         )}
       </ul>
 
+      {item.notes ? (
+        <p className="rounded-md bg-muted px-3 py-2 text-xs leading-relaxed text-mist-500">{item.notes}</p>
+      ) : null}
+
       <div className="rounded-md bg-muted px-3 py-2.5">
         <p className="text-sm font-semibold text-foreground">Did we re-book {when}?</p>
         <p className="mt-0.5 text-xs text-mist-400">
-          Re-booked: refund everything ({gbpPence(item.heldPence)}). Stayed empty: {gbpPence(item.conditionalPence)} is
-          held under the booking terms
-          {item.unconditionalPence > 0 ? ` and ${gbpPence(item.unconditionalPence)} is refunded regardless` : ""}.
+          {isDateChange ? (
+            <>
+              Re-booked: everything held ({gbpPence(item.heldPence)}) keeps counting toward the new booking. Stayed
+              empty: {gbpPence(item.conditionalPence)} is retained and stops counting
+              {item.unconditionalPence > 0
+                ? ` — the remaining ${gbpPence(item.unconditionalPence)} keeps counting regardless`
+                : ""}
+              .
+            </>
+          ) : (
+            <>
+              Re-booked: refund everything ({gbpPence(item.heldPence)}). Stayed empty: {gbpPence(item.conditionalPence)}{" "}
+              is held under the booking terms
+              {item.unconditionalPence > 0 ? ` and ${gbpPence(item.unconditionalPence)} is refunded regardless` : ""}.
+            </>
+          )}
         </p>
         <div className="mt-2.5 flex flex-wrap items-center gap-2">
           <Button size="sm" onClick={() => setConfirming("filled")} disabled={processing}>
@@ -135,16 +172,38 @@ export function DecisionCard({ item }: { item: QueueItemView }) {
           </DialogHeader>
           {confirming === "filled" ? (
             <p className="text-sm leading-relaxed text-mist-500">
-              Everything held ({gbpPence(item.heldPence)}) becomes refundable in full. You&apos;ll pay it out from the
-              To execute list next — nothing is sent to the customer until the refunds are done.
+              {isDateChange ? (
+                <>
+                  Everything held ({gbpPence(item.heldPence)}) keeps counting toward the new booking — nothing is
+                  refunded and no email is sent. You&apos;ll close the entry from the To execute list next.
+                </>
+              ) : (
+                <>
+                  Everything held ({gbpPence(item.heldPence)}) becomes refundable in full. You&apos;ll pay it out from
+                  the To execute list next — nothing is sent to the customer until the refunds are done.
+                </>
+              )}
             </p>
           ) : (
             <p className="text-sm leading-relaxed text-mist-500">
-              {gbpPence(item.conditionalPence)} stays held against {when}, as the booking terms set out.
-              {item.unconditionalPence > 0
-                ? ` ${gbpPence(item.unconditionalPence)} above that is still refunded in full.`
-                : ""}{" "}
-              The customer is told once you settle the entry.
+              {isDateChange ? (
+                <>
+                  {gbpPence(item.conditionalPence)} is retained against {when} and stops counting toward the new
+                  booking — the balance invoice for the new date increases by the same amount.
+                  {item.unconditionalPence > 0
+                    ? ` ${gbpPence(item.unconditionalPence)} above that keeps counting toward the new booking.`
+                    : ""}{" "}
+                  The customer is told once you settle the entry.
+                </>
+              ) : (
+                <>
+                  {gbpPence(item.conditionalPence)} stays held against {when}, as the booking terms set out.
+                  {item.unconditionalPence > 0
+                    ? ` ${gbpPence(item.unconditionalPence)} above that is still refunded in full.`
+                    : ""}{" "}
+                  The customer is told once you settle the entry.
+                </>
+              )}
             </p>
           )}
           <DialogFooter>

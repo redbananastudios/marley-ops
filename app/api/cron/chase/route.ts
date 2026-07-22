@@ -426,13 +426,17 @@ export async function GET(req: Request) {
       const { data: q } = await sb
         .from("quotes")
         .select(
-          "id, quote_ref, agreed_price, grand_total, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, estimator_id, client_id",
+          "id, quote_ref, agreed_price, grand_total, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, estimator_id, client_id, booking_cancelled_at",
         )
         .eq("lead_id", leadId)
         .eq("status", "accepted")
         .order("accepted_at", { ascending: false })
         .limit(1)
         .maybeSingle();
+      // A cancelled booking (Marley cancel that left a same-day appointment
+      // behind historically) must never auto-complete, review-request, or
+      // raise an OVERDUE alarm — its money lives in the refund queue.
+      if (q?.booking_cancelled_at) continue;
       const agreed = Number(q?.agreed_price ?? q?.grand_total ?? 0);
       // Outstanding counts only money that actually LANDED (Payments Policy
       // v2): agreed − paid deposit − paid commitment, zeroed by the office's
@@ -520,6 +524,11 @@ export async function GET(req: Request) {
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
+    // Cancelled bookings drop out of the ladder entirely: chase_paused
+    // deliberately does NOT suppress the T-7 flag, so without this filter a
+    // Marley-cancelled job would still stamp date_releasable_at, alert the
+    // money desk and sit on "Dates at risk".
+    .is("booking_cancelled_at", null)
     .gte("moving_date", todayDay)
     .lte("moving_date", horizonDay)
     .not("lead_id", "is", null)

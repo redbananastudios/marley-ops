@@ -365,6 +365,18 @@ export async function updateLeadStatusAction(
     };
   }
 
+  // A reopened lead's booking is live again: clear the cancellation marker so
+  // /q + the chase ladder wake back up (it was stamped by the mark-lost /
+  // Marley-cancel unwind).
+  if (reopening) {
+    await createAdminClient()
+      .from("quotes")
+      .update({ booking_cancelled_at: null } as never)
+      .eq("lead_id", leadId)
+      .eq("status", "accepted")
+      .not("booking_cancelled_at", "is", null);
+  }
+
   await sb.from("activities").insert({
     client_id: current?.client_id ?? null,
     lead_id: leadId,
@@ -583,6 +595,23 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   // design, and only an office session can win the CAS above to reach here.
   if (moneyQuotes?.length) {
     const admin = createAdminClient();
+
+    // Retire the public money surface: the emailed /q link must stop
+    // soliciting payment (bank details against now-voided invoices) and
+    // confirmMoveDate must refuse — booking_cancelled_at is the marker every
+    // money surface reads. Cleared again if the lead is reopened. Fail-soft.
+    const { error: cancelMarkError } = await admin
+      .from("quotes")
+      .update({ booking_cancelled_at: new Date().toISOString() } as never)
+      .eq("lead_id", leadId)
+      .eq("status", "accepted")
+      .is("booking_cancelled_at", null);
+    if (cancelMarkError) {
+      await sendOpsAlert(`Cancellation marker failed on mark-lost — ${moneyQuotes[0]?.quote_ref ?? leadId}`, [
+        `booking_cancelled_at could not be stamped (${cancelMarkError.message}) — the /q page may still show payment panels for this cancelled booking.`,
+      ], "system");
+    }
+
     const snapshot = await buildHeldSnapshot(admin, leadId);
     if (snapshot.held.length) {
       // Pre-confirmation the deposit never became non-refundable: everything
@@ -615,13 +644,25 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
       });
       refundTask = res.ok;
     } else if (anyMoneyTaken) {
-      // Paid stamps say money was taken but the snapshot resolved nothing held
-      // (e.g. a card payment sitting in needs_review). No silent loss: alert
-      // the money desk to reconcile by hand.
-      await sendOpsAlert(`Cancellation with money taken but nothing snapshotted — ${moneyQuotes[0]?.quote_ref ?? leadId}`, [
-        `<strong>${current?.name ?? "Customer"}</strong> cancelled with recorded payments, but the held-money snapshot resolved £0 — likely a card payment awaiting review.`,
-        `No refund-queue row was created. Reconcile the payments and raise the refund decision manually.`,
-      ], "money");
+      // Paid stamps say money was taken but the snapshot resolved nothing
+      // held. Two legitimate reasons: a card payment sitting in needs_review,
+      // OR the money was ALREADY refunded/settled through an earlier queue row
+      // (the snapshot nets executed payouts out). Only the first needs a
+      // human — an alert on the second would send accounts chasing money that
+      // was correctly returned.
+      const { data: settled } = await admin
+        .from("refund_queue")
+        .select("id")
+        .eq("lead_id", leadId)
+        .in("status", ["refunded", "retained", "released"])
+        .limit(1)
+        .maybeSingle();
+      if (!settled) {
+        await sendOpsAlert(`Cancellation with money taken but nothing snapshotted — ${moneyQuotes[0]?.quote_ref ?? leadId}`, [
+          `<strong>${current?.name ?? "Customer"}</strong> cancelled with recorded payments, but the held-money snapshot resolved £0 — likely a card payment awaiting review.`,
+          `No refund-queue row was created. Reconcile the payments and raise the refund decision manually.`,
+        ], "money");
+      }
     }
   }
 

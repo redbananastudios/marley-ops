@@ -79,10 +79,19 @@ export function ChangeDateDialog({
   const [newEnd, setNewEnd] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const [held, setHeld] = useState<HeldSummary | null>(null);
+  // Server said "actually inside the window" (a tab opened before a UK-day
+  // boundary shows the free-change copy) — re-render the warning + tick.
+  const [forceInside, setForceInside] = useState(false);
   const [pending, start] = useTransition();
 
   // Inside/outside is judged against the ORIGINAL move day, not the new one.
-  const inside = useMemo(() => bookingChangeMode(ukDayOf(startsAt)) === "cancel_rebook", [startsAt]);
+  // Render-time only — the SERVER recomputes at submit and refuses an
+  // unacknowledged inside-window change, flipping forceInside here.
+  const renderInside = useMemo(
+    () => bookingChangeMode(ukDayOf(startsAt)) === "cancel_rebook",
+    [startsAt],
+  );
+  const inside = renderInside || forceInside;
 
   useEffect(() => {
     if (!open) return;
@@ -90,12 +99,13 @@ export function ChangeDateDialog({
     setNewEnd(toLocalInput(presetEndsAt ?? endsAt));
     setAcknowledged(false);
     setHeld(null);
-    if (inside) {
+    setForceInside(false);
+    if (renderInside) {
       fetchHeldSummaryAction(leadId).then((res) => {
         if (res.ok) setHeld(res);
       });
     }
-  }, [open, startsAt, endsAt, presetStartsAt, presetEndsAt, inside, leadId]);
+  }, [open, startsAt, endsAt, presetStartsAt, presetEndsAt, renderInside, leadId]);
 
   // Moving the start shifts the end by the same amount, keeping the duration.
   function onStartChange(value: string) {
@@ -124,8 +134,18 @@ export function ChangeDateDialog({
       return;
     }
     start(async () => {
-      const res = await changeBookingDateAction(appointmentId, s.toISOString(), e.toISOString());
+      const res = await changeBookingDateAction(appointmentId, s.toISOString(), e.toISOString(), {
+        acknowledgedInsideWindow: acknowledged,
+      });
       if (!res.ok) {
+        if (res.stale && !inside) {
+          // The UK day ticked over since this dialog rendered: the change is
+          // now inside the 7-day window. Show the warning + tick and re-ask.
+          setForceInside(true);
+          fetchHeldSummaryAction(leadId).then((r) => {
+            if (r.ok) setHeld(r);
+          });
+        }
         toast.error(res.error || "Could not change the date.");
         return;
       }

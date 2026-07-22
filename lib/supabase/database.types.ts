@@ -2765,6 +2765,7 @@ export type Database = {
           agreed_price: number | null
           balance_invoice_amount: number | null
           balance_invoice_created_at: string | null
+          booking_cancelled_at: string | null
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
@@ -2831,6 +2832,7 @@ export type Database = {
           agreed_price?: number | null
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null
+          booking_cancelled_at?: string | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -2897,6 +2899,7 @@ export type Database = {
           agreed_price?: number | null
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null
+          booking_cancelled_at?: string | null
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null

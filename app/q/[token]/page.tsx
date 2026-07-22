@@ -180,6 +180,29 @@ export default async function AcceptPage({
   // Only quotes the customer was actually sent (or has accepted) resolve here.
   if (!quote || (quote.status !== "sent" && quote.status !== "accepted")) return <NotFoundCard />;
 
+  // A cancelled booking's emailed link must never solicit payment (its unpaid
+  // invoices were voided) or offer date confirmation — booking_cancelled_at is
+  // stamped by the Marley-cancel and mark-lost unwinds and cleared on reopen.
+  if (quote.status === "accepted" && quote.booking_cancelled_at) {
+    return (
+      <Shell>
+        <Card>
+          <div className="p-6 text-center sm:p-8">
+            <h1 className="font-brand text-3xl font-semibold text-ink">
+              This booking has been cancelled
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-mist-500">
+              There&apos;s nothing to pay on this page. If anything you&apos;ve paid is due back
+              to you, it&apos;s being processed and we&apos;ll confirm by email. Any questions —
+              or if you&apos;d like to rebook — call{" "}
+              <strong className="text-ink">01747 637070</strong>.
+            </p>
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
+
   if (quote.status === "sent" && isAcceptExpired(quote.email_sent_at, quote.created_at)) {
     return (
       <Shell>
