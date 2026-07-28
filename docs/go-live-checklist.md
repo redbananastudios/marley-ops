@@ -152,9 +152,16 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    credit note MIRRORS the original invoice's VAT (no phantom reversal across the VAT-
    enablement boundary) and REQUIRES the deposit invoice to exist (else fall back to a
    human); a failed verify email leaves a durable follow-up; BACS reversals get an audit
-   link. **Remaining:** (a) accountant confirms a "refunded credit note" is the right
-   instrument + VAT-period treatment before it runs on the LIVE return; (b) the C7 IP
-   allowlist (refunds can't reach the gateway without it anyway).
+   link. **INSTRUMENT CONFIRMED (Peter, 2026-07-28): the refunded credit note IS the way
+   to offset — go.** DEPLOYED + config-verified on prod (`349368a`; ZOHO live org,
+   OPS_ALERT_EMAIL_MONEY=accounts@, COMMS_DRYRUN=false so verify emails send). **Live-active
+   now:** a BACS refund via /refunds fires the reversal immediately (no gateway needed); a
+   CARD refund fires it after the gateway REFUND_SALE, so it waits on **C7** (the IP
+   allowlist). CAVEAT — prod still holds TEST data + points at the LIVE Zoho org, so
+   exercising a refund now posts a REAL credit note to the live books (same as accepting a
+   test quote already raises a live invoice); the go-live flush (C5) does NOT touch Zoho,
+   so any test-phase credit notes/invoices need manual void in Zoho. Optional: accountant
+   can still sanity-check VAT-period timing — not a blocker per Peter.
    **Instrument to confirm with the accountant:** the Zoho document that BOTH returns the
    money AND reverses the output VAT is a **credit note that is then REFUNDED** (cash back
    to the card) — this is NOT a customer voucher/credit-balance, so it already fits "full

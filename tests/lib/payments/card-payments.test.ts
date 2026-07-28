@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   successAmountMatches,
   refundBoundsError,
+  refundDeclineMessage,
   shouldEscalateStuckPayment,
   terminalStatusToReturnState,
   STUCK_PENDING_ALERT_MIN,
@@ -74,6 +75,26 @@ describe("refundBoundsError", () => {
 
   it("requires a reason", () => {
     expect(refundBoundsError({ ...ok, reason: "   " })).toMatch(/reason is required/);
+  });
+});
+
+describe("refundDeclineMessage", () => {
+  // A same-day card auth is captured-but-unsettled; the gateway won't REFUND it,
+  // so the raw "Cannot REFUND this SALE transaction" needs desk-friendly copy.
+  it("explains an unsettled PARTIAL refund in plain terms, hiding the raw gateway text", () => {
+    const m = refundDeclineMessage("Cannot REFUND this SALE transaction", false);
+    expect(m.toLowerCase()).toContain("hasn't settled");
+    expect(m.toLowerCase()).toContain("refund it in full");
+    expect(m).not.toContain("Cannot REFUND");
+  });
+
+  it("uses the mid-settlement wording for a full-refund attempt", () => {
+    expect(refundDeclineMessage("Cannot REFUND this SALE transaction", true).toLowerCase()).toContain("mid-settlement");
+  });
+
+  it("passes any OTHER gateway decline through verbatim", () => {
+    expect(refundDeclineMessage("Insufficient funds", false)).toBe("Gateway declined the refund: Insufficient funds");
+    expect(refundDeclineMessage(null, false)).toBe("Gateway declined the refund: unknown");
   });
 });
 

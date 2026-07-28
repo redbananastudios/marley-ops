@@ -70,6 +70,24 @@ export function refundBoundsError(
   return null;
 }
 
+/**
+ * Turn a REFUND_SALE decline into desk-friendly copy. The common one: a same-day
+ * card auth is captured-but-UNSETTLED, and the gateway won't REFUND it ("Cannot
+ * REFUND this SALE transaction") — before it settles you can only VOID it in full;
+ * a partial or a plain refund waits until it settles (next working day). Pure, so
+ * the wording is unit-tested. `fullAttempt` = a full untouched refund that already
+ * tried a VOID and had that fail too (a rarer mid-settlement edge).
+ */
+export function refundDeclineMessage(gatewayMessage: string | undefined | null, fullAttempt: boolean): string {
+  const msg = gatewayMessage ?? "";
+  if (/cannot refund/i.test(msg)) {
+    return fullAttempt
+      ? "This payment can't be refunded right now — it may be mid-settlement. Try again shortly, or check the takepayments MMS."
+      : "This payment hasn't settled yet, so a partial refund isn't possible until it does (usually the next working day). To return money today, refund it in full — that voids the payment.";
+  }
+  return `Gateway declined the refund: ${msg || "unknown"}`;
+}
+
 /* ------------------------------------------------------------- availability */
 
 /** Kill switch + env creds — both required before /q renders the card button. */
@@ -480,7 +498,7 @@ export async function refundCardPayment(
       const refund = await directRequest(config, { action: "REFUND_SALE", xref, amount });
       if (Number(refund.responseCode) !== RC_SUCCESS) {
         await rollback();
-        return { ok: false, error: `Gateway declined the refund: ${refund.responseMessage ?? "unknown"}` };
+        return { ok: false, error: refundDeclineMessage(refund.responseMessage, fullAndUnsettledToday) };
       }
       response = refund;
     }
