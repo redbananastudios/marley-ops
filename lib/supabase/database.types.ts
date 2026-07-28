@@ -695,6 +695,7 @@ export type Database = {
           kind: string
           lead_id: string | null
           quote_id: string
+          reconcile_alerted_at: string | null
           refund_reason: string | null
           refunded_at: string | null
           refunded_by: string | null
@@ -718,6 +719,7 @@ export type Database = {
           kind?: string
           lead_id?: string | null
           quote_id: string
+          reconcile_alerted_at?: string | null
           refund_reason?: string | null
           refunded_at?: string | null
           refunded_by?: string | null
@@ -741,6 +743,7 @@ export type Database = {
           kind?: string
           lead_id?: string | null
           quote_id?: string
+          reconcile_alerted_at?: string | null
           refund_reason?: string | null
           refunded_at?: string | null
           refunded_by?: string | null

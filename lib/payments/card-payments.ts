@@ -540,52 +540,108 @@ export async function refundCardPayment(
 
 /* ------------------------------------------------------------- reconcile */
 
+/** Minutes a pending attempt may sit before we escalate it to a human. Well
+ *  past the seconds-level settle window (a real callback/return lands almost
+ *  immediately), early enough to catch before the daily deposit chase could
+ *  email a customer who has actually already paid. */
+export const STUCK_PENDING_ALERT_MIN = 45;
+
+/**
+ * Pure decision: should the reconcile cron escalate this pending attempt to a
+ * human? True only for a real (non-test) attempt still `pending` past the
+ * threshold that hasn't been escalated yet. Extracted so the money-critical
+ * condition is unit-tested without the DB/gateway around it.
+ *
+ * Why escalate rather than resolve: the gateway QUERY polls by `xref`, and an
+ * attempt whose callback AND browser-return both failed never received one, so
+ * it CANNOT be queried. We then can't tell an abandoned checkout (no charge)
+ * from a paid-but-lost transaction — only the takepayments MMS can, by our
+ * reference. Escalating (never silently concluding "not paid") is the correct
+ * floor.
+ */
+export function shouldEscalateStuckPending(
+  row: { status: string; is_test: boolean; created_at: string; reconcile_alerted_at: string | null },
+  opts: { nowMs: number; thresholdMin?: number },
+): boolean {
+  if (row.status !== "pending" || row.is_test || row.reconcile_alerted_at) return false;
+  const ageMs = opts.nowMs - new Date(row.created_at).getTime();
+  return ageMs >= (opts.thresholdMin ?? STUCK_PENDING_ALERT_MIN) * 60 * 1000;
+}
+
 /**
  * Safety net, three jobs:
- *  1. QUERY pending attempts >10 min old and settle from the gateway's answer;
- *     ones the gateway never saw are swept to `abandoned` after 24 h.
- *  2. QUERY recently-abandoned attempts (superseded by a retry) in case one was
- *     actually PAID — a two-tab second charge whose callback we missed. settle
- *     records it and raises the double-payment alert.
+ *  1. Pending/abandoned attempts that carry an `xref` (rare — an attempt that
+ *     was settled once then reopened): QUERY the gateway by that xref and
+ *     re-settle. A pending attempt with NO xref cannot be queried (the gateway
+ *     needs the xref), so instead it is ESCALATED once to a human to check the
+ *     takepayments MMS — the customer may have been charged — and is only swept
+ *     to `abandoned` after 24 h, after that escalation, never silently.
+ *  2. (folded into 1 via the xref-present branch: a two-tab second charge whose
+ *     callback we missed is settled if it carries an xref.)
  *  3. Re-drive `paid` rows whose quote deposit never got confirmed — the crash
  *     window where the card claim committed but the paid pipeline threw. Idempotent.
  */
 export async function reconcileCardPayments(
   sb: Sb,
-): Promise<{ checked: number; settled: number; abandoned: number; recovered: number }> {
+): Promise<{ checked: number; settled: number; abandoned: number; recovered: number; escalated: number }> {
   const config = getTakepaymentsConfig();
-  const out = { checked: 0, settled: 0, abandoned: 0, recovered: 0 };
+  const out = { checked: 0, settled: 0, abandoned: 0, recovered: 0, escalated: 0 };
   if (!config) return out;
 
-  const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const nowMs = Date.now();
+  const tenMinAgo = new Date(nowMs - 10 * 60 * 1000).toISOString();
+  const dayAgoMs = nowMs - 24 * 60 * 60 * 1000;
 
-  // (1) + (2): pending stragglers, plus recently-abandoned rows that a missed
-  // callback might have left un-recorded despite a real charge.
   const { data: rows } = await sb
     .from("card_payments")
     .select("*")
     .in("status", ["pending", "abandoned"])
     .lt("created_at", tenMinAgo)
-    .gt("created_at", dayAgo)
+    .gt("created_at", new Date(dayAgoMs).toISOString())
     .limit(25);
 
   for (const row of rows ?? []) {
     out.checked++;
-    let fields: GatewayResponse | null = null;
-    try {
-      fields = await directRequest(config, { action: "QUERY", transactionUnique: row.id });
-    } catch {
-      continue; // transport blip — next run retries
+
+    // (1) An attempt that carries an xref CAN be polled — settle from the
+    // gateway's answer. (Almost never a pending/abandoned row, but correct.)
+    if (row.gateway_xref) {
+      let fields: GatewayResponse | null = null;
+      try {
+        fields = await directRequest(config, { action: "QUERY", xref: row.gateway_xref });
+      } catch {
+        continue; // transport blip — next run retries
+      }
+      const found = Number(fields.responseCode) === RC_SUCCESS || fields.xref;
+      if (found && fields.transactionUnique === row.id) {
+        const outcome = await settleCardPayment(sb, fields);
+        if (outcome.ok && outcome.state === "paid") out.settled++;
+      }
+      continue;
     }
-    const found = Number(fields.responseCode) === RC_SUCCESS || fields.xref;
-    if (found && fields.transactionUnique === row.id) {
-      const outcome = await settleCardPayment(sb, fields);
-      if (outcome.ok && outcome.state === "paid") out.settled++;
-    } else if (row.status === "pending" && row.created_at < dayAgo) {
+
+    // No xref → un-queryable. Escalate once so a human verifies in the MMS
+    // BEFORE anything ever treats this as unpaid; only then let it age out.
+    if (shouldEscalateStuckPending(row, { nowMs })) {
+      const { data: q } = await sb.from("quotes").select("quote_ref").eq("id", row.quote_id).maybeSingle();
+      const ref = q?.quote_ref ?? row.quote_id?.slice(0, 8) ?? "?";
+      await sendOpsAlert(
+        "Card payment pending — verify in takepayments",
+        [
+          `A card deposit for quote ${ref} has been pending ${STUCK_PENDING_ALERT_MIN}+ minutes with no confirmation from the gateway.`,
+          `The customer MAY have been charged. Check the takepayments MMS for reference ${row.id} (£${(row.amount_pence / 100).toFixed(2)}).`,
+          `If it shows there as paid, mark the deposit paid on the quote. If there's no charge, no action is needed — it will clear on its own.`,
+        ],
+        "money",
+      );
+      await sb.from("card_payments").update({ reconcile_alerted_at: new Date(nowMs).toISOString() }).eq("id", row.id);
+      out.escalated++;
+    }
+
+    if (row.status === "pending" && new Date(row.created_at).getTime() < dayAgoMs) {
       await sb
         .from("card_payments")
-        .update({ status: "abandoned", response_message: "no gateway record after 24h" })
+        .update({ status: "abandoned", response_message: "no confirmation after 24h — flagged for MMS check" })
         .eq("id", row.id)
         .eq("status", "pending");
       out.abandoned++;

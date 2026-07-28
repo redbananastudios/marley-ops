@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { successAmountMatches, refundBoundsError } from "@/lib/payments/card-payments";
+import {
+  successAmountMatches,
+  refundBoundsError,
+  shouldEscalateStuckPending,
+  STUCK_PENDING_ALERT_MIN,
+} from "@/lib/payments/card-payments";
 
 /**
  * Pure money guards for the card-payment lifecycle. The DB-coupled flow
@@ -68,5 +73,39 @@ describe("refundBoundsError", () => {
 
   it("requires a reason", () => {
     expect(refundBoundsError({ ...ok, reason: "   " })).toMatch(/reason is required/);
+  });
+});
+
+describe("shouldEscalateStuckPending", () => {
+  const nowMs = Date.parse("2026-07-28T12:00:00Z");
+  const old = new Date(nowMs - (STUCK_PENDING_ALERT_MIN + 5) * 60 * 1000).toISOString();
+  const fresh = new Date(nowMs - 5 * 60 * 1000).toISOString();
+  const base = { status: "pending", is_test: false, created_at: old, reconcile_alerted_at: null };
+
+  it("escalates a real pending attempt older than the threshold, once", () => {
+    expect(shouldEscalateStuckPending(base, { nowMs })).toBe(true);
+  });
+
+  it("does NOT escalate before the threshold", () => {
+    expect(shouldEscalateStuckPending({ ...base, created_at: fresh }, { nowMs })).toBe(false);
+  });
+
+  it("does NOT re-escalate one already alerted (dedup)", () => {
+    expect(shouldEscalateStuckPending({ ...base, reconcile_alerted_at: old }, { nowMs })).toBe(false);
+  });
+
+  it("never escalates a test attempt", () => {
+    expect(shouldEscalateStuckPending({ ...base, is_test: true }, { nowMs })).toBe(false);
+  });
+
+  it("never escalates a non-pending attempt (already settled/abandoned)", () => {
+    expect(shouldEscalateStuckPending({ ...base, status: "paid" }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPending({ ...base, status: "abandoned" }, { nowMs })).toBe(false);
+  });
+
+  it("honours an explicit threshold override", () => {
+    const twentyMinOld = new Date(nowMs - 20 * 60 * 1000).toISOString();
+    expect(shouldEscalateStuckPending({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 15 })).toBe(true);
+    expect(shouldEscalateStuckPending({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 30 })).toBe(false);
   });
 });
