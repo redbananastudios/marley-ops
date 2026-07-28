@@ -161,7 +161,13 @@ export async function startCardPayment(
 /* ------------------------------------------------------------- settle */
 
 export type SettleOutcome =
-  | { ok: true; state: "paid" | "already_terminal" }
+  | { ok: true; state: "paid" }
+  /** The row was already terminal (the other route won the race) — carries the
+   *  row's final status so the browser-return redirect reflects the REAL
+   *  outcome. Without it a declined customer whose callback settled first got
+   *  bounced to ?card=ok and saw no failure explanation (caught in the
+   *  2026-07-28 sandbox verification). */
+  | { ok: true; state: "already_terminal"; finalStatus: string }
   | { ok: true; state: "declined"; message: string }
   | { ok: false; error: string };
 
@@ -187,7 +193,7 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
 
   // A success can rescue an abandoned (superseded) row; a decline can't.
   const claimFrom = success ? ["pending", "abandoned"] : ["pending"];
-  if (!claimFrom.includes(row.status)) return { ok: true, state: "already_terminal" };
+  if (!claimFrom.includes(row.status)) return { ok: true, state: "already_terminal", finalStatus: row.status };
 
   // Paranoia gate on success: the gateway must have taken exactly our amount.
   // A mismatch is never auto-confirmed — claim the row to `needs_review` (a
@@ -235,7 +241,12 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
     .in("status", claimFrom)
     .select("id");
   if (claimErr) return { ok: false, error: claimErr.message };
-  if (!claimed?.length) return { ok: true, state: "already_terminal" };
+  if (!claimed?.length) {
+    // Lost the claim mid-flight — re-read for the winner's terminal status
+    // (the pre-claim `row` snapshot is stale by definition here).
+    const { data: fresh } = await sb.from("card_payments").select("status").eq("id", row.id).maybeSingle();
+    return { ok: true, state: "already_terminal", finalStatus: fresh?.status ?? row.status };
+  }
 
   if (!success) {
     return { ok: true, state: "declined", message: fields.responseMessage ?? "declined" };
@@ -348,6 +359,13 @@ export async function handleGatewayMessage(
     const outcome = await settleCardPayment(sb, verified);
     if (!outcome.ok) return { state: "error", token };
     if (outcome.state === "declined") return { state: "failed", token };
+    // Race-loser path: reflect what the winner recorded. A declined attempt
+    // must land back on /q as card=failed even when the callback settled it
+    // first; needs_review maps to "error" (call-us copy) — never a quiet "ok".
+    if (outcome.state === "already_terminal") {
+      if (outcome.finalStatus === "failed") return { state: "failed", token };
+      if (outcome.finalStatus === "needs_review") return { state: "error", token };
+    }
     return { state: "ok", token };
   } catch (err) {
     console.error(
