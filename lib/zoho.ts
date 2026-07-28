@@ -338,6 +338,22 @@ export async function getInvoiceStatus(invoiceId: string): Promise<ZohoInvoiceSt
   };
 }
 
+/**
+ * Did this invoice actually carry output VAT? A refund's credit note must MIRROR
+ * the original invoice's tax treatment, not re-derive it from the org's CURRENT
+ * rate — otherwise a deposit invoiced BEFORE VAT was enabled (no tax) but refunded
+ * AFTER would reverse VAT that was never declared. Also serves as the existence
+ * gate: this throws (via zoho()) if the invoice id isn't a real invoice, so the
+ * caller falls back to a human when there's nothing genuine to reverse.
+ */
+export async function invoiceCarriesVat(invoiceId: string): Promise<boolean> {
+  const res = await zoho("GET", `/invoices/${invoiceId}`);
+  const inv = res.invoice ?? {};
+  const taxTotal = Number(inv.tax_total ?? 0);
+  const lineHasTax = (inv.line_items ?? []).some((l: any) => !!l.tax_id);
+  return taxTotal > 0 || lineHasTax;
+}
+
 /** Record a customer payment applied to one invoice (e.g. a BACS deposit). */
 export async function recordInvoicePayment(input: {
   customerId: string;
@@ -387,6 +403,127 @@ export async function voidInvoice(invoiceId: string): Promise<void> {
     throw new ZohoError(`Refusing to void ${status.invoiceNumber}: payment already applied`);
   }
   await zoho("POST", `/invoices/${invoiceId}/status/void`);
+}
+
+/* ------------------------------------------------------------- credit notes */
+
+export interface ZohoCreditNoteRef {
+  creditNoteId: string;
+  creditNoteNumber: string;
+}
+
+/**
+ * Adopt an existing credit note by our reference number — the idempotency half of
+ * never-create-twice (covers a crash between Zoho-create and the DB write-back),
+ * mirroring findInvoiceByReference. Skips void ones.
+ */
+export async function findCreditNoteByReference(reference: string): Promise<ZohoCreditNoteRef | null> {
+  const res = await zoho("GET", `/creditnotes?reference_number=${encodeURIComponent(reference)}`);
+  const cn = (res.creditnotes ?? []).find((c: any) => c.status !== "void");
+  if (!cn) return null;
+  return { creditNoteId: cn.creditnote_id as string, creditNoteNumber: cn.creditnote_number as string };
+}
+
+/**
+ * Create a credit note — the VAT-reversal document for a refunded/cancelled
+ * supply. Mirrors createInvoice EXACTLY: a single VAT-inclusive line that
+ * auto-itemises ex-VAT + VAT the hour a 20% rate exists in the org (so the
+ * reversal always matches how the original deposit invoice was raised). The
+ * verified DEMO-org flow returns the note already `open`; a `draft` is opened
+ * defensively. Idempotent via reference_number — adopts rather than duplicating.
+ *
+ * This does NOT move money; refundCreditNote records the cash going back.
+ */
+export async function createCreditNote(input: {
+  customerId: string;
+  reference: string;
+  description: string;
+  /** Gross, VAT-inclusive — matches the amount being refunded. */
+  amount: number;
+  notes?: string;
+  /** Income-separation handle, like createInvoice (e.g. "Storage"). */
+  itemName?: string;
+  /** yyyy-mm-dd; defaults to today (the reversal lands in this VAT period). */
+  date?: string;
+  /** MIRROR the original invoice's tax treatment instead of re-deriving from the
+   *  org's current rate. false ⇒ no tax line even if a rate now exists (the
+   *  deposit was invoiced pre-VAT); true/undefined ⇒ use the org's 20% rate. */
+  applyVat?: boolean;
+}): Promise<ZohoCreditNoteRef> {
+  const existing = await findCreditNoteByReference(input.reference);
+  if (existing) return existing;
+
+  const taxId = input.applyVat === false ? null : await getVatTaxId();
+  const line: Record<string, unknown> = {
+    description: input.description,
+    rate: Math.round(input.amount * 100) / 100,
+    quantity: 1,
+  };
+  if (input.itemName) line.name = input.itemName;
+  if (taxId) line.tax_id = taxId;
+
+  const created = await zoho("POST", "/creditnotes", {
+    customer_id: input.customerId,
+    reference_number: input.reference,
+    date: input.date ?? new Date().toISOString().slice(0, 10),
+    ...(taxId ? { is_inclusive_tax: true } : {}),
+    line_items: [line],
+    notes: input.notes,
+  });
+  const cn = created.creditnote;
+  const id = cn.creditnote_id as string;
+  if (cn.status === "draft") {
+    await zoho("POST", `/creditnotes/${id}/status/open`);
+  }
+  return { creditNoteId: id, creditNoteNumber: cn.creditnote_number as string };
+}
+
+/**
+ * Record a refund against an OPEN credit note — the money going back to the
+ * customer's card (creditcard) or bank (banktransfer/cash). The gateway/bank has
+ * ALREADY moved the money; this is the bookkeeping record that completes the VAT
+ * reversal. Guards against a double-refund: refuses to post more than the note's
+ * un-refunded balance, and reports `already_refunded` when nothing is left.
+ * Returns the refund id (or the sentinel "already_refunded").
+ */
+export async function refundCreditNote(input: {
+  creditNoteId: string;
+  amount: number;
+  mode: "creditcard" | "banktransfer" | "cash";
+  reference?: string;
+  description?: string;
+  date?: string;
+}): Promise<string> {
+  const cur = await zoho("GET", `/creditnotes/${input.creditNoteId}`);
+  const cn = cur.creditnote ?? {};
+  const total = Number(cn.total ?? 0);
+  const alreadyRefunded = Number(cn.total_refunded_amount ?? 0);
+  const available = Math.round((total - alreadyRefunded) * 100) / 100;
+  const want = Math.round(input.amount * 100) / 100;
+  if (available <= 0) return "already_refunded"; // fully refunded — never double-pay
+  if (want > available) {
+    throw new ZohoError(
+      `Credit note ${input.creditNoteId} has only £${available.toFixed(2)} left to refund (asked £${want.toFixed(2)})`,
+    );
+  }
+  const res = await zoho("POST", `/creditnotes/${input.creditNoteId}/refunds`, {
+    date: input.date ?? new Date().toISOString().slice(0, 10),
+    refund_mode: input.mode,
+    amount: want,
+    reference_number: input.reference,
+    description: input.description,
+  });
+  return res.creditnote_refund?.creditnote_refund_id as string;
+}
+
+/** Void + delete a credit note — test-data cleanup only, never the app flow. */
+export async function voidAndDeleteCreditNote(creditNoteId: string): Promise<void> {
+  try {
+    await zoho("POST", `/creditnotes/${creditNoteId}/status/void`);
+  } catch {
+    /* drafts can't be voided — deletable directly */
+  }
+  await zoho("DELETE", `/creditnotes/${creditNoteId}`);
 }
 
 /* ------------------------------------------------------------- cleanup (test hygiene) */

@@ -704,6 +704,8 @@ export type Database = {
           response_message: string | null
           settled_at: string | null
           status: string
+          zoho_credit_note_id: string | null
+          zoho_credit_note_number: string | null
         }
         Insert: {
           amount_pence: number
@@ -728,6 +730,8 @@ export type Database = {
           response_message?: string | null
           settled_at?: string | null
           status?: string
+          zoho_credit_note_id?: string | null
+          zoho_credit_note_number?: string | null
         }
         Update: {
           amount_pence?: number
@@ -752,6 +756,8 @@ export type Database = {
           response_message?: string | null
           settled_at?: string | null
           status?: string
+          zoho_credit_note_id?: string | null
+          zoho_credit_note_number?: string | null
         }
         Relationships: [
           {

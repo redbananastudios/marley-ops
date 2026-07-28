@@ -118,6 +118,14 @@ describe.skipIf(!RUN)("card refund — live sandbox gateway (end to end)", () =>
 
   beforeAll(async () => {
     loadEnvFile(".env.local");
+    // SAFETY: .env.local's ZOHO_* point at Connor's LIVE org, and refundCardPayment
+    // now fires the Zoho reversal. Strip the creds so the reversal takes its
+    // fallback path (a tracked follow-up, asserted below) and this test can NEVER
+    // touch any Zoho org. The reversal automation is proven separately against the
+    // Demo org in refund-vat-zoho.test.ts.
+    for (const k of ["ZOHO_CLIENT_ID", "ZOHO_CLIENT_SECRET", "ZOHO_REFRESH_TOKEN", "ZOHO_ORG_ID"]) {
+      delete process.env[k];
+    }
     const config = getTakepaymentsConfig();
     expect(config, "takepayments config must load from .env.local").toBeTruthy();
     // HARD safety — never the live merchant, never live mode.

@@ -18,6 +18,7 @@ import type { Database, Json } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { refundCardPayment } from "@/lib/payments/card-payments";
+import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import { replyAddressFor } from "@/lib/quote/chase";
@@ -97,13 +98,18 @@ interface QueueQuote {
   lead_id: string | null;
   client_id: string | null;
   accept_token: string | null;
+  zoho_contact_id: string | null;
+  zoho_deposit_invoice_id: string | null;
+  zoho_deposit_invoice_number: string | null;
 }
 
 async function loadQuote(admin: Sb, quoteId: string | null): Promise<QueueQuote | null> {
   if (!quoteId) return null;
   const { data } = await admin
     .from("quotes")
-    .select("id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token")
+    .select(
+      "id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number",
+    )
     .eq("id", quoteId)
     .maybeSingle();
   return (data as QueueQuote | null) ?? null;
@@ -505,6 +511,43 @@ export async function markRailRefundedAction(
         "system",
       );
     }
+  }
+
+  // Automated VAT reversal for the BACS/cash payout just recorded. The money went
+  // back BY HAND (this action logs it); this only raises + refunds the Zoho credit
+  // note and emails accounts@ to verify. Cash is returned by bank transfer, so both
+  // rails record refund_mode "banktransfer". Fail-soft; never blocks the payout.
+  if (quote) {
+    await reverseDepositVatInZoho(admin, {
+      quoteId: quote.id,
+      quoteRef: quote.quote_ref,
+      zohoContactId: quote.zoho_contact_id,
+      zohoDepositInvoiceId: quote.zoho_deposit_invoice_id,
+      zohoDepositInvoiceNumber: quote.zoho_deposit_invoice_number,
+      customerName: quote.customer_name,
+      customerEmail: quote.customer_email,
+      leadId: row.lead_id,
+      clientId: quote.client_id,
+      amountPence: amount,
+      mode: "banktransfer",
+      voided: false,
+      idemKey: `${row.id}-${rail}`,
+      // Audit link: record which Zoho credit note reversed this rail (best-effort;
+      // must never derail the reversal, so swallow any write failure).
+      onCreditNote: async (creditNoteId, creditNoteNumber) => {
+        try {
+          await admin.from("events_log").insert({
+            actor_id: prof.id,
+            entity_type: "refund_queue",
+            entity_id: row.id,
+            action: "credit_note_raised",
+            diff: { rail, credit_note_id: creditNoteId, credit_note_number: creditNoteNumber, amount_pence: amount } as unknown as Json,
+          });
+        } catch {
+          /* audit link only; the accounts@ verify email is the primary record */
+        }
+      },
+    });
   }
 
   revalidateQueueSurfaces();

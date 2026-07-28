@@ -4,7 +4,6 @@ import {
   refundBoundsError,
   shouldEscalateStuckPayment,
   terminalStatusToReturnState,
-  buildCreditNoteReminder,
   STUCK_PENDING_ALERT_MIN,
 } from "@/lib/payments/card-payments";
 
@@ -152,56 +151,3 @@ describe("terminalStatusToReturnState", () => {
   });
 });
 
-describe("buildCreditNoteReminder", () => {
-  // The VAT guard-rail on a card refund: because raising the Zoho credit note is
-  // a manual step, this reminder is the only thing standing between "refunded in
-  // app" and "output VAT actually reclaimed". These lock the money-critical
-  // wording so it can't silently drift to something a human would ignore.
-  it("tells accounts to reverse the VAT via a credit note, naming the amount + invoice", () => {
-    const r = buildCreditNoteReminder({
-      quoteRef: "MM-260728-001",
-      invoiceNumber: "INV-000038",
-      invoiceUrl: "https://invoice.zoho.eu/…/38",
-      amountPence: 1500,
-      voided: false,
-    });
-    expect(r.subject).toContain("VAT reversal");
-    expect(r.subject).toContain("MM-260728-001");
-    const body = r.lines.join(" ");
-    expect(body).toContain("£15.00");
-    expect(body).toContain("refunded");
-    expect(body).toContain("credit note");
-    expect(body).toContain("INV-000038");
-    expect(body.toLowerCase()).toContain("vat");
-    expect(r.followUpNotes).toContain("£15.00");
-    expect(r.followUpNotes).toContain("INV-000038");
-    expect(r.followUpNotes.toLowerCase()).toContain("reclaim");
-  });
-
-  it("uses void wording and a safe fallback when there is no invoice number", () => {
-    const r = buildCreditNoteReminder({
-      quoteRef: "MM-1",
-      invoiceNumber: null,
-      invoiceUrl: null,
-      amountPence: 12000,
-      voided: true,
-    });
-    expect(r.subject).toContain("voided");
-    expect(r.lines.join(" ")).toContain("£120.00");
-    // No invoice number → a readable generic reference, never a broken blank.
-    expect(r.lines.join(" ")).toContain("the deposit invoice for this quote");
-    expect(r.followUpNotes).toContain("the deposit invoice");
-  });
-
-  it("keeps the forfeited-deposit nuance explicit — only money-back reverses VAT", () => {
-    const r = buildCreditNoteReminder({
-      quoteRef: "MM-2",
-      invoiceNumber: "INV-1",
-      invoiceUrl: null,
-      amountPence: 5000,
-      voided: false,
-    });
-    expect(r.lines.join(" ").toLowerCase()).toContain("forfeited");
-    expect(r.followUpNotes.toLowerCase()).toContain("forfeited");
-  });
-});

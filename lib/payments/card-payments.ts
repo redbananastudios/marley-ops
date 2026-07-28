@@ -21,7 +21,8 @@ import { getBusinessSettings } from "@/lib/settings";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
-import { fetchQuoteByToken, fetchQuoteById, markDepositPaid, type AcceptQuoteRow } from "@/lib/quote/accept-flow";
+import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
+import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
 import {
   buildHostedSaleFields,
   directRequest,
@@ -315,92 +316,6 @@ async function raiseDoublePaymentAlert(sb: Sb, row: CardPaymentRow): Promise<voi
   ], "money");
 }
 
-/* --------------------------------------------------- VAT credit-note guard-rail */
-
-/**
- * Pure builder for the credit-note reminder content (accounts@ alert + tracked
- * follow-up). Extracted so the money-critical VAT wording is unit-tested without
- * the DB/alert around it.
- *
- * WHY this exists (Peter, 2026-07-28): a card refund moves real money back to the
- * customer, so the output VAT declared on that deposit must be REVERSED — a Zoho
- * credit note raised in the refund's own VAT period, or the VAT stays paid to
- * HMRC and is never reclaimed. Raising that credit note is a MANUAL Zoho step by
- * design (no credit-note API is wired), so a refund that isn't paired with a
- * reminder is a silent VAT leak. This is deliberately NOT run for a
- * forfeited/retained deposit — those keep their VAT (HMRC forfeited-deposit
- * position) and never pass through refundCardPayment.
- */
-export function buildCreditNoteReminder(input: {
-  quoteRef: string;
-  invoiceNumber: string | null;
-  invoiceUrl: string | null;
-  amountPence: number;
-  voided: boolean;
-}): { subject: string; lines: string[]; followUpNotes: string } {
-  const amount = `£${(input.amountPence / 100).toFixed(2)}`;
-  const verb = input.voided ? "voided" : "refunded";
-  const period = input.voided ? "void" : "refund";
-  const invoiceRef = input.invoiceNumber
-    ? `deposit invoice ${input.invoiceNumber}${input.invoiceUrl ? ` (${input.invoiceUrl})` : ""}`
-    : "the deposit invoice for this quote";
-  return {
-    subject: `Raise a Zoho credit note — VAT reversal on a ${verb} deposit (${input.quoteRef})`,
-    lines: [
-      `A card deposit of <strong>${amount}</strong> was ${verb} for <strong>${input.quoteRef}</strong>.`,
-      `Raise a credit note in Zoho against ${invoiceRef} so the output VAT declared on the deposit is reversed and reclaimed in this VAT period.`,
-      `Manual Zoho step by design — mark the follow-up done once the credit note exists. A forfeited/retained deposit keeps its VAT and needs no credit note; this is a genuine money-back ${verb} deposit.`,
-    ],
-    followUpNotes:
-      `Raise a Zoho credit note for ${amount} against ${input.invoiceNumber ?? "the deposit invoice"} to REVERSE the VAT on the ${verb} card deposit (${input.quoteRef}). ` +
-      `Action it in the VAT period the ${period} falls in so the output VAT is reclaimed. Forfeited/retained sums keep their VAT — this is only for actual money-back.`,
-  };
-}
-
-/**
- * Fire the credit-note reminder for a settled refund/void: a tracked follow-up on
- * the lead (so it can be worked + marked done) plus the accounts@ money alert.
- * Fail-soft — a guard-rail must NEVER break a refund the gateway already ran; a
- * failure here is itself money-critical so it's logged loudly.
- */
-async function raiseCreditNoteReminder(
-  sb: Sb,
-  row: CardPaymentRow,
-  quote: AcceptQuoteRow | null,
-  opts: { amountPence: number; voided: boolean },
-): Promise<void> {
-  try {
-    const realZoho = (id: string | null | undefined): boolean => !!id && id !== "pending";
-    const content = buildCreditNoteReminder({
-      quoteRef: quote?.quote_ref ?? row.quote_id.slice(0, 8),
-      invoiceNumber: quote?.zoho_deposit_invoice_number ?? null,
-      invoiceUrl: realZoho(quote?.zoho_deposit_invoice_id) ? quote?.zoho_deposit_invoice_url ?? null : null,
-      amountPence: opts.amountPence,
-      voided: opts.voided,
-    });
-    if (quote?.lead_id) {
-      await sb.from("follow_ups").insert({
-        lead_id: quote.lead_id,
-        client_id: quote.client_id,
-        quote_id: quote.id,
-        reason: "custom",
-        due_at: new Date().toISOString(),
-        source: "card_payment",
-        notes: content.followUpNotes,
-      } as never);
-    }
-    await sendOpsAlert(content.subject, content.lines, "money");
-  } catch (err) {
-    console.error(
-      JSON.stringify({
-        evt: "card_refund.credit_note_reminder_failed",
-        id: row.id,
-        error: err instanceof Error ? err.message : "unknown",
-      }),
-    );
-  }
-}
-
 /* ------------------------------------------------------------- verify + settle */
 
 export type CardReturnState = "ok" | "failed" | "error";
@@ -606,10 +521,37 @@ export async function refundCardPayment(
     diff: { amount_pence: amount, reason } as never,
   } as never);
 
-  // VAT guard-rail: this refund/void returned real money, so the output VAT on
-  // the deposit must be reversed via a Zoho credit note (a manual step by
-  // design). Raise a tracked accounts@ task so it's never forgotten. Fail-soft.
-  await raiseCreditNoteReminder(sb, row, quote, { amountPence: amount, voided });
+  // Automated VAT reversal: this refund/void returned real money, so the output
+  // VAT on the deposit is reversed by raising + refunding a Zoho credit note, then
+  // emailing accounts@ to verify. Falls back to a tracked manual reminder if Zoho
+  // fails; never throws (the gateway already moved the money).
+  //
+  // NEVER for a test row: settleCardPayment skips the whole Zoho/customer pipeline
+  // for is_test (so a test deposit has NO Zoho invoice to reverse), and posting a
+  // real credit note for it would corrupt the LIVE VAT return. Mirror that guard.
+  if (!row.is_test) {
+    await reverseDepositVatInZoho(sb, {
+      quoteId: row.quote_id,
+      quoteRef: quote?.quote_ref ?? null,
+      zohoContactId: quote?.zoho_contact_id ?? null,
+      zohoDepositInvoiceId: quote?.zoho_deposit_invoice_id ?? null,
+      zohoDepositInvoiceNumber: quote?.zoho_deposit_invoice_number ?? null,
+      customerName: quote?.customer_name ?? null,
+      customerEmail: quote?.customer_email ?? null,
+      leadId: row.lead_id,
+      clientId: row.client_id,
+      amountPence: amount,
+      mode: "creditcard",
+      voided,
+      idemKey: `${row.id}-${reservedPence}`,
+      onCreditNote: async (creditNoteId, creditNoteNumber) => {
+        await sb
+          .from("card_payments")
+          .update({ zoho_credit_note_id: creditNoteId, zoho_credit_note_number: creditNoteNumber } as never)
+          .eq("id", row.id);
+      },
+    });
+  }
 
   // Customer note — duplicate-guarded like every other send. A same-day VOID
   // cancels the pending authorisation (no credit lands on a statement), so the

@@ -139,22 +139,34 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    to finish the green sandbox refund suite.) Verified 2026-07-28 by codebase scan:
    these three are the ONLY Direct-API calls, so one allowlist entry covers both
    refunds and reconcile.
-8. ☐ **Refund → Zoho credit note + VAT reversal — DECISION + guard-rail needed
-   before real card refunds.** An in-app card refund (refundCardPayment,
-   REFUND_SALE/CANCEL) updates card_payments + events_log + emails the customer but
-   by design does NOT raise the matching Zoho credit note — that is a manual Zoho
-   action (deferred 2026-07-09; no Zoho credit-note API is wired). Marley is now
-   VAT-registered (520 2213 58, effective 01 Jun 2026), so a genuine refund must
-   REVERSE the output VAT declared on the deposit, via a credit note in the refund's
-   own VAT period. RISK: refund the card in-app but forget the Zoho credit note →
-   income overstated and the output VAT never reclaimed. Decide: (a) GUARD-RAIL — on
-   a successful refund auto-raise an accounts@ task "raise credit note £X vs INV-xxx
-   (VAT reversal)" + track to done (keeps the deliberate manual design, closes the
-   forgotten-reversal hole); or (b) AUTOMATE — wire the Zoho credit-note API
-   (VAT-aware, mirrors createInvoice's inclusive→itemised upgrade; accountant
-   sign-off + Demo-Zoho test). KEEP the existing correct nuance: a FORFEITED/retained
-   deposit (the >25% cancellation retention) keeps its VAT — NO credit note (HMRC
-   forfeited-deposit position). Only actual refunds reverse VAT.
+8. ◐ **Refund → Zoho VAT reversal — FULL AUTOMATION BUILT + adversarially reviewed
+   (Peter, 2026-07-28); remaining gate = accountant confirms the instrument.** BUILT:
+   on a refund/void the panel auto-raises a Zoho credit note, records its refund, stores
+   the id, and emails accounts@ to VERIFY (`lib/payments/refund-vat.ts` shared by the CARD
+   path `refundCardPayment` and the BACS path `markRailRefundedAction`; new Zoho
+   `createCreditNote`/`refundCreditNote`/`invoiceCarriesVat`; migration 0078). Money back
+   IN FULL, not a held credit. **Verified:** Demo-Zoho E2E (create→refund→idempotent→
+   fallback-never-throws) + unit builders + tsc/lint/1152 vitest/build. **Adversarially
+   reviewed** (5-dimension workflow + /code-reviewer): all findings fixed — is_test rows
+   never touch Zoho; a lost-response on CREATE is adopted (no double credit note); the
+   credit note MIRRORS the original invoice's VAT (no phantom reversal across the VAT-
+   enablement boundary) and REQUIRES the deposit invoice to exist (else fall back to a
+   human); a failed verify email leaves a durable follow-up; BACS reversals get an audit
+   link. **Remaining:** (a) accountant confirms a "refunded credit note" is the right
+   instrument + VAT-period treatment before it runs on the LIVE return; (b) the C7 IP
+   allowlist (refunds can't reach the gateway without it anyway).
+   **Instrument to confirm with the accountant:** the Zoho document that BOTH returns the
+   money AND reverses the output VAT is a **credit note that is then REFUNDED** (cash back
+   to the card) — this is NOT a customer voucher/credit-balance, so it already fits "full
+   refund, no rebooking"; there is no VAT-reversal that records nothing. Confirm this is
+   the instrument (+ VAT-period treatment) before it touches the live return.
+   **Build spans BOTH rails:** CARD = automated money-back (takepayments REFUND_SALE, proven
+   in sandbox) + auto Zoho credit-note-and-refund; **BACS = money-back is MANUAL** (human
+   bank transfer — no auto rail; via the existing `refund_queue` /refunds flow) but the Zoho
+   reversal + accounts@ verify email still fire so nothing is forgotten. Then: wire the Zoho
+   `creditnotes` API (VAT-aware, mirrors `createInvoice`) + Demo-Zoho test.
+   KEEP the nuance: a FORFEITED/retained deposit keeps its VAT — NO reversal (HMRC
+   forfeited-deposit position). Only genuine money-back refunds reverse VAT.
 9. ☐ Go: real enquiries into Marley Ops; iMVE runs in PARALLEL (bookings
    double-entered only).
 
