@@ -129,7 +129,33 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 7. ☐ Card payments (when A2 lands): TAKEPAYMENTS_* env into /opt/marley-ops/app.env
    + .env.local → flip the Settings kill switch → Settings test payment → run the
    S9 suite (refund lockout, tampered callback, reconcile cron) → leave ON.
-8. ☐ Go: real enquiries into Marley Ops; iMVE runs in PARALLEL (bookings
+   **PREREQUISITE — register the production server IP in the takepayments MMS.**
+   The Direct-API money-out/management actions — REFUND_SALE, CANCEL, and the
+   reconcile QUERY — are IP-restricted: from an unregistered IP they return rc
+   **65558 "IP blocked primary"** (customer SALEs via the HPP are unaffected). Add
+   the OVH box outbound IP **51.195.253.165** to the MMS permitted-IP allowlist
+   (mms.tponlinepayments.com, peter@marleymoves.co.uk) or LIVE REFUNDS **and** the
+   15-min reconcile cron will silently fail. (Also add i9 test IP **51.179.200.95**
+   to finish the green sandbox refund suite.) Verified 2026-07-28 by codebase scan:
+   these three are the ONLY Direct-API calls, so one allowlist entry covers both
+   refunds and reconcile.
+8. ☐ **Refund → Zoho credit note + VAT reversal — DECISION + guard-rail needed
+   before real card refunds.** An in-app card refund (refundCardPayment,
+   REFUND_SALE/CANCEL) updates card_payments + events_log + emails the customer but
+   by design does NOT raise the matching Zoho credit note — that is a manual Zoho
+   action (deferred 2026-07-09; no Zoho credit-note API is wired). Marley is now
+   VAT-registered (520 2213 58, effective 01 Jun 2026), so a genuine refund must
+   REVERSE the output VAT declared on the deposit, via a credit note in the refund's
+   own VAT period. RISK: refund the card in-app but forget the Zoho credit note →
+   income overstated and the output VAT never reclaimed. Decide: (a) GUARD-RAIL — on
+   a successful refund auto-raise an accounts@ task "raise credit note £X vs INV-xxx
+   (VAT reversal)" + track to done (keeps the deliberate manual design, closes the
+   forgotten-reversal hole); or (b) AUTOMATE — wire the Zoho credit-note API
+   (VAT-aware, mirrors createInvoice's inclusive→itemised upgrade; accountant
+   sign-off + Demo-Zoho test). KEEP the existing correct nuance: a FORFEITED/retained
+   deposit (the >25% cancellation retention) keeps its VAT — NO credit note (HMRC
+   forfeited-deposit position). Only actual refunds reverse VAT.
+9. ☐ Go: real enquiries into Marley Ops; iMVE runs in PARALLEL (bookings
    double-entered only).
 
 ## D — After go-live

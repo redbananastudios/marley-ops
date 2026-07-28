@@ -21,7 +21,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
-import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
+import { fetchQuoteByToken, fetchQuoteById, markDepositPaid, type AcceptQuoteRow } from "@/lib/quote/accept-flow";
 import {
   buildHostedSaleFields,
   directRequest,
@@ -315,9 +315,112 @@ async function raiseDoublePaymentAlert(sb: Sb, row: CardPaymentRow): Promise<voi
   ], "money");
 }
 
+/* --------------------------------------------------- VAT credit-note guard-rail */
+
+/**
+ * Pure builder for the credit-note reminder content (accounts@ alert + tracked
+ * follow-up). Extracted so the money-critical VAT wording is unit-tested without
+ * the DB/alert around it.
+ *
+ * WHY this exists (Peter, 2026-07-28): a card refund moves real money back to the
+ * customer, so the output VAT declared on that deposit must be REVERSED — a Zoho
+ * credit note raised in the refund's own VAT period, or the VAT stays paid to
+ * HMRC and is never reclaimed. Raising that credit note is a MANUAL Zoho step by
+ * design (no credit-note API is wired), so a refund that isn't paired with a
+ * reminder is a silent VAT leak. This is deliberately NOT run for a
+ * forfeited/retained deposit — those keep their VAT (HMRC forfeited-deposit
+ * position) and never pass through refundCardPayment.
+ */
+export function buildCreditNoteReminder(input: {
+  quoteRef: string;
+  invoiceNumber: string | null;
+  invoiceUrl: string | null;
+  amountPence: number;
+  voided: boolean;
+}): { subject: string; lines: string[]; followUpNotes: string } {
+  const amount = `£${(input.amountPence / 100).toFixed(2)}`;
+  const verb = input.voided ? "voided" : "refunded";
+  const period = input.voided ? "void" : "refund";
+  const invoiceRef = input.invoiceNumber
+    ? `deposit invoice ${input.invoiceNumber}${input.invoiceUrl ? ` (${input.invoiceUrl})` : ""}`
+    : "the deposit invoice for this quote";
+  return {
+    subject: `Raise a Zoho credit note — VAT reversal on a ${verb} deposit (${input.quoteRef})`,
+    lines: [
+      `A card deposit of <strong>${amount}</strong> was ${verb} for <strong>${input.quoteRef}</strong>.`,
+      `Raise a credit note in Zoho against ${invoiceRef} so the output VAT declared on the deposit is reversed and reclaimed in this VAT period.`,
+      `Manual Zoho step by design — mark the follow-up done once the credit note exists. A forfeited/retained deposit keeps its VAT and needs no credit note; this is a genuine money-back ${verb} deposit.`,
+    ],
+    followUpNotes:
+      `Raise a Zoho credit note for ${amount} against ${input.invoiceNumber ?? "the deposit invoice"} to REVERSE the VAT on the ${verb} card deposit (${input.quoteRef}). ` +
+      `Action it in the VAT period the ${period} falls in so the output VAT is reclaimed. Forfeited/retained sums keep their VAT — this is only for actual money-back.`,
+  };
+}
+
+/**
+ * Fire the credit-note reminder for a settled refund/void: a tracked follow-up on
+ * the lead (so it can be worked + marked done) plus the accounts@ money alert.
+ * Fail-soft — a guard-rail must NEVER break a refund the gateway already ran; a
+ * failure here is itself money-critical so it's logged loudly.
+ */
+async function raiseCreditNoteReminder(
+  sb: Sb,
+  row: CardPaymentRow,
+  quote: AcceptQuoteRow | null,
+  opts: { amountPence: number; voided: boolean },
+): Promise<void> {
+  try {
+    const realZoho = (id: string | null | undefined): boolean => !!id && id !== "pending";
+    const content = buildCreditNoteReminder({
+      quoteRef: quote?.quote_ref ?? row.quote_id.slice(0, 8),
+      invoiceNumber: quote?.zoho_deposit_invoice_number ?? null,
+      invoiceUrl: realZoho(quote?.zoho_deposit_invoice_id) ? quote?.zoho_deposit_invoice_url ?? null : null,
+      amountPence: opts.amountPence,
+      voided: opts.voided,
+    });
+    if (quote?.lead_id) {
+      await sb.from("follow_ups").insert({
+        lead_id: quote.lead_id,
+        client_id: quote.client_id,
+        quote_id: quote.id,
+        reason: "custom",
+        due_at: new Date().toISOString(),
+        source: "card_payment",
+        notes: content.followUpNotes,
+      } as never);
+    }
+    await sendOpsAlert(content.subject, content.lines, "money");
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        evt: "card_refund.credit_note_reminder_failed",
+        id: row.id,
+        error: err instanceof Error ? err.message : "unknown",
+      }),
+    );
+  }
+}
+
 /* ------------------------------------------------------------- verify + settle */
 
 export type CardReturnState = "ok" | "failed" | "error";
+
+/**
+ * Map an already-terminal row's real status (the race winner's outcome) to the
+ * customer-facing redirect state. WHITELIST, not blacklist: only a genuine
+ * `paid` row may show the success page. Every other terminal status — a decline
+ * (`failed`), an amount-mismatch hold (`needs_review`), a superseded attempt
+ * (`abandoned`), a void/refund, or a `pending` fallback from a failed re-read —
+ * must NOT render success, or a customer who did not pay is told they did.
+ * `failed` gets the retry copy; anything else non-paid gets the call-us
+ * ("error") copy. Pure, so this money-critical redirect table is unit-tested
+ * without a gateway.
+ */
+export function terminalStatusToReturnState(finalStatus: string): CardReturnState {
+  if (finalStatus === "paid") return "ok";
+  if (finalStatus === "failed") return "failed";
+  return "error";
+}
 
 /**
  * Shared entry for the return + callback routes: verify the signature, settle,
@@ -359,12 +462,13 @@ export async function handleGatewayMessage(
     const outcome = await settleCardPayment(sb, verified);
     if (!outcome.ok) return { state: "error", token };
     if (outcome.state === "declined") return { state: "failed", token };
-    // Race-loser path: reflect what the winner recorded. A declined attempt
-    // must land back on /q as card=failed even when the callback settled it
-    // first; needs_review maps to "error" (call-us copy) — never a quiet "ok".
+    // Race-loser path: reflect what the winner ACTUALLY recorded, via a strict
+    // whitelist. A declined attempt must land back on /q as card=failed even
+    // when the callback settled it first; a superseded (abandoned) row hit by a
+    // late decline, a needs_review hold, or a stale-read `pending` fallback all
+    // map to "error" — only a genuine `paid` winner is ever shown success.
     if (outcome.state === "already_terminal") {
-      if (outcome.finalStatus === "failed") return { state: "failed", token };
-      if (outcome.finalStatus === "needs_review") return { state: "error", token };
+      return { state: terminalStatusToReturnState(outcome.finalStatus), token };
     }
     return { state: "ok", token };
   } catch (err) {
@@ -502,6 +606,11 @@ export async function refundCardPayment(
     diff: { amount_pence: amount, reason } as never,
   } as never);
 
+  // VAT guard-rail: this refund/void returned real money, so the output VAT on
+  // the deposit must be reversed via a Zoho credit note (a manual step by
+  // design). Raise a tracked accounts@ task so it's never forgotten. Fail-soft.
+  await raiseCreditNoteReminder(sb, row, quote, { amountPence: amount, voided });
+
   // Customer note — duplicate-guarded like every other send. A same-day VOID
   // cancels the pending authorisation (no credit lands on a statement), so the
   // copy must differ from a settled refund or the customer waits for a line
@@ -547,23 +656,30 @@ export async function refundCardPayment(
 export const STUCK_PENDING_ALERT_MIN = 45;
 
 /**
- * Pure decision: should the reconcile cron escalate this pending attempt to a
- * human? True only for a real (non-test) attempt still `pending` past the
- * threshold that hasn't been escalated yet. Extracted so the money-critical
- * condition is unit-tested without the DB/gateway around it.
+ * Pure decision: should the reconcile cron escalate this attempt to a human?
+ * True for a real (non-test) attempt that is still un-settled — `pending` OR
+ * `abandoned` — past the threshold and not yet escalated. Extracted so the
+ * money-critical condition is unit-tested without the DB/gateway around it.
+ *
+ * Why `abandoned` counts too: a superseded attempt (retired when the customer
+ * started a second one) may still have had its ORIGINAL gateway session
+ * completed and charged. With no xref and both channels lost it is exactly as
+ * un-queryable as a stuck `pending` one, so it needs the same human MMS check —
+ * omitting it left a real (if rare) two-tab hole where a charged customer was
+ * never surfaced.
  *
  * Why escalate rather than resolve: the gateway QUERY polls by `xref`, and an
  * attempt whose callback AND browser-return both failed never received one, so
- * it CANNOT be queried. We then can't tell an abandoned checkout (no charge)
- * from a paid-but-lost transaction — only the takepayments MMS can, by our
- * reference. Escalating (never silently concluding "not paid") is the correct
- * floor.
+ * it CANNOT be queried. We then can't tell a genuinely abandoned checkout (no
+ * charge) from a paid-but-lost transaction — only the takepayments MMS can, by
+ * our reference. Escalating (never silently concluding "not paid") is the floor.
  */
-export function shouldEscalateStuckPending(
+export function shouldEscalateStuckPayment(
   row: { status: string; is_test: boolean; created_at: string; reconcile_alerted_at: string | null },
   opts: { nowMs: number; thresholdMin?: number },
 ): boolean {
-  if (row.status !== "pending" || row.is_test || row.reconcile_alerted_at) return false;
+  if (!["pending", "abandoned"].includes(row.status)) return false;
+  if (row.is_test || row.reconcile_alerted_at) return false;
   const ageMs = opts.nowMs - new Date(row.created_at).getTime();
   return ageMs >= (opts.thresholdMin ?? STUCK_PENDING_ALERT_MIN) * 60 * 1000;
 }
@@ -572,10 +688,11 @@ export function shouldEscalateStuckPending(
  * Safety net, three jobs:
  *  1. Pending/abandoned attempts that carry an `xref` (rare — an attempt that
  *     was settled once then reopened): QUERY the gateway by that xref and
- *     re-settle. A pending attempt with NO xref cannot be queried (the gateway
- *     needs the xref), so instead it is ESCALATED once to a human to check the
- *     takepayments MMS — the customer may have been charged — and is only swept
- *     to `abandoned` after 24 h, after that escalation, never silently.
+ *     re-settle. A pending OR abandoned attempt with NO xref cannot be queried
+ *     (the gateway needs the xref), so instead it is ESCALATED once to a human
+ *     to check the takepayments MMS — the customer may have been charged — and a
+ *     stuck `pending` one is only swept to `abandoned` after 24 h, after that
+ *     escalation, never silently.
  *  2. (folded into 1 via the xref-present branch: a two-tab second charge whose
  *     callback we missed is settled if it carries an xref.)
  *  3. Re-drive `paid` rows whose quote deposit never got confirmed — the crash
@@ -591,13 +708,20 @@ export async function reconcileCardPayments(
   const nowMs = Date.now();
   const tenMinAgo = new Date(nowMs - 10 * 60 * 1000).toISOString();
   const dayAgoMs = nowMs - 24 * 60 * 60 * 1000;
+  // Fetch a WIDER window than the 24 h abandon threshold, or the sweep below
+  // (created_at < dayAgoMs) could never see the rows it targets — a lower bound
+  // of dayAgoMs and a `< dayAgoMs` check are mutually exclusive, which made the
+  // sweep dead code. Oldest-first + the 25-row cap means the most-stuck attempt
+  // is always processed, never starved out of its escalation under a backlog.
+  const windowStart = new Date(nowMs - 7 * 24 * 60 * 60 * 1000).toISOString();
 
   const { data: rows } = await sb
     .from("card_payments")
     .select("*")
     .in("status", ["pending", "abandoned"])
     .lt("created_at", tenMinAgo)
-    .gt("created_at", new Date(dayAgoMs).toISOString())
+    .gt("created_at", windowStart)
+    .order("created_at", { ascending: true })
     .limit(25);
 
   for (const row of rows ?? []) {
@@ -622,13 +746,15 @@ export async function reconcileCardPayments(
 
     // No xref → un-queryable. Escalate once so a human verifies in the MMS
     // BEFORE anything ever treats this as unpaid; only then let it age out.
-    if (shouldEscalateStuckPending(row, { nowMs })) {
+    // Covers `abandoned` (superseded) rows too — their original session may
+    // still have been charged.
+    if (shouldEscalateStuckPayment(row, { nowMs })) {
       const { data: q } = await sb.from("quotes").select("quote_ref").eq("id", row.quote_id).maybeSingle();
       const ref = q?.quote_ref ?? row.quote_id?.slice(0, 8) ?? "?";
       await sendOpsAlert(
-        "Card payment pending — verify in takepayments",
+        "Card payment unconfirmed — verify in takepayments",
         [
-          `A card deposit for quote ${ref} has been pending ${STUCK_PENDING_ALERT_MIN}+ minutes with no confirmation from the gateway.`,
+          `A card deposit for quote ${ref} has had no confirmation from the gateway for ${STUCK_PENDING_ALERT_MIN}+ minutes.`,
           `The customer MAY have been charged. Check the takepayments MMS for reference ${row.id} (£${(row.amount_pence / 100).toFixed(2)}).`,
           `If it shows there as paid, mark the deposit paid on the quote. If there's no charge, no action is needed — it will clear on its own.`,
         ],
@@ -656,6 +782,7 @@ export async function reconcileCardPayments(
     .eq("status", "paid")
     .eq("is_test", false)
     .lt("settled_at", tenMinAgo)
+    .order("settled_at", { ascending: true })
     .limit(25);
   for (const row of orphans ?? []) {
     const { data: q } = await sb

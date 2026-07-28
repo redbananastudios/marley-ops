@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   successAmountMatches,
   refundBoundsError,
-  shouldEscalateStuckPending,
+  shouldEscalateStuckPayment,
+  terminalStatusToReturnState,
+  buildCreditNoteReminder,
   STUCK_PENDING_ALERT_MIN,
 } from "@/lib/payments/card-payments";
 
@@ -76,36 +78,130 @@ describe("refundBoundsError", () => {
   });
 });
 
-describe("shouldEscalateStuckPending", () => {
+describe("shouldEscalateStuckPayment", () => {
   const nowMs = Date.parse("2026-07-28T12:00:00Z");
   const old = new Date(nowMs - (STUCK_PENDING_ALERT_MIN + 5) * 60 * 1000).toISOString();
   const fresh = new Date(nowMs - 5 * 60 * 1000).toISOString();
   const base = { status: "pending", is_test: false, created_at: old, reconcile_alerted_at: null };
 
   it("escalates a real pending attempt older than the threshold, once", () => {
-    expect(shouldEscalateStuckPending(base, { nowMs })).toBe(true);
+    expect(shouldEscalateStuckPayment(base, { nowMs })).toBe(true);
   });
 
-  it("does NOT escalate before the threshold", () => {
-    expect(shouldEscalateStuckPending({ ...base, created_at: fresh }, { nowMs })).toBe(false);
+  it("ALSO escalates a superseded (abandoned) attempt — its original session may have been charged", () => {
+    // The two-tab hole: an abandoned row with no xref whose original gateway
+    // session may still have completed + charged is just as un-queryable as a
+    // stuck pending one, so it must reach a human too.
+    expect(shouldEscalateStuckPayment({ ...base, status: "abandoned" }, { nowMs })).toBe(true);
+  });
+
+  it("does NOT escalate before the threshold (pending or abandoned)", () => {
+    expect(shouldEscalateStuckPayment({ ...base, created_at: fresh }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, status: "abandoned", created_at: fresh }, { nowMs })).toBe(false);
   });
 
   it("does NOT re-escalate one already alerted (dedup)", () => {
-    expect(shouldEscalateStuckPending({ ...base, reconcile_alerted_at: old }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, reconcile_alerted_at: old }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, status: "abandoned", reconcile_alerted_at: old }, { nowMs })).toBe(false);
   });
 
   it("never escalates a test attempt", () => {
-    expect(shouldEscalateStuckPending({ ...base, is_test: true }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, is_test: true }, { nowMs })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, status: "abandoned", is_test: true }, { nowMs })).toBe(false);
   });
 
-  it("never escalates a non-pending attempt (already settled/abandoned)", () => {
-    expect(shouldEscalateStuckPending({ ...base, status: "paid" }, { nowMs })).toBe(false);
-    expect(shouldEscalateStuckPending({ ...base, status: "abandoned" }, { nowMs })).toBe(false);
+  it("never escalates an already-settled/terminal attempt", () => {
+    for (const status of ["paid", "failed", "needs_review", "refunded", "voided", "partially_refunded"]) {
+      expect(shouldEscalateStuckPayment({ ...base, status }, { nowMs })).toBe(false);
+    }
   });
 
   it("honours an explicit threshold override", () => {
     const twentyMinOld = new Date(nowMs - 20 * 60 * 1000).toISOString();
-    expect(shouldEscalateStuckPending({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 15 })).toBe(true);
-    expect(shouldEscalateStuckPending({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 30 })).toBe(false);
+    expect(shouldEscalateStuckPayment({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 15 })).toBe(true);
+    expect(shouldEscalateStuckPayment({ ...base, created_at: twentyMinOld }, { nowMs, thresholdMin: 30 })).toBe(false);
+  });
+});
+
+describe("terminalStatusToReturnState", () => {
+  // The money-critical redirect table: a race-loser browser-return must reflect
+  // the WINNER's real outcome. Only a genuinely paid row may show success — a
+  // whitelist, so a new terminal status can never silently fall through to a
+  // false "you paid" screen (the bug that shipped as the abandoned/pending
+  // fall-through and was caught in this hardening pass).
+  it("shows success ONLY for a genuinely paid row", () => {
+    expect(terminalStatusToReturnState("paid")).toBe("ok");
+  });
+
+  it("shows the retry (failed) page for a decline", () => {
+    expect(terminalStatusToReturnState("failed")).toBe("failed");
+  });
+
+  it("shows the call-us (error) page for EVERY other status — never a false success", () => {
+    for (const status of [
+      "needs_review",
+      "abandoned",
+      "pending",
+      "voided",
+      "refunded",
+      "partially_refunded",
+      "something_new",
+    ]) {
+      expect(terminalStatusToReturnState(status)).toBe("error");
+    }
+  });
+});
+
+describe("buildCreditNoteReminder", () => {
+  // The VAT guard-rail on a card refund: because raising the Zoho credit note is
+  // a manual step, this reminder is the only thing standing between "refunded in
+  // app" and "output VAT actually reclaimed". These lock the money-critical
+  // wording so it can't silently drift to something a human would ignore.
+  it("tells accounts to reverse the VAT via a credit note, naming the amount + invoice", () => {
+    const r = buildCreditNoteReminder({
+      quoteRef: "MM-260728-001",
+      invoiceNumber: "INV-000038",
+      invoiceUrl: "https://invoice.zoho.eu/…/38",
+      amountPence: 1500,
+      voided: false,
+    });
+    expect(r.subject).toContain("VAT reversal");
+    expect(r.subject).toContain("MM-260728-001");
+    const body = r.lines.join(" ");
+    expect(body).toContain("£15.00");
+    expect(body).toContain("refunded");
+    expect(body).toContain("credit note");
+    expect(body).toContain("INV-000038");
+    expect(body.toLowerCase()).toContain("vat");
+    expect(r.followUpNotes).toContain("£15.00");
+    expect(r.followUpNotes).toContain("INV-000038");
+    expect(r.followUpNotes.toLowerCase()).toContain("reclaim");
+  });
+
+  it("uses void wording and a safe fallback when there is no invoice number", () => {
+    const r = buildCreditNoteReminder({
+      quoteRef: "MM-1",
+      invoiceNumber: null,
+      invoiceUrl: null,
+      amountPence: 12000,
+      voided: true,
+    });
+    expect(r.subject).toContain("voided");
+    expect(r.lines.join(" ")).toContain("£120.00");
+    // No invoice number → a readable generic reference, never a broken blank.
+    expect(r.lines.join(" ")).toContain("the deposit invoice for this quote");
+    expect(r.followUpNotes).toContain("the deposit invoice");
+  });
+
+  it("keeps the forfeited-deposit nuance explicit — only money-back reverses VAT", () => {
+    const r = buildCreditNoteReminder({
+      quoteRef: "MM-2",
+      invoiceNumber: "INV-1",
+      invoiceUrl: null,
+      amountPence: 5000,
+      voided: false,
+    });
+    expect(r.lines.join(" ").toLowerCase()).toContain("forfeited");
+    expect(r.followUpNotes.toLowerCase()).toContain("forfeited");
   });
 });
