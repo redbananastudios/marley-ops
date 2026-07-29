@@ -8,6 +8,7 @@ import { balanceDue, moveDateLabel } from "@/lib/quote/payments";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
+import { BookingDetailsButton } from "@/components/bookings/booking-details-dialog";
 import { CopyLinkButton, MarkPaidButton } from "@/components/bookings/booking-actions";
 import { CancelBookingButton, ChangeDateButton } from "@/components/bookings/booking-policy-actions";
 import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
@@ -66,6 +67,7 @@ interface Row {
   deposit: number;
   depositPaidAt: string | null;
   depositSelfreportAt: string | null;
+  commitmentPaidAt: string | null;
   acceptedAt: string | null;
   acceptToken: string | null;
   movingDate: string | null;
@@ -136,7 +138,7 @@ export default async function BookingsPage() {
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+        "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
       )
       .eq("status", "accepted")
       .not("lead_id", "is", null)
@@ -145,7 +147,7 @@ export default async function BookingsPage() {
   );
 
   const leadIds = [...new Set((quotes ?? []).map((q) => q.lead_id as string))];
-  const [{ data: leads }, { data: appts }] = await Promise.all([
+  const [{ data: leads }, { data: appts }, { data: bookingDetails }] = await Promise.all([
     leadIds.length
       ? sb
           .from("leads")
@@ -162,7 +164,15 @@ export default async function BookingsPage() {
           .in("status", ["scheduled", "completed"])
           .in("lead_id", leadIds)
       : Promise.resolve({ data: [] as never[] }),
+    // Move-window capture — prefills the shared drawer on "To book" rows.
+    leadIds.length
+      ? sb
+          .from("booking_details")
+          .select("lead_id, approx_window, approx_month, provisional_date, property_type")
+          .in("lead_id", leadIds)
+      : Promise.resolve({ data: [] as never[] }),
   ]);
+  const bdByLead = new Map((bookingDetails ?? []).map((b) => [b.lead_id as string, b]));
 
   // Latest card-payment attempt per lead → a small "did they try to pay?" chip
   // on awaiting rows (the first question on a deposit chase call).
@@ -214,6 +224,7 @@ export default async function BookingsPage() {
       deposit,
       depositPaidAt: q.deposit_paid_at,
       depositSelfreportAt: q.deposit_selfreport_at,
+      commitmentPaidAt: (q.commitment_paid_at as string | null) ?? null,
       acceptedAt: q.accepted_at,
       acceptToken: q.accept_token,
       movingDate: (q.moving_date || lead.preferred_date) as string | null,
@@ -339,6 +350,20 @@ export default async function BookingsPage() {
             <span className="inline-flex items-center gap-1 text-xs font-semibold text-success">
               <CheckCircle2 className="size-3.5" strokeWidth={2} /> Deposit
             </span>
+            {/* Deposit paid, no date yet — capture the move window so the
+                /schedule soft-demand panel knows when they are thinking. */}
+            <BookingDetailsButton
+              leadId={r.leadId}
+              leadName={r.customer}
+              label="Set window"
+              initial={{
+                approxWindow: bdByLead.get(r.leadId)?.approx_window ?? null,
+                approxMonth: bdByLead.get(r.leadId)?.approx_month ?? null,
+                provisionalDate: bdByLead.get(r.leadId)?.provisional_date ?? null,
+                propertyType: bdByLead.get(r.leadId)?.property_type ?? null,
+              }}
+              context={{ depositPaid: true, commitmentPaid: !!r.commitmentPaidAt }}
+            />
             <Link
               href={`/schedule/removals?leadId=${r.leadId}`}
               className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-3.5 text-sm font-semibold text-white transition-colors hover:brightness-95"

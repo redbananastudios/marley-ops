@@ -192,7 +192,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Signed paperwork on this enquiry (final-pass audit: the lead page is where
   // the office lands from Leads/Board/Follow-ups — evidence must show here,
   // not just on the quote page).
-  const [{ data: sigRow }, { data: completionRow }, crewNotes, jobMedia, { data: claimRows }] = await Promise.all([
+  const [{ data: sigRow }, { data: completionRow }, crewNotes, jobMedia, { data: claimRows }, { data: bookingDetailsRow }] = await Promise.all([
     supabase
       .from("signatures")
       .select("signer_name, signature_data, method, channel, acknowledgments, terms_version, signed_at")
@@ -217,6 +217,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       .select("id, claim_no, status, reported_at, reported_channel, description")
       .eq("lead_id", id)
       .order("reported_at", { ascending: false }),
+    // Move-window capture (booking_details, migration 0080) — feeds the shared
+    // drawer on the action bar. Null row = nothing captured yet.
+    supabase
+      .from("booking_details")
+      .select("approx_window, approx_month, provisional_date, property_type")
+      .eq("lead_id", id)
+      .maybeSingle(),
   ]);
   const leadClaims = (claimRows ?? []).map((c) => ({
     id: c.id,
@@ -397,6 +404,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
         <LeadActionBar
           leadId={lead.id}
+          leadName={lead.name}
           phone={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone)}
           email={client?.email ?? lead.email}
           status={lead.status}
@@ -407,6 +415,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             grand_total: q.grand_total,
             status: q.status,
           }))}
+          bookingDetails={
+            bookingDetailsRow
+              ? {
+                  approxWindow: bookingDetailsRow.approx_window,
+                  approxMonth: bookingDetailsRow.approx_month,
+                  provisionalDate: bookingDetailsRow.provisional_date,
+                  propertyType: bookingDetailsRow.property_type,
+                }
+              : null
+          }
+          depositPaid={!!lead.deposit_paid_at}
         />
       </Card>
 

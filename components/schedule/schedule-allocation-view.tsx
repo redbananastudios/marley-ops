@@ -17,10 +17,15 @@
 
 import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { CalendarRange, ChevronLeft, ChevronRight, Plus, TriangleAlert, Truck, UsersRound } from "lucide-react";
+import { CalendarClock, CalendarRange, ChevronLeft, ChevronRight, Plus, SquarePen, TriangleAlert, Truck, UsersRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apptDays, apptWindow } from "@/lib/job-board";
 import { dayCapacityState, sumRequired, type CapacityState } from "@/lib/schedule/capacity";
+import {
+  BookingDetailsDialog,
+  type BookingDetailsContext,
+  type BookingDetailsInitial,
+} from "@/components/bookings/booking-details-dialog";
 import {
   AppointmentDialog,
   type EditTarget,
@@ -53,6 +58,10 @@ export interface AvailAppt {
   requiredVans: number;
   requiredCrew: number;
   property_type: string | null; // 'homeowner' | 'rented' | null
+  // The lead's move-window capture (booking_details) — prefills the shared drawer.
+  approx_window: string | null;
+  approx_month: string | null;
+  provisional_date: string | null;
   deposit: boolean; // £100 paid
   commitment: boolean; // 25% paid
   // For the view/edit/reschedule dialogs (same payload the removals diary carries).
@@ -71,6 +80,7 @@ export interface SoftDemandItem {
   property_type: string | null;
   requiredVans: number | null;
   requiredCrew: number | null;
+  commitment: boolean; // 25% paid (deposit is true by construction on this list)
 }
 
 /* ── pure, UTC-safe date helpers (mirrors job-board-view's addDays) ────────── */
@@ -240,7 +250,58 @@ export function ScheduleAllocationView(props: {
   const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
   const [reschedOpen, setReschedOpen] = useState(false);
   const [reschedTarget, setReschedTarget] = useState<EditTarget | null>(null);
+  // Shared booking-details drawer (move window / property) — one instance,
+  // retargeted from the soft-demand panel and the day summary.
+  const [bdOpen, setBdOpen] = useState(false);
+  const [bdTarget, setBdTarget] = useState<{
+    leadId: string;
+    leadName: string;
+    initial: BookingDetailsInitial;
+    context: BookingDetailsContext;
+  } | null>(null);
   const estimatorById = useMemo(() => new Map(estimators.map((e) => [e.id, e.full_name])), [estimators]);
+
+  function openSoftDetails(item: SoftDemandItem) {
+    setBdTarget({
+      leadId: item.lead_id,
+      leadName: item.name,
+      initial: {
+        approxWindow: item.approx_window,
+        approxMonth: item.approx_month,
+        provisionalDate: item.provisional_date,
+        propertyType: item.property_type,
+      },
+      context: {
+        requiredVans: item.requiredVans,
+        requiredCrew: item.requiredCrew,
+        // Soft demand = deposit-paid by construction (that's what earns the list).
+        depositPaid: true,
+        commitmentPaid: item.commitment,
+      },
+    });
+    setBdOpen(true);
+  }
+
+  function openBookedDetails(a: AvailAppt) {
+    if (!a.lead_id) return;
+    setBdTarget({
+      leadId: a.lead_id,
+      leadName: a.lead_name ?? "Move",
+      initial: {
+        approxWindow: a.approx_window,
+        approxMonth: a.approx_month,
+        provisionalDate: a.provisional_date,
+        propertyType: a.property_type,
+      },
+      context: {
+        requiredVans: a.requiredVans,
+        requiredCrew: a.requiredCrew,
+        depositPaid: a.deposit,
+        commitmentPaid: a.commitment,
+      },
+    });
+    setBdOpen(true);
+  }
 
   function toEditTarget(a: AvailAppt): EditTarget {
     return {
@@ -646,13 +707,15 @@ export function ScheduleAllocationView(props: {
                     <div className="flex flex-col gap-2">
                       {dayJobs.map((j) => {
                         const multiDay = apptDays(j).length > 1;
+                        // The row itself is a <button> (opens the view modal), so the
+                        // move-window control renders BESIDE it, never nested inside.
                         return (
+                          <div key={j.id} className="flex items-stretch gap-1.5">
                           <button
                             type="button"
-                            key={j.id}
                             onClick={() => openView(j)}
                             title="Open this booking"
-                            className="focus-ring w-full rounded-md border border-border bg-card p-2.5 text-left transition-colors hover:border-mm-red/60"
+                            className="focus-ring min-w-0 flex-1 rounded-md border border-border bg-card p-2.5 text-left transition-colors hover:border-mm-red/60"
                           >
                             <div className="flex items-center justify-between gap-2">
                               <span className="flex min-w-0 items-center gap-1 text-[13px] font-semibold text-foreground">
@@ -683,6 +746,18 @@ export function ScheduleAllocationView(props: {
                               </span>
                             </div>
                           </button>
+                          {j.lead_id ? (
+                            <button
+                              type="button"
+                              onClick={() => openBookedDetails(j)}
+                              title="Move window and property"
+                              aria-label={`Move window for ${j.lead_name ?? "this move"}`}
+                              className="focus-ring flex w-8 shrink-0 items-center justify-center rounded-md border border-border bg-card text-mist-400 transition-colors hover:border-mm-red/60 hover:text-mm-red"
+                            >
+                              <CalendarClock className="size-3.5" strokeWidth={1.75} />
+                            </button>
+                          ) : null}
+                          </div>
                         );
                       })}
                     </div>
@@ -771,6 +846,7 @@ export function ScheduleAllocationView(props: {
                           <div key={item.lead_id} className="rounded-md border border-border bg-muted/40 p-2.5">
                             <div className="flex items-center justify-between gap-2">
                               <span className="truncate text-[13px] font-semibold text-foreground">{item.name}</span>
+                              <span className="flex shrink-0 items-center gap-1.5">
                               {item.provisional_date ? (
                                 <span className="shrink-0 rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
                                   prov · {fmt(item.provisional_date, { day: "numeric", month: "short" })}
@@ -780,6 +856,16 @@ export function ScheduleAllocationView(props: {
                                   {item.approx_window}
                                 </span>
                               ) : null}
+                              <button
+                                type="button"
+                                onClick={() => openSoftDetails(item)}
+                                title="Move window and property"
+                                aria-label={`Move window for ${item.name}`}
+                                className="focus-ring flex size-6 items-center justify-center rounded-md border border-border bg-card text-mist-400 transition-colors hover:border-mm-red/60 hover:text-mm-red"
+                              >
+                                <SquarePen className="size-3" strokeWidth={1.75} />
+                              </button>
+                              </span>
                             </div>
                             <div className="mt-1.5 flex items-center justify-between gap-2">
                               <Estimate vans={item.requiredVans} crew={item.requiredCrew} />
@@ -849,6 +935,20 @@ export function ScheduleAllocationView(props: {
           presetDate={null}
         />
       )}
+
+      {/* Shared booking-details drawer — the single writer for a lead's move
+          window (approx window / target month / provisional date / property).
+          Money renders read-only inside; it is never edited here. */}
+      {bdTarget ? (
+        <BookingDetailsDialog
+          leadId={bdTarget.leadId}
+          leadName={bdTarget.leadName}
+          initial={bdTarget.initial}
+          context={bdTarget.context}
+          open={bdOpen}
+          onOpenChange={setBdOpen}
+        />
+      ) : null}
 
       <AppointmentDialog
         open={createOpen}

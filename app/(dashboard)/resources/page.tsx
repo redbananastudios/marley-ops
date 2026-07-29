@@ -9,6 +9,7 @@ import {
   type UnavailabilityRow,
   type VehicleRow,
 } from "@/components/resources/resources-view";
+import type { StaffSubmissionRow } from "@/components/resources/staff-onboarding";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
   // Availability is shown/edited forward only — a past day off is history.
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
-  const [{ data: staff }, { data: pay }, { data: vehicles }, { data: unavailability }, staffAvailability] =
+  const [{ data: staff }, { data: pay }, { data: vehicles }, { data: unavailability }, staffAvailability, { data: onboardSettings }, { data: submissions }] =
     await Promise.all([
       supabase.from("staff").select("*").order("is_active", { ascending: false }).order("full_name"),
       // Pay is office-scoped (staff_pay); merged in below so a crew page never
@@ -41,6 +42,20 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
       fetchAllRows((f, t) =>
         supabase.from("staff_availability").select("id, staff_id, date, status, note").gte("date", today).order("date").range(f, t),
       ),
+      // Public crew sign-up link state + the pending review queue. Fetched for
+      // ADMIN ONLY (review 2026-07-29): the UI renders only for admin, and
+      // gating the fetch keeps the live token + applicant PII out of an
+      // estimator's RSC payload entirely.
+      isAdmin
+        ? supabase.from("business_settings").select("staff_onboard_enabled, staff_onboard_token").eq("id", true).maybeSingle()
+        : Promise.resolve({ data: null }),
+      isAdmin
+        ? supabase
+            .from("staff_submissions")
+            .select("id, full_name, date_of_birth, address, email, phone, is_driver, emergency_contact_name, emergency_contact_phone, notes, created_at")
+            .eq("status", "pending")
+            .order("created_at", { ascending: true })
+        : Promise.resolve({ data: null }),
     ]);
 
   const payById = new Map((pay ?? []).map((p) => [p.staff_id, p]));
@@ -64,6 +79,12 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
         today={today}
         isAdmin={isAdmin}
         initialTab={sp.tab === "vehicles" ? "vehicles" : sp.tab === "availability" ? "availability" : "staff"}
+        onboarding={{
+          enabled: onboardSettings?.staff_onboard_enabled === true,
+          token: onboardSettings?.staff_onboard_token ?? null,
+          baseUrl: (process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, ""),
+        }}
+        pendingSubmissions={(submissions ?? []) as StaffSubmissionRow[]}
       />
     </main>
   );

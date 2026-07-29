@@ -179,6 +179,9 @@ export default async function SchedulePage({
       requiredVans: r.required?.vans ?? 0,
       requiredCrew: r.required?.men ?? 0,
       property_type: r.lead_id ? (bdByLead.get(r.lead_id)?.property_type ?? null) : null,
+      approx_window: r.lead_id ? (bdByLead.get(r.lead_id)?.approx_window ?? null) : null,
+      approx_month: r.lead_id ? (bdByLead.get(r.lead_id)?.approx_month ?? null) : null,
+      provisional_date: r.lead_id ? (bdByLead.get(r.lead_id)?.provisional_date ?? null) : null,
       deposit: r.lead_id ? (payByLead.get(r.lead_id)?.deposit ?? false) : false,
       commitment: r.lead_id ? (payByLead.get(r.lead_id)?.commitment ?? false) : false,
       // For the view/edit/reschedule dialogs (mirrors the removals diary payload).
@@ -205,6 +208,7 @@ export default async function SchedulePage({
         property_type: bd?.property_type ?? null,
         requiredVans: req?.vans ?? null,
         requiredCrew: req?.men ?? null,
+        commitment: payByLead.get(q.lead_id!)?.commitment ?? false,
       };
     });
 

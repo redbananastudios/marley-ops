@@ -1,10 +1,12 @@
 "use server";
 
+import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { normalizeWorkingDays } from "@/lib/staff/availability";
+import { normalisePhone, staffFieldsFromSubmission } from "@/lib/staff/onboarding";
 
 /** Staff-availability scheduling is an OFFICE surface — estimators plan around
  *  crew availability. Gated at the app layer in addition to RLS (a crew login
@@ -186,6 +188,12 @@ const staffSchema = z.object({
   is_driver: z.boolean(),
   phone: z.string().trim().max(20).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
+  // Onboarding details — collected by the public crew sign-up form, editable
+  // here so the office can maintain them later.
+  address: z.string().trim().max(500).optional().or(z.literal("")),
+  date_of_birth: optDate,
+  emergency_contact_name: z.string().trim().max(120).optional().or(z.literal("")),
+  emergency_contact_phone: z.string().trim().max(120).optional().or(z.literal("")),
   // Pay: hourly rate + optional weekly guarantee (Rob: £600/wk floor). Stored in
   // the office-scoped staff_pay table, not on the crew-readable staff row.
   hourly_rate: optMoney,
@@ -215,6 +223,10 @@ export async function saveStaffAction(input: StaffInput) {
     is_driver: v.is_driver,
     phone: v.phone || null,
     email: v.email || null,
+    address: v.address || null,
+    date_of_birth: v.date_of_birth || null,
+    emergency_contact_name: v.emergency_contact_name || null,
+    emergency_contact_phone: v.emergency_contact_phone || null,
     notes: v.notes || null,
     is_active: v.is_active,
     // Only touch the pattern when the caller manages it — an insert without it
@@ -376,5 +388,166 @@ export async function setStaffAvailabilityCellAction(input: SetStaffAvailability
 
   revalidatePath("/resources");
   revalidatePath("/schedule/board");
+  return { ok: true as const };
+}
+
+/* ------------------------------------------------- public crew sign-up link */
+
+/** Switch the shared /join/<token> crew sign-up link on or off. First enable
+ *  mints the token; disabling keeps it (the same link works again when
+ *  re-enabled — use "New link" to burn it). Admin: the link writes into the
+ *  staff pipeline. business_settings update RLS is is_admin() to match. */
+export async function setStaffOnboardEnabledAction(enabled: boolean) {
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
+
+  const patch: { staff_onboard_enabled: boolean; staff_onboard_token?: string } = {
+    staff_onboard_enabled: enabled === true,
+  };
+  if (enabled) {
+    const { data } = await sb.from("business_settings").select("staff_onboard_token").eq("id", true).maybeSingle();
+    if (!data?.staff_onboard_token) patch.staff_onboard_token = randomBytes(24).toString("base64url");
+  }
+  const { error } = await sb.from("business_settings").update(patch).eq("id", true);
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/resources");
+  return { ok: true as const };
+}
+
+/** Regenerate the crew sign-up token — the old link dies immediately. */
+export async function regenerateStaffOnboardTokenAction() {
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
+
+  const token = randomBytes(24).toString("base64url");
+  const { error } = await sb.from("business_settings").update({ staff_onboard_token: token }).eq("id", true);
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/resources");
+  return { ok: true as const };
+}
+
+/** Approve a pending crew sign-up. Review-hardened (2026-07-29):
+ *  - Matching against ACTIVE staff uses lower(email) OR the NORMALISED phone
+ *    (spaces/+44 folded), so formatting variance can't dodge the dedupe.
+ *  - A match whose name DIFFERS from the submission is refused outright — a
+ *    sign-up quoting a colleague's email/phone must never overwrite their row.
+ *  - A same-name match is an explicit two-step: the first call returns
+ *    needsConfirm and the admin confirms "update the existing record".
+ *  - The pending→approved stamp happens FIRST (the row is the mutex) so two
+ *    admins can't double-approve into duplicate staff rows; if the staff write
+ *    then fails, the stamp is reverted best-effort. */
+export async function approveStaffSubmissionAction(id: string, confirmUpdateStaffId?: string) {
+  const parsedId = z.string().uuid().safeParse(id);
+  if (!parsedId.success) return { ok: false as const, error: "Invalid submission." };
+  const parsedConfirm = confirmUpdateStaffId == null ? null : z.string().uuid().safeParse(confirmUpdateStaffId);
+  if (parsedConfirm && !parsedConfirm.success) return { ok: false as const, error: "Invalid confirmation." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb, userId } = ctx;
+
+  const { data: sub, error: subErr } = await sb
+    .from("staff_submissions")
+    .select("id, full_name, date_of_birth, address, email, phone, is_driver, emergency_contact_name, emergency_contact_phone, notes, status")
+    .eq("id", parsedId.data)
+    .maybeSingle();
+  if (subErr || !sub) return { ok: false as const, error: "Submission not found." };
+  if (sub.status !== "pending") return { ok: false as const, error: "Already reviewed." };
+
+  const { data: activeStaff, error: staffErr } = await sb
+    .from("staff")
+    .select("id, full_name, email, phone")
+    .eq("is_active", true);
+  if (staffErr) return { ok: false as const, error: staffErr.message };
+
+  const subEmail = (sub.email ?? "").trim().toLowerCase();
+  const subPhone = normalisePhone(sub.phone);
+  const match = (activeStaff ?? []).find(
+    (s) =>
+      (subEmail && (s.email ?? "").trim().toLowerCase() === subEmail) ||
+      (subPhone && normalisePhone(s.phone) === subPhone),
+  );
+
+  if (match) {
+    const sameName = match.full_name.trim().toLowerCase() === sub.full_name.trim().toLowerCase();
+    if (!sameName) {
+      return {
+        ok: false as const,
+        error: `This sign-up matches the existing staff record for ${match.full_name} (same email or phone) but the name differs. Edit their record in Staff & Fleet instead, or reject this sign-up.`,
+      };
+    }
+    if (confirmUpdateStaffId !== match.id) {
+      // Two-step: surface WHO gets updated before anything is written.
+      return { ok: false as const, needsConfirm: { staffId: match.id, staffName: match.full_name } };
+    }
+  }
+
+  // Mutex FIRST: only the caller who flips pending→approved does the staff write.
+  const { data: claimed, error: claimErr } = await sb
+    .from("staff_submissions")
+    .update({ status: "approved", reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .eq("id", sub.id)
+    .eq("status", "pending")
+    .select("id");
+  if (claimErr) return { ok: false as const, error: claimErr.message };
+  if (!claimed || claimed.length === 0) return { ok: false as const, error: "Already reviewed." };
+
+  const revert = async () => {
+    await sb
+      .from("staff_submissions")
+      .update({ status: "pending", reviewed_by: null, reviewed_at: null })
+      .eq("id", sub.id)
+      .eq("status", "approved");
+  };
+
+  const fields = staffFieldsFromSubmission(sub);
+  let staffId: string;
+  if (match) {
+    const { error } = await sb.from("staff").update(fields).eq("id", match.id);
+    if (error) {
+      await revert();
+      return { ok: false as const, error: error.message };
+    }
+    staffId = match.id;
+  } else {
+    // New crew record — staff_role 'crew', active, default Mon-Fri pattern
+    // (column default). The submission's free-text notes ride along.
+    const { data: created, error } = await sb
+      .from("staff")
+      .insert({ ...fields, staff_role: "crew", is_active: true, notes: sub.notes || null })
+      .select("id")
+      .single();
+    if (error || !created) {
+      await revert();
+      return { ok: false as const, error: error?.message ?? "Could not create the crew member." };
+    }
+    staffId = created.id;
+  }
+
+  await sb.from("staff_submissions").update({ staff_id: staffId }).eq("id", sub.id);
+
+  revalidatePath("/resources");
+  return { ok: true as const, updatedExisting: match ? match.full_name : null };
+}
+
+/** Reject a pending crew sign-up — stamped, kept for the record, hidden from the queue. */
+export async function rejectStaffSubmissionAction(id: string) {
+  const parsedId = z.string().uuid().safeParse(id);
+  if (!parsedId.success) return { ok: false as const, error: "Invalid submission." };
+  const ctx = await requireAdminActor();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb, userId } = ctx;
+
+  const { error } = await sb
+    .from("staff_submissions")
+    .update({ status: "rejected", reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .eq("id", parsedId.data)
+    .eq("status", "pending");
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/resources");
   return { ok: true as const };
 }

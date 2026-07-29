@@ -1,4 +1,4 @@
-﻿export type Json =
+export type Json =
   | string
   | number
   | boolean
@@ -618,6 +618,8 @@ export type Database = {
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
           self_billing_enabled: boolean
+          staff_onboard_enabled: boolean
+          staff_onboard_token: string | null
           storage_rates: Json | null
           updated_at: string
           vat_default: boolean
@@ -663,6 +665,8 @@ export type Database = {
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           self_billing_enabled?: boolean
+          staff_onboard_enabled?: boolean
+          staff_onboard_token?: string | null
           storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean
@@ -708,6 +712,8 @@ export type Database = {
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
           self_billing_enabled?: boolean
+          staff_onboard_enabled?: boolean
+          staff_onboard_token?: string | null
           storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean
@@ -3251,9 +3257,13 @@ export type Database = {
       }
       staff: {
         Row: {
+          address: string | null
           created_at: string
+          date_of_birth: string | null
           day_rate: number | null
           email: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
           full_name: string
           id: string
           is_active: boolean
@@ -3266,9 +3276,13 @@ export type Database = {
           working_days: number[]
         }
         Insert: {
+          address?: string | null
           created_at?: string
+          date_of_birth?: string | null
           day_rate?: number | null
           email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           full_name: string
           id?: string
           is_active?: boolean
@@ -3281,9 +3295,13 @@ export type Database = {
           working_days?: number[]
         }
         Update: {
+          address?: string | null
           created_at?: string
+          date_of_birth?: string | null
           day_rate?: number | null
           email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
           full_name?: string
           id?: string
           is_active?: boolean
@@ -3519,6 +3537,78 @@ export type Database = {
           },
           {
             foreignKeyName: "staff_statements_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      staff_submissions: {
+        Row: {
+          address: string | null
+          created_at: string
+          date_of_birth: string | null
+          email: string | null
+          emergency_contact_name: string | null
+          emergency_contact_phone: string | null
+          full_name: string
+          id: string
+          is_driver: boolean
+          notes: string | null
+          phone: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          staff_id: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          address?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          full_name: string
+          id?: string
+          is_driver?: boolean
+          notes?: string | null
+          phone?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          staff_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          address?: string | null
+          created_at?: string
+          date_of_birth?: string | null
+          email?: string | null
+          emergency_contact_name?: string | null
+          emergency_contact_phone?: string | null
+          full_name?: string
+          id?: string
+          is_driver?: boolean
+          notes?: string | null
+          phone?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          staff_id?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_submissions_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "staff_submissions_staff_id_fkey"
             columns: ["staff_id"]
             isOneToOne: false
             referencedRelation: "staff"

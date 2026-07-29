@@ -64,6 +64,11 @@ import {
 import { docStatus, VEHICLE_DOCS, VEHICLE_TYPES } from "@/lib/vehicles";
 import { groupAvailabilityRuns, patternLabel, type AvailabilitySegment } from "@/lib/staff/availability";
 import { StaffWallChart } from "@/components/resources/staff-wall-chart";
+import {
+  CrewSignupCard,
+  SubmissionsReview,
+  type StaffSubmissionRow,
+} from "@/components/resources/staff-onboarding";
 
 export interface StaffRow {
   id: string;
@@ -73,12 +78,23 @@ export interface StaffRow {
   is_driver: boolean;
   phone: string | null;
   email: string | null;
+  // Onboarding details — collected by the public crew sign-up, office-editable.
+  address: string | null;
+  date_of_birth: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
   // Pay — merged in from the office-scoped staff_pay table (not on the staff row).
   hourly_rate: number | null;
   weekly_guarantee: number | null;
   working_days: number[] | null;
   notes: string | null;
   is_active: boolean;
+}
+
+export interface StaffOnboardingState {
+  enabled: boolean;
+  token: string | null;
+  baseUrl: string;
 }
 
 const PATTERN_CHIPS: { iw: number; l: string }[] = [
@@ -214,6 +230,8 @@ export function ResourcesView({
   today,
   isAdmin,
   initialTab,
+  onboarding,
+  pendingSubmissions,
 }: {
   staff: StaffRow[];
   vehicles: VehicleRow[];
@@ -222,6 +240,8 @@ export function ResourcesView({
   today: string;
   isAdmin: boolean;
   initialTab: "staff" | "vehicles" | "availability";
+  onboarding: StaffOnboardingState;
+  pendingSubmissions: StaffSubmissionRow[];
 }) {
   const [tab, setTab] = useState<"staff" | "vehicles" | "availability">(initialTab);
   const [staffEdit, setStaffEdit] = useState<StaffRow | "new" | null>(null);
@@ -316,26 +336,38 @@ export function ResourcesView({
       ) : null}
 
       {tab === "staff" ? (
-        staff.length === 0 ? (
-          <EmptyState
-            icon={UserRound}
-            title="No staff yet"
-            hint="Add the crew so jobs can be assigned to them — use Add staff above."
-            className="mt-4 rounded-lg border border-border bg-card"
-          />
-        ) : (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {staff.map((s) => (
-              <StaffCard
-                key={s.id}
-                s={s}
-                segments={segmentsByStaff.get(s.id) ?? []}
-                isAdmin={isAdmin}
-                onEdit={() => setStaffEdit(s)}
+        <>
+          {isAdmin ? (
+            <>
+              <CrewSignupCard
+                enabled={onboarding.enabled}
+                token={onboarding.token}
+                baseUrl={onboarding.baseUrl}
               />
-            ))}
-          </div>
-        )
+              <SubmissionsReview submissions={pendingSubmissions} />
+            </>
+          ) : null}
+          {staff.length === 0 ? (
+            <EmptyState
+              icon={UserRound}
+              title="No staff yet"
+              hint="Add the crew so jobs can be assigned to them — use Add staff above."
+              className="mt-4 rounded-lg border border-border bg-card"
+            />
+          ) : (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {staff.map((s) => (
+                <StaffCard
+                  key={s.id}
+                  s={s}
+                  segments={segmentsByStaff.get(s.id) ?? []}
+                  isAdmin={isAdmin}
+                  onEdit={() => setStaffEdit(s)}
+                />
+              ))}
+            </div>
+          )}
+        </>
       ) : tab === "vehicles" ? (
         vehicles.length === 0 ? (
           <EmptyState
@@ -510,6 +542,10 @@ function StaffDialog({
     is_driver: row?.is_driver ?? false,
     phone: row?.phone ?? "",
     email: row?.email ?? "",
+    address: row?.address ?? "",
+    date_of_birth: row?.date_of_birth?.slice(0, 10) ?? "",
+    emergency_contact_name: row?.emergency_contact_name ?? "",
+    emergency_contact_phone: row?.emergency_contact_phone ?? "",
     hourly_rate: row?.hourly_rate != null ? String(row.hourly_rate) : "",
     weekly_guarantee: row?.weekly_guarantee != null ? String(row.weekly_guarantee) : "",
     notes: row?.notes ?? "",
@@ -525,6 +561,10 @@ function StaffDialog({
       is_driver: v.is_driver,
       phone: v.phone,
       email: v.email,
+      address: v.address,
+      date_of_birth: v.date_of_birth,
+      emergency_contact_name: v.emergency_contact_name,
+      emergency_contact_phone: v.emergency_contact_phone,
       hourly_rate: v.hourly_rate === "" ? "" : Number(v.hourly_rate),
       weekly_guarantee: v.weekly_guarantee === "" ? "" : Number(v.weekly_guarantee),
       working_days: pattern,
@@ -615,6 +655,33 @@ function StaffDialog({
             <div className="grid gap-1.5">
               <Label htmlFor="st-email">Email</Label>
               <Input id="st-email" type="email" inputMode="email" className="h-11" value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} placeholder="name@example.com" />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="st-dob">Date of birth</Label>
+              <Input id="st-dob" type="date" className="h-11" value={v.date_of_birth} onChange={(e) => setV({ ...v, date_of_birth: e.target.value })} />
+            </div>
+            <div className="grid gap-1.5 sm:col-span-1">
+              <Label htmlFor="st-address">Home address</Label>
+              <textarea
+                id="st-address"
+                rows={2}
+                value={v.address}
+                onChange={(e) => setV({ ...v, address: e.target.value })}
+                className="focus-ring w-full rounded-md border border-input bg-card px-3 py-2 text-sm"
+                placeholder="House, street, town, postcode"
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-1.5">
+              <Label htmlFor="st-ec-name">Emergency contact name</Label>
+              <Input id="st-ec-name" className="h-11" value={v.emergency_contact_name} onChange={(e) => setV({ ...v, emergency_contact_name: e.target.value })} placeholder="e.g. Sarah Smith" />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="st-ec-phone">Emergency contact number</Label>
+              <Input id="st-ec-phone" type="tel" inputMode="tel" className="h-11" value={v.emergency_contact_phone} onChange={(e) => setV({ ...v, emergency_contact_phone: e.target.value })} placeholder="07…" />
             </div>
           </div>
           <div className="grid gap-1.5">

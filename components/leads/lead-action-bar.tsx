@@ -28,6 +28,10 @@ import {
   Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  BookingDetailsButton,
+  type BookingDetailsInitial,
+} from "@/components/bookings/booking-details-dialog";
 import { ContactAction } from "@/components/ui/contact-action";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import { CaptureLauncher } from "@/components/capture/capture-launchers";
@@ -55,18 +59,26 @@ const primaryBtn =
 
 export function LeadActionBar({
   leadId,
+  leadName,
   phone,
   email,
   status,
   firstContactedAt,
   quotes = [],
+  bookingDetails,
+  depositPaid,
 }: {
   leadId: string;
+  leadName?: string | null;
   phone?: string | null;
   email?: string | null;
   status: string;
   firstContactedAt?: string | null;
   quotes?: WonQuote[];
+  /** The lead's move-window capture (booking_details) — enables the shared
+   *  drawer when the page loads it. Null = no row yet (drawer opens empty). */
+  bookingDetails?: BookingDetailsInitial | null;
+  depositPaid?: boolean;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -164,6 +176,25 @@ export function LeadActionBar({
           <PhoneMissed className="size-4 text-mm-red" strokeWidth={1.75} />
           No reply
         </button>
+      ) : null}
+      {/* Move window — the shared booking-details drawer (approx window /
+          target month / provisional date / homeowner-rented). Only rendered
+          when the page wires the data in (undefined = not loaded). */}
+      {bookingDetails !== undefined && !isClosed(status) ? (
+        <BookingDetailsButton
+          leadId={leadId}
+          leadName={leadName ?? "this lead"}
+          initial={
+            bookingDetails ?? {
+              approxWindow: null,
+              approxMonth: null,
+              provisionalDate: null,
+              propertyType: null,
+            }
+          }
+          context={depositPaid === undefined ? null : { depositPaid }}
+          className={btn}
+        />
       ) : null}
 
       {/* stage-driven next steps — pushed to the right */}

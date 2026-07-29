@@ -42,6 +42,9 @@ export async function updateSession(request: NextRequest) {
     path.startsWith("/s/") ||
     // Customer cubic-survey self-fill — same token-as-credential model.
     path.startsWith("/cv/") ||
+    // Public crew sign-up — one shared tokenised link for the crew WhatsApp
+    // group; the page + action re-verify the token themselves.
+    path.startsWith("/join/") ||
     // Crew day sheet opened from the SMS with no login — same
     // token-as-credential model (the page reads it, noindex, stale-expires).
     path.startsWith("/sheet/") ||
