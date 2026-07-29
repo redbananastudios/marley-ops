@@ -10,7 +10,7 @@ rollback reference.
 |---|---|
 | **VPS** | `vps-a0b9c066.vps.ovh.net` · `51.195.253.165` · Ubuntu 26.04 · 6 vCPU / 11 GiB / 96 GB |
 | **SSH** | `ubuntu@51.195.253.165`, key `~/.ssh/rbs_vps` (i9). **Key-only** (password login disabled). Passwordless sudo. |
-| **Firewall** | UFW — only 22 / 80 / 443 open |
+| **Firewall** | UFW allows 22 / 80 / 443 — **but UFW does NOT govern Docker-published ports** (see "Network exposure" below). Container port publishing is filtered in the `DOCKER-USER` iptables chain via `docker-user-firewall.service`. |
 | **App** | Docker container `marley-ops-app` (image `marley-ops:latest`, Next.js standalone), on the `rbs` network, published `127.0.0.1:3000` |
 | **Backend** | Supabase stack under `/opt/rbs/supabase` (`docker compose`), 11 services, on `rbs` |
 | **Reverse proxy** | Caddy (`/opt/rbs/caddy`) — auto Let's Encrypt TLS. Routes `ops.marleymoves.co.uk`→app:3000, `supabase.redbananastudios.com`→supabase-kong:8000. Has internal network aliases for both hostnames so the app reaches the backend without a public hairpin. |
@@ -18,6 +18,39 @@ rollback reference.
 | **Cron** | `/etc/cron.d/marley-ops` → `cron-hit.sh` fires the jobs against `localhost:3000` with `CRON_SECRET` (replaces Vercel Cron). Registry: `lib/cron/jobs.ts`. **When adding a job (e.g. `card-reconcile`, `*/15`), add its endpoint to `cron-hit.sh` on the VPS** — the in-repo registry drives the /automations page, not the scheduler. |
 | **DNS** | Both records A → `51.195.253.165`, at IONOS, TTL 60 |
 | **Backups** | `scripts/backup-prod-db.ps1` (nightly on i9, 02:30) → SSH pg_dump from the OVH `supabase-db` → `../backups` |
+
+## Network exposure (PCI hardening, 2026-07-29)
+
+**Do not trust `ufw status` on this box.** Docker publishes container ports with its own
+iptables DNAT rules, which are evaluated *before* UFW's INPUT chain — so a published port
+is reachable from the internet even though `ufw status` lists only 22/80/443. This bit us:
+`supabase-pooler` published `0.0.0.0:5432` and `0.0.0.0:6543`, leaving **Postgres open to
+the whole internet** behind nothing but the DB password. Found during the PCI DSS ASV scan
+(flagged High: "Database Accessibility (External Scan)").
+
+Fix in place:
+
+| Piece | Detail |
+|---|---|
+| Script | `/usr/local/sbin/docker-user-firewall.sh` — flushes and rebuilds the `DOCKER-USER` chain |
+| Rule | `RETURN` for `51.179.200.95` (i9) on 5432/6543, `DROP` for all other sources on `ens3` |
+| Persistence | `docker-user-firewall.service` (systemd, `After=docker.service`, enabled) — required because Docker recreates `DOCKER-USER` **empty** on daemon start |
+
+To change who may reach the DB, edit `ALLOW` in the script and re-run it (or
+`sudo systemctl restart docker-user-firewall`). Verify a rule actually bites by removing the
+allow entry and testing from i9 — a successful connection from an allowlisted IP alone does
+not prove the DROP works.
+
+**SSH algorithms.** `/etc/ssh/sshd_config.d/10-pci-macs.conf` restricts MACs to
+`hmac-sha2-256-etm`, `hmac-sha2-512-etm`, `umac-128-etm` (the defaults offered `hmac-sha1`
+and `umac-64`, flagged Medium by the ASV). Ciphers and KEX were already clean.
+
+> **Editing sshd on this box:** always arm an auto-revert first —
+> `sudo systemd-run --unit=ssh-revert --on-active=300 /bin/bash -c "rm -f /etc/ssh/sshd_config.d/<file> && systemctl reload ssh"` —
+> then `sshd -t`, reload, open a **fresh** connection to prove access, and only then
+> `systemctl stop ssh-revert.timer`. SSH here is one-shot from i9; a bad config locks us out.
+
+PCI context, portal login and scan schedule: memory `marley-pci-compliance`.
 
 ## Deploy an app update
 
