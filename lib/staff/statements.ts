@@ -15,6 +15,12 @@
  *  hours per line. */
 export const DEFAULT_DAY_HOURS = 8;
 
+/** Hard per-line ceiling. No single crew/estimator invoice line is legitimately
+ *  this large; it caps a fat-finger (e.g. 800 hrs instead of 8) or a direct
+ *  PostgREST post at a sane bound instead of the numeric(10,2) ~£100M limit.
+ *  Enforced in the line-upsert action (the office still approves before pay). */
+export const MAX_LINE_AMOUNT = 10_000;
+
 export type StatementStatus = "draft" | "submitted" | "paid" | "void";
 
 /** Money rounded to whole pennies — avoids 0.1 + 0.2 float drift in totals. */

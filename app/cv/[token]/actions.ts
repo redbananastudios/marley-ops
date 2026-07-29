@@ -84,10 +84,15 @@ export async function submitCubicCustomerAction(
       summary: `Customer ${firstSubmit ? "completed" : "updated"} their cubic survey — ${totals.totalFt3} ft³ across ${totals.itemCount} items`,
       meta: { cubic_survey_id: row.id, via: "cubic_customer_link" },
     });
-    await sendOpsAlert(`Customer cubic survey ${firstSubmit ? "received" : "updated"}`, [
-      `<strong>${esc(lead?.name ?? "A customer")}</strong> filled in their volume survey: <strong>${totals.totalFt3} ft³</strong> across ${totals.itemCount} items.`,
-      `Review it on the lead's Survey tab — it will suggest the van count on the next quote.`,
-    ]);
+    // Email the desk on the FIRST submission only — repeated customer edits still
+    // update the activity + the survey data, but must not fire an alert each time
+    // (alert amplification). The office sees later changes on the Survey tab.
+    if (firstSubmit) {
+      await sendOpsAlert(`Customer cubic survey received`, [
+        `<strong>${esc(lead?.name ?? "A customer")}</strong> filled in their volume survey: <strong>${totals.totalFt3} ft³</strong> across ${totals.itemCount} items.`,
+        `Review it on the lead's Survey tab — it will suggest the van count on the next quote.`,
+      ]);
+    }
   }
   return { ok: true, totalFt3: totals.totalFt3, updatedAt: updated.updated_at };
 }

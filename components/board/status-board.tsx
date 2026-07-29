@@ -198,6 +198,11 @@ export function StatusBoard({
   const [reasonMove, setReasonMove] = useState<{ lead: BoardLead; toStatus: string } | null>(null);
 
   async function applyMove(target: BoardLead, toStatus: string, reason?: string): Promise<boolean> {
+    // Completing a job emails the customer a review request and can't be undone —
+    // guard an accidental drag into Completed with a confirm.
+    if (toStatus === "completed" && !window.confirm(`Mark “${target.name ?? "this job"}” as Completed? This emails the customer a review request.`)) {
+      return false;
+    }
     const fromStatus = target.status;
     const revert = () =>
       setLeads((prev) => prev.map((l) => (l.id === target.id ? { ...l, status: fromStatus } : l)));

@@ -429,6 +429,10 @@ export async function createFrameUploadTargetsAction(
             objectKey: path,
             contentType: "image/jpeg",
             accessToken: actor.accessToken,
+            // Bind the R2 Content-Length to the client-declared (schema-capped
+            // ≤300KB) frame size, so an oversize frame is rejected at the PUT
+            // instead of uploading and being orphaned by the finalize check.
+            sizeBytes: frame.bytes,
           }),
         };
       })),

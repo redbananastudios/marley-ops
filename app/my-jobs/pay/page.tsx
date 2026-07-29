@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ChevronLeft, ChevronRight, FileSignature } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
+import { likeEscape } from "@/lib/util/like";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/app-sidebar";
@@ -49,7 +50,7 @@ export default async function CrewPayPage() {
     const { data: byEmail } = await sb
       .from("staff")
       .select("id, full_name")
-      .ilike("email", profile.email)
+      .ilike("email", likeEscape(profile.email))
       .eq("is_active", true)
       .maybeSingle();
     staffRow = byEmail ?? null;

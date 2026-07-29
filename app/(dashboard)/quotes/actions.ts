@@ -216,9 +216,19 @@ export async function deleteQuote(id: string) {
 export async function setQuoteStatus(id: string, status: string) {
   // Accepting captures revenue + advances the lead — route through acceptQuote.
   if (status === "accepted") return acceptQuote(id);
+  // This generic setter is for the pre-acceptance states ONLY. Rejecting or
+  // superseding an accepted quote must unwind the live booking + Zoho invoices +
+  // deposit (rejectQuote / markLeadLost do that) — a raw status write here would
+  // leave those live under a quote that reads rejected.
+  if (status !== "draft" && status !== "sent") {
+    return { ok: false as const, error: "That status can’t be set here — use Reject, or supersede with a new quote." };
+  }
 
   const { sb, userId } = await ctx();
-  const { data: q } = await sb.from("quotes").select("lead_id, client_id").eq("id", id).single();
+  const { data: q } = await sb.from("quotes").select("lead_id, client_id, status").eq("id", id).single();
+  if (q?.status === "accepted") {
+    return { ok: false as const, error: "This quote is accepted — reject or supersede it so the booking and invoices unwind properly." };
+  }
   const { error } = await sb.from("quotes").update({ status: status as never }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
 

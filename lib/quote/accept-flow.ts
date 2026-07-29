@@ -408,7 +408,7 @@ export async function acceptQuoteOnline(
   if (isAcceptExpired(quote.email_sent_at, quote.created_at)) {
     return { ok: false, error: "This quote has expired. Call us on 01747 637070 for an updated price." };
   }
-  const name = fullName.trim();
+  const name = fullName.trim().slice(0, 120);
   if (name.length < 2) return { ok: false, error: "Type your full name to accept the quote." };
   if (!allAcksConfirmed(opts?.acks)) {
     return { ok: false, error: "Please tick each confirmation box to accept the quote." };
@@ -806,7 +806,7 @@ export async function declineQuoteOnline(
       .update({
         status: "declined",
         lost_reason: lostReason,
-        lost_note: note?.trim() || null,
+        lost_note: note?.trim().slice(0, 2000) || null,
         lost_at: new Date().toISOString(),
         chase_paused: true,
       } as never)
@@ -1429,7 +1429,7 @@ export async function confirmMoveDate(
   if (!quote.moving_date) {
     return { ok: false, error: "There's no move date on this booking yet — nothing to confirm." };
   }
-  const name = input.signerName.trim();
+  const name = input.signerName.trim().slice(0, 120);
   if (name.length < 2) return { ok: false, error: "Type your full name to confirm the date." };
   if (!allDateConfirmAcksConfirmed(input.acks)) {
     return { ok: false, error: "Please tick the confirmation box to confirm your move date." };

@@ -26,7 +26,18 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/:path*",
-        headers: [{ key: "X-Robots-Tag", value: "noindex, nofollow" }],
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow" },
+          // Defence-in-depth. NOTE: a full resource-restricting CSP
+          // (script-src/connect-src/img-src covering Supabase, takepayments,
+          // Google Maps, PostHog, R2) needs a nonce-based setup + prod-origin
+          // testing and is tracked separately. `frame-ancestors 'none'` here is
+          // the SAFE subset — clickjacking protection with no effect on resource
+          // loading — plus the two unambiguous hardening headers.
+          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "X-Content-Type-Options", value: "nosniff" },
+          { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+        ],
       },
     ];
   },

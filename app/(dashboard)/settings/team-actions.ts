@@ -2,19 +2,21 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
+import { likeEscape } from "@/lib/util/like";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-/** Admin gate returning the caller's id (for self-lockout guards). */
+/** Admin gate returning the caller's id (for self-lockout guards).
+ *  Uses getSessionProfile so a DEACTIVATED admin (active=false) fails CLOSED —
+ *  it already treats an inactive account as signed out. The prior version
+ *  selected `role` only, so a deactivated admin still holding a live refresh
+ *  token kept full team management on the RLS-bypassing service-role client
+ *  below (and could self-reactivate). */
 async function requireAdmin() {
-  const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return { userId: null, error: "Not signed in." as const };
-  const { data: prof } = await sb.from("profiles").select("role").eq("id", user.id).single();
-  if (prof?.role !== "admin") return { userId: null, error: "Only admins can manage the team." as const };
-  return { userId: user.id, error: null };
+  const profile = await getSessionProfile();
+  if (!profile) return { userId: null, error: "Not signed in." as const };
+  if (profile.role !== "admin") return { userId: null, error: "Only admins can manage the team." as const };
+  return { userId: profile.id, error: null };
 }
 
 const createSchema = z.object({
@@ -50,7 +52,7 @@ export async function createTeamUserAction(input: z.infer<typeof createSchema>) 
   // Crew login ↔ crew record: link the Staff & Fleet row that carries this
   // email so /my-jobs resolves their assignments immediately.
   if (v.role === "crew") {
-    await admin.from("staff").update({ profile_id: data.user.id }).ilike("email", v.email).is("profile_id", null);
+    await admin.from("staff").update({ profile_id: data.user.id }).ilike("email", likeEscape(v.email)).is("profile_id", null);
   }
 
   revalidatePath("/settings");

@@ -132,13 +132,16 @@ export async function deleteSurveyPhoto(photoId: string, storagePath: string, le
   if (!photo?.storage_path || photo.storage_path !== storagePath) {
     return { ok: false as const, error: "Photo not found." };
   }
-  // Best-effort object bin through the seam (follows the active driver — R2 in
-  // prod). deleteObjects is idempotent (a missing object is a no-op) and throws
-  // only on a real failure; the row still deletes either way, preserving the
-  // original remove-and-don't-block behaviour.
-  await surveyPhotoStore()
-    .deleteObjects([photo.storage_path])
-    .catch(() => {});
+  // Delete the object FIRST through the seam (R2 in prod) and KEEP the row if it
+  // fails, so a transient storage error can't strand customer imagery
+  // (interior-of-home photos) as an orphan with no DB pointer — a GDPR-erasure
+  // hygiene gap. deleteObjects is idempotent (an already-gone object is a no-op),
+  // so a retry is safe. Mirrors deleteJobMediaAction.
+  try {
+    await surveyPhotoStore().deleteObjects([photo.storage_path]);
+  } catch {
+    return { ok: false as const, error: "Couldn’t remove the photo file — try again." };
+  }
   const { error } = await admin
     .from("survey_photos")
     .delete()
@@ -201,9 +204,15 @@ export async function signSurveyPhotoUrls(
 ): Promise<{ ok: true; urls: Record<string, string> } | { ok: false; error: string }> {
   const context = await officeCtx();
   if (!context) return { ok: false as const, error: "Office access required." };
-  const paths = [...new Set(storagePaths)]
+  const requested = [...new Set(storagePaths)]
     .filter((p): p is string => typeof p === "string" && p.length > 0)
     .slice(0, 100);
+  // Defence-in-depth: only sign paths that actually map to a survey_photos row, so
+  // this can never mint a signed URL for an arbitrary object in the bucket.
+  const admin = createAdminClient();
+  const { data: known } = await admin.from("survey_photos").select("storage_path").in("storage_path", requested);
+  const allowed = new Set((known ?? []).map((r) => r.storage_path));
+  const paths = requested.filter((p) => allowed.has(p));
   const store = surveyPhotoStore();
   const entries = await Promise.all(
     paths.map(async (p) => {

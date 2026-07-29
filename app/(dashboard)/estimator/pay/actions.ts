@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
+import { likeEscape } from "@/lib/util/like";
 import { getBusinessSettings } from "@/lib/settings";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
 import { hasSignedCurrentAgreement } from "@/lib/contractor/status";
@@ -67,7 +68,7 @@ async function meAsEstimator() {
     const { data: byEmail } = await sb
       .from("staff")
       .select("id, full_name")
-      .ilike("email", profile.email)
+      .ilike("email", likeEscape(profile.email))
       .eq("is_active", true)
       .maybeSingle();
     if (byEmail) {

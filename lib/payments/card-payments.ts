@@ -138,6 +138,18 @@ export async function startCardPayment(
     return { ok: false, error: "No deposit amount is set for this quote." };
   }
 
+  // Cap attempts per quote — repeatedly minting otherwise spawns a pile of
+  // abandoned rows that each fire a reconcile "verify in MMS" money alert (alert
+  // amplification). A dozen is far more than a real customer ever needs.
+  const { count: priorAttempts } = await sb
+    .from("card_payments")
+    .select("id", { count: "exact", head: true })
+    .eq("quote_id", quote.id)
+    .in("status", ["pending", "abandoned"]);
+  if ((priorAttempts ?? 0) >= 12) {
+    return { ok: false, error: "Too many payment attempts on this quote — please call us to take your deposit." };
+  }
+
   // Retire any stale pending attempt so the partial unique index lets us mint.
   // If that older attempt was actually PAID (customer completed two HPP tabs),
   // its callback still settles it via the abandoned-on-success path in
@@ -503,8 +515,44 @@ export async function refundCardPayment(
       response = refund;
     }
   } catch (err) {
-    await rollback();
-    return { ok: false, error: err instanceof Error ? err.message : "Gateway unreachable — try again." };
+    // AMBIGUOUS OUTCOME — the REFUND_SALE/CANCEL may have COMMITTED at the gateway
+    // before the transport failed (a timeout after processing, or an unverifiable
+    // response). REFUND_SALE carries no idempotency key, so rolling the reservation
+    // back and inviting a retry ("try again") would DOUBLE-REFUND the customer.
+    // Instead keep the reservation (a retry is blocked by refundBoundsError since
+    // the row is no longer paid/partially_refunded), freeze the row as needs_review
+    // (terminal — the reconcile cron won't re-alert), and send the operator to the
+    // MMS. Mirrors the settle amount-mismatch hold. If the money did NOT move, a
+    // human clears the hold and re-issues; if it did, the reservation is already
+    // correct.
+    const message = err instanceof Error ? err.message : "Gateway unreachable";
+    await sb
+      .from("card_payments")
+      .update({
+        status: "needs_review",
+        response_message: `REFUND UNCONFIRMED — verify in takepayments MMS: ${message}`.slice(0, 512),
+      })
+      .eq("id", row.id);
+    await sb.from("events_log").insert({
+      actor_id: input.actorId,
+      entity_type: "card_payment",
+      entity_id: row.id,
+      action: "refund_unconfirmed",
+      diff: { amount_pence: amount, reason, error: message } as never,
+    } as never);
+    await sendOpsAlert(
+      `Card refund UNCONFIRMED — attempt ${row.id.slice(0, 8)}`,
+      [
+        `A refund of <strong>£${(amount / 100).toFixed(2)}</strong> was sent to takepayments for quote ${row.quote_id}, but the gateway did not confirm (${message}).`,
+        `It MAY have gone through. Check the takepayments MMS for this transaction. The attempt is flagged <strong>needs review</strong> — do NOT retry the refund in the app until you have confirmed, as a blind retry can refund the customer twice.`,
+      ],
+      "money",
+    );
+    return {
+      ok: false,
+      error:
+        "The refund was sent but the gateway didn't confirm — it may have gone through. Check the takepayments MMS for this transaction before retrying. This payment is flagged for review.",
+    };
   }
 
   // Gateway succeeded — finalise status + audit (refunded_pence already reserved).

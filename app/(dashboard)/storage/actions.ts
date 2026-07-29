@@ -452,12 +452,15 @@ export async function recordHandlingEventAction(input: HandlingEventInput) {
   if (v.event_date < let_.start_date) return { ok: false as const, error: "Event can't be before the let started." };
   if (v.event_date > UK_TODAY()) return { ok: false as const, error: "The event date can't be in the future." };
 
+  // Handling is a FIXED pass-through of Sandys' charge (no markup) — pin the
+  // amount to the rate card server-side rather than trusting the posted value.
+  const rates = await getStorageRates(sb);
   const { error } = await sb.from("storage_handling_events").insert({
     let_id: v.let_id,
     client_id: let_.client_id,
     event_date: v.event_date,
     kind: v.kind,
-    amount: v.amount,
+    amount: rates.handlingEventInc,
     notes: v.notes || null,
     created_by: userId,
   } as never);

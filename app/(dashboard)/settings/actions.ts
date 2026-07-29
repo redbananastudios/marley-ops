@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VEHICLE_KEYS } from "@/lib/quote/constants";
 import { toPricingConfig, type EditablePricing } from "@/lib/quote/pricing-config";
@@ -14,13 +15,14 @@ import { storageRatesToDb } from "@/lib/storage-rates";
 import { supplierCostsToDb } from "@/lib/storage-supplier";
 
 async function requireAdmin() {
+  // Active-aware gate: getSessionProfile treats a deactivated account as signed
+  // out, so a deactivated admin holding a live token fails closed here too.
+  // Writes still go through the RLS `sb` client (is_admin() is the primary
+  // backstop); this mirrors team-actions so both admin surfaces behave alike.
+  const profile = await getSessionProfile();
   const sb = await createClient();
-  const {
-    data: { user },
-  } = await sb.auth.getUser();
-  if (!user) return { sb, error: "Not signed in." as const };
-  const { data: prof } = await sb.from("profiles").select("role").eq("id", user.id).single();
-  if (prof?.role !== "admin") return { sb, error: "Only admins can change this." as const };
+  if (!profile) return { sb, error: "Not signed in." as const };
+  if (profile.role !== "admin") return { sb, error: "Only admins can change this." as const };
   return { sb, error: null };
 }
 

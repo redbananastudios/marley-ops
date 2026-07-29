@@ -27,6 +27,7 @@ export default async function ContractorPayPage() {
       .select("id, staff_id, ref, status, period_start, period_end, total, note, submitted_at, created_at, paid_at, paid_method, paid_ref")
       .order("period_start", { ascending: false })
       .range(f, t),
+    { strict: true },
   );
 
   const staffIds = [...new Set(statements.map((s) => s.staff_id))];
@@ -41,6 +42,7 @@ export default async function ContractorPayPage() {
             .in("statement_id", stmtIds)
             .order("sort_index")
             .range(f, t),
+          { strict: true },
         )
       : Promise.resolve([] as { id: string; statement_id: string; description: string; work_date: string | null; quantity: number | null; unit_amount: number | null; amount: number }[]),
   ]);

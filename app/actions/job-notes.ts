@@ -147,11 +147,15 @@ export async function deleteJobNoteAction(
   }
 
   if (note.photo_paths?.length) {
-    // Photo removal stays best-effort (matches the prior behaviour) so a
-    // storage hiccup can't strand the note row; deleteObjects is idempotent.
-    await jobPhotosStore()
-      .deleteObjects(note.photo_paths)
-      .catch(() => {});
+    // Delete the photo objects FIRST and keep the note if it fails, so a transient
+    // storage error can't orphan the images (they can carry customer-property
+    // photos) — GDPR-erasure hygiene. deleteObjects is idempotent, so a retry is
+    // safe. Mirrors deleteJobMediaAction / deleteSurveyPhoto.
+    try {
+      await jobPhotosStore().deleteObjects(note.photo_paths);
+    } catch {
+      return { ok: false, error: "Couldn’t remove the note’s photos — try again." };
+    }
   }
   const { error } = await admin.from("job_notes").delete().eq("id", noteId);
   if (error) return { ok: false, error: "Could not remove the note — try again." };

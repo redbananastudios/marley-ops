@@ -119,7 +119,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    every media object (Supabase Storage AND R2, all five buckets); keeps
    users/passkeys/push devices, settings, staff + pay, vehicles, storage
    sites/units. Quote-ref counters deliberately NOT reset (a reused ref could
-   adopt a stale test invoice in Zoho); Zoho itself never touched.
+   adopt a stale test invoice in Zoho); Zoho itself never touched. **⚠ Before the
+   first REAL refund, manually VOID any test-phase credit notes/invoices in the
+   LIVE Zoho org** — prod pointed at live Zoho during the test phase, so test
+   accepts/refunds raised real Zoho docs, and the bank/cash refund rail has no
+   is_test guard (pre-live inspection 2026-07-29).
 6. ☐ **No-backfill go-live**: set `LEAD_SYNC_SINCE=<cutover ISO timestamp>` in
    /opt/marley-ops/app.env, THEN remove SANITY_SYNC_DISABLED → redeploy. The
    floor is enforced in `lib/sync/sanity-leads.ts` — historical website leads

@@ -315,8 +315,8 @@ export default async function GrowthPage() {
             <h2 className="font-display text-lg font-semibold text-foreground">Warnings</h2>
           </div>
           <ul className="divide-y">
-            {snapshot.warnings.map((w) => (
-              <li key={w.code} className="flex items-start gap-3 px-5 py-3">
+            {snapshot.warnings.map((w, i) => (
+              <li key={`${w.code}-${i}`} className="flex items-start gap-3 px-5 py-3">
                 <CircleAlert className="mt-0.5 size-4 shrink-0 text-warn" strokeWidth={1.75} />
                 <p className="text-sm text-foreground">{w.message}</p>
               </li>

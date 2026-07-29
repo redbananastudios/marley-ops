@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSessionProfile } from "@/lib/auth";
 import {
   computeLineAmount,
+  MAX_LINE_AMOUNT,
   seedLinesFromDays,
   guaranteeTopUp,
   round2,
@@ -95,7 +96,7 @@ async function recomputeTotal(
       .order("sort_index", { ascending: false })
       .limit(1)
       .maybeSingle();
-    await sb.from("staff_statement_lines").insert({
+    const { error: guaranteeErr } = await sb.from("staff_statement_lines").insert({
       statement_id: statementId,
       description: `Guaranteed weekly minimum (${gbpShort(weeklyGuarantee)})`,
       work_date: null,
@@ -105,7 +106,9 @@ async function recomputeTotal(
       source: "guarantee",
       sort_index: (last?.sort_index ?? -1) + 1,
     });
-    total = round2(base + topUp);
+    // Only credit the top-up to the total if the line actually landed — a race on
+    // the one-guarantee-per-statement unique index must not leave total > sum(lines).
+    if (!guaranteeErr) total = round2(base + topUp);
   }
 
   await sb.from("staff_statements").update({ total }).eq("id", statementId);
@@ -281,6 +284,12 @@ export async function upsertMyStatementLineAction(input: z.infer<typeof lineSche
   const unit = l.unit_amount === "" || l.unit_amount == null ? null : Number(l.unit_amount);
   const enteredAmount = l.amount === "" || l.amount == null ? null : Number(l.amount);
   const amount = computeLineAmount(qty, unit, enteredAmount);
+  // Sane upper bound so a fat-finger (800 hrs) or a direct-PostgREST post can't
+  // create an absurd invoice line. The office still approves before any pay run,
+  // but this gates the garbage at entry rather than relying on the reviewer's eye.
+  if (amount > MAX_LINE_AMOUNT) {
+    return { ok: false as const, error: `A single line can’t exceed ${gbpShort(MAX_LINE_AMOUNT)} — check the hours and rate.` };
+  }
 
   const row = {
     statement_id: l.statement_id,

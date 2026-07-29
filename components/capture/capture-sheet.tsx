@@ -229,6 +229,9 @@ export function CaptureSheet({
               target: target.target,
               file: blob,
               onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
+              // Mid-upload removal hard-stops the transfer (R2 PUT abort) so no
+              // orphaned object is left behind — matches the video path.
+              onControl: (control) => patchTray(key, { abort: () => control.abort() }),
             });
             patchTray(key, { status: "ready", progress: 100 });
             buzzOk();
@@ -351,6 +354,9 @@ export function CaptureSheet({
             target: target.target,
             file: capture.blob,
             onProgress: (pct) => patchTray(key, { progress: Math.round(pct) }),
+            // Mid-upload removal hard-stops the transfer (R2 PUT abort) so no
+            // orphaned object is left behind — matches the video path.
+            onControl: (control) => patchTray(key, { abort: () => control.abort() }),
           });
           patchTray(key, { status: "ready", progress: 100 });
           buzzOk();

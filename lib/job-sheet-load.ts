@@ -8,6 +8,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { likeEscape } from "@/lib/util/like";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { SURVEY_PHOTOS_BUCKET } from "@/lib/survey-photos";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
@@ -81,7 +82,7 @@ export async function crewAssignedToAppointment(
     const { data: byEmail } = await admin
       .from("staff")
       .select("id")
-      .ilike("email", email)
+      .ilike("email", likeEscape(email))
       .eq("is_active", true)
       .maybeSingle();
     staffId = byEmail?.id ?? null;

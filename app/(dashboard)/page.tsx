@@ -136,9 +136,11 @@ export default async function DashboardPage() {
           .order("submitted_at", { ascending: false })
           .order("id")
           .range(f, t),
+      { strict: true },
       ),
       fetchAllRows((f, t) =>
         supabase.from("appointments").select("id, appt_type, starts_at, status, lead_id, estimator_id").order("id").range(f, t),
+      { strict: true },
       ),
       fetchAllRows((f, t) =>
         supabase
@@ -146,6 +148,7 @@ export default async function DashboardPage() {
           .select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at")
           .order("id")
           .range(f, t),
+      { strict: true },
       ),
       supabase.from("profiles").select("id, full_name"),
       getBusinessSettings(supabase),

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { BookOpen, CalendarCheck, ChevronRight, HandCoins, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
+import { likeEscape } from "@/lib/util/like";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
@@ -52,7 +53,7 @@ export default async function MyJobsPage() {
     const { data: byEmail } = await sb
       .from("staff")
       .select("id, full_name")
-      .ilike("email", profile.email)
+      .ilike("email", likeEscape(profile.email))
       .eq("is_active", true)
       .maybeSingle();
     staffRow = byEmail ?? null;

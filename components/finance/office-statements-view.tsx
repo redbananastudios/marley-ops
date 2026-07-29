@@ -159,7 +159,7 @@ export function OfficeStatementsView({ statements, enabled }: { statements: Offi
                   <span className={cn("rounded-pill px-2.5 py-1 text-[11px] font-semibold capitalize", STATUS_META[s.status] ?? "bg-muted text-mist-500")}>
                     {s.status}
                   </span>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     <StatementPdfButton data={s.pdf} />
                     {s.status === "submitted" ? (
                       <>
