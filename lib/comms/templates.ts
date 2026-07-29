@@ -50,7 +50,7 @@ export function depositReminderTemplate(c: TemplateContext): MessageTemplate {
   return {
     key: "deposit_reminder",
     label: "Deposit reminder",
-    subject: `Your deposit${ref ? ` — quote ${c.quoteRef}` : ""}`,
+    subject: `Your deposit${ref ? ` (quote ${c.quoteRef})` : ""}`,
     email: `Hi ${name},
 
 Just a gentle reminder that the ${amt} deposit${ref}${when} is still outstanding. Once it's in, your date is locked and we're all set.
@@ -70,7 +70,7 @@ export function balanceReminderTemplate(c: TemplateContext): MessageTemplate {
   return {
     key: "balance_reminder",
     label: "Balance reminder",
-    subject: `Remaining balance${c.quoteRef ? ` — quote ${c.quoteRef}` : ""}`,
+    subject: `Remaining balance${c.quoteRef ? ` (quote ${c.quoteRef})` : ""}`,
     email: `Hi ${name},
 
 A quick reminder that the remaining balance of ${amt}${when} is now due.

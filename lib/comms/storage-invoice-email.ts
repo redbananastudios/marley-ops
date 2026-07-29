@@ -1,6 +1,7 @@
 /**
  * Storage invoice email — sent by the daily billing cron with Zoho's VAT PDF
- * attached. BACS-first per the card policy (deposit is the only card payment).
+ * attached. BACS-first, card by phone (Peter, 2026-07-29: card is accepted
+ * now, so every invoice offers it alongside bank transfer).
  * Inline-branded HTML (no published template yet — add one to
  * scripts/create-resend-templates.mjs if Connor wants dashboard editing).
  */
@@ -23,10 +24,10 @@ export interface StorageInvoiceEmailInput {
 }
 
 const DEFAULT_FOOTER_NOTE =
-  "Storage is billed in advance each period and runs until you tell us you're done — reply to this email or call 01747 637070 to arrange collection.";
+  "Storage is billed in advance each period. Whenever you're ready to arrange collection, please get in touch and we'll book it in.";
 
 export function storageInvoiceSubject(i: StorageInvoiceEmailInput): string {
-  return `Your storage invoice — ${i.invoiceNumber} (${i.amountLabel})`;
+  return `Your storage invoice: ${i.invoiceNumber} (${i.amountLabel})`;
 }
 
 export function storageInvoiceText(i: StorageInvoiceEmailInput): string {
@@ -37,6 +38,7 @@ export function storageInvoiceText(i: StorageInvoiceEmailInput): string {
     `Period: ${i.periodLabel} · Amount: ${i.amountLabel} · Invoice: ${i.invoiceNumber}`,
     ``,
     `Pay by bank transfer to MARLEYMOVES LTD, sort code 04-00-03, account 12787423, using reference ${i.invoiceNumber}.`,
+    `Prefer to pay by card? Call 01747 637070 and we'll take it over the phone.`,
     i.invoiceUrl ? `View the invoice online: ${i.invoiceUrl}` : ``,
     ``,
     i.footerNote ?? DEFAULT_FOOTER_NOTE,
@@ -50,9 +52,9 @@ export function storageInvoiceText(i: StorageInvoiceEmailInput): string {
 export function buildStorageInvoiceEmailHtml(i: StorageInvoiceEmailInput): string {
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Storage invoice — Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Storage invoice | Marley Moves</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your storage invoice ${esc(i.invoiceNumber)} for ${esc(i.periodLabel)} — ${esc(i.amountLabel)}.</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your storage invoice ${esc(i.invoiceNumber)} for ${esc(i.periodLabel)}: ${esc(i.amountLabel)}.</div>
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
@@ -71,8 +73,9 @@ export function buildStorageInvoiceEmailHtml(i: StorageInvoiceEmailInput): strin
   <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:18px 24px;border-left:4px solid #C03838;">
-        <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Pay by bank transfer</p>
+        <p style="margin:0 0 8px;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Pay by bank transfer or card</p>
         <p style="margin:0;font-size:14px;line-height:1.8;color:#1A1A1A;"><strong>MARLEYMOVES LTD</strong> · Sort code <strong>04-00-03</strong> · Account <strong>12787423</strong><br>Reference: <strong>${esc(i.invoiceNumber)}</strong></p>
+        <p style="margin:8px 0 0;font-size:13px;line-height:1.65;color:#5A554F;">Prefer to pay by card? Call <strong style="color:#1A1A1A;">01747 637070</strong> and we'll take it over the phone.</p>
       </td></tr>
     </table>
   </td></tr>

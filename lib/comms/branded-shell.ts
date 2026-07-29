@@ -37,7 +37,7 @@ const STANDARD_FOOTER = `  <tr><td style="padding:26px 36px;border-top:1px solid
       <strong style="color:#5A554F;">MarleyMoves Ltd</strong> &middot; Company No. 15914266 &middot; VAT 520 2213 58<br>
       Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX<br>
       <a href="tel:01747637070" style="color:#8A857E;text-decoration:none;">01747 637070</a> &middot; <a href="mailto:hello@marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">hello@marleymoves.co.uk</a> &middot; <a href="https://marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">marleymoves.co.uk</a><br>
-      Fully insured &mdash; Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
+      Fully insured: Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
       Registered in England &amp; Wales &middot; <a href="https://marleymoves.co.uk/terms-conditions" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="https://marleymoves.co.uk/privacy-policy" style="color:#8A857E;text-decoration:underline;">Privacy</a>
     </p>
   </td></tr>`;

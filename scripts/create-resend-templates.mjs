@@ -10,6 +10,7 @@
  * Usage:
  *   RESEND_FULL_API_KEY=re_... node scripts/create-resend-templates.mjs
  *   node scripts/create-resend-templates.mjs --preview-dir <directory>
+ *   node scripts/create-resend-templates.mjs --only chase-deposit-2
  *
  * Idempotent: matches templates by name; existing ones are updated (PATCH) and
  * republished, so the template ids never change (no env re-wiring needed).
@@ -23,6 +24,11 @@ import { resolve } from "node:path";
 
 const previewArg = process.argv.indexOf("--preview-dir");
 const PREVIEW_DIR = previewArg >= 0 ? process.argv[previewArg + 1] : null;
+
+// --only <name>[,<name>...] limits the run to the named templates, so a
+// single-copy tweak doesn't re-push (and potentially clobber) the other 19.
+const onlyArg = process.argv.indexOf("--only");
+const ONLY = onlyArg >= 0 ? new Set((process.argv[onlyArg + 1] ?? "").split(",").filter(Boolean)) : null;
 
 const KEY = process.env.RESEND_FULL_API_KEY || process.env.MARLEY_RESEND_FULL_API_KEY || process.env.MARLEY_RESEND_API_KEY;
 if (!KEY && !PREVIEW_DIR) {
@@ -50,7 +56,7 @@ const STANDARD_FOOTER = `  <tr><td style="padding:26px 36px;border-top:1px solid
       <strong style="color:#5A554F;">MarleyMoves Ltd</strong> &middot; Company No. 15914266 &middot; VAT 520 2213 58<br>
       Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX<br>
       <a href="tel:01747637070" style="color:#8A857E;text-decoration:none;">01747 637070</a> &middot; <a href="mailto:hello@marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">hello@marleymoves.co.uk</a> &middot; <a href="https://marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">marleymoves.co.uk</a><br>
-      Fully insured &mdash; Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
+      Fully insured: Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
       Registered in England &amp; Wales &middot; <a href="https://marleymoves.co.uk/terms-conditions" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="https://marleymoves.co.uk/privacy-policy" style="color:#8A857E;text-decoration:underline;">Privacy</a>
     </p>
   </td></tr>`;
@@ -138,7 +144,7 @@ const paymentCard = (reference) => {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 24px;">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">How to pay</div>
-        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, card or cash &mdash; whichever suits. Card via the button above; bank details below.</div>
+        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, card or cash, whichever suits. Card via the button above; bank details below.</div>
         <table width="100%" cellpadding="0" cellspacing="0">
           ${row("Account name", "MARLEYMOVES LTD")}
           ${row("Sort code", "04-00-03")}
@@ -153,8 +159,9 @@ const paymentCard = (reference) => {
   </td></tr>`;
 };
 
-/** Bank-transfer-only payment card (no card button): the commitment and
- *  balance rails are BACS/cash — card stays deposit-only for now. */
+/** Payment card without an online card button: the commitment and balance
+ *  rails are BACS/cash/card-by-phone (card accepted, Peter 2026-07-29 — only
+ *  the online button stays deposit-only). */
 const bankOnlyCard = (reference) => {
   const row = (l, v) => `<tr>
     <td style="padding:8px 0;border-bottom:1px solid #F0EDE8;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;width:42%;">${l}</td>
@@ -163,8 +170,8 @@ const bankOnlyCard = (reference) => {
   return `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 24px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">Pay by bank transfer</div>
-        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, or cash if that is easier &mdash; whichever suits.</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">How to pay</div>
+        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, card over the phone on 01747 637070, or cash. Whichever suits.</div>
         <table width="100%" cellpadding="0" cellspacing="0">
           ${row("Account name", "MARLEYMOVES LTD")}
           ${row("Sort code", "04-00-03")}
@@ -206,7 +213,7 @@ const refundLinesCard = (title, linesVar, totalLabel, totalVar) => `  <tr><td st
 const MONEY_FROM = "Marley Moves Accounts <accounts@marleymoves.co.uk>";
 
 const dateConfirmationHtml = shellHtml(
-  "Your move date is confirmed — here's what happens next with your booking.",
+  "Your move date is confirmed. Here's what happens next with your booking.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("Your date is locked in."),
@@ -224,10 +231,10 @@ const dateConfirmationHtml = shellHtml(
 );
 
 const commitmentReceivedHtml = shellHtml(
-  "We've received your {{{AMOUNT}}} commitment payment — it counts towards your final bill.",
+  "We've received your {{{AMOUNT}}} commitment payment. It counts towards your final bill.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
-    headlineRow("Commitment received &mdash; thank you."),
+    headlineRow("Commitment received. Thank you."),
     sublineRow(
       `We've received your <strong style="color:${INK};">{{{AMOUNT}}}</strong> commitment payment for your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). It counts towards your final bill.`,
     ),
@@ -268,12 +275,12 @@ const commitmentChaseHtml = shellHtml(
 );
 
 const cancellationAckHtml = shellHtml(
-  "Your move date has changed — everything you've paid still counts towards your move.",
+  "Your move date has changed. Everything you've paid still counts towards your move.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("Your move date has changed."),
     sublineRow(
-      `We've released your original date of <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> and booked you in for <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). No new deposit is needed &mdash; everything you've already paid still counts towards your move.`,
+      `We've released your original date of <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> and booked you in for <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). No new deposit is needed. Everything you've already paid still counts towards your move.`,
     ),
     "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCES}}}", "0 36px 16px"),
@@ -321,7 +328,7 @@ const retainedOutcomeHtml = shellHtml(
 );
 
 const marleyCancelHtml = shellHtml(
-  "We're sorry — we've had to cancel your move. Everything you've paid is refunded in full.",
+  "We're sorry: we've had to cancel your move. Everything you've paid is refunded in full.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("We're sorry."),
@@ -331,7 +338,7 @@ const marleyCancelHtml = shellHtml(
     "{{{REFUND_CARD}}}",
     sublineRow("{{{REFUND_SENTENCE}}}", "0 36px 16px"),
     sublineRow(
-      `If we can help with your move on another date, call <strong style="color:${RED};">the team</strong> on 01747 637070 &mdash; we'd like to make it right.`,
+      `If we can help with your move on another date, call <strong style="color:${RED};">the team</strong> on 01747 637070. We'd like to make it right.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -339,12 +346,12 @@ const marleyCancelHtml = shellHtml(
 );
 
 const dateChangeConfirmationHtml = shellHtml(
-  "Your new move date is confirmed — your booking and everything you've paid roll straight over.",
+  "Your new move date is confirmed. Your booking and everything you've paid roll straight over.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("You're booked for {{{NEW_DATE_LABEL}}}."),
     sublineRow(
-      `Your move has moved from <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> to <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). Your booking carries straight over &mdash; same team, same price, nothing to re-do.`,
+      `Your move has moved from <strong style="color:${INK};">{{{OLD_DATE_LABEL}}}</strong> to <strong style="color:${INK};">{{{NEW_DATE_LABEL}}}</strong> (ref {{{QUOTE_REF}}}). Your booking carries straight over: same team, same price, nothing to re-do.`,
     ),
     "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCE}}}", "0 36px 16px"),
@@ -365,13 +372,13 @@ const surveyConfirmationHtml = shellHtml(
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("You're booked in."),
     sublineRow(
-      `Thanks &mdash; your <strong style="color:${INK};">free</strong> home survey is in the diary. {{{ESTIMATOR}}} will come and take a proper look at your move so we can give you an accurate, written fixed price. It won't take long &mdash; usually well under an hour.`,
+      `Thank you, your <strong style="color:${INK};">free</strong> home survey is in the diary. {{{ESTIMATOR}}} will come and take a proper look at your move so we can give you an accurate, written fixed price. It won't take long, usually well under an hour.`,
     ),
     factsCard(
       `${fact("When", "{{{DATE_LABEL}}} at {{{TIME_LABEL}}}")}${fact("Who's coming", "{{{ESTIMATOR}}}")}${fact("Where", "{{{ADDRESS}}}", true)}`,
     ),
     sublineRow(
-      `<strong style="color:${INK};">One thing that helps us:</strong> please make sure we can get to every room and area we'll be moving items from &mdash; including any loft, garage or outbuildings.`,
+      `<strong style="color:${INK};">One thing that helps us:</strong> please make sure we can get to every room and area we'll be moving items from, including any loft, garage or outbuildings.`,
       "0 36px 16px",
     ),
     sublineRow(
@@ -436,11 +443,11 @@ const quoteEmailHtml = shellHtml(
   </td></tr>`,
     stepsRow([
       { t: "Accept your quote", d: "About 30 seconds, and your date is reserved." },
-      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: "Card or bank transfer &mdash; this locks your booking in." },
+      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: "Card or bank transfer. This locks your booking in." },
       { t: "Before &amp; on the day", d: "Balance due 24 hours before moving day, then we arrive on time and get you moved." },
     ]),
     sublineRow(
-      `<strong style="color:${INK};">Included, free:</strong> your survey, packing boxes, furniture &amp; wardrobe boxes, and full insurance. Just tell us if you'd like <strong style="color:${INK};">boxes</strong> dropped off &mdash; and if anything needs special care (wardrobe boxes, chair covers), your estimator will already have flagged it.`,
+      `<strong style="color:${INK};">Included, free:</strong> your survey, packing boxes, furniture &amp; wardrobe boxes, and full insurance. Just tell us if you'd like <strong style="color:${INK};">boxes</strong> dropped off, and if anything needs special care (wardrobe boxes, chair covers), your estimator will already have flagged it.`,
       "0 36px 18px",
     ),
     sublineRow(
@@ -455,17 +462,17 @@ const quoteEmailHtml = shellHtml(
 );
 
 const depositReceivedHtml = shellHtml(
-  "We've received your {{{AMOUNT}}} deposit &mdash; your move date is secured.",
+  "We've received your {{{AMOUNT}}} deposit. Your move date is secured.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("Thank you for booking with Marley Moves."),
     sublineRow(
-      `We've received your <strong style="color:${INK};">{{{AMOUNT}}}</strong> deposit for your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong> &mdash; your date and crew are now secured.`,
+      `We've received your <strong style="color:${INK};">{{{AMOUNT}}}</strong> deposit for your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong>. Your date and crew are now secured.`,
     ),
     amountCard("Deposit paid", "{{{AMOUNT}}}"),
     sublineRow("{{{BALANCE_LINE}}}", "0 36px 16px"),
     sublineRow(
-      "If we need anything from you beforehand we'll be in touch &mdash; otherwise, rest assured we'll see you on the day. In the meantime, just let us know if you'd like any <strong style=\"color:" + INK + ';">boxes</strong> dropped off.',
+      "If we need anything from you beforehand we'll be in touch. Otherwise, rest assured we'll see you on the day. In the meantime, just let us know if you'd like any <strong style=\"color:" + INK + ';">boxes</strong> dropped off.',
       "0 36px 16px",
     ),
     sublineRow(
@@ -496,10 +503,10 @@ const balanceInvoiceHtml = shellHtml(
 );
 
 const balanceReceivedHtml = shellHtml(
-  "Balance of {{{AMOUNT}}} received &mdash; you're all set for move day.",
+  "Balance of {{{AMOUNT}}} received. You're all set for move day.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
-    headlineRow("All settled &mdash; thank you."),
+    headlineRow("All settled. Thank you."),
     sublineRow(
       `We've received your balance of <strong style="color:${INK};">{{{AMOUNT}}}</strong>, so there's nothing more to pay. Everything's in order for your move on <strong style="color:${INK};">{{{MOVE_DAY_LABEL}}}</strong>, and we look forward to seeing you then.`,
     ),
@@ -512,12 +519,12 @@ const balanceReceivedHtml = shellHtml(
 );
 
 const completionCertificateHtml = shellHtml(
-  "Your move with Marley Moves is complete &mdash; your certificate is attached.",
+  "Your move with Marley Moves is complete. Your certificate is attached.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("That's your move complete."),
     sublineRow(
-      "Your move on <strong style=\"color:" + INK + ';">{{{MOVE_DATE_LABEL}}}</strong> is all done &mdash; and we genuinely can\'t thank you enough for choosing Marley Moves. We know moving is a big deal and that you had plenty of choice; it really does mean a lot that you trusted us with it.',
+      "Your move on <strong style=\"color:" + INK + ';">{{{MOVE_DATE_LABEL}}}</strong> is all done, and we genuinely can\'t thank you enough for choosing Marley Moves. We know moving is a big deal and that you had plenty of choice; it really does mean a lot that you trusted us with it.',
     ),
     sublineRow("Your <strong style=\"color:" + INK + ';">completion certificate is attached</strong> for your records.', "0 36px 18px"),
     `  <tr><td style="padding:0 36px 22px;">
@@ -526,7 +533,7 @@ const completionCertificateHtml = shellHtml(
     </td></tr></table>
   </td></tr>`,
     sublineRow(
-      `If anything comes up at all, just reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070 &mdash; we're always happy to help.`,
+      `If anything comes up at all, just reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070. We're always happy to help.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -539,15 +546,15 @@ const reviewRequestHtml = shellHtml(
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("How did we do?"),
     sublineRow(
-      "That's your move done &mdash; and thank you, genuinely, for choosing Marley Moves. It really does mean a lot to a small local firm like ours, and we're grateful you trusted us with your move.",
+      "That's your move done, and thank you, genuinely, for choosing Marley Moves. It really does mean a lot to a small local firm like ours, and we're grateful you trusted us with your move.",
     ),
     sublineRow(
-      `If Connor and the crew looked after you well, a quick <strong style="color:${INK};">{{{REVIEW_PLATFORM}}}</strong> review would make a real difference &mdash; it only takes a minute.`,
+      `If Connor and the crew looked after you well, a quick <strong style="color:${INK};">{{{REVIEW_PLATFORM}}}</strong> review would make a real difference. It only takes a minute.`,
       "0 36px 20px",
     ),
     linkButton("Leave a {{{REVIEW_PLATFORM}}} review&nbsp;&rarr;", "{{{REVIEW_URL}}}"),
     sublineRow(
-      `And if anything wasn't quite right, please reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070 first &mdash; we'd always rather put it right.`,
+      `And if anything wasn't quite right, please reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070 first. We'd always rather put it right.`,
       "16px 36px 6px",
     ),
     signoffRow(),
@@ -590,7 +597,7 @@ const TEMPLATES = [
   {
     name: "survey-confirmation",
     envVar: "RESEND_TEMPLATE_SURVEY_CONFIRMATION",
-    subject: "Your survey is booked — {{{DATE_LABEL}}}, {{{TIME_LABEL}}}",
+    subject: "Your survey is booked: {{{DATE_LABEL}}}, {{{TIME_LABEL}}}",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     reply_to: "hello@marleymoves.co.uk",
     html: surveyConfirmationHtml,
@@ -605,7 +612,7 @@ const TEMPLATES = [
   {
     name: "quote-email",
     envVar: "RESEND_TEMPLATE_QUOTE_EMAIL",
-    subject: "Your removal quote from Marley Moves — {{{QUOTE_REF}}}",
+    subject: "Your removal quote from Marley Moves ({{{QUOTE_REF}}})",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     html: quoteEmailHtml,
     variables: [
@@ -629,7 +636,7 @@ const TEMPLATES = [
   {
     name: "deposit-received",
     envVar: "RESEND_TEMPLATE_DEPOSIT_RECEIVED",
-    subject: "Deposit received — you're booked in ({{{QUOTE_REF}}})",
+    subject: "Deposit received. You're booked in ({{{QUOTE_REF}}})",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     html: depositReceivedHtml,
     variables: [
@@ -648,7 +655,7 @@ const TEMPLATES = [
   {
     name: "balance-invoice",
     envVar: "RESEND_TEMPLATE_BALANCE_INVOICE",
-    subject: "Your final balance — {{{QUOTE_REF}}} ({{{AMOUNT}}})",
+    subject: "Your final balance: {{{QUOTE_REF}}} ({{{AMOUNT}}})",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     html: balanceInvoiceHtml,
     variables: [
@@ -663,7 +670,7 @@ const TEMPLATES = [
   {
     name: "balance-received",
     envVar: "RESEND_TEMPLATE_BALANCE_RECEIVED",
-    subject: "Payment received — all settled ({{{QUOTE_REF}}})",
+    subject: "Payment received. All settled ({{{QUOTE_REF}}})",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     html: balanceReceivedHtml,
     variables: [
@@ -676,7 +683,7 @@ const TEMPLATES = [
   {
     name: "completion-certificate",
     envVar: "RESEND_TEMPLATE_COMPLETION_CERT",
-    subject: "Your move is complete — certificate attached",
+    subject: "Your move is complete. Certificate attached",
     from: "Marley Moves <hello@marleymoves.co.uk>",
     reply_to: "hello@marleymoves.co.uk",
     html: completionCertificateHtml,
@@ -709,7 +716,7 @@ const TEMPLATES = [
   {
     name: "chase-quote-1",
     envVar: "RESEND_TEMPLATE_CHASE_QUOTE_1",
-    subject: "Your removal quote — any questions, {{{CUSTOMER_FIRST_NAME}}}?",
+    subject: "Your removal quote: any questions, {{{CUSTOMER_FIRST_NAME}}}?",
     from: CHASE_FROM,
     html: chaseHtml("Just checking your quote reached you okay.", {
       intro: [
@@ -780,7 +787,7 @@ const TEMPLATES = [
         "Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, your {{{DEPOSIT_AMOUNT}}} deposit is what confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
-      closing: ["If your timing has changed or plans have shifted, just reply and let me know. I'd genuinely rather help than chase."],
+      closing: ["If your timing has changed or plans have shifted, just reply and let me know."],
     }),
     variables: CHASE_VARS,
   },
@@ -789,7 +796,7 @@ const TEMPLATES = [
   {
     name: "date-confirmation",
     envVar: "RESEND_TEMPLATE_DATE_CONFIRMATION",
-    subject: "Move date confirmed — {{{QUOTE_REF}}}",
+    subject: "Move date confirmed ({{{QUOTE_REF}}})",
     from: MONEY_FROM,
     html: dateConfirmationHtml,
     variables: [
@@ -812,7 +819,7 @@ const TEMPLATES = [
   {
     name: "commitment-received",
     envVar: "RESEND_TEMPLATE_COMMITMENT_RECEIVED",
-    subject: "Payment received — commitment for your move ({{{QUOTE_REF}}})",
+    subject: "Payment received: commitment for your move ({{{QUOTE_REF}}})",
     from: MONEY_FROM,
     html: commitmentReceivedHtml,
     variables: [
@@ -905,7 +912,7 @@ const TEMPLATES = [
   {
     name: "marley-cancel-refund",
     envVar: "RESEND_TEMPLATE_MARLEY_CANCEL",
-    subject: "We're sorry — your move is cancelled ({{{QUOTE_REF}}})",
+    subject: "We're sorry: your move is cancelled ({{{QUOTE_REF}}})",
     from: MONEY_FROM,
     html: marleyCancelHtml,
     variables: [
@@ -927,7 +934,7 @@ const TEMPLATES = [
   {
     name: "date-change-confirmation",
     envVar: "RESEND_TEMPLATE_DATE_CHANGE_CONFIRMATION",
-    subject: "Your new move date is confirmed — {{{NEW_DATE_LABEL}}} ({{{QUOTE_REF}}})",
+    subject: "Your new move date is confirmed: {{{NEW_DATE_LABEL}}} ({{{QUOTE_REF}}})",
     from: MONEY_FROM,
     html: dateChangeConfirmationHtml,
     variables: [
@@ -983,7 +990,7 @@ if (PREVIEW_DIR) {
     REVIEW_URL: "https://search.google.com/local/writereview?placeid=example",
   };
   await mkdir(directory, { recursive: true });
-  for (const template of TEMPLATES) {
+  for (const template of ONLY ? TEMPLATES.filter((t) => ONLY.has(t.name)) : TEMPLATES) {
     const fallbacks = Object.fromEntries(
       (template.variables ?? []).map((variable) => [variable.key, String(variable.fallback_value ?? "")]),
     );
@@ -1004,8 +1011,20 @@ async function api(method, path, body) {
   return json;
 }
 
-const existing = (await api("GET", "/templates").catch(() => ({ data: [] }))).data ?? [];
+// ?limit=100: the default page size is 20, which silently hid the 20th+
+// template and made the create-or-update matcher DUPLICATE it (bit us
+// 2026-07-29 with survey-confirmation). One page of 100 covers us for a long
+// time; if we ever exceed it, has_more turns true and the guard below throws.
+const listing = await api("GET", "/templates?limit=100").catch(() => ({ data: [], has_more: false }));
+if (listing.has_more) throw new Error("More than 100 templates — add real pagination before running.");
+const existing = listing.data ?? [];
 const byName = new Map(existing.map((t) => [t.name, t]));
+
+const SELECTED = ONLY ? TEMPLATES.filter((t) => ONLY.has(t.name)) : TEMPLATES;
+if (ONLY && SELECTED.length === 0) {
+  console.error(`--only matched nothing. Known names: ${TEMPLATES.map((t) => t.name).join(", ")}`);
+  process.exit(1);
+}
 
 // Resend enforces declared-variables ≡ html-variables at every moment, so an
 // in-place PATCH that changes the variable SET is rejected. So: try PATCH first
@@ -1013,7 +1032,7 @@ const byName = new Map(existing.map((t) => [t.name, t]));
 // (a variable was added/removed) delete + recreate (new id). The loop prints an
 // env line for each — apply any that changed to the app env.
 const envLines = [];
-for (const t of TEMPLATES) {
+for (const t of SELECTED) {
   const { envVar, ...def } = t;
   const old = byName.get(t.name)?.id;
   let id = old;

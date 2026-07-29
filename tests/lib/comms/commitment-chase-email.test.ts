@@ -85,7 +85,8 @@ describe("composeCommitmentChaseEmail — copy invariants", () => {
     expect(email.text).toContain("04-00-03");
     expect(email.text).toContain("12787423");
     expect(email.text).toContain("Reference: MMR001");
-    expect(email.html).toContain("Pay by bank transfer");
+    expect(email.html).toContain("How to pay");
+    expect(email.html).toContain("card over the phone on 01747 637070");
   });
 
   it("links the hosted invoice when known, and omits the button otherwise", () => {

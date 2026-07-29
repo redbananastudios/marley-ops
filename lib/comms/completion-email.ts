@@ -20,14 +20,14 @@ export interface CompletionEmailInput {
 }
 
 export function completionEmailSubject(_i: CompletionEmailInput): string {
-  return `Your move is complete — certificate attached`;
+  return `Your move is complete. Certificate attached`;
 }
 
 export function completionEmailText(i: CompletionEmailInput): string {
   const lines = [
     `Hi ${i.firstName},`,
     ``,
-    `That's your move done — thank you for choosing Marley Moves. Your completion certificate is attached for your records.`,
+    `That's your move done. Thank you for choosing Marley Moves. Your completion certificate is attached for your records.`,
     i.customerAbsent
       ? `Nobody was available to sign at the destination, so please check your delivered items and reply to this email within 48 hours if anything is missing or damaged.`
       : i.hasExceptions
@@ -58,9 +58,9 @@ export function buildCompletionEmailHtml(i: CompletionEmailInput): string {
   const statusLine = completionEmailVariables(i).STATUS_LINE;
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Move complete — Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Move complete | Marley Moves</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your move with Marley Moves is complete — your certificate is attached.</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your move with Marley Moves is complete. Your certificate is attached.</div>
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
@@ -74,7 +74,7 @@ export function buildCompletionEmailHtml(i: CompletionEmailInput): string {
     <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">That's you moved, ${esc(i.firstName)}</h1>
   </td></tr>
   <tr><td align="center" style="padding:14px 36px 18px;">
-    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">Your move on ${esc(i.moveDateLabel)} is complete — thank you for choosing Marley Moves. Your <strong>completion certificate is attached</strong> for your records.</p>
+    <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0 auto;max-width:440px;">Your move on ${esc(i.moveDateLabel)} is complete. Thank you for choosing Marley Moves. Your <strong>completion certificate is attached</strong> for your records.</p>
   </td></tr>
   <tr><td style="padding:0 36px 24px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FBF8F4;border-radius:8px;">

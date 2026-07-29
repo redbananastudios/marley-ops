@@ -82,7 +82,7 @@ describe("payment emails", () => {
     NO_EM_DASH(html);
   });
 
-  it("balance invoice: amount, bank details with the QUOTE ref (not the -BAL ref), hosted link, NEVER card", () => {
+  it("balance invoice: amount, bank details with the QUOTE ref (not the -BAL ref), hosted link, card by phone only", () => {
     const html = buildBalanceInvoiceEmailHtml({
       firstName: "Jane",
       quoteRef: "MM-T-1",
@@ -97,9 +97,11 @@ describe("payment emails", () => {
     expect(html).toContain(">MM-T-1<"); // BACS reference = quote ref, exact
     expect(html).toContain("INV-000200");
     expect(html).toContain("View your invoice");
-    // The balance is BACS/cash only (card fees) — card copy must never appear,
-    // Stripe or no Stripe.
-    expect(html.toLowerCase()).not.toContain("card");
+    // Card is accepted by PHONE (Peter, 2026-07-29) but there is still no
+    // online card button on the balance — the pay-online rail stays
+    // deposit-only, so the only card mention is the phone line.
+    expect(html).toContain("card over the phone on 01747 637070");
+    expect(html.toLowerCase()).not.toContain("pay by card online");
     NO_EM_DASH(html);
   });
 

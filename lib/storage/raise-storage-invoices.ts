@@ -81,35 +81,35 @@ export function invoiceDescription(due: DueInvoice, unitLabel: string, dayRate: 
   const span = `${prettyDay(due.period_start)} – ${prettyDay(due.period_end)}`;
   switch (due.kind) {
     case "minimum":
-      return `Storage — ${unitLabel}, ${due.days}-day minimum (${span})${handlingSuffix(due.handlingEvents)}`;
+      return `Storage: ${unitLabel}, ${due.days}-day minimum (${span})${handlingSuffix(due.handlingEvents)}`;
     case "arrears":
     case "final": {
-      if (due.days === 0) return `Storage — ${unitLabel}${handlingSuffix(due.handlingEvents)}`;
-      return `Storage — ${unitLabel}, ${due.days} day${due.days === 1 ? "" : "s"} (${span}) @ ${gbp(dayRate)}/day${handlingSuffix(due.handlingEvents)}`;
+      if (due.days === 0) return `Storage: ${unitLabel}${handlingSuffix(due.handlingEvents)}`;
+      return `Storage: ${unitLabel}, ${due.days} day${due.days === 1 ? "" : "s"} (${span}) @ ${gbp(dayRate)}/day${handlingSuffix(due.handlingEvents)}`;
     }
     default:
-      return `Storage — ${unitLabel}, ${span}`;
+      return `Storage: ${unitLabel}, ${span}`;
   }
 }
 
 const NOTES: Record<DueInvoice["kind"], string> = {
   period:
-    "Storage is billed in advance per period. Pay by bank transfer using the invoice number as the reference.",
+    "Storage is billed in advance per period. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
   minimum:
-    "Your minimum storage period, billed in advance; further days are charged to the exact day in arrears. Pay by bank transfer using the invoice number as the reference.",
+    "Your minimum storage period, billed in advance; further days are charged to the exact day in arrears. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
   arrears:
-    "Storage days billed in arrears to the exact day. Pay by bank transfer using the invoice number as the reference.",
+    "Storage days billed in arrears to the exact day. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
   final:
-    "Final storage invoice — all charges are settled before items are released. Pay by bank transfer using the invoice number as the reference.",
+    "Final storage invoice. All charges are settled before items are released. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
 };
 
 const FOOTER_NOTES: Partial<Record<DueInvoice["kind"], string>> = {
   minimum:
-    "This covers your minimum storage period, billed in advance. After that, storage is charged to the exact day in arrears — reply to this email or call 01747 637070 any time to arrange release.",
+    "This invoice covers your minimum storage period, billed in advance. After that, storage is charged to the exact day, in arrears. Whenever you're ready to arrange release, please get in touch and we'll book it in.",
   arrears:
-    "Storage days are charged to the exact day, in arrears, every 4 weeks. Release is by appointment with all charges settled before your items leave — reply to this email or call 01747 637070 to arrange it.",
+    "Storage days are charged to the exact day, in arrears, every 4 weeks. Release is by appointment, with all charges settled before your items leave. Whenever you're ready, please get in touch and we'll book it in.",
   final:
-    "This is your final storage invoice — everything is settled before your items are released. Reply to this email or call 01747 637070 with any questions.",
+    "This is your final storage invoice. All charges are settled before your items are released. If you have any questions, please get in touch.",
 };
 
 function periodLabelFor(due: Pick<DueInvoice, "kind" | "period_start" | "period_end" | "days">): string {

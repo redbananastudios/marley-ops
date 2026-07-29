@@ -147,7 +147,7 @@ export async function startCardPayment(
     .eq("quote_id", quote.id)
     .in("status", ["pending", "abandoned"]);
   if ((priorAttempts ?? 0) >= 12) {
-    return { ok: false, error: "Too many payment attempts on this quote — please call us to take your deposit." };
+    return { ok: false, error: "Too many payment attempts on this quote. Please call us to take your deposit." };
   }
 
   // Retire any stale pending attempt so the partial unique index lets us mint.

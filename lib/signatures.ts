@@ -106,7 +106,7 @@ export const DATE_CONFIRM_ACKS = [
   {
     key: "date_confirm",
     label:
-      "I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and Marley Moves cannot re-book the day, amounts I've paid up to 25% of my job price may be retained — and are refunded in full if the day is re-booked.",
+      "I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and Marley Moves cannot re-book the day, amounts I've paid up to 25% of my job price may be retained, and are refunded in full if the day is re-booked.",
   },
 ] as const;
 

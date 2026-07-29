@@ -91,7 +91,7 @@ export function composeCommitmentChaseEmail(m: CommitmentChaseMeta): ComposedCom
 
 Thank you for confirming your move date of ${moveLabel}. The next step in your booking is your commitment payment of ${gbp(m.amount)}, due ${dueLabel}. Your remaining balance is then due in full before move day.
 
-You can pay by bank transfer, or in cash if that is easier:
+You can pay by bank transfer, by card over the phone on 01747 637070, or in cash if that is easier:
 
 Account name: ${BANK_DETAILS.name}
 Sort code: ${BANK_DETAILS.sortCode}
@@ -189,7 +189,7 @@ function bankCard(reference: string): string {
   return `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 24px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:10px;">Pay by bank transfer</div>
+        <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#6E6A65;margin-bottom:10px;">How to pay</div>
         <table width="100%" cellpadding="0" cellspacing="0">
           ${row("Account name", BANK_DETAILS.name)}
           ${row("Sort code", BANK_DETAILS.sortCode)}
@@ -199,6 +199,7 @@ function bankCard(reference: string): string {
             <td style="padding:8px 0;font-size:14px;color:#C03838;font-weight:700;">${escapeHtml(reference)}</td>
           </tr>
         </table>
+        <p style="margin:10px 0 0;font-size:12.5px;line-height:1.6;color:#6E6A65;">Bank transfer, card over the phone on 01747 637070, or cash. Whichever suits.</p>
       </td></tr>
     </table>
   </td></tr>`;

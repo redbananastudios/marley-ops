@@ -233,7 +233,7 @@ export function cancellationAckSubject(m: CancellationAckMeta): string {
 function ackHeldSentences(m: CancellationAckMeta): string[] {
   if (!m.dateConfirmed || m.conditionalAmount <= 0) {
     return [
-      `Everything you've paid simply moves with you to the new date — nothing changes and there's nothing to do.`,
+      `Everything you've paid simply moves with you to the new date. Nothing changes and there's nothing to do.`,
     ];
   }
   const out = [
@@ -258,7 +258,7 @@ export function cancellationAckText(m: CancellationAckMeta): string {
     `We've released your original move date${m.oldDateLabel ? ` (${m.oldDateLabel})` : ""} and booked you in${
       m.newDateLabel ? ` for ${m.newDateLabel}` : " for your new date"
     } (${m.quoteRef}).`,
-    `No new deposit is needed — you've paid ${gbp(m.heldTotal)}${
+    `No new deposit is needed. You've paid ${gbp(m.heldTotal)}${
       m.heldLines.length ? ` (${m.heldLines.join(", ")})` : ""
     } and it still counts towards your move.`,
     ...ackHeldSentences(m),
@@ -289,7 +289,7 @@ export function buildCancellationAckEmailHtml(m: CancellationAckMeta): string {
         m.oldDateLabel ? ` of <strong style="color:#1A1A1A;">${escapeHtml(m.oldDateLabel)}</strong>` : ""
       } and booked you in${
         m.newDateLabel ? ` for <strong style="color:#1A1A1A;">${escapeHtml(m.newDateLabel)}</strong>` : " for your new date"
-      }. No new deposit is needed — everything you've already paid still counts towards your move.`,
+      }. No new deposit is needed. Everything you've already paid still counts towards your move.`,
     ),
     m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines) : "",
     subline(ackHeldSentences(m).map((s) => escapeHtml(s)).join(" ")),
@@ -300,7 +300,7 @@ export function buildCancellationAckEmailHtml(m: CancellationAckMeta): string {
     .filter(Boolean)
     .join("\n");
   return shell(
-    `Your move date has changed — everything you've paid still counts towards your move.`,
+    `Your move date has changed. Everything you've paid still counts towards your move.`,
     inner,
   );
 }
@@ -317,24 +317,24 @@ export interface MarleyCancelMeta {
 }
 
 export function marleyCancelSubject(m: MarleyCancelMeta): string {
-  return `We're sorry — your move is cancelled (${m.quoteRef})`;
+  return `We're sorry: your move is cancelled (${m.quoteRef})`;
 }
 
 export function marleyCancelText(m: MarleyCancelMeta): string {
   const name = firstNameOf(m.firstName);
   const refund =
     m.refundTotal > 0
-      ? `Everything you've paid — ${gbp(m.refundTotal)}${
+      ? `Everything you've paid, ${gbp(m.refundTotal)}${
           m.heldLines.length ? ` (${m.heldLines.join(", ")})` : ""
-        } — comes back to you in full, the same way you paid it, within ${REFUND_CUSTOMER_SLA_DAYS} days. There's nothing you need to do.`
+        }, comes back to you in full, the same way you paid it, within ${REFUND_CUSTOMER_SLA_DAYS} days. There's nothing you need to do.`
       : `You haven't paid anything towards this move, so there's nothing owed either way.`;
   return [
     `Hi ${name || "there"},`,
-    `We're very sorry — we can't do your move${
+    `We're very sorry. We can't do your move${
       m.moveDateLabel ? ` on ${m.moveDateLabel}` : ""
     } and have had to cancel your booking (${m.quoteRef}). This one is on us.`,
     refund,
-    `If we can help with your move on another date, call Connor on 01747 637070 — we'd like to make it right.`,
+    `If we can help with your move on another date, call Connor on 01747 637070. We'd like to make it right.`,
   ].join("\n\n");
 }
 
@@ -370,12 +370,12 @@ export function buildMarleyCancelEmailHtml(m: MarleyCancelMeta): string {
         : `You haven't paid anything towards this move, so there's nothing owed either way.`,
     ),
     subline(
-      `If we can help with your move on another date, call Connor on <strong style="color:#C03838;">01747 637070</strong> — we'd like to make it right.`,
+      `If we can help with your move on another date, call Connor on <strong style="color:#C03838;">01747 637070</strong>. We'd like to make it right.`,
     ),
   ]
     .filter(Boolean)
     .join("\n");
-  return shell(`We're sorry — we've had to cancel your move. Everything you've paid is refunded in full.`, inner);
+  return shell(`We're sorry: we've had to cancel your move. Everything you've paid is refunded in full.`, inner);
 }
 
 /* --------------------------------- date-change-confirmation (outside window) */
@@ -393,14 +393,14 @@ export interface DateChangeConfirmationMeta {
 }
 
 export function dateChangeConfirmationSubject(m: DateChangeConfirmationMeta): string {
-  return `Your new move date is confirmed${m.newDateLabel ? ` — ${m.newDateLabel}` : ""} (${m.quoteRef})`;
+  return `Your new move date is confirmed${m.newDateLabel ? `: ${m.newDateLabel}` : ""} (${m.quoteRef})`;
 }
 
 function commitmentSentence(m: DateChangeConfirmationMeta): string | null {
   if (!m.commitmentAmount || m.commitmentAmount <= 0) return null;
   return `Your commitment payment of ${gbp(m.commitmentAmount)} is now due${
     m.commitmentDueLabel ? ` by ${m.commitmentDueLabel}` : ""
-  } — it moves with your date and still counts towards your final bill.`;
+  }. It moves with your date and still counts towards your final bill.`;
 }
 
 export function dateChangeConfirmationText(m: DateChangeConfirmationMeta): string {
@@ -410,7 +410,7 @@ export function dateChangeConfirmationText(m: DateChangeConfirmationMeta): strin
     `Hi ${name || "there"},`,
     `Your move${m.oldDateLabel ? ` has moved from ${m.oldDateLabel}` : " date has changed"} to ${
       m.newDateLabel ?? "your new date"
-    } (${m.quoteRef}). Your booking carries straight over — same team, same price, nothing to re-do.`,
+    } (${m.quoteRef}). Your booking carries straight over: same team, same price, nothing to re-do.`,
     m.heldTotal > 0
       ? `You've paid ${gbp(m.heldTotal)}${
           m.heldLines.length ? ` (${m.heldLines.join(", ")})` : ""
@@ -456,11 +456,11 @@ export function buildDateChangeConfirmationEmailHtml(m: DateChangeConfirmationMe
         m.oldDateLabel ? ` has moved from <strong style="color:#1A1A1A;">${escapeHtml(m.oldDateLabel)}</strong>` : " date has changed"
       } to <strong style="color:#1A1A1A;">${escapeHtml(
         m.newDateLabel ?? "your new date",
-      )}</strong>. Your booking carries straight over — same team, same price, nothing to re-do.`,
+      )}</strong>. Your booking carries straight over: same team, same price, nothing to re-do.`,
     ),
     m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines) : "",
     m.heldTotal > 0
-      ? subline(`It all still counts towards your move — nothing extra is taken for the change.`)
+      ? subline(`It all still counts towards your move. Nothing extra is taken for the change.`)
       : "",
     commitment ? subline(escapeHtml(commitment)) : "",
     subline(
@@ -470,7 +470,7 @@ export function buildDateChangeConfirmationEmailHtml(m: DateChangeConfirmationMe
     .filter(Boolean)
     .join("\n");
   return shell(
-    `Your new move date is confirmed — your booking and everything you've paid roll straight over.`,
+    `Your new move date is confirmed. Your booking and everything you've paid roll straight over.`,
     inner,
   );
 }

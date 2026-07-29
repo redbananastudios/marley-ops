@@ -215,7 +215,7 @@ ${owner}`,
 Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, the £100 deposit confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:
 ${c.acceptUrl}
 
-If your plans have changed or you need help with payment, reply and let me know. I'd rather help than keep chasing.
+If your timing has changed or plans have shifted, just reply and let me know.
 
 Best regards,
 ${owner}`,

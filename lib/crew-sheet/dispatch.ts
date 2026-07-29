@@ -118,7 +118,7 @@ export function smsBody(day: CrewDaySheet, url: string, superseding: boolean): s
   const n = day.jobs.length;
   const jobs = n === 0 ? "no jobs" : `${n} ${n === 1 ? "job" : "jobs"}`;
   const lead = superseding ? `Marley Moves UPDATE: your ${when} sheet changed` : `Marley Moves: your job sheet for ${when}`;
-  return `${lead} (${jobs}). ${url} — questions? 01747 637070`;
+  return `${lead} (${jobs}). ${url} Questions? 01747 637070`;
 }
 
 /** Email HTML — brief body; the PDF is attached and the web version linked. */
@@ -128,10 +128,10 @@ export function emailHtml(day: CrewDaySheet, url: string, superseding: boolean):
   const n = day.jobs.length;
   const jobsLine =
     n === 0
-      ? "Your jobs for this day have changed — you now have <strong>no jobs</strong> booked. Please check with the office if that's a surprise."
+      ? "Your jobs for this day have changed. You now have <strong>no jobs</strong> booked. Please check with the office if that's a surprise."
       : `You're on <strong>${n} ${n === 1 ? "job" : "jobs"}</strong>.`;
   const banner = superseding
-    ? `<tr><td style="padding:12px 24px;background:#FEF3E2;border-bottom:1px solid #F5D9A8;font-size:13px;color:#B45309;"><strong>Updated sheet.</strong> A job changed — this replaces the sheet we sent earlier.</td></tr>`
+    ? `<tr><td style="padding:12px 24px;background:#FEF3E2;border-bottom:1px solid #F5D9A8;font-size:13px;color:#B45309;"><strong>Updated sheet.</strong> A job changed. This replaces the sheet we sent earlier.</td></tr>`
     : "";
   return `<!doctype html><html><body style="margin:0;padding:0;background:#F6F5F3;font-family:Arial,Helvetica,sans-serif;">
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:24px 12px;">
@@ -326,7 +326,7 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
       if (day.crew.email && pdfBase64) {
         const res = await sendEmail({
           to: day.crew.email,
-          subject: `${superseding ? "Updated job sheet" : "Your job sheet"} — ${fmtLongDate(workDate)}`,
+          subject: `${superseding ? "Updated job sheet" : "Your job sheet"}: ${fmtLongDate(workDate)}`,
           html: emailHtml(day, url, superseding),
           attachments: [{ filename, content: pdfBase64 }],
           replyTo: "hello@marleymoves.co.uk",

@@ -81,7 +81,7 @@ export async function sendReviewRequest(
     channel: "email",
     to: lead.email,
     subject: `How did we do, ${first}?`,
-    bodyText: `Thanks for moving with Marley Moves. If Connor and the crew looked after you, a quick ${review.platform} review makes a real difference to us: ${review.url} — and if anything wasn't right, reply to this email or call the team on 01747 637070 first.`,
+    bodyText: `Thanks for moving with Marley Moves. If Connor and the crew looked after you, a quick ${review.platform} review makes a real difference to us: ${review.url}. If anything wasn't right, reply to this email or call the team on 01747 637070 first.`,
     ...(templateId
       ? {
           template: {

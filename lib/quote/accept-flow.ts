@@ -1109,7 +1109,7 @@ export async function markDepositPaid(
       // (docs/email-identity-plan.md); replies still route via the token relay.
       from: accountsFrom(),
       to: quote.customer_email,
-      subject: `Deposit received — you're booked in (${quote.quote_ref})`,
+      subject: `Deposit received. You're booked in (${quote.quote_ref})`,
       bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref}. Your move date is secured.`,
       ...(templateId
         ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) } }
@@ -1198,7 +1198,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
         reference: ref,
         description: `Booking commitment — removal quote ${quote.quote_ref} (25% of your move price, less your £${deposit.toFixed(2)} deposit)`,
         amount,
-        notes: `Commitment payment for your confirmed move date, quote ${quote.quote_ref}. Due by ${dueDate}. It counts towards your final bill; the remaining balance is due in full before move day. Payable by bank transfer (reference ${quote.quote_ref}) or cash.`,
+        notes: `Commitment payment for your confirmed move date, quote ${quote.quote_ref}. Due by ${dueDate}. It counts towards your final bill; the remaining balance is due in full before move day. Payable by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`,
         disableOnlinePayments: true, // commitment is BACS/cash only — never card
       });
     }
@@ -1351,7 +1351,7 @@ export async function markCommitmentPaid(
       channel: "email",
       from: accountsFrom(),
       to: quote.customer_email,
-      subject: `Payment received — commitment for your move (${quote.quote_ref})`,
+      subject: `Payment received: commitment for your move (${quote.quote_ref})`,
       bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. It counts towards your final bill; the remaining balance is due before move day.`,
       ...(templateId
         ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) } }
@@ -1570,7 +1570,7 @@ export async function confirmMoveDate(
       channel: "email",
       from: accountsFrom(),
       to: quote.customer_email,
-      subject: `Move date confirmed — ${quote.quote_ref}`,
+      subject: `Move date confirmed (${quote.quote_ref})`,
       bodyText:
         commitAmt > 0
           ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${commitAmt.toFixed(2)} commitment payment is ${dueLabel ? `due by ${dueLabel}` : "due now"}.`
@@ -1793,7 +1793,7 @@ export async function createBalanceInvoiceFlow(
         reference: ref,
         description: `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash.`,
+        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`,
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
@@ -1871,7 +1871,7 @@ export async function createBalanceInvoiceFlow(
         channel: "email",
         from: accountsFrom(),
         to: quote.customer_email,
-        subject: `Your final balance — ${quote.quote_ref} (£${amount.toFixed(2)})`,
+        subject: `Your final balance: ${quote.quote_ref} (£${amount.toFixed(2)})`,
         bodyText: `Final balance of £${amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
         ...(templateId
           ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) } }

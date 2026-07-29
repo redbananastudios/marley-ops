@@ -35,7 +35,7 @@ export function surveyConfirmSms(i: SurveyConfirmInput): string {
 }
 
 export function surveyConfirmSubject(i: SurveyConfirmInput): string {
-  return `Your survey is booked — ${i.dateLabel}, ${i.timeLabel}`;
+  return `Your survey is booked: ${i.dateLabel}, ${i.timeLabel}`;
 }
 
 export function surveyConfirmEmailHtml(i: SurveyConfirmInput): string {
@@ -52,7 +52,7 @@ export function surveyConfirmEmailHtml(i: SurveyConfirmInput): string {
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Survey booked — Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Survey booked | Marley Moves</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your free home survey with Marley Moves is booked for ${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}.</div>
 
