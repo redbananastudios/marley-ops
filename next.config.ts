@@ -23,18 +23,46 @@ const nextConfig: NextConfig = {
 
   // Internal admin panel — must never be indexed (the login page is public).
   async headers() {
+    // Resource-restricting CSP built from the app's actual browser origins.
+    // script/style-src need 'unsafe-inline' (Next injects inline hydration/RSC
+    // bootstrap without nonces) and 'unsafe-eval' (Turbopack HMR in dev + some
+    // libs); a nonce-based tightening of script-src is a tracked follow-up.
+    // connect/img/media are pinned to Supabase + R2; frame-src allows the Google
+    // Maps directions embed; form-action allows the takepayments hosted page.
+    let supaHttps = "";
+    let supaWs = "";
+    try {
+      const u = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "");
+      supaHttps = u.origin;
+      supaWs = `${u.protocol === "https:" ? "wss:" : "ws:"}//${u.host}`;
+    } catch {
+      /* no Supabase URL at build → connect/img fall back to self only */
+    }
+    const R2 = "https://*.r2.cloudflarestorage.com";
+    const csp = [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self' https://gw1.tponlinepayments.com",
+      "frame-src 'self' https://www.google.com https://maps.google.com",
+      // cdnjs: pdfmake (client-side job-sheet / contractor-statement PDF rendering).
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com",
+      "style-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
+      `img-src 'self' data: blob: ${supaHttps} ${R2}`,
+      `media-src 'self' blob: ${supaHttps} ${R2}`,
+      `connect-src 'self' ${supaHttps} ${supaWs}`,
+      "worker-src 'self' blob:",
+    ]
+      .map((d) => d.replace(/\s+/g, " ").trim())
+      .join("; ");
     return [
       {
         source: "/:path*",
         headers: [
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
-          // Defence-in-depth. NOTE: a full resource-restricting CSP
-          // (script-src/connect-src/img-src covering Supabase, takepayments,
-          // Google Maps, PostHog, R2) needs a nonce-based setup + prod-origin
-          // testing and is tracked separately. `frame-ancestors 'none'` here is
-          // the SAFE subset — clickjacking protection with no effect on resource
-          // loading — plus the two unambiguous hardening headers.
-          { key: "Content-Security-Policy", value: "frame-ancestors 'none'" },
+          { key: "Content-Security-Policy", value: csp },
           { key: "X-Content-Type-Options", value: "nosniff" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
         ],

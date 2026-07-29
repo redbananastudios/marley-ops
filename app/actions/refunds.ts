@@ -19,6 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { refundCardPayment } from "@/lib/payments/card-payments";
 import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
+import { planRailVatReversals } from "@/lib/refunds/vat-reversal-plan";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import { replyAddressFor } from "@/lib/quote/chase";
@@ -518,36 +519,56 @@ export async function markRailRefundedAction(
   // note and emails accounts@ to verify. Cash is returned by bank transfer, so both
   // rails record refund_mode "banktransfer". Fail-soft; never blocks the payout.
   if (quote) {
-    await reverseDepositVatInZoho(admin, {
-      quoteId: quote.id,
-      quoteRef: quote.quote_ref,
-      zohoContactId: quote.zoho_contact_id,
-      zohoDepositInvoiceId: quote.zoho_deposit_invoice_id,
-      zohoDepositInvoiceNumber: quote.zoho_deposit_invoice_number,
-      customerName: quote.customer_name,
-      customerEmail: quote.customer_email,
-      leadId: row.lead_id,
-      clientId: quote.client_id,
-      amountPence: amount,
-      mode: "banktransfer",
-      voided: false,
-      idemKey: `${row.id}-${rail}`,
-      // Audit link: record which Zoho credit note reversed this rail (best-effort;
-      // must never derail the reversal, so swallow any write failure).
-      onCreditNote: async (creditNoteId, creditNoteNumber) => {
-        try {
-          await admin.from("events_log").insert({
-            actor_id: prof.id,
-            entity_type: "refund_queue",
-            entity_id: row.id,
-            action: "credit_note_raised",
-            diff: { rail, credit_note_id: creditNoteId, credit_note_number: creditNoteNumber, amount_pence: amount } as unknown as Json,
-          });
-        } catch {
-          /* audit link only; the accounts@ verify email is the primary record */
-        }
-      },
+    // Reverse the deposit VAT PER PAYMENT, not per rail — a rail can aggregate
+    // payments invoiced under DIFFERENT invoices (a deposit invoiced before VAT
+    // was enabled + a later commitment invoiced after), so each reverses against
+    // its OWN invoice for a correct VAT mirror. planRailVatReversals collapses the
+    // common single-payment rail (deposit-only refund) back to ONE step against
+    // the quote's reliable deposit invoice — identical to the prior behaviour.
+    const steps = planRailVatReversals({
+      rail,
+      rowId: row.id,
+      fullAmountPence: amount,
+      payments: railView.payments.map((p) => ({
+        zohoInvoiceId: p.zohoInvoiceId,
+        at: p.at,
+        refundDuePence: p.refundDuePence,
+      })),
+      quoteDepositInvoiceId: quote.zoho_deposit_invoice_id,
+      quoteDepositInvoiceNumber: quote.zoho_deposit_invoice_number,
     });
+    for (const step of steps) {
+      await reverseDepositVatInZoho(admin, {
+        quoteId: quote.id,
+        quoteRef: quote.quote_ref,
+        zohoContactId: quote.zoho_contact_id,
+        zohoDepositInvoiceId: step.invoiceId,
+        zohoDepositInvoiceNumber: step.invoiceNumber,
+        customerName: quote.customer_name,
+        customerEmail: quote.customer_email,
+        leadId: row.lead_id,
+        clientId: quote.client_id,
+        amountPence: step.amountPence,
+        mode: "banktransfer",
+        voided: false,
+        idemKey: step.idemKey,
+        // Audit link: record which Zoho credit note reversed this payment
+        // (best-effort; must never derail the reversal, so swallow write failures).
+        onCreditNote: async (creditNoteId, creditNoteNumber) => {
+          try {
+            await admin.from("events_log").insert({
+              actor_id: prof.id,
+              entity_type: "refund_queue",
+              entity_id: row.id,
+              action: "credit_note_raised",
+              diff: { rail, credit_note_id: creditNoteId, credit_note_number: creditNoteNumber, amount_pence: step.amountPence } as unknown as Json,
+            });
+          } catch {
+            /* audit link only; the accounts@ verify email is the primary record */
+          }
+        },
+      });
+    }
   }
 
   revalidateQueueSurfaces();
