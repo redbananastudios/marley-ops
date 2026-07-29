@@ -38,7 +38,7 @@ export default async function JobBoardPage({
     fetchAllRows((f, t) =>
       supabase.from("quotes").select("id, lead_id, status, breakdown").eq("status", "accepted").order("id").range(f, t),
     ),
-    supabase.from("staff").select("id, full_name, staff_role, working_days").eq("is_active", true).order("full_name"),
+    supabase.from("staff").select("id, full_name, staff_role, working_days, is_driver").eq("is_active", true).order("full_name"),
     supabase
       .from("vehicles")
       .select("id, name, vehicle_type, registration, tax_due, mot_due, insurance_renewal, service_due, end_of_term")

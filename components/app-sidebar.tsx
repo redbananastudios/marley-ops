@@ -9,6 +9,7 @@ import {
   BellRing,
   BookOpen,
   CalendarCheck,
+  CalendarClock,
   CalendarRange,
   ClipboardCheck,
   Compass,
@@ -80,6 +81,7 @@ const OFFICE_NAV: NavGroup[] = [
   {
     group: "Schedule",
     items: [
+      { href: "/schedule", label: "Schedule & Allocation", icon: CalendarClock },
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
       { href: "/schedule/removals", label: "Removals", icon: Truck },
       { href: "/schedule/board", label: "Job Board", icon: CalendarRange },

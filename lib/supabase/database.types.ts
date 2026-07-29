@@ -1,4 +1,4 @@
-export type Json =
+﻿export type Json =
   | string
   | number
   | boolean
@@ -538,6 +538,44 @@ export type Database = {
             columns: ["matched_quote_id"]
             isOneToOne: false
             referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      booking_details: {
+        Row: {
+          approx_month: string | null
+          approx_window: string | null
+          created_at: string
+          lead_id: string
+          property_type: string | null
+          provisional_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          approx_month?: string | null
+          approx_window?: string | null
+          created_at?: string
+          lead_id: string
+          property_type?: string | null
+          provisional_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          approx_month?: string | null
+          approx_window?: string | null
+          created_at?: string
+          lead_id?: string
+          property_type?: string | null
+          provisional_date?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "booking_details_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: true
+            referencedRelation: "leads"
             referencedColumns: ["id"]
           },
         ]
@@ -3219,6 +3257,7 @@ export type Database = {
           full_name: string
           id: string
           is_active: boolean
+          is_driver: boolean
           notes: string | null
           phone: string | null
           profile_id: string | null
@@ -3233,6 +3272,7 @@ export type Database = {
           full_name: string
           id?: string
           is_active?: boolean
+          is_driver?: boolean
           notes?: string | null
           phone?: string | null
           profile_id?: string | null
@@ -3247,6 +3287,7 @@ export type Database = {
           full_name?: string
           id?: string
           is_active?: boolean
+          is_driver?: boolean
           notes?: string | null
           phone?: string | null
           profile_id?: string | null

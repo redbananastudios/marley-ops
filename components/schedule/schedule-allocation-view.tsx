@@ -1,0 +1,865 @@
+"use client";
+
+/**
+ * Schedule & Allocation — one page, two views of the same day (design doc
+ * docs/schedule-allocation-design.md). ADDITIVE: the existing /schedule/removals
+ * diary and /schedule/board Job Board are untouched.
+ *
+ *  - Availability (default) answers "can we sell this day?" — a Mon-first month
+ *    grid graded by the confirmed removals' REQUIRED vans/crew vs the live fleet
+ *    (lib/schedule/capacity), a soft-demand panel of deposit-paid leads not yet
+ *    on the diary, and a day summary for the selected date.
+ *  - Day Allocation reuses the Job Board for dispatch (surveys hidden).
+ *
+ * The selected day lives in the URL (?date=YYYY-MM-DD) so both tabs share it;
+ * month browsing is local. All date maths is pure + UTC-safe (string dates).
+ */
+
+import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { CalendarRange, ChevronLeft, ChevronRight, Plus, TriangleAlert, Truck, UsersRound } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { apptDays, apptWindow } from "@/lib/job-board";
+import { dayCapacityState, sumRequired, type CapacityState } from "@/lib/schedule/capacity";
+import {
+  AppointmentDialog,
+  type EditTarget,
+  type EstimatorOption,
+  type LeadOption,
+} from "@/components/schedule/appointment-dialog";
+import { AppointmentViewDialog } from "@/components/schedule/appointment-view-dialog";
+import { RescheduleDialog } from "@/components/schedule/reschedule-dialog";
+import { ChangeDateDialog } from "@/components/bookings/change-date-dialog";
+import type { SchedulerEvent } from "@/components/schedule/scheduler-view";
+import {
+  JobBoardView,
+  type BoardAppt,
+  type BoardAssignment,
+  type BoardStaff,
+  type BoardStaffAvailability,
+  type BoardUnavailability,
+  type BoardVehicle,
+} from "@/components/job-board/job-board-view";
+
+export interface AvailAppt {
+  id: string;
+  lead_id: string | null;
+  lead_name: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  all_day: boolean | null;
+  from_postcode: string | null;
+  to_postcode: string | null;
+  requiredVans: number;
+  requiredCrew: number;
+  property_type: string | null; // 'homeowner' | 'rented' | null
+  deposit: boolean; // £100 paid
+  commitment: boolean; // 25% paid
+  // For the view/edit/reschedule dialogs (same payload the removals diary carries).
+  title: string | null;
+  status: string | null;
+  location: string | null;
+  estimator_id: string | null;
+}
+
+export interface SoftDemandItem {
+  lead_id: string;
+  name: string;
+  approx_window: string | null;
+  approx_month: string | null; // approx_month = ISO 1st-of-month or null
+  provisional_date: string | null;
+  property_type: string | null;
+  requiredVans: number | null;
+  requiredCrew: number | null;
+}
+
+/* ── pure, UTC-safe date helpers (mirrors job-board-view's addDays) ────────── */
+
+/** yyyy-mm-dd ± n days. */
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Monday of the week containing the given day (UTC-safe). */
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  return d.toISOString().slice(0, 10);
+}
+
+const fmt = (iso: string, opts: Intl.DateTimeFormatOptions): string =>
+  new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", { timeZone: "UTC", ...opts });
+
+/** Start time for the compact calendar chip ("09:00", or "All day"). */
+function startLabel(a: AvailAppt): string {
+  if (a.all_day || !a.starts_at) return "All day";
+  return new Date(a.starts_at).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/London",
+  });
+}
+
+/* ── capacity-state presentation ──────────────────────────────────────────── */
+
+const CAP_META: Record<
+  CapacityState,
+  { label: string; short: string; pill: string; text: string; swatch: string; cellBg: string }
+> = {
+  available: {
+    label: "Available",
+    short: "Avail",
+    pill: "border-success-border bg-success-bg text-success",
+    text: "text-success",
+    swatch: "bg-success",
+    cellBg: "bg-card",
+  },
+  limited: {
+    label: "Limited",
+    short: "Ltd",
+    pill: "border-warn-border bg-warn-bg text-warn",
+    text: "text-warn",
+    swatch: "bg-warn",
+    cellBg: "bg-warn-bg",
+  },
+  full: {
+    label: "Full",
+    short: "Full",
+    pill: "border-danger-border bg-danger-bg text-danger",
+    text: "text-danger",
+    swatch: "bg-danger",
+    cellBg: "bg-danger-bg",
+  },
+  over: {
+    label: "Over",
+    short: "Over",
+    pill: "border-danger-border bg-danger-bg text-danger",
+    text: "text-danger",
+    swatch: "bg-danger",
+    cellBg: "bg-danger-bg",
+  },
+};
+
+const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+
+function StatePill({ state }: { state: CapacityState }): React.JSX.Element {
+  const meta = CAP_META[state];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 rounded-pill border px-1.5 py-0.5 text-[9px] font-bold uppercase leading-none tracking-wide",
+        meta.pill,
+      )}
+    >
+      {state === "over" ? <TriangleAlert className="size-2.5" strokeWidth={2} /> : null}
+      {meta.label}
+    </span>
+  );
+}
+
+/** Homeowner date is fixed (can't move); rented flexes — the office reads the tag
+ *  to know which day it can shuffle. */
+function PropertyTag({ type }: { type: string | null }): React.JSX.Element | null {
+  if (type === "homeowner")
+    return (
+      <span className="rounded-pill border border-danger-border bg-danger-bg px-2 py-0.5 text-[10px] font-semibold text-danger">
+        Homeowner · fixed
+      </span>
+    );
+  if (type === "rented")
+    return (
+      <span className="rounded-pill border border-success-border bg-success-bg px-2 py-0.5 text-[10px] font-semibold text-success">
+        Rented · flexible
+      </span>
+    );
+  return null;
+}
+
+function Estimate({ vans, crew }: { vans: number | null; crew: number | null }): React.JSX.Element | null {
+  if (vans == null && crew == null) return null;
+  return (
+    <span className="tabular inline-flex items-center gap-2 text-[11px] text-mist-500">
+      {vans != null ? (
+        <span className="inline-flex items-center gap-0.5">
+          <Truck className="size-3" strokeWidth={1.75} />
+          {vans}
+        </span>
+      ) : null}
+      {crew != null ? (
+        <span className="inline-flex items-center gap-0.5">
+          <UsersRound className="size-3" strokeWidth={1.75} />
+          {crew}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+export function ScheduleAllocationView(props: {
+  fleet: { vans: number; crew: number };
+  availAppts: AvailAppt[];
+  softDemand: SoftDemandItem[];
+  selectedDate: string; // YYYY-MM-DD
+  today: string; // YYYY-MM-DD
+  leads: LeadOption[];
+  estimators: EstimatorOption[];
+  defaultEstimatorId: string | null;
+  baseLocation: string;
+  events: SchedulerEvent[];
+  board: {
+    appts: BoardAppt[];
+    staff: BoardStaff[];
+    vehicles: BoardVehicle[];
+    assignments: BoardAssignment[];
+    unavailability: BoardUnavailability[];
+    staffAvailability: BoardStaffAvailability[];
+    thisWeekStart: string;
+    today: string;
+  };
+}): React.JSX.Element {
+  const { fleet, availAppts, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const [tab, setTab] = useState<"availability" | "alloc">("availability");
+  const [monthCursor, setMonthCursor] = useState(() => {
+    const d = new Date(`${selectedDate}T00:00:00Z`);
+    return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+  });
+
+  // Booking dialogs — the SAME create/view/edit/reschedule stack as the removals
+  // diary, so this page is a full workstation, not a read-only dashboard. Booked
+  // removals with a lead reschedule through the Payments Policy v2 ChangeDateDialog.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<EditTarget | null>(null);
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewTarget, setViewTarget] = useState<EditTarget | null>(null);
+  const [reschedOpen, setReschedOpen] = useState(false);
+  const [reschedTarget, setReschedTarget] = useState<EditTarget | null>(null);
+  const estimatorById = useMemo(() => new Map(estimators.map((e) => [e.id, e.full_name])), [estimators]);
+
+  function toEditTarget(a: AvailAppt): EditTarget {
+    return {
+      id: a.id,
+      apptType: "removal",
+      leadId: a.lead_id,
+      estimatorId: a.estimator_id,
+      status: a.status,
+      title: a.title,
+      location: a.location,
+      notes: null, // not loaded into this payload; edit overwrites only if changed
+      startsAt: a.starts_at,
+      endsAt: a.ends_at ?? a.starts_at,
+    };
+  }
+
+  function openView(a: AvailAppt) {
+    setViewTarget(toEditTarget(a));
+    setViewOpen(true);
+  }
+
+  // The selected day is the single source of truth in the URL — both tabs read it.
+  function selectDate(date: string) {
+    const next = new URLSearchParams(searchParams);
+    next.set("date", date);
+    router.replace(`${pathname}?${next.toString()}`, { scroll: false });
+  }
+
+  function shiftMonth(delta: number) {
+    setMonthCursor((c) => {
+      const d = new Date(Date.UTC(c.year, c.month + delta, 1));
+      return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+    });
+  }
+
+  function goToday() {
+    const d = new Date(`${today}T00:00:00Z`);
+    setMonthCursor({ year: d.getUTCFullYear(), month: d.getUTCMonth() });
+    selectDate(today);
+  }
+
+  // Every confirmed removal indexed by the UK days it spans.
+  const apptsByDay = useMemo(() => {
+    const m = new Map<string, AvailAppt[]>();
+    for (const a of availAppts) {
+      for (const d of apptDays(a)) {
+        const list = m.get(d) ?? [];
+        list.push(a);
+        m.set(d, list);
+      }
+    }
+    return m;
+  }, [availAppts]);
+
+  // Grade a day for sellability — worst of vans/crew wins (see lib/schedule/capacity).
+  const gradeOf = (iso: string) => dayCapacityState({ ...sumRequired(apptsByDay.get(iso) ?? []), fleet });
+
+  // 42-cell Mon-first grid for the cursor month.
+  const cells = useMemo(() => {
+    const first = new Date(Date.UTC(monthCursor.year, monthCursor.month, 1));
+    first.setUTCDate(first.getUTCDate() - ((first.getUTCDay() + 6) % 7));
+    const start = first.toISOString().slice(0, 10);
+    return Array.from({ length: 42 }, (_, i) => {
+      const iso = addDays(start, i);
+      const d = new Date(`${iso}T00:00:00Z`);
+      return { iso, day: d.getUTCDate(), inMonth: d.getUTCMonth() === monthCursor.month };
+    });
+  }, [monthCursor]);
+
+  // Soft demand grouped by month (approx_month, else provisional_date, else "No date yet").
+  const softGroups = useMemo(() => {
+    const groups = new Map<string, { label: string; sort: number; items: SoftDemandItem[] }>();
+    for (const item of softDemand) {
+      const rep = item.approx_month ?? item.provisional_date;
+      let key: string;
+      let label: string;
+      let sort: number;
+      if (rep) {
+        const d = new Date(`${rep}T00:00:00Z`);
+        key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
+        label = d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+        sort = d.getUTCFullYear() * 12 + d.getUTCMonth();
+      } else {
+        key = "no-date";
+        label = "No date yet";
+        sort = Number.MAX_SAFE_INTEGER;
+      }
+      const g = groups.get(key) ?? { label, sort, items: [] };
+      g.items.push(item);
+      groups.set(key, g);
+    }
+    const out = [...groups.values()].sort((a, b) => a.sort - b.sort);
+    for (const g of out)
+      g.items.sort(
+        (x, y) =>
+          (x.provisional_date ?? "9999").localeCompare(y.provisional_date ?? "9999") || x.name.localeCompare(y.name),
+      );
+    return out;
+  }, [softDemand]);
+
+  // Soft demand whose firm/approx date falls in the SAME week or month as the selected day.
+  const nearSoft = useMemo(() => {
+    const ws = mondayOf(selectedDate);
+    const we = addDays(ws, 6);
+    const sd = new Date(`${selectedDate}T00:00:00Z`);
+    const sy = sd.getUTCFullYear();
+    const sm = sd.getUTCMonth();
+    return softDemand.filter((item) => {
+      if (item.provisional_date && item.provisional_date >= ws && item.provisional_date <= we) return true;
+      const rep = item.provisional_date ?? item.approx_month;
+      if (rep) {
+        const rd = new Date(`${rep}T00:00:00Z`);
+        if (rd.getUTCFullYear() === sy && rd.getUTCMonth() === sm) return true;
+      }
+      return false;
+    });
+  }, [softDemand, selectedDate]);
+
+  const sel = gradeOf(selectedDate);
+  const dayJobs = useMemo(
+    () =>
+      [...(apptsByDay.get(selectedDate) ?? [])].sort(
+        (a, b) => Number(b.all_day) - Number(a.all_day) || (a.starts_at ?? "").localeCompare(b.starts_at ?? ""),
+      ),
+    [apptsByDay, selectedDate],
+  );
+
+  const metricTone = (free: number) => (free < 0 ? "text-danger" : free <= 1 ? "text-warn" : "text-foreground");
+
+  return (
+    <div className="flex flex-1 flex-col">
+      {/* tabs */}
+      <div
+        role="tablist"
+        aria-label="Schedule views"
+        className="mb-4 inline-flex w-fit gap-1 rounded-lg border border-border bg-card p-1 shadow-xs"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "availability"}
+          onClick={() => setTab("availability")}
+          className={cn(
+            "focus-ring inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors",
+            tab === "availability" ? "bg-foreground text-card" : "text-mist-500 hover:text-foreground",
+          )}
+        >
+          Availability
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "alloc"}
+          onClick={() => setTab("alloc")}
+          className={cn(
+            "focus-ring inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors",
+            tab === "alloc" ? "bg-foreground text-card" : "text-mist-500 hover:text-foreground",
+          )}
+        >
+          Day Allocation
+          <span
+            className={cn(
+              "tabular rounded-pill px-2 py-0.5 text-[11px] font-semibold leading-none",
+              tab === "alloc" ? "bg-mm-red text-white" : "bg-mm-red-tint text-mm-red-deep",
+            )}
+          >
+            {fmt(selectedDate, { weekday: "short", day: "numeric" })}
+          </span>
+        </button>
+      </div>
+
+      {/* ============ AVAILABILITY ============ */}
+      <div className={cn(tab !== "availability" && "hidden")}>
+        {/* toolbar */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <div className="inline-flex items-stretch overflow-hidden rounded-md border border-input bg-card">
+            <button
+              type="button"
+              onClick={() => shiftMonth(-1)}
+              aria-label="Previous month"
+              className="focus-ring flex min-h-9 w-9 items-center justify-center text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ChevronLeft className="size-4" strokeWidth={1.75} />
+            </button>
+            <span className="tabular flex min-w-[150px] items-center justify-center border-x border-input px-3 text-sm font-medium text-foreground">
+              {fmt(`${monthCursor.year}-${String(monthCursor.month + 1).padStart(2, "0")}-01`, {
+                month: "long",
+                year: "numeric",
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => shiftMonth(1)}
+              aria-label="Next month"
+              className="focus-ring flex min-h-9 w-9 items-center justify-center text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <ChevronRight className="size-4" strokeWidth={1.75} />
+            </button>
+          </div>
+          <button
+            type="button"
+            onClick={goToday}
+            className="focus-ring min-h-9 rounded-md border border-input bg-card px-3 text-sm font-medium text-mist-500 transition-colors hover:bg-muted hover:text-foreground"
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setEditTarget(null);
+              setCreateOpen(true);
+            }}
+            className="focus-ring ml-auto inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-4 text-sm font-semibold text-white shadow-xs transition-colors hover:bg-mm-red-deep"
+          >
+            <Plus className="size-4" strokeWidth={2} />
+            New booking · {fmt(selectedDate, { weekday: "short", day: "numeric", month: "short" })}
+          </button>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+          {/* calendar + legend */}
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="rounded-lg border border-border bg-card p-2.5">
+              <div className="overflow-x-auto">
+                <div className="min-w-[560px]">
+                  <div className="mb-1.5 grid grid-cols-7 gap-1.5">
+                    {DOW.map((d) => (
+                      <div key={d} className="text-center text-[10px] font-bold uppercase tracking-wide text-mist-400">
+                        {d}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-7 gap-1.5">
+                    {cells.map((cell) => {
+                      if (!cell.inMonth)
+                        return (
+                          <div
+                            key={cell.iso}
+                            className="min-h-[92px] rounded-md border border-transparent bg-muted/40 p-1.5 opacity-50"
+                          >
+                            <span className="text-xs font-semibold text-mist-400">{cell.day}</span>
+                          </div>
+                        );
+                      const grade = gradeOf(cell.iso);
+                      const meta = CAP_META[grade.state];
+                      const jobs = apptsByDay.get(cell.iso) ?? [];
+                      const isToday = cell.iso === today;
+                      const isSelected = cell.iso === selectedDate;
+                      return (
+                        <button
+                          type="button"
+                          key={cell.iso}
+                          onClick={() => selectDate(cell.iso)}
+                          aria-pressed={isSelected}
+                          className={cn(
+                            "focus-ring relative flex min-h-[92px] flex-col gap-1 rounded-md border p-1.5 text-left transition-colors",
+                            meta.cellBg,
+                            isSelected
+                              ? "border-mm-red ring-2 ring-inset ring-mm-red"
+                              : isToday
+                                ? "border-mm-red/60 ring-1 ring-inset ring-mm-red/60"
+                                : "border-border hover:border-mist-400",
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-1">
+                            <span
+                              className={cn(
+                                "text-xs font-semibold",
+                                isSelected || isToday ? "text-mm-red" : "text-mist-500",
+                              )}
+                            >
+                              {cell.day}
+                            </span>
+                            <StatePill state={grade.state} />
+                          </div>
+
+                          {jobs.slice(0, 2).map((j) => (
+                            <div
+                              key={j.id}
+                              className="flex items-center gap-1 rounded-[4px] bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-card"
+                            >
+                              <span className="tabular shrink-0 opacity-70">{startLabel(j)}</span>
+                              <span className="truncate">{j.lead_name ?? "Move"}</span>
+                            </div>
+                          ))}
+                          {jobs.length > 2 ? (
+                            <span className="text-[10px] text-mist-400">+{jobs.length - 2} more</span>
+                          ) : null}
+
+                          <div className="tabular mt-auto flex items-center gap-2 pt-0.5 text-[10px] font-semibold">
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-0.5",
+                                grade.freeVans < 0 ? "text-danger" : "text-mist-500",
+                              )}
+                            >
+                              <Truck className="size-3" strokeWidth={1.75} />
+                              {grade.freeVans}
+                            </span>
+                            <span
+                              className={cn(
+                                "inline-flex items-center gap-0.5",
+                                grade.freeCrew < 0 ? "text-danger" : "text-mist-500",
+                              )}
+                            >
+                              <UsersRound className="size-3" strokeWidth={1.75} />
+                              {grade.freeCrew}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* legend */}
+            <div className="rounded-lg border border-border bg-card p-4">
+              <h3 className="mb-3 text-sm font-semibold text-foreground">
+                How a day is graded — capacity is a shared pool, worst of vans or crew wins
+              </h3>
+              <div className="grid gap-2.5 sm:grid-cols-2">
+                {(["available", "limited", "full", "over"] as const).map((state) => {
+                  const meta = CAP_META[state];
+                  const desc: Record<CapacityState, string> = {
+                    available: "Spare van and crew.",
+                    limited: "Down to the last of either.",
+                    full: "None spare.",
+                    over: "Booked needs exceed the fleet.",
+                  };
+                  return (
+                    <div key={state} className="flex items-start gap-2.5">
+                      <span className={cn("mt-0.5 size-3 shrink-0 rounded-[4px]", meta.swatch)} />
+                      <div>
+                        <p className={cn("flex items-center gap-1 text-xs font-bold", meta.text)}>
+                          {state === "over" ? <TriangleAlert className="size-3" strokeWidth={2} /> : null}
+                          {meta.label}
+                        </p>
+                        <p className="text-[11px] text-mist-400">{desc[state]}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {/* side: day summary + soft demand */}
+          <div className="flex flex-col gap-4">
+            {/* day summary */}
+            <div className="rounded-lg border border-border bg-card">
+              <div className="flex items-center justify-between gap-2 border-b border-border px-4 py-3">
+                <span className="text-sm font-semibold text-foreground">
+                  {fmt(selectedDate, { weekday: "long", day: "numeric", month: "long" })}
+                </span>
+                <StatePill state={sel.state} />
+              </div>
+              <div className="flex flex-col gap-4 p-4">
+                {/* free-capacity metrics */}
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-md border border-border bg-muted/40 p-2.5">
+                    <p className="eyebrow flex items-center gap-1">
+                      <Truck className="size-3" strokeWidth={1.75} />
+                      Vans free
+                    </p>
+                    <p className={cn("tabular mt-0.5 text-lg font-bold", metricTone(sel.freeVans))}>
+                      {sel.freeVans}
+                      <span className="text-xs font-medium text-mist-400"> / {fleet.vans}</span>
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border bg-muted/40 p-2.5">
+                    <p className="eyebrow flex items-center gap-1">
+                      <UsersRound className="size-3" strokeWidth={1.75} />
+                      Crew free
+                    </p>
+                    <p className={cn("tabular mt-0.5 text-lg font-bold", metricTone(sel.freeCrew))}>
+                      {sel.freeCrew}
+                      <span className="text-xs font-medium text-mist-400"> / {fleet.crew}</span>
+                    </p>
+                  </div>
+                </div>
+
+                {/* booked removals */}
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <h4 className="eyebrow">Booked in ({dayJobs.length})</h4>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditTarget(null);
+                        setCreateOpen(true);
+                      }}
+                      className="focus-ring inline-flex items-center gap-1 rounded-md border border-input bg-card px-2 py-1 text-[11px] font-semibold text-mist-500 transition-colors hover:border-mm-red hover:text-mm-red"
+                    >
+                      <Plus className="size-3" strokeWidth={2} />
+                      Book this day
+                    </button>
+                  </div>
+                  {dayJobs.length === 0 ? (
+                    <p className="text-xs text-mist-400">Nothing booked yet. The day is clear.</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {dayJobs.map((j) => {
+                        const multiDay = apptDays(j).length > 1;
+                        return (
+                          <button
+                            type="button"
+                            key={j.id}
+                            onClick={() => openView(j)}
+                            title="Open this booking"
+                            className="focus-ring w-full rounded-md border border-border bg-card p-2.5 text-left transition-colors hover:border-mm-red/60"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="flex min-w-0 items-center gap-1 text-[13px] font-semibold text-foreground">
+                                {multiDay ? (
+                                  <CalendarRange className="size-3 shrink-0 text-mist-400" strokeWidth={1.75} />
+                                ) : null}
+                                <span className="truncate">{j.lead_name ?? "Move"}</span>
+                              </span>
+                              <span className="tabular shrink-0 text-[11px] text-mist-400">{apptWindow(j)}</span>
+                            </div>
+                            {j.from_postcode || j.to_postcode ? (
+                              <p className="tabular mt-1 truncate text-[11px] text-mist-400">
+                                {j.from_postcode ?? "?"} → {j.to_postcode ?? "?"}
+                              </p>
+                            ) : null}
+                            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                              <Estimate vans={j.requiredVans} crew={j.requiredCrew} />
+                              <PropertyTag type={j.property_type} />
+                              <span
+                                className={cn(
+                                  "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
+                                  j.commitment
+                                    ? "border-success-border bg-success-bg text-success"
+                                    : "border-border bg-muted text-mist-500",
+                                )}
+                              >
+                                {j.commitment ? "25% ✓" : "25% due"}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* provisional interest around this date */}
+                <div>
+                  <h4 className="eyebrow mb-2">Provisional around this date</h4>
+                  {nearSoft.length === 0 ? (
+                    <p className="text-xs text-mist-400">No provisional interest near this day.</p>
+                  ) : (
+                    <div className="flex flex-col gap-2">
+                      {nearSoft.map((item) => (
+                        <div
+                          key={item.lead_id}
+                          className="flex items-center justify-between gap-2 rounded-md border border-warn-border bg-warn-bg px-2.5 py-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-semibold text-warn">{item.name}</p>
+                            <p className="mt-0.5 text-[10px] text-warn/80">
+                              {item.provisional_date
+                                ? `prov · ${fmt(item.provisional_date, { day: "numeric", month: "short" })}`
+                                : (item.approx_window ?? "this month")}
+                            </p>
+                          </div>
+                          <span className="shrink-0 rounded-md border border-warn-border bg-card px-2 py-1 text-[10px] font-semibold text-warn">
+                            Ring to reserve
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* ±3-day neighbour strip */}
+                <div>
+                  <h4 className="eyebrow mb-2">Days either side</h4>
+                  <div className="grid grid-cols-7 gap-1">
+                    {Array.from({ length: 7 }, (_, i) => addDays(selectedDate, i - 3)).map((iso) => {
+                      const grade = gradeOf(iso);
+                      const meta = CAP_META[grade.state];
+                      const isSel = iso === selectedDate;
+                      return (
+                        <button
+                          type="button"
+                          key={iso}
+                          onClick={() => selectDate(iso)}
+                          className={cn(
+                            "focus-ring rounded-md border border-border px-1 py-1.5 text-center transition-colors hover:border-mist-400",
+                            isSel && "ring-1 ring-inset ring-mm-red",
+                          )}
+                        >
+                          <div className={cn("text-[11px] font-bold", meta.text)}>{fmt(iso, { day: "numeric" })}</div>
+                          <div className={cn("mt-0.5 text-[8px] font-bold uppercase tracking-wide", meta.text)}>
+                            {meta.short}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* soft demand ("thinking about it") */}
+            <div className="rounded-lg border border-border bg-card">
+              <div className="flex items-center justify-between gap-2 px-4 pt-3">
+                <h3 className="text-sm font-semibold text-foreground">Thinking about it</h3>
+                <span className="tabular rounded-pill border border-border bg-muted px-2 py-0.5 text-[11px] font-semibold text-mist-500">
+                  {softDemand.length} · £100 down
+                </span>
+              </div>
+              <p className="px-4 pt-1 text-[11px] text-mist-400">
+                £100 secures Marley, not a date. Off the diary until the 25% earns the day.
+              </p>
+              <div className="flex flex-col gap-3 p-3">
+                {softDemand.length === 0 ? (
+                  <p className="px-1 py-2 text-xs text-mist-400">No soft demand yet.</p>
+                ) : (
+                  softGroups.map((group) => (
+                    <div key={group.label}>
+                      <p className="eyebrow px-0.5 pb-1.5">{group.label}</p>
+                      <div className="flex flex-col gap-2">
+                        {group.items.map((item) => (
+                          <div key={item.lead_id} className="rounded-md border border-border bg-muted/40 p-2.5">
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="truncate text-[13px] font-semibold text-foreground">{item.name}</span>
+                              {item.provisional_date ? (
+                                <span className="shrink-0 rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
+                                  prov · {fmt(item.provisional_date, { day: "numeric", month: "short" })}
+                                </span>
+                              ) : item.approx_window ? (
+                                <span className="shrink-0 rounded-pill border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-mist-500">
+                                  {item.approx_window}
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="mt-1.5 flex items-center justify-between gap-2">
+                              <Estimate vans={item.requiredVans} crew={item.requiredCrew} />
+                              <PropertyTag type={item.property_type} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ============ DAY ALLOCATION ============ */}
+      {tab === "alloc" ? (
+        <div className="flex flex-1 flex-col">
+          <JobBoardView {...board} initialWeekStart={mondayOf(selectedDate)} hideSurveys />
+        </div>
+      ) : null}
+
+      {/* Booking dialogs — the same stack as the removals diary. Clicking a booked
+          job opens the read-only view first; edit is a deliberate second step. */}
+      <AppointmentViewDialog
+        open={viewOpen}
+        onOpenChange={setViewOpen}
+        target={viewTarget}
+        lead={viewTarget?.leadId ? (leads.find((l) => l.id === viewTarget.leadId) ?? null) : null}
+        estimatorName={viewTarget?.estimatorId ? (estimatorById.get(viewTarget.estimatorId) ?? null) : null}
+        baseLocation={baseLocation}
+        onEdit={() => {
+          setViewOpen(false);
+          setEditTarget(viewTarget);
+          setCreateOpen(true);
+        }}
+        onReschedule={() => {
+          setViewOpen(false);
+          setReschedTarget(viewTarget);
+          setReschedOpen(true);
+        }}
+      />
+
+      {/* Booked removals (with a lead) reschedule through the Payments Policy v2
+          dialog — the single date-change path. Lead-less diary entries keep the
+          plain reschedule. */}
+      {reschedTarget && reschedTarget.apptType === "removal" && reschedTarget.leadId ? (
+        <ChangeDateDialog
+          appointmentId={reschedTarget.id}
+          leadId={reschedTarget.leadId}
+          startsAt={reschedTarget.startsAt}
+          endsAt={reschedTarget.endsAt}
+          presetStartsAt={null}
+          presetEndsAt={null}
+          open={reschedOpen}
+          onOpenChange={setReschedOpen}
+        />
+      ) : (
+        <RescheduleDialog
+          open={reschedOpen}
+          onOpenChange={setReschedOpen}
+          target={reschedTarget}
+          estimatorName={reschedTarget?.estimatorId ? (estimatorById.get(reschedTarget.estimatorId) ?? null) : null}
+          events={events}
+          presetDate={null}
+        />
+      )}
+
+      <AppointmentDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        leads={leads}
+        estimators={estimators}
+        defaultEstimatorId={defaultEstimatorId}
+        defaultType="removal"
+        presetStart={editTarget ? undefined : `${selectedDate}T09:00`}
+        edit={editTarget}
+      />
+    </div>
+  );
+}

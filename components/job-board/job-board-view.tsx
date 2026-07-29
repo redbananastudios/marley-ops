@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   CalendarRange,
+  CarFront,
   ChevronLeft,
   ChevronRight,
   GripVertical,
@@ -55,6 +56,7 @@ import {
 import { vehicleNeedsAttention } from "@/lib/vehicles";
 import { vehicleOffRoad, type UnavailabilityWindow } from "@/lib/fleet/availability";
 import { staffOffOn, type AvailabilityRow } from "@/lib/staff/availability";
+import { needsDriverWarning } from "@/lib/schedule/capacity";
 import {
   assignResourceAction,
   setAssignmentsAction,
@@ -79,6 +81,8 @@ export interface BoardStaff {
   full_name: string;
   staff_role: string;
   working_days: number[] | null;
+  /** Can take a van out (design §D12). Warn-only when a van has no driver. */
+  is_driver?: boolean;
 }
 
 export interface BoardVehicle {
@@ -168,6 +172,7 @@ export function JobBoardView({
   thisWeekStart,
   initialWeekStart,
   today,
+  hideSurveys,
 }: {
   appts: BoardAppt[];
   staff: BoardStaff[];
@@ -179,6 +184,8 @@ export function JobBoardView({
   /** Week the board opens on (?week= deep link); "This week" still resets to thisWeekStart. */
   initialWeekStart?: string;
   today: string;
+  /** Hide surveys entirely + the Surveys toggle (Schedule & Allocation's Day Allocation is moves-only). */
+  hideSurveys?: boolean;
 }) {
   const router = useRouter();
   const [weekStart, setWeekStart] = useState(initialWeekStart ?? thisWeekStart);
@@ -232,7 +239,7 @@ export function JobBoardView({
 
   const cardsForDay = (day: string) =>
     appts
-      .filter((a) => (showSurveys || a.appt_type !== "survey") && (daysByAppt.get(a.id) ?? []).includes(day))
+      .filter((a) => ((showSurveys && !hideSurveys) || a.appt_type !== "survey") && (daysByAppt.get(a.id) ?? []).includes(day))
       .sort((a, b) => Number(b.all_day) - Number(a.all_day) || (a.starts_at ?? "").localeCompare(b.starts_at ?? ""));
 
   /** "John Farnell (All day, Mon 13 Jul)" labels for clash messages. */
@@ -373,17 +380,19 @@ export function JobBoardView({
           </button>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowSurveys((v) => !v)}
-          aria-pressed={showSurveys}
-          className={cn(
-            "focus-ring min-h-9 rounded-md border border-input px-3 text-sm font-medium transition-colors",
-            showSurveys ? "border-mm-red bg-mm-red text-white" : "bg-card text-mist-500 hover:bg-muted",
-          )}
-        >
-          Surveys
-        </button>
+        {!hideSurveys ? (
+          <button
+            type="button"
+            onClick={() => setShowSurveys((v) => !v)}
+            aria-pressed={showSurveys}
+            className={cn(
+              "focus-ring min-h-9 rounded-md border border-input px-3 text-sm font-medium transition-colors",
+              showSurveys ? "border-mm-red bg-mm-red text-white" : "bg-card text-mist-500 hover:bg-muted",
+            )}
+          >
+            Surveys
+          </button>
+        ) : null}
 
         <button
           type="button"
@@ -416,7 +425,7 @@ export function JobBoardView({
                       key={s.id}
                       res={{ kind: "staff", id: s.id, name: s.full_name }}
                       sub={s.staff_role}
-                      icon={<UserRound className="size-3.5 text-mist-400" strokeWidth={1.75} />}
+                      driver={s.is_driver}
                     />
                   ))
                 )}
@@ -431,7 +440,6 @@ export function JobBoardView({
                       key={v.id}
                       res={{ kind: "vehicle", id: v.id, name: v.name }}
                       sub={v.registration || v.vehicle_type}
-                      icon={<Truck className="size-3.5 text-mist-400" strokeWidth={1.75} />}
                       warn={vehicleNeedsAttention(v)}
                     />
                   ))
@@ -440,6 +448,12 @@ export function JobBoardView({
               <p className="mt-4 border-t border-border pt-2 text-[11px] leading-snug text-mist-400">
                 Drag onto a job, or use Assign on the card.
               </p>
+              <div className="mt-2 flex items-center gap-1.5 text-[10px] text-mist-400">
+                <span className="flex size-4 shrink-0 items-center justify-center rounded-[3px] bg-foreground text-card">
+                  <CarFront className="size-2.5" strokeWidth={1.75} />
+                </span>
+                <span>Driver — can take a van out</span>
+              </div>
             </div>
           </aside>
         ) : null}
@@ -514,14 +528,24 @@ function RailEmpty({ href, label }: { href: string; label: string }) {
 function RailChip({
   res,
   sub,
-  icon,
   warn,
+  driver,
 }: {
   res: Resource;
   sub: string;
-  icon: React.ReactNode;
   warn?: boolean;
+  driver?: boolean;
 }) {
+  // Icon-tile colour tells the resource apart at a glance: a van carries the
+  // Marley-red tint, a driver gets a filled-charcoal tile (plus the CarFront
+  // mark on the right), and ordinary crew stay muted.
+  const isVehicle = res.kind === "vehicle";
+  const TileIcon = isVehicle ? Truck : UserRound;
+  const tileCls = isVehicle
+    ? "bg-mm-red-tint text-mm-red-deep"
+    : driver
+      ? "bg-foreground text-card"
+      : "bg-muted text-mist-400";
   return (
     <div
       draggable
@@ -530,14 +554,21 @@ function RailChip({
         e.dataTransfer.effectAllowed = "copy";
       }}
       title={`Drag ${res.name} onto a job`}
-      className="flex cursor-grab items-center gap-2 rounded-md border border-border bg-card px-2 py-1.5 active:cursor-grabbing"
+      className={cn(
+        "flex cursor-grab items-center gap-2 rounded-md border bg-card px-2 py-1.5 active:cursor-grabbing",
+        // A driver frames slightly stronger than ordinary crew/vans so it pops.
+        driver ? "border-mist-400/60" : "border-border",
+      )}
     >
       <GripVertical className="size-3.5 shrink-0 text-mist-300" strokeWidth={1.75} />
-      {icon}
+      <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-md", tileCls)}>
+        <TileIcon className="size-3.5" strokeWidth={1.75} />
+      </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-foreground">{res.name}</span>
         <span className="block truncate text-[10px] capitalize text-mist-400">{sub}</span>
       </span>
+      {driver ? <CarFront className="size-3.5 shrink-0 text-foreground" strokeWidth={1.75} /> : null}
       {warn ? <ShieldAlert className="size-3.5 shrink-0 text-warn" strokeWidth={2} /> : null}
     </div>
   );
@@ -701,6 +732,9 @@ function JobCard({
 
   const req = appt.required;
   const under = isRemoval && req ? assignedVehicles.length < req.vans || assignedStaff.length < req.men : false;
+  // Warn-only: a removal with a van assigned needs at least one driver on the crew.
+  const assignedDrivers = assignedStaff.filter((a) => staffById.get(a.staff_id!)?.is_driver).length;
+  const driverWarn = isRemoval && needsDriverWarning({ assignedVans: assignedVehicles.length, assignedDrivers });
 
   return (
     <div
@@ -782,6 +816,13 @@ function JobCard({
         </p>
       ) : null}
 
+      {driverWarn ? (
+        <p className="mt-1 inline-flex items-center gap-1 rounded-pill border border-warn-border bg-warn-bg px-1.5 py-0.5 text-[10px] font-semibold text-warn">
+          <ShieldAlert className="size-3" strokeWidth={2} />
+          No driver assigned
+        </p>
+      ) : null}
+
       {assigned.length > 0 ? (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {assignedStaff.map((a) => {
@@ -791,6 +832,7 @@ function JobCard({
                 key={a.id}
                 icon={<UserRound className="size-3" strokeWidth={1.75} />}
                 label={s?.full_name ?? "Staff"}
+                driver={s?.is_driver}
                 pending={pending}
                 onRemove={() => unassign(a.id, s?.full_name ?? "Staff")}
               />
@@ -832,12 +874,14 @@ function AssignedChip({
   icon,
   label,
   warn,
+  driver,
   pending,
   onRemove,
 }: {
   icon: React.ReactNode;
   label: string;
   warn?: boolean;
+  driver?: boolean;
   pending: boolean;
   onRemove: () => void;
 }) {
@@ -845,6 +889,7 @@ function AssignedChip({
     <span className="inline-flex items-center gap-1 rounded-pill border border-border bg-muted/60 py-0.5 pl-1.5 pr-0.5 text-[11px] font-medium text-foreground">
       {icon}
       <span className="max-w-[110px] truncate">{label}</span>
+      {driver ? <CarFront className="size-3 text-mist-500" strokeWidth={1.75} /> : null}
       {warn ? <ShieldAlert className="size-3 text-warn" strokeWidth={2} /> : null}
       <button
         type="button"
@@ -935,6 +980,7 @@ function AssignDialog({
     selected: boolean,
     onToggle: () => void,
     warn?: boolean,
+    driver?: boolean,
   ) => {
     const clashes = clashesFor(id, kind, appt, assignments, apptById);
     return (
@@ -956,6 +1002,7 @@ function AssignDialog({
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
             <span className="truncate">{name}</span>
+            {driver ? <CarFront className="size-3.5 shrink-0 text-foreground" strokeWidth={1.75} /> : null}
             {warn ? <ShieldAlert className="size-3.5 shrink-0 text-warn" strokeWidth={2} /> : null}
           </span>
           <span className="block truncate text-xs capitalize text-mist-400">{sub}</span>
@@ -1009,6 +1056,7 @@ function AssignDialog({
                     staffSel.has(s.id),
                     () => toggle(staffSel, s.id, setStaffSel),
                     apptDaysList.some((day) => staffOffOn(availByStaff.get(s.id) ?? [], day, s.working_days ?? undefined).off),
+                    s.is_driver,
                   ),
                 )
               )}

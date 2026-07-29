@@ -15,6 +15,7 @@ import {
   Archive,
   ArchiveRestore,
   CalendarDays,
+  CarFront,
   Loader2,
   Pencil,
   Phone,
@@ -68,6 +69,8 @@ export interface StaffRow {
   id: string;
   full_name: string;
   staff_role: string;
+  /** Can take a van out on a move (design §D12). Drives the Job Board driver mark. */
+  is_driver: boolean;
   phone: string | null;
   email: string | null;
   // Pay — merged in from the office-scoped staff_pay table (not on the staff row).
@@ -396,7 +399,14 @@ function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: Av
     <div className={cn("flex flex-col gap-3 rounded-lg border border-border bg-card p-4", !s.is_active && "opacity-60")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{s.full_name}</p>
+          <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+            <span className="truncate">{s.full_name}</span>
+            {s.is_driver ? (
+              <span title="Driver" className="shrink-0 text-mist-500">
+                <CarFront className="size-3.5" strokeWidth={1.75} aria-label="Driver" />
+              </span>
+            ) : null}
+          </p>
           <span className="mt-1 inline-flex rounded-pill bg-muted px-2 py-0.5 text-[11px] font-medium capitalize text-mist-500">
             {s.staff_role}
           </span>
@@ -497,6 +507,7 @@ function StaffDialog({
   const [v, setV] = useState({
     full_name: row?.full_name ?? "",
     staff_role: (row?.staff_role ?? "crew") as StaffInput["staff_role"],
+    is_driver: row?.is_driver ?? false,
     phone: row?.phone ?? "",
     email: row?.email ?? "",
     hourly_rate: row?.hourly_rate != null ? String(row.hourly_rate) : "",
@@ -511,6 +522,7 @@ function StaffDialog({
       id: row?.id,
       full_name: v.full_name,
       staff_role: v.staff_role,
+      is_driver: v.is_driver,
       phone: v.phone,
       email: v.email,
       hourly_rate: v.hourly_rate === "" ? "" : Number(v.hourly_rate),
@@ -566,6 +578,24 @@ function StaffDialog({
                 <Input id="st-rate" type="number" inputMode="decimal" min={0} step="0.01" className="h-11" value={v.hourly_rate} onChange={(e) => setV({ ...v, hourly_rate: e.target.value })} placeholder="15" />
               </div>
             ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-4 rounded-md border border-input bg-card px-3 py-2.5">
+            <div>
+              <p className="text-sm font-medium text-foreground">Is a driver (can take a van out)</p>
+              <p className="text-xs text-mist-400">Shows a driver mark on the Job Board and flags moves with no driver assigned.</p>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-label="Is a driver (can take a van out)"
+                className="peer sr-only"
+                checked={v.is_driver}
+                onChange={(e) => setV({ ...v, is_driver: e.target.checked })}
+              />
+              <span className="h-7 w-12 rounded-full bg-mist-200 transition-colors peer-checked:bg-mm-red" />
+              <span className="absolute left-1 size-5 rounded-full bg-white transition-transform peer-checked:translate-x-5" />
+            </label>
           </div>
           {isAdmin ? (
             <div className="grid gap-1.5">

@@ -181,6 +181,9 @@ const staffSchema = z.object({
   id: z.string().uuid().optional(),
   full_name: z.string().trim().min(1, "Name is required").max(120),
   staff_role: z.enum(["crew", "driver", "estimator", "admin"]),
+  // Can take a van out on a move — drives the Job Board driver mark + the
+  // warn-only "no driver assigned" flag. Independent of staff_role.
+  is_driver: z.boolean(),
   phone: z.string().trim().max(20).optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   // Pay: hourly rate + optional weekly guarantee (Rob: £600/wk floor). Stored in
@@ -209,6 +212,7 @@ export async function saveStaffAction(input: StaffInput) {
   const row = {
     full_name: v.full_name,
     staff_role: v.staff_role,
+    is_driver: v.is_driver,
     phone: v.phone || null,
     email: v.email || null,
     notes: v.notes || null,
