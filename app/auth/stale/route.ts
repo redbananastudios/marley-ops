@@ -9,8 +9,12 @@ import { createClient } from "@/lib/supabase/server";
  * by devices still carrying deactivated test-login cookies). Signing out here
  * breaks the cycle so /login renders with no session.
  */
-export async function GET(request: Request) {
+export async function GET() {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  return NextResponse.redirect(new URL("/login", request.url));
+  // Absolute base from config, NOT request.url — behind the reverse proxy the
+  // request host is the container bind (0.0.0.0:3000), which browsers reject
+  // as a redirect target (same pattern as /api/card/return).
+  const base = (process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, "");
+  return NextResponse.redirect(`${base}/login`, 303);
 }
