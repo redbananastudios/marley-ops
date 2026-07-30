@@ -4,7 +4,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { tokensMatch } from "@/lib/staff/onboard-token";
-import { normalisePhone, staffSubmissionSchema, type StaffSubmissionInput } from "@/lib/staff/onboarding";
+import {
+  formatSubmissionAddress,
+  normalisePhone,
+  staffSubmissionSchema,
+  type StaffSubmissionInput,
+} from "@/lib/staff/onboarding";
 
 /**
  * PUBLIC action — a crew applicant at /join/<token>. No session: the shared
@@ -71,7 +76,12 @@ export async function submitStaffOnboardingAction(
   const row = {
     full_name: v.full_name,
     date_of_birth: v.date_of_birth,
-    address: v.address,
+    // Structured parts are canonical; `address` keeps the formatted one-liner
+    // for the review queue and the approve→staff copy.
+    address: formatSubmissionAddress(v),
+    address_line1: v.address_line1,
+    address_town: v.address_town || null,
+    address_postcode: v.address_postcode,
     email: v.email,
     phone: v.phone,
     is_driver: v.is_driver,

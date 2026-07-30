@@ -42,6 +42,9 @@ export function normalisePhone(raw: string | null | undefined): string {
 const MIN_AGE = 16;
 const MAX_AGE = 80;
 
+/** Lenient standard-form UK postcode (outward + inward, optional space). */
+const UK_POSTCODE_RE = /^[A-Za-z]{1,2}\d[A-Za-z\d]?\s?\d[A-Za-z]{2}$/;
+
 /** Bounded free-text — same trim + slice discipline as the quote accept flow. */
 const bounded = (max: number) => z.string().trim().transform((s) => s.slice(0, max));
 
@@ -59,7 +62,14 @@ export const staffSubmissionSchema = z.object({
       },
       `You need to be between ${MIN_AGE} and ${MAX_AGE} to join the crew`,
     ),
-  address: z.string().trim().min(1, "Enter your home address").transform((s) => s.slice(0, 500)),
+  address_line1: z.string().trim().min(1, "Enter your street address").transform((s) => s.slice(0, 160)),
+  address_town: bounded(80).optional(),
+  address_postcode: z
+    .string()
+    .trim()
+    .min(1, "Enter your postcode")
+    .refine((s) => UK_POSTCODE_RE.test(s), "Enter a valid UK postcode")
+    .transform((s) => s.toUpperCase().slice(0, 10)),
   email: z
     .string()
     .trim()
@@ -80,6 +90,19 @@ export const staffSubmissionSchema = z.object({
 
 export type StaffSubmissionInput = z.input<typeof staffSubmissionSchema>;
 export type StaffSubmissionParsed = z.output<typeof staffSubmissionSchema>;
+
+/** One-line display address from the structured parts (line1, town, postcode) —
+ *  what goes in the legacy `address` column, the review queue and the staff copy. */
+export function formatSubmissionAddress(v: {
+  address_line1: string;
+  address_town?: string | null;
+  address_postcode: string;
+}): string {
+  return [v.address_line1, v.address_town ?? "", v.address_postcode]
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .join(", ");
+}
 
 /** Shape of a staff_submissions row the approve mapping needs. */
 export interface SubmissionLike {

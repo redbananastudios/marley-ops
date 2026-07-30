@@ -30,7 +30,7 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
         {children}
         <p className="mt-6 text-center text-xs leading-relaxed text-mist-400">
-          Marley Moves Ltd · Company No. 15914266 · Shaftesbury, SP7
+          MarleyMoves Ltd · Company No. 15914266 · Shaftesbury, SP7
           <br />
           Questions? Call{" "}
           <a href="tel:01747637070" className="font-semibold text-ink">

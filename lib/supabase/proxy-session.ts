@@ -60,7 +60,12 @@ export async function updateSession(request: NextRequest) {
     // Listed EXACTLY, not by prefix, so a future /api/card/* helper isn't
     // silently exposed unauthenticated.
     path === "/api/card/callback" ||
-    path === "/api/card/return";
+    path === "/api/card/return" ||
+    // Google Places proxies — the public crew sign-up form calls them with a
+    // `jt` join-token credential; each route enforces session-or-valid-token
+    // itself. Listed EXACTLY so future /api/places/* helpers stay gated.
+    path === "/api/places" ||
+    path === "/api/places/details";
 
   if (!user && !isPublic) {
     const url = request.nextUrl.clone();

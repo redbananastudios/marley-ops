@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { PlacesInput } from "@/components/places/places-input";
+import { lookupPlaceDetails } from "@/lib/places/lookup";
 import { submitStaffOnboardingAction } from "./actions";
 
 /**
@@ -40,7 +42,9 @@ export function JoinForm({ token }: { token: string }) {
   const [v, setV] = useState({
     full_name: "",
     date_of_birth: "",
-    address: "",
+    address_line1: "",
+    address_town: "",
+    address_postcode: "",
     email: "",
     phone: "",
     emergency_contact_name: "",
@@ -48,6 +52,8 @@ export function JoinForm({ token }: { token: string }) {
     notes: "",
     company: "", // honeypot — stays empty for humans
   });
+  // The places proxies take the join token as the credential (no session here).
+  const jt = `jt=${encodeURIComponent(token)}`;
   const [isDriver, setIsDriver] = useState<boolean | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +72,9 @@ export function JoinForm({ token }: { token: string }) {
     const res = await submitStaffOnboardingAction(token, {
       full_name: v.full_name,
       date_of_birth: v.date_of_birth,
-      address: v.address,
+      address_line1: v.address_line1,
+      address_town: v.address_town,
+      address_postcode: v.address_postcode,
       email: v.email,
       phone: v.phone,
       is_driver: isDriver,
@@ -122,17 +130,57 @@ export function JoinForm({ token }: { token: string }) {
       </Field>
 
       <Field id="jn-address" label="Home address">
-        <textarea
+        <PlacesInput
           id="jn-address"
-          rows={2}
-          className="focus-ring w-full rounded-md border border-mist-200 bg-white px-3 py-2.5 text-base text-ink placeholder:text-mist-400"
-          autoComplete="street-address"
-          value={v.address}
-          onChange={(e) => set({ address: e.target.value })}
-          placeholder="House, street, town, postcode"
-          required
+          kind="address"
+          className={inputCls}
+          extraQuery={jt}
+          value={v.address_line1}
+          onValueChange={(val) => set({ address_line1: val })}
+          onPick={async (p) => {
+            const a = await lookupPlaceDetails(p.id, jt);
+            if (!a) return;
+            set({
+              address_line1: a.line1 || p.description,
+              address_town: a.town || v.address_town,
+              address_postcode: a.postcode || v.address_postcode,
+            });
+          }}
+          placeholder="Start typing your address…"
         />
       </Field>
+
+      <div className="grid grid-cols-2 gap-3">
+        <Field id="jn-town" label="Town / City">
+          <input
+            id="jn-town"
+            className={inputCls}
+            autoComplete="address-level2"
+            value={v.address_town}
+            onChange={(e) => set({ address_town: e.target.value })}
+            placeholder="e.g. Shaftesbury"
+          />
+        </Field>
+        <Field id="jn-postcode" label="Postcode">
+          <PlacesInput
+            id="jn-postcode"
+            kind="postcode"
+            className={inputCls}
+            extraQuery={jt}
+            value={v.address_postcode}
+            onValueChange={(val) => set({ address_postcode: val })}
+            onPick={async (p) => {
+              const a = await lookupPlaceDetails(p.id, jt);
+              set({
+                address_postcode: a?.postcode || p.main || v.address_postcode,
+                address_town: a?.town || v.address_town,
+                address_line1: a?.line1 || v.address_line1,
+              });
+            }}
+            placeholder="SP7…"
+          />
+        </Field>
+      </div>
 
       <Field id="jn-email" label="Email">
         <input

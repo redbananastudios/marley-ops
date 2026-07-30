@@ -29,6 +29,7 @@ export function PlacesInput({
   placeholder,
   className,
   inputMode,
+  extraQuery,
 }: {
   value: string;
   onValueChange: (v: string) => void;
@@ -39,6 +40,9 @@ export function PlacesInput({
   placeholder?: string;
   className?: string;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  /** Extra query string for /api/places (no leading &) — e.g. the public crew
+   *  sign-up form passes `jt=<join-token>` since it has no session. */
+  extraQuery?: string;
 }) {
   const [items, setItems] = useState<Prediction[]>([]);
   const [open, setOpen] = useState(false);
@@ -65,9 +69,10 @@ export function PlacesInput({
     setLoading(true);
     const t = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/places?q=${encodeURIComponent(q)}&kind=${kind}`, {
-          signal: AbortSignal.timeout(5000),
-        });
+        const res = await fetch(
+          `/api/places?q=${encodeURIComponent(q)}&kind=${kind}${extraQuery ? `&${extraQuery}` : ""}`,
+          { signal: AbortSignal.timeout(5000) },
+        );
         const json = (await res.json()) as { predictions?: Prediction[] };
         if (cancelled) return;
         setItems(json.predictions ?? []);
@@ -83,7 +88,7 @@ export function PlacesInput({
       cancelled = true;
       clearTimeout(t);
     };
-  }, [value, kind]);
+  }, [value, kind, extraQuery]);
 
   // Close on outside click.
   useEffect(() => {

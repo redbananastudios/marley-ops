@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
+import { isOnboardTokenValid } from "@/lib/staff/onboard-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -34,13 +35,15 @@ function pick(components: Component[], type: string): string {
 }
 
 export async function GET(req: Request) {
-  if (!(await requireApiUser())) {
+  const { searchParams } = new URL(req.url);
+  // Session (office) OR the live crew sign-up token (`jt`) — see /api/places.
+  if (!(await requireApiUser()) && !(await isOnboardTokenValid(searchParams.get("jt")))) {
     return NextResponse.json({ ok: false, address: EMPTY_ADDR }, { status: 401 });
   }
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return NextResponse.json({ ok: false, address: EMPTY_ADDR }, { status: 200 });
 
-  const placeId = (new URL(req.url).searchParams.get("placeId") ?? "").trim();
+  const placeId = (searchParams.get("placeId") ?? "").trim();
   if (!placeId) return NextResponse.json({ ok: false, address: EMPTY_ADDR }, { status: 200 });
 
   const url =

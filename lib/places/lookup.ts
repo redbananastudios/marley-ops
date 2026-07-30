@@ -14,12 +14,13 @@ export interface AddressParts {
   formatted: string;
 }
 
-export async function lookupPlaceDetails(placeId: string): Promise<AddressParts | null> {
+export async function lookupPlaceDetails(placeId: string, extraQuery?: string): Promise<AddressParts | null> {
   if (!placeId) return null;
   try {
-    const res = await fetch(`/api/places/details?placeId=${encodeURIComponent(placeId)}`, {
-      signal: AbortSignal.timeout(5000),
-    });
+    const res = await fetch(
+      `/api/places/details?placeId=${encodeURIComponent(placeId)}${extraQuery ? `&${extraQuery}` : ""}`,
+      { signal: AbortSignal.timeout(5000) },
+    );
     const json = (await res.json()) as { ok: boolean; address: AddressParts };
     return json.ok ? json.address : null;
   } catch {

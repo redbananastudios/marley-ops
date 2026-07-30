@@ -3547,6 +3547,11 @@ export type Database = {
       staff_submissions: {
         Row: {
           address: string | null
+          address_country: string | null
+          address_county: string | null
+          address_line1: string | null
+          address_postcode: string | null
+          address_town: string | null
           created_at: string
           date_of_birth: string | null
           email: string | null
@@ -3565,6 +3570,11 @@ export type Database = {
         }
         Insert: {
           address?: string | null
+          address_country?: string | null
+          address_county?: string | null
+          address_line1?: string | null
+          address_postcode?: string | null
+          address_town?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null
@@ -3583,6 +3593,11 @@ export type Database = {
         }
         Update: {
           address?: string | null
+          address_country?: string | null
+          address_county?: string | null
+          address_line1?: string | null
+          address_postcode?: string | null
+          address_town?: string | null
           created_at?: string
           date_of_birth?: string | null
           email?: string | null

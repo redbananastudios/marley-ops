@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
+import { isOnboardTokenValid } from "@/lib/staff/onboard-token";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,11 +20,15 @@ export const dynamic = "force-dynamic";
 const EMPTY = { ok: false as const, predictions: [] as never[] };
 
 export async function GET(req: Request) {
-  if (!(await requireApiUser())) return NextResponse.json(EMPTY, { status: 401 });
+  const { searchParams } = new URL(req.url);
+  // Session (office) OR the live crew sign-up token (`jt`) — the public /join
+  // form's autocomplete. Token is revocable ("New link") and checked timing-safe.
+  if (!(await requireApiUser()) && !(await isOnboardTokenValid(searchParams.get("jt")))) {
+    return NextResponse.json(EMPTY, { status: 401 });
+  }
   const key = process.env.GOOGLE_MAPS_API_KEY;
   if (!key) return NextResponse.json(EMPTY, { status: 200 });
 
-  const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim();
   const kind = searchParams.get("kind") === "postcode" ? "postcode" : "address";
   if (q.length < 3) return NextResponse.json({ ok: true, predictions: [] }, { status: 200 });

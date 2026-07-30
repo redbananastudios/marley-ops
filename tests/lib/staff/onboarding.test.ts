@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   ageFromDob,
+  formatSubmissionAddress,
   isUkPhone,
   normalisePhone,
   staffFieldsFromSubmission,
@@ -12,7 +13,9 @@ const TODAY = new Date(Date.UTC(2026, 6, 29)); // 29 Jul 2026
 const valid = {
   full_name: "Jack Smith",
   date_of_birth: "1998-03-14",
-  address: "1 High Street, Shaftesbury, SP7 8AA",
+  address_line1: "1 High Street",
+  address_town: "Shaftesbury",
+  address_postcode: "SP7 8AA",
   email: "Jack.Smith@Example.com",
   phone: "07572 382366",
   is_driver: true,
@@ -85,6 +88,30 @@ describe("staffSubmissionSchema", () => {
     const res = staffSubmissionSchema.safeParse({ ...valid, notes: "x".repeat(5000) });
     expect(res.success).toBe(true);
     if (res.success) expect(res.data.notes).toHaveLength(1000);
+  });
+
+  it("requires a plausible UK postcode and uppercases it", () => {
+    expect(staffSubmissionSchema.safeParse({ ...valid, address_postcode: "" }).success).toBe(false);
+    expect(staffSubmissionSchema.safeParse({ ...valid, address_postcode: "not a code" }).success).toBe(false);
+    const res = staffSubmissionSchema.safeParse({ ...valid, address_postcode: "sp7 8aa" });
+    expect(res.success).toBe(true);
+    if (res.success) expect(res.data.address_postcode).toBe("SP7 8AA");
+  });
+
+  it("requires a street address; town is optional", () => {
+    expect(staffSubmissionSchema.safeParse({ ...valid, address_line1: "  " }).success).toBe(false);
+    expect(staffSubmissionSchema.safeParse({ ...valid, address_town: "" }).success).toBe(true);
+  });
+});
+
+describe("formatSubmissionAddress", () => {
+  it("joins line1, town and postcode, skipping blanks", () => {
+    expect(
+      formatSubmissionAddress({ address_line1: "1 High Street", address_town: "Shaftesbury", address_postcode: "SP7 8AA" }),
+    ).toBe("1 High Street, Shaftesbury, SP7 8AA");
+    expect(
+      formatSubmissionAddress({ address_line1: "1 High Street", address_town: "", address_postcode: "SP7 8AA" }),
+    ).toBe("1 High Street, SP7 8AA");
   });
 });
 
