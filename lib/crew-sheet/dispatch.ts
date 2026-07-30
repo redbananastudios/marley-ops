@@ -27,7 +27,8 @@ import { buildDaySheetDocDef } from "./daily-docdef";
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Admin = { from: (t: string) => any };
 
-const SEND_HOUR = 18; // 18:00 UK the evening before — the PRD's send time.
+const SEND_HOUR = 19; // 19:30 UK the evening before (Peter, 2026-07-30; was the PRD's 18:00).
+const SEND_MINUTE = 30;
 const MAX_ATTEMPTS = 6; // ~30 min of 5-min retries before a hard failure gives up.
 const PHOTOS_PER_JOB = 3; // survey photos embedded per job on the day sheet…
 const PHOTOS_PER_DAY = 8; // …and a whole-day cap so a many-job PDF stays sane.
@@ -46,11 +47,11 @@ export function targetWorkDates(now: Date = new Date()): string[] {
   return [today, tomorrow];
 }
 
-/** Has the 18:00-evening-before send window opened for this work-date? */
+/** Has the 19:30-evening-before send window opened for this work-date? */
 export function windowOpen(workDate: string, now: Date = new Date()): boolean {
   const [y, m, d] = workDate.split("-").map(Number);
-  // Window opens at SEND_HOUR the previous calendar day.
-  return now.getTime() >= ukInstant(y, m, d - 1, SEND_HOUR).getTime();
+  // Window opens at SEND_HOUR:SEND_MINUTE the previous calendar day.
+  return now.getTime() >= ukInstant(y, m, d - 1, SEND_HOUR, SEND_MINUTE).getTime();
 }
 
 export interface SheetStateRow {

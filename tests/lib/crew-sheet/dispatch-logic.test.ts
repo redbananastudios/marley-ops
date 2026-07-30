@@ -63,13 +63,13 @@ describe("decideSheetAction", () => {
   });
 });
 
-describe("windowOpen (18:00 the evening before, UK)", () => {
-  it("is closed at 17:00 UK the day before", () => {
-    // 2026-07-21 sheet; window opens 2026-07-20 18:00 BST = 17:00 UTC.
-    expect(windowOpen("2026-07-21", new Date("2026-07-20T16:59:00Z"))).toBe(false);
+describe("windowOpen (19:30 the evening before, UK)", () => {
+  it("is closed at 19:29 UK the day before", () => {
+    // 2026-07-21 sheet; window opens 2026-07-20 19:30 BST = 18:30 UTC.
+    expect(windowOpen("2026-07-21", new Date("2026-07-20T18:29:00Z"))).toBe(false);
   });
-  it("is open at 18:00 UK the day before", () => {
-    expect(windowOpen("2026-07-21", new Date("2026-07-20T17:00:00Z"))).toBe(true);
+  it("is open at 19:30 UK the day before", () => {
+    expect(windowOpen("2026-07-21", new Date("2026-07-20T18:30:00Z"))).toBe(true);
   });
   it("is open for a work-date that is already today", () => {
     expect(windowOpen("2026-07-20", new Date("2026-07-20T09:00:00Z"))).toBe(true);
