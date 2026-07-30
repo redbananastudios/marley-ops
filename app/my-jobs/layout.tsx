@@ -13,7 +13,8 @@ import { getSessionProfile } from "@/lib/auth";
  */
 export default async function MyJobsLayout({ children }: { children: ReactNode }) {
   const profile = await getSessionProfile();
-  if (!profile?.active) redirect("/login");
+  // Stale-session guard — same loop-breaker as the dashboard shell.
+  if (!profile?.active) redirect("/auth/stale");
   return (
     <OutboxProvider ownerId={profile.id}>
       <PushSwRegister />

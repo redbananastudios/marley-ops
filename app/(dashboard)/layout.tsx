@@ -16,7 +16,10 @@ export default async function DashboardLayout({
   children: React.ReactNode;
 }) {
   const profile = await getSessionProfile();
-  if (!profile) redirect("/login");
+  // A signed-in session with a missing/deactivated profile must be SIGNED OUT,
+  // not sent to /login — the proxy bounces authenticated /login hits back here
+  // and the pair loops forever (ERR_TOO_MANY_REDIRECTS).
+  if (!profile) redirect("/auth/stale");
   // Crew logins get their own surface — never the office dashboard.
   if (profile.role === "crew") redirect("/my-jobs");
 
