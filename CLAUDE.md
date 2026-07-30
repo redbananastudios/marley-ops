@@ -1,8 +1,8 @@
 @AGENTS.md
 
-## Data policy until go-live (Peter, 2026-07-13)
+## PRODUCTION IS LIVE (cutover 2026-07-30, Peter's order)
 
-**Production `ops.marleymoves.co.uk` holds MOCK/TEST data only until Peter approves testing complete.** No live-lead backfill, no real customer records, keep `SANITY_SYNC_DISABLED` in place. The `growth_artifacts` rows are exempt (agent proposals + tracking summaries — no customer data). Do not flip anything to live data without his explicit approval. **Dev mirrors this**: `SANITY_SYNC_DISABLED=true` is set in `.env.local` too (2026-07-13 — the leads-page Sync button re-imported 78 real website enquiries into dev mid-test; wiped + guarded).
+**`ops.marleymoves.co.uk` is the LIVE system of record since 2026-07-30 12:09 UTC.** Real customers, real money, real emails (`COMMS_DRYRUN=false`), card payments LIVE (takepayments merchant 292748, kill switch ON), Zoho = Connor's real books. Treat every prod write as customer-facing. The go-live flush ran via `scripts/reset-data.mjs`; `LEAD_SYNC_SINCE=2026-07-30T12:09:26Z` is the no-backfill floor — never remove it (historical website leads must not import). **Dev stays guarded**: `SANITY_SYNC_DISABLED=true` remains in `.env.local` so dev never pulls real enquiries (2026-07-13 lesson: the Sync button re-imported 78 real enquiries into dev mid-test).
 
 ## AI survey gotchas (2026-07-13)
 
@@ -20,7 +20,9 @@
 
 ## Current State
 
-Last touched: 2026-07-29 on i9 — **SCHEDULE & ALLOCATION SHIPPED (`e6e058f`, merged `3d8c67a`): one page, two views of the same day; migration 0080 on prod.**
+Last touched: 2026-07-30 on i9 — **SYSTEM WENT LIVE (cutover 12:09 UTC).** Pre-flush backup 12:51-prior + nightly; full flush (DB + Supabase Storage + R2; identity/config kept; reset-data.mjs composite-PK fix shipped); live users peter/luke/connor/leanne@marleymoves.co.uk (shared launch password, Peter distributes — no credential-email feature exists by design), test logins deactivated, Crew Test staff retired; `LEAD_SYNC_SINCE=2026-07-30T12:09:26Z` + `SANITY_SYNC_DISABLED` removed (sync proven ok/0 — no backfill); takepayments flipped LIVE (merchant 292748, TEST_MODE=false, kill switch ON, health "Merchant ••••2748 · LIVE"); Zoho verified clean (only app test doc INV-000191 already void — the org is Connor's REAL books, actively used); fleet-reminder recipients set (connor@+luke@); all 13 crons wired; browser-verified fresh login (Leanne) + all-green integration health. Remaining = Peter: £1 real-card test + refund proof, WhatsApp sign-up link, drivers via Staff & Fleet, VAT stagger, T&Cs, iMVE parallel. Details: `docs/go-live-checklist.md` C-block.
+
+Prior session (2026-07-29) — **SCHEDULE & ALLOCATION SHIPPED (`e6e058f`, merged `3d8c67a`): one page, two views of the same day; migration 0080 on prod.**
 - **New `/schedule` page (additive — Removals diary + Job Board untouched, retire later):** *Availability* tab = month graded from the confirmed removals' REQUIRED vans/crew vs the live fleet (Available/Limited/Full/Over; pure `lib/schedule/capacity.ts`, 14 tests, `limitedAt` threshold configurable) + soft-demand "Thinking about it" panel (deposit-paid, off-diary) + click-a-day summary (booked jobs, provisional interest, ±3 days). *Day Allocation* = Job Board single-day for dispatch, surveys off, shared `?date=`.
 - **Bookings from the page:** New booking prefilled to the selected date; clicking a booked job opens the diary's view modal → Edit / Reschedule (booked removals via the Payments Policy v2 ChangeDateDialog). All flows browser-verified as office.
 - **Driver-aware crew:** `staff.is_driver` (Staff & Fleet toggle, admin-only write) → charcoal+car-mark rail chips, warn-only "No driver assigned" on job cards (never blocks, mirrors clash warnings).

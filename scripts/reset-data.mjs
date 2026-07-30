@@ -52,10 +52,10 @@ const TABLES = [
   "cubic_survey_rooms",
   "cubic_surveys",
   { name: "ai_spend_months", key: "month" }, // PK is the month date, not id
-  // webhooks + operational issues (0070)
-  "webhook_delivery_steps",
-  "webhook_receipts",
-  "operational_issue_daily_digests",
+  // webhooks + operational issues (0070) — composite/date PKs, no id column
+  { name: "webhook_delivery_steps", key: "provider" },
+  { name: "webhook_receipts", key: "provider" },
+  { name: "operational_issue_daily_digests", key: "snapshot_date" },
   "operational_issue_daily_updates",
   "operational_issues",
   // crew job sheets (0068)

@@ -99,7 +99,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done
 
 ## C — Cutover day (ordered — from the runbook in go-live-test-plan.md)
 
-1. ☐ Snapshot the DB.
+> **CUTOVER EXECUTED 2026-07-30 ~12:09 UTC (Peter's order: "this system must be ready to go live now all aspects").** C1/C4/C5/C6/C7 done below; C2 partially (logins live, enrolment per person outstanding); C9 = the system is now receiving real enquiries. Remaining Peter actions: £1 real-card live test + refund proof, WhatsApp sign-up link, real drivers via Staff & Fleet, VAT stagger (A1), T&Cs review (A3), iMVE parallel run (D4).
+
+1. ☑ Snapshot the DB (30 Jul 12:51 backup + nightly 02:30).
 2. ◐ Team identities: office logins are REAL (Connor + Luke swapped 16 Jul,
    Peter already real); remaining = each person signs in on their real device;
    passkey + push enrolled (Connor's iPhone ☑ 15 Jul; Jack/Rob/Luke ☐ —
@@ -111,9 +113,14 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    Quotes/chases send From the owner (luke@/connor@), money emails From
    accounts@. Remaining smoke: one real inbound reply + eyeball the From on the
    next quote email (chase 2 on ~19 Jul proves it unattended).
-4. ☐ Comms flags: COMMS_DRYRUN=false confirmed; decide LEAD_AUTOREPLY_ENABLED
-   (still gated off — Peter reviewing the template).
-5. ☐ **SYSTEM FLUSH (no backfill — Peter, 2026-07-21)**: on the box,
+4. ☑ Comms flags: COMMS_DRYRUN=false confirmed live 30 Jul. LEAD_AUTOREPLY_ENABLED
+   is a SITE-side (Vercel) flag, not in ops code — still Peter's call.
+5. ☑ **SYSTEM FLUSH — RAN 30 Jul** (all transactional rows + Supabase Storage +
+   R2 swept; identity/config kept; Zoho untouched — and verified: the only
+   app-created doc in the live org, INV-000191, was already void; everything
+   else is Connor's real bookkeeping). Script fixed en route: composite-PK
+   tables (webhook_receipts/_delivery_steps, operational_issue_daily_digests)
+   now flush by their real key. Original runbook: on the box,
    `RESET_DRY_RUN=yes node --env-file=/opt/marley-ops/app.env scripts/reset-data.mjs`
    to preview, then re-run with `RESET_CONFIRM=yes`. Wipes ALL transactional data +
    every media object (Supabase Storage AND R2, all five buckets); keeps
@@ -124,13 +131,18 @@ Status legend: ☐ open · ◐ in progress · ☑ done
    LIVE Zoho org** — prod pointed at live Zoho during the test phase, so test
    accepts/refunds raised real Zoho docs, and the bank/cash refund rail has no
    is_test guard (pre-live inspection 2026-07-29).
-6. ☐ **No-backfill go-live**: set `LEAD_SYNC_SINCE=<cutover ISO timestamp>` in
+6. ☑ **No-backfill go-live — DONE 30 Jul**: `LEAD_SYNC_SINCE=2026-07-30T12:09:26Z`
+   set, `SANITY_SYNC_DISABLED` removed, container recreated; manual sync run
+   returned `ok, 0 imported` (floor proven). Original spec: set `LEAD_SYNC_SINCE=<cutover ISO timestamp>` in
    /opt/marley-ops/app.env, THEN remove SANITY_SYNC_DISABLED → redeploy. The
    floor is enforced in `lib/sync/sanity-leads.ts` — historical website leads
    can never import, in any mode, including the manual "Sync website leads"
    button. This retires the old chase-safety gate (there is no historical
    backlog to bulk-close). Pre-cutover enquiries are handled manually/in iMVE.
-7. ☐ Card payments (when A2 lands): TAKEPAYMENTS_* env into /opt/marley-ops/app.env
+7. ☑ Card payments — **LIVE 30 Jul**: box app.env on LIVE merchant 292748,
+   TEST_MODE=false, Settings kill switch ON, health check reads "Merchant
+   ••••2748 · LIVE"; card-reconcile cron wired. REMAINING: Peter's £1
+   real-card test + a live refund proof (S9 on live). Original spec: TAKEPAYMENTS_* env into /opt/marley-ops/app.env
    + .env.local → flip the Settings kill switch → Settings test payment → run the
    S9 suite (refund lockout, tampered callback, reconcile cron) → leave ON.
    **PREREQUISITE — register the production server IP in the takepayments MMS.**
