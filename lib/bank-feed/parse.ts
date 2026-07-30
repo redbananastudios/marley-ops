@@ -142,3 +142,24 @@ export function isInboundPayment(tx: Pick<BankTxRow, "amount" | "txType">): bool
   const t = (tx.txType ?? "").toLowerCase();
   return t.includes("faster payment") || t.includes("bacs") || t.includes("monzo-to-monzo");
 }
+
+/** Go-live floor for the bank feed — mirrors the Sanity LEAD_SYNC_SINCE
+ *  no-backfill floor (lib/sync/sync-window.ts). The Monzo sheet holds history
+ *  back to April 2025; the floor stops that pre-go-live history importing.
+ *  Resolves the BANK_FEED_SINCE env value to a yyyy-mm-dd date string for
+ *  lexicographic comparison against BankTxRow.txDate (already yyyy-mm-dd), or
+ *  null when unset/garbled (→ no floor, behaviour unchanged, so it ships safely
+ *  before the env var exists). Kept pure — the caller passes the raw env string
+ *  — so this module stays I/O-free. */
+export function resolveBankFeedFloor(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) return null; // must start ISO yyyy-mm-dd
+  return isNaN(new Date(s).getTime()) ? null : s.slice(0, 10); // date portion
+}
+
+/** Drop rows dated BEFORE the go-live floor (a null floor is a no-op). Applied
+ *  to the parsed sheet rows before the upsert so pre-floor history never enters
+ *  bank_transactions — and thus never reaches arrival/digest counting either. */
+export function applyBankFeedFloor(rows: BankTxRow[], floor: string | null): BankTxRow[] {
+  return floor ? rows.filter((r) => r.txDate >= floor) : rows;
+}

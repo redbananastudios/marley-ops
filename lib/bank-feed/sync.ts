@@ -1,7 +1,14 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { BANK_FEED_TAB, isInboundPayment, parseSheetRows, type BankTxRow } from "@/lib/bank-feed/parse";
+import {
+  applyBankFeedFloor,
+  BANK_FEED_TAB,
+  isInboundPayment,
+  parseSheetRows,
+  resolveBankFeedFloor,
+  type BankTxRow,
+} from "@/lib/bank-feed/parse";
 import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
 import { BANK_FEED_DIGEST_THRESHOLD, decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
@@ -158,7 +165,36 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       notified: 0,
     };
   }
-  const { rows, skipped } = await fetchSheet();
+  const { rows: sheetRows, skipped } = await fetchSheet();
+
+  // Go-live floor — mirrors the Sanity LEAD_SYNC_SINCE no-backfill floor
+  // (lib/sync/sync-window.ts). The Monzo→Sheets export holds history back to
+  // April 2025; without this the first sync into the flushed go-live DB would
+  // upsert every pre-go-live row.
+  //
+  // FAIL CLOSED: on the flushed live system a missing/garbled BANK_FEED_SINCE
+  // must NOT default to "no floor" (that re-imports the whole pre-go-live
+  // history). If we can't resolve a valid ISO floor while the feed is otherwise
+  // configured, refuse to import and log — the env is set in prod, so this only
+  // trips on a real misconfiguration (reviewer, 2026-07-30).
+  const floor = resolveBankFeedFloor(process.env.BANK_FEED_SINCE);
+  if (!floor) {
+    log.warn("bank-feed.floor_missing", { raw: process.env.BANK_FEED_SINCE ?? null });
+    return {
+      disabled: true,
+      rowsInSheet: sheetRows.length,
+      skippedRows: skipped,
+      upserted: 0,
+      suggested: 0,
+      mismatched: 0,
+      unmatched: 0,
+      notified: 0,
+    };
+  }
+  // Applied to the parsed rows BEFORE the upsert, so both the upsert AND the
+  // downstream arrival/digest counting (which only ever see rows that reached
+  // bank_transactions) respect it.
+  const rows = applyBankFeedFloor(sheetRows, floor);
 
   // What we already hold, and which rows the office has settled — confirmed/
   // dismissed rows are NEVER rewritten (their amount/reference are part of the
@@ -342,7 +378,9 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   }
 
   return {
-    rowsInSheet: rows.length,
+    // Full parsed-sheet count (pre-floor) — keeps the /automations metric
+    // meaning "rows the export contained"; `upserted` reflects the floored set.
+    rowsInSheet: sheetRows.length,
     skippedRows: skipped,
     upserted,
     suggested,

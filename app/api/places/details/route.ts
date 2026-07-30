@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
 import { isOnboardTokenValid } from "@/lib/staff/onboard-token";
+import { osPlacesConfigured, osByUprn } from "@/lib/places/os";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -45,6 +46,14 @@ export async function GET(req: Request) {
 
   const placeId = (searchParams.get("placeId") ?? "").trim();
   if (!placeId) return NextResponse.json({ ok: false, address: EMPTY_ADDR }, { status: 200 });
+
+  // OS Places primary: a prediction id from /api/places is a UPRN when OS is the
+  // provider. Resolve it to the full PAF address (house number + postcode). On any
+  // OS error, fall through to the Google Place Details path below.
+  if (osPlacesConfigured()) {
+    const os = await osByUprn(placeId);
+    if (os) return NextResponse.json({ ok: true, address: os }, { status: 200 });
+  }
 
   const url =
     `https://maps.googleapis.com/maps/api/place/details/json` +

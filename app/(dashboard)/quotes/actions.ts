@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import { computeQuote } from "@/lib/quote/pricing";
 import {
   deriveInputs,
@@ -46,7 +47,7 @@ async function nextQuoteRef(
 
 /** Create a draft quote (optionally pre-filled from a lead) so it exists in the panel immediately. */
 export async function createDraftQuote(opts: { leadId?: string } = {}) {
-  const { sb, userId } = await ctx();
+  const { sb } = await ctx();
 
   let lead = null;
   if (opts.leadId) {
@@ -69,6 +70,14 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     seed.job.destAddress = addressFromString([lead.to_address, lead.to_postcode].filter(Boolean).join(", "));
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
+    // Carry the lead's requested move date into the wizard. It is the customer's
+    // PREFERRED date (not yet confirmed), so open it flagged as an estimate.
+    // Without this the date entered on the lead was silently lost when the quote
+    // form opened (Peter, 2026-07-30).
+    if (lead.preferred_date) {
+      seed.job.moveDate = lead.preferred_date as string;
+      seed.job.moveDateEstimated = true;
+    }
 
     // Cubic survey → pre-select the recommended vehicle on NEW quotes only
     // (Peter, 2026-07-10). Existing quotes only ever get the suggestion chip.
@@ -107,7 +116,14 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
       .from("quotes")
       .insert({
         quote_ref,
-        estimator_id: userId,
+        // New quotes start UNASSIGNED — NOT owned by whoever clicked "New quote".
+        // The estimator is set deliberately on the review step (EstimatorPicker),
+        // so an un-triaged quote emails from the Accounts money desk rather than
+        // from the office admin who created it (Peter, 2026-07-30: "Leanne was
+        // wrong"). estimator_id is a nullable FK; pay attribution only ever reads
+        // it as a last-resort fallback after the lead/survey owner, so null here
+        // is safe. The office assigns it to the real estimator via the picker.
+        estimator_id: null,
         lead_id: lead?.id ?? null,
         client_id: lead?.client_id ?? null,
         status: "draft",
@@ -188,6 +204,28 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
   return { ok: true as const };
 }
 
+/**
+ * Assign (or clear) the estimator who OWNS this quote. This decides who a quote
+ * EMAIL fronts (lib/comms/sender.ownerIdentity -> "Luke at Marley Moves
+ * <luke@marleymoves.co.uk>") and, as a last-resort fallback, pay attribution.
+ * Passing null leaves it UNASSIGNED so the email sends from the Accounts money
+ * desk, never whichever office admin created or sent it (Peter, 2026-07-30).
+ * Office-gated (admin OR estimator): both office roles build and own quotes, but
+ * crew must never touch ownership. Tighter than the is_staff() RLS on quotes.
+ */
+export async function setQuoteEstimator(quoteId: string, estimatorId: string | null) {
+  const profile = await getSessionProfile();
+  if (!profile) return { ok: false as const, error: "Not signed in." };
+  if (profile.role !== "admin" && profile.role !== "estimator") {
+    return { ok: false as const, error: "Office only." };
+  }
+  const { sb } = await ctx();
+  const { error } = await sb.from("quotes").update({ estimator_id: estimatorId }).eq("id", quoteId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath(`/quotes/${quoteId}`);
+  return { ok: true as const };
+}
+
 /** Delete a quote. Drafts/rejected go freely; the UI gates sent/accepted behind an
  *  extra confirm (deleting an accepted quote removes a recorded win). A quote
  *  carrying a SIGNED CONTRACT is never deletable — the signature row would be
@@ -204,6 +242,29 @@ export async function deleteQuote(id: string) {
     return {
       ok: false as const,
       error: "This quote carries a signed contract — it can't be deleted. Reject it instead if it's no longer live.",
+    };
+  }
+  // An accepted quote that carries MONEY (a paid deposit or any raised Zoho
+  // invoice) must not be deletable — deleting it would drop a recorded payment /
+  // live invoice off the books. The quotes-list delete widened who can reach this
+  // action, so guard the money here, not just at the UI (reviewer, 2026-07-30).
+  const { data: q } = await sb
+    .from("quotes")
+    .select("status, deposit_paid_at, zoho_deposit_invoice_id, zoho_balance_invoice_id, zoho_commitment_invoice_id")
+    .eq("id", id)
+    .maybeSingle();
+  const realZoho = (v: string | null | undefined): boolean => !!v && v !== "pending";
+  if (
+    q?.status === "accepted" &&
+    (q.deposit_paid_at ||
+      realZoho(q.zoho_deposit_invoice_id) ||
+      realZoho(q.zoho_balance_invoice_id) ||
+      realZoho(q.zoho_commitment_invoice_id))
+  ) {
+    return {
+      ok: false as const,
+      error:
+        "This accepted quote has money against it (a paid deposit or a raised invoice) — it can't be deleted. Cancel the booking and handle any refund first.",
     };
   }
   const { error } = await sb.from("quotes").delete().eq("id", id);

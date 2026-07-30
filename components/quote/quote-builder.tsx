@@ -29,6 +29,7 @@ import {
   type CubicQuoteHint,
 } from "@/components/quote/wizard-steps";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
+import { EstimatorPicker } from "@/components/quote/estimator-picker";
 
 const QUOTE_STATUS_META: Record<string, { label: string; cls: string }> = {
   draft: { label: "Draft", cls: "bg-muted text-mist-500" },
@@ -84,6 +85,8 @@ export function QuoteBuilder({
   leadId,
   clientId,
   estimatorName,
+  estimatorId,
+  estimators,
   readOnly,
   pricing = DEFAULT_PRICING,
   settings,
@@ -96,6 +99,10 @@ export function QuoteBuilder({
   leadId?: string | null;
   clientId?: string | null;
   estimatorName?: string | null;
+  /** Who this quote is assigned to — drives the email sender (accounts@ when null). */
+  estimatorId?: string | null;
+  /** Assignable office members (active admin/estimator) for the sender picker. */
+  estimators?: { id: string; full_name: string }[];
   readOnly?: boolean;
   /** Active (settings-driven) prices for the live total + step labels. */
   pricing?: PricingConfig;
@@ -114,6 +121,7 @@ export function QuoteBuilder({
   const [step, setStep] = useState(1);
   const [sendOpen, setSendOpen] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
+  const [draftBusy, setDraftBusy] = useState(false);
   const [showStep1Errors, setShowStep1Errors] = useState(false);
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved">("idle");
 
@@ -122,6 +130,12 @@ export function QuoteBuilder({
   const step1Valid =
     values.customer.name.trim() !== "" &&
     /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.customer.email.trim());
+
+  // Step 2 gate: the route mileage must have been calculated before the quote can
+  // proceed — the price depends on dead + job miles, so an un-calculated route
+  // would price off defaults. Both legs present === the "Calculate route &
+  // mileage" step ran (Peter, 2026-07-30).
+  const step2Valid = values.route.deadMiles != null && values.route.jobMiles != null;
 
   /* ---- typed setter passed into every step ---- */
   const set = useCallback(
@@ -178,18 +192,64 @@ export function QuoteBuilder({
     }
   }
 
+  // "Save as draft" — the quote already autosaves on every edit, but this makes
+  // it explicit that the quote is parked for a colleague to pick up. Flush a
+  // final save first (cancelling the pending debounce) so the "Saved" is truthful
+  // even when the user edits and immediately saves within the 800ms window, then
+  // leave for the Quotes list. Does NOT touch the send flow.
+  async function handleSaveDraft() {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setDraftBusy(true);
+    const res = await saveQuoteDraft(quoteId, values);
+    setDraftBusy(false);
+    if (!res.ok) {
+      toast.error("Could not save: " + res.error);
+      return;
+    }
+    toast.success("Saved as draft");
+    router.push("/quotes");
+  }
+
   const goNext = () => {
     if (step === 1 && !step1Valid) {
       setShowStep1Errors(true);
       toast.error("Add the customer's name and a valid email to continue.");
       return;
     }
+    if (step === 2 && !step2Valid) {
+      toast.error("Calculate the route & mileage before continuing.");
+      return;
+    }
     setStep((s) => Math.min(TOTAL_STEPS, s + 1));
   };
   const goBack = () => setStep((s) => Math.max(1, s - 1));
 
+  // Progress-dot navigation. Going BACK (or to the current step) is always fine;
+  // jumping FORWARD must clear the SAME gates as Next, so the dots can't bypass
+  // the step-1 (customer) or step-2 (mileage) gates (reviewer, 2026-07-30).
+  const goToStep = (n: number) => {
+    if (n <= step) {
+      setStep(n);
+      return;
+    }
+    if (!step1Valid) {
+      setShowStep1Errors(true);
+      toast.error("Add the customer's name and a valid email to continue.");
+      return;
+    }
+    if (n > 2 && !step2Valid) {
+      toast.error("Calculate the route & mileage before continuing.");
+      return;
+    }
+    setStep(n);
+  };
+
   const reviewActions = (
     <div className="space-y-3">
+      {/* Who the quote email sends from — the assigned estimator, or the Accounts
+          money desk when left as Office / Accounts. Sits above Send so it's set
+          before the email goes out. Read-only quotes never render this builder. */}
+      <EstimatorPicker quoteId={quoteId} estimatorId={estimatorId ?? null} estimators={estimators ?? []} />
       <button
         type="button"
         onClick={() => setSendOpen(true)}
@@ -197,6 +257,17 @@ export function QuoteBuilder({
       >
         <Mail className="size-5" strokeWidth={1.75} />
         Send quote by email
+      </button>
+      {/* Explicit "park it for a colleague" — the autosave already persisted the
+          quote, so this just confirms + returns to the list. */}
+      <button
+        type="button"
+        onClick={handleSaveDraft}
+        disabled={draftBusy}
+        className="focus-ring flex h-14 w-full items-center justify-center gap-2 rounded-md border border-input bg-card text-base font-semibold text-foreground hover:bg-muted active:bg-muted disabled:opacity-60"
+      >
+        {draftBusy ? <Loader2 className="size-5 animate-spin" strokeWidth={1.75} /> : null}
+        Save as draft
       </button>
       <button
         type="button"
@@ -226,7 +297,7 @@ export function QuoteBuilder({
             <button
               key={label}
               type="button"
-              onClick={() => setStep(n)}
+              onClick={() => goToStep(n)}
               aria-label={`Step ${n}: ${label}${done ? ", completed" : ""}`}
               aria-current={active ? "step" : undefined}
               className="focus-ring flex h-11 items-center rounded-sm px-1"

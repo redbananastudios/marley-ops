@@ -5,7 +5,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
-import { accountsFrom, leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
+import {
+  accountsFrom,
+  leadOwnerIdentity,
+  ownerFrom,
+  ownerIdentity,
+  HELLO_FROM,
+} from "@/lib/comms/sender";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
 import {
@@ -84,11 +90,32 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
     if (token) input = { ...input, replyTo: replyAddressFor(token) };
   }
 
-  // Quote emails front the money desk (Peter, 2026-07-30 go-live): the priced
-  // offer comes from accounts@, never whichever office member clicked send.
-  // Replies still route to the owner via the tokenized relay above.
+  // A quote email sends from its ASSIGNED ESTIMATOR (Peter, 2026-07-30): Luke's
+  // quote goes out as "Luke at Marley Moves <luke@marleymoves.co.uk>" so the
+  // customer sees the person who priced it. When the quote is UNASSIGNED — or the
+  // assignee has left / isn't on the company domain — it fronts the Accounts money
+  // desk instead, NEVER whichever office admin happened to click send and never
+  // the quote's creator. ownerIdentity resolves to a person only when the profile
+  // is active, admin/estimator, and on marleymoves.co.uk; anything else -> accounts@.
+  // Replies still route to the lead's owner via the tokenized relay set above.
   if (input.channel === "email" && input.templateKey === "quote-email" && !input.from) {
-    input = { ...input, from: accountsFrom() };
+    let estimatorId: string | null = null;
+    if (input.quoteId) {
+      const { data: q } = await sb
+        .from("quotes")
+        .select("estimator_id")
+        .eq("id", input.quoteId)
+        .maybeSingle();
+      estimatorId = (q?.estimator_id as string | null) ?? null;
+    }
+    const owner = await ownerIdentity(sb, estimatorId);
+    // Reuse ownerFrom's OWN on-domain validation instead of a looser endsWith:
+    // ownerFrom returns HELLO_FROM whenever it can't build a valid personal
+    // @marleymoves.co.uk identity (unassigned, off-domain, or a malformed address
+    // that would fail its header-safe regex). In that case front the Accounts
+    // money desk — never hello@, never the creator.
+    const fronted = ownerFrom(owner.name, owner.email);
+    input = { ...input, from: fronted === HELLO_FROM ? accountsFrom() : fronted };
   }
 
   // Sales identity: a lead-linked email with no explicit sender goes out as

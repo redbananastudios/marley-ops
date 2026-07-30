@@ -34,6 +34,22 @@ export function formatAddress(a: AddressValue): string {
 /** Seed an AddressValue from a stored one-line string (shared parser in lib/places/parse). */
 export const addressFromString = parseAddressString;
 
+/**
+ * Google's UK street/route-level autocomplete results carry NO street_number and NO
+ * postal_code, so a Place Details lookup for "12 High Street" comes back as line1
+ * "High Street" (house number dropped) with a blank postcode. Merge the user's typed
+ * premise number back onto Google's street so it isn't silently lost. Full house-level
+ * results (line1 already starts with a number) pass through untouched.
+ */
+function mergePremiseNumber(googleLine1: string, typedLine1: string): string {
+  const g = (googleLine1 || "").trim();
+  const typed = (typedLine1 || "").trim();
+  if (!g) return typed; // Google gave nothing usable → keep what the user typed.
+  if (/^\d/.test(g)) return g; // Full house-level result already carries the number.
+  const m = typed.match(/^(\d+[A-Za-z]?)\b/); // Leading UK premise number, e.g. "12" / "12a" / "221b".
+  return m ? `${m[1]} ${g}` : g;
+}
+
 export function AddressFields({
   value,
   onChange,
@@ -46,7 +62,9 @@ export function AddressFields({
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<AddressValue>) => onChange({ ...value, ...patch });
 
-  // Street pick → fill everything we got back; keep anything Google omitted.
+  // Street pick → fill everything we got back; keep anything Google omitted. For a
+  // UK street-level result Google drops the house number and postcode, so merge the
+  // typed premise number back onto the street and never blank an existing postcode.
   const onStreetPick = useCallback(
     async (p: { id: string; description: string }) => {
       setBusy(true);
@@ -54,10 +72,10 @@ export function AddressFields({
       setBusy(false);
       if (!a) return;
       onChange({
-        line1: a.line1 || value.line1,
+        line1: mergePremiseNumber(a.line1, value.line1),
         town: a.town || value.town,
         county: a.county || value.county,
-        postcode: a.postcode || value.postcode,
+        postcode: a.postcode || value.postcode, // only overwrite when Google returns one
         country: a.country || value.country || "United Kingdom",
       });
     },
@@ -65,7 +83,8 @@ export function AddressFields({
   );
 
   // Postcode pick → fill town/county/postcode; when the chosen result is a full
-  // address (Google mixes those into postcode searches) the street fills too.
+  // address (Google mixes those into postcode searches) the street fills too. Same
+  // non-destructive rules: keep the typed premise number, never blank the postcode.
   const onPostcodePick = useCallback(
     async (p: { id: string; main: string }) => {
       setBusy(true);
@@ -73,7 +92,7 @@ export function AddressFields({
       setBusy(false);
       onChange({
         ...value,
-        line1: a?.line1 || value.line1,
+        line1: mergePremiseNumber(a?.line1 ?? "", value.line1),
         postcode: a?.postcode || p.main || value.postcode,
         town: a?.town || value.town,
         county: a?.county || value.county,

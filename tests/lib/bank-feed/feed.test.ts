@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { isInboundPayment, parseAmount, parseSheetRows, ukDateToIso } from "@/lib/bank-feed/parse";
+import {
+  applyBankFeedFloor,
+  isInboundPayment,
+  parseAmount,
+  parseSheetRows,
+  resolveBankFeedFloor,
+  ukDateToIso,
+  type BankTxRow,
+} from "@/lib/bank-feed/parse";
 import { matchTransaction, refsInText, type OpenItem } from "@/lib/bank-feed/match";
 
 /* ------------------------------------------------------------ parse */
@@ -96,6 +104,47 @@ describe("isInboundPayment", () => {
     expect(isInboundPayment({ amount: -60.9, txType: "Faster payment" })).toBe(false);
     expect(isInboundPayment({ amount: 60.9, txType: "Pot transfer" })).toBe(false);
     expect(isInboundPayment({ amount: 500, txType: "Card payment" })).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------ go-live floor */
+
+const tx = (txDate: string): BankTxRow => ({
+  transactionId: `tx_${txDate}`,
+  txDate,
+  txTime: null,
+  txType: "Faster payment",
+  counterparty: null,
+  amount: 100,
+  currency: "GBP",
+  reference: null,
+  description: null,
+  raw: {},
+});
+
+describe("bank-feed go-live floor (BANK_FEED_SINCE — mirrors LEAD_SYNC_SINCE)", () => {
+  it("resolveBankFeedFloor: unset/empty/garbled → null (no floor, behaviour unchanged)", () => {
+    expect(resolveBankFeedFloor(undefined)).toBeNull();
+    expect(resolveBankFeedFloor(null)).toBeNull();
+    expect(resolveBankFeedFloor("")).toBeNull();
+    expect(resolveBankFeedFloor("not-a-date")).toBeNull();
+    expect(resolveBankFeedFloor("2026-13-45")).toBeNull(); // impossible date, not silently everything
+  });
+
+  it("resolveBankFeedFloor: an ISO date or datetime resolves to the yyyy-mm-dd floor", () => {
+    expect(resolveBankFeedFloor("2026-07-30")).toBe("2026-07-30");
+    expect(resolveBankFeedFloor("2026-07-30T12:09:26Z")).toBe("2026-07-30");
+  });
+
+  it("applyBankFeedFloor: rows dated BEFORE the floor are skipped, go-live day and after pass", () => {
+    const rows = [tx("2025-04-01"), tx("2026-07-29"), tx("2026-07-30"), tx("2026-08-01")];
+    const kept = applyBankFeedFloor(rows, "2026-07-30").map((r) => r.txDate);
+    expect(kept).toEqual(["2026-07-30", "2026-08-01"]); // floor is inclusive of go-live day
+  });
+
+  it("applyBankFeedFloor: a null floor is a no-op — every row passes (safe before the env is set)", () => {
+    const rows = [tx("2025-04-01"), tx("2026-07-30")];
+    expect(applyBankFeedFloor(rows, null)).toEqual(rows);
   });
 });
 

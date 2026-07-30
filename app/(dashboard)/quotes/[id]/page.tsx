@@ -58,7 +58,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date",
+      "id, quote_ref, status, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -198,6 +198,20 @@ export default async function QuoteDetailPage({
   // job card (which is where Edit becomes an offered action).
   const editing = statusStr === "draft" || sp.edit === "1";
 
+  // Assignable office members for the sender picker (active admin/estimator).
+  // Setting one makes the quote email front that person; leaving it as Office /
+  // Accounts sends from accounts@. Only fetched when the editable builder renders.
+  let estimatorOptions: { id: string; full_name: string }[] = [];
+  if (editing) {
+    const { data: members } = await sb
+      .from("profiles")
+      .select("id, full_name")
+      .eq("active", true)
+      .in("role", ["admin", "estimator"])
+      .order("full_name", { ascending: true });
+    estimatorOptions = (members ?? []).map((m) => ({ id: m.id, full_name: m.full_name ?? "Unnamed" }));
+  }
+
   const headerMeta = (
     <>
       <QuoteStatusPill status={statusStr} />
@@ -272,6 +286,8 @@ export default async function QuoteDetailPage({
           leadId={quote.lead_id}
           clientId={quote.client_id}
           estimatorName={estimatorName}
+          estimatorId={quote.estimator_id}
+          estimators={estimatorOptions}
           pricing={pricing}
           settings={settings}
           acceptUrl={acceptUrl}

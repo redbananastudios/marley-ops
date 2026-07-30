@@ -11,13 +11,20 @@
 import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ClipboardCheck, Search, Users, X } from "lucide-react";
+import { ClipboardCheck, MoreHorizontal, Search, Trash2, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Pager, usePager } from "@/components/ui/pager";
 import { filterChipClass, filterChipCountClass } from "@/components/ui/segmented";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
+import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 import { QuoteStatusPill } from "@/components/quote/quote-status-pill";
 
 export interface QuoteRow {
@@ -305,6 +312,7 @@ export function QuotesView({
                     <Users className="size-4" strokeWidth={1.75} />
                   </Link>
                 ) : null}
+                <RowActions quote={q} />
               </div>
             </li>
           ))
@@ -319,6 +327,47 @@ export function QuotesView({
         className="mt-4"
       />
     </div>
+  );
+}
+
+/** Per-row overflow → Delete. Behind a "⋯" menu so the delete never sits a
+ *  stray-click away on a dense list. Reuses the detail page's DeleteQuoteButton
+ *  in controlled mode, so the confirm — and the extra "removes a recorded win"
+ *  warning on sent/accepted quotes — is byte-for-byte the same everywhere. The
+ *  deleteQuote action revalidates /quotes, so this force-dynamic list re-renders
+ *  and the row drops out on success (no manual refresh needed). */
+function RowActions({ quote }: { quote: QuoteRow }) {
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  // Defer opening until the menu has closed, so Radix's focus-return and the
+  // dialog's focus-trap don't fight over the same tick (mirrors the header).
+  const openDelete = () => window.setTimeout(() => setDeleteOpen(true), 0);
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            aria-label="More actions"
+            className="focus-ring flex size-9 shrink-0 items-center justify-center rounded-md text-mist-400 hover:bg-muted hover:text-foreground"
+          >
+            <MoreHorizontal className="size-4" strokeWidth={1.75} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem variant="destructive" onSelect={openDelete}>
+            <Trash2 strokeWidth={1.75} />
+            Delete quote
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DeleteQuoteButton
+        quoteId={quote.id}
+        status={quote.status}
+        quoteRef={quote.quote_ref ?? ""}
+        open={deleteOpen}
+        onOpenChange={setDeleteOpen}
+      />
+    </>
   );
 }
 

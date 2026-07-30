@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
 import { isOnboardTokenValid } from "@/lib/staff/onboard-token";
+import { osPlacesConfigured, osFind } from "@/lib/places/os";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,12 +27,20 @@ export async function GET(req: Request) {
   if (!(await requireApiUser()) && !(await isOnboardTokenValid(searchParams.get("jt")))) {
     return NextResponse.json(EMPTY, { status: 401 });
   }
-  const key = process.env.GOOGLE_MAPS_API_KEY;
-  if (!key) return NextResponse.json(EMPTY, { status: 200 });
-
   const q = (searchParams.get("q") ?? "").trim();
   const kind = searchParams.get("kind") === "postcode" ? "postcode" : "address";
   if (q.length < 3) return NextResponse.json({ ok: true, predictions: [] }, { status: 200 });
+
+  // OS Places (Royal Mail PAF) is the primary provider when configured — it
+  // returns full house-level UK addresses WITH postcodes, which Google's UK
+  // autocomplete does not. On any OS error we fall through to Google below.
+  if (osPlacesConfigured()) {
+    const os = await osFind(q, kind);
+    if (os) return NextResponse.json({ ok: true, predictions: os }, { status: 200 });
+  }
+
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return NextResponse.json(EMPTY, { status: 200 });
 
   // address -> street-level results; postcode -> regions (includes postal codes).
   const types = kind === "postcode" ? "(regions)" : "address";

@@ -132,18 +132,26 @@ export type SourceSignals = Pick<
 >;
 
 export function classifySource(l: SourceSignals): SourceKey {
+  // A lead only counts as PAID Google Ads on a real tracking signal — a click id
+  // (gclid/gbraid/wbraid) or a paid utm_medium. A hand-entered "Phone — Google"
+  // source only means the customer SAID they found us on Google; with no click id
+  // we can't know it was a paid click, so it must NOT inflate Ads/ROAS. If unsure,
+  // it falls through to organic (Peter, 2026-07-30 — revisit once call tracking
+  // attributes phone leads to the ad click).
   if (
     l.gclid ||
     l.gbraid ||
     l.wbraid ||
-    /cpc|ppc|paid/i.test(l.utm_medium ?? "") ||
-    l.entry_channel === "phone_google"
+    /cpc|ppc|paid/i.test(l.utm_medium ?? "")
   )
     return "google_ads";
+  // Same rule as google_ads above: a hand-entered "Phone — Facebook" source only
+  // means the customer SAID they found us on Facebook — with no fbclid we can't
+  // know it was a paid click, so it must not inflate Meta/ROAS. If unsure it
+  // falls through to organic (Peter, 2026-07-30).
   if (
     l.fbclid ||
-    /facebook|meta|instagram|^fb$|^ig$/i.test(l.utm_source ?? "") ||
-    l.entry_channel === "phone_facebook"
+    /facebook|meta|instagram|^fb$|^ig$/i.test(l.utm_source ?? "")
   )
     return "meta";
   if (l.entry_channel === "manual") return "manual";

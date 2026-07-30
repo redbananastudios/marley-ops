@@ -29,9 +29,12 @@ describe("ITEM_FIELDS", () => {
     expect([...keys].sort()).toEqual(Object.keys(ZERO_ITEMS).sort());
   });
 
-  it("Boxes Before Move steps in 5s; every other item defaults to 1", () => {
+  it("both box counts step in 5s; every other item defaults to 1", () => {
+    // Boxes are counted in fives in the field (Peter, 2026-07-30 — boxesOnCollection
+    // joined boxesBefore); the covers/piano items still step by 1.
+    const fives = new Set(["boxesBefore", "boxesOnCollection"]);
     for (const f of ITEM_FIELDS) {
-      if (f.key === "boxesBefore") expect(f.step).toBe(5);
+      if (fives.has(f.key)) expect(f.step).toBe(5);
       else expect(f.step ?? 1).toBe(1);
     }
   });

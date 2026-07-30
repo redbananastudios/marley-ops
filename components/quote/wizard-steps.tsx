@@ -367,9 +367,23 @@ export function Step2Job({ values, set, pricing }: StepProps) {
   // seed the structured value's line1 from it so nothing is lost on open.
   const collectAddress: AddressValue = j.collectAddress ?? { ...BLANK_QUOTE_ADDRESS, line1: j.collectAddr || "" };
   const destAddress: AddressValue = j.destAddress ?? { ...BLANK_QUOTE_ADDRESS, line1: j.destAddr || "" };
-  const setCollect = (next: AddressValue) =>
+  // Editing either address invalidates a previously-calculated route: the miles
+  // (and the price that depends on them) no longer match the addresses. Clear it
+  // so the step-2 gate forces a recalculate before the quote can proceed
+  // (Peter, 2026-07-30).
+  const clearStaleRoute = () => {
+    if (route.deadMiles != null || route.jobMiles != null || route.routeLegs.length > 0) {
+      set("route", { deadMiles: null, jobMiles: null, routeLegs: [] });
+    }
+  };
+  const setCollect = (next: AddressValue) => {
+    clearStaleRoute();
     set("job", { ...j, collectAddress: next, collectAddr: composeAddr(next) });
-  const setDest = (next: AddressValue) => set("job", { ...j, destAddress: next, destAddr: composeAddr(next) });
+  };
+  const setDest = (next: AddressValue) => {
+    clearStaleRoute();
+    set("job", { ...j, destAddress: next, destAddr: composeAddr(next) });
+  };
 
   async function calculateMileage() {
     if (!j.collectAddr.trim() || !j.destAddr.trim()) {
