@@ -70,7 +70,7 @@ already-scheduled go-live step. No schema change, no new Settings UI.
 
 | Email | Current From | Proposed From |
 |---|---|---|
-| Quote email + re-send | hello@ (env default) | **Owner** |
+| Quote email + re-send | hello@ (env default) | ~~Owner~~ **accounts@** (changed by Peter 2026-07-30 on go-live day — the priced offer fronts the money desk; replies still relay to the owner) |
 | Quote chases 1–3 | "«Owner» at Marley Moves &lt;hello@&gt;" | **Owner** (display AND address) |
 | Deposit request on accept + deposit chases 1–2 | same as chases | **Owner** (the customer said yes to *them*) |
 | Survey confirmation | hello@ | **Owner** (hello@ if none yet) |

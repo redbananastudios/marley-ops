@@ -6,8 +6,8 @@ import type { Database } from "@/lib/supabase/database.types";
  * from (docs/email-identity-plan.md, approved by Peter 2026-07-16):
  *
  *  - hello@    front door + fallback identity (whole office monitors it)
- *  - accounts@ money desk: receipts, invoices, refunds send from it; payment
- *              ops alerts route to it
+ *  - accounts@ money desk: quote emails (Peter, 2026-07-30), receipts,
+ *              invoices, refunds send from it; payment ops alerts route to it
  *  - luke@/connor@/…  personal sales identity — a team member's SENDING address
  *              is their ops login email when it's on the marleymoves.co.uk
  *              domain (anything else falls back to hello@, so a .test login or

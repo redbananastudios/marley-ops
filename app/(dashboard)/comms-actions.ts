@@ -5,7 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
-import { leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
+import { accountsFrom, leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
 import {
@@ -82,6 +82,13 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
       token = (q?.accept_token as string | null) ?? null;
     }
     if (token) input = { ...input, replyTo: replyAddressFor(token) };
+  }
+
+  // Quote emails front the money desk (Peter, 2026-07-30 go-live): the priced
+  // offer comes from accounts@, never whichever office member clicked send.
+  // Replies still route to the owner via the tokenized relay above.
+  if (input.channel === "email" && input.templateKey === "quote-email" && !input.from) {
+    input = { ...input, from: accountsFrom() };
   }
 
   // Sales identity: a lead-linked email with no explicit sender goes out as
