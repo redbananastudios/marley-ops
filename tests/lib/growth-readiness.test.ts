@@ -142,10 +142,11 @@ describe("artifactViews", () => {
 describe("nextActions", () => {
   it("expands the tracking_validation blocker into the unblock sequence", () => {
     const actions = nextActions(snapshot());
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(2);
     expect(actions[0].title).toContain("PostHog");
     expect(actions[1].detail).toContain("lead-form-hero-red");
-    expect(actions[2].detail).toContain("tracking.cli validate --brand marley-moves");
+    // No engineer command / machine name leaks into the office-facing steps.
+    expect(actions.map((a) => `${a.title} ${a.detail}`).join(" ")).not.toMatch(/i9|tracking\.cli|python/);
   });
 
   it("drops the creds step once a validation run produced a verdict", () => {
@@ -160,9 +161,9 @@ describe("nextActions", () => {
       ],
     });
     const actions = nextActions(s);
-    expect(actions).toHaveLength(2);
-    expect(actions[0].title).toContain("Wire the site");
-    expect(actions[1].title).toContain("Re-run tracking validation");
+    expect(actions).toHaveLength(1);
+    expect(actions[0].title).toContain("Waiting on the last tracking signal");
+    expect(actions[0].detail).not.toMatch(/i9|tracking\.cli|python/);
   });
 
   it("passes unknown blockers through verbatim", () => {
@@ -185,7 +186,7 @@ describe("nextActions", () => {
       message: "m",
     };
     const actions = nextActions(snapshot({ blocking_issues: [issue, issue] }));
-    expect(actions).toHaveLength(3);
+    expect(actions).toHaveLength(2);
   });
 });
 

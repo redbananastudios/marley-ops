@@ -76,16 +76,17 @@ export function nextActions(snapshot: OpsSnapshot): NextAction[] {
           detail: "PostHog keys and GA4 grants must cover the Marley properties before validation can read events.",
         });
       }
-      actions.push(
-        {
-          title: "Wire the site to fire the spec events",
-          detail: `The landing tracking spec (variant ${snapshot.landing_summary.variant_key ?? "—"}) defines the required events and properties — the tracking gaps card below lists exactly what is missing.`,
-        },
-        {
-          title: "Re-run tracking validation on i9",
-          detail: "python -m tracking.cli validate --brand " + snapshot.brand + " — a pass flips this page to ready.",
-        },
-      );
+      // Validation re-runs automatically each morning (and on every ops-suite
+      // push) — it is NOT a manual step for the office, and it does not run from
+      // this machine. Surface the pending SIGNAL, not an engineer command: the
+      // gaps card lists the one event + property still to confirm, and a
+      // wired-but-still-processing metric reads as "pending", not "go wire the
+      // site". (GA4's server-side conversion can take up to a day to appear in
+      // reporting even once it is firing correctly.)
+      actions.push({
+        title: "Waiting on the last tracking signal to confirm",
+        detail: `The tracking gaps card below lists exactly which event + property GA4/PostHog have not reported yet for variant ${snapshot.landing_summary.variant_key ?? "—"}. Validation re-runs on its own and this page flips to ready once the gap clears — nothing to run by hand.`,
+      });
     } else {
       actions.push({ title: issue.message, detail: issue.blocks_paid_launch ? "Blocks paid launch." : "" });
     }
