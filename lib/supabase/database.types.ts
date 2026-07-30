@@ -4732,7 +4732,7 @@ export type Database = {
         | "merge"
         | "lead_created"
       appt_status: "scheduled" | "completed" | "cancelled"
-      appt_type: "survey" | "removal"
+      appt_type: "survey" | "removal" | "pack"
       comm_channel: "email" | "sms"
       comm_status: "queued" | "sent" | "failed" | "blocked_duplicate"
       follow_up_outcome:
@@ -4911,7 +4911,7 @@ export const Constants = {
         "lead_created",
       ],
       appt_status: ["scheduled", "completed", "cancelled"],
-      appt_type: ["survey", "removal"],
+      appt_type: ["survey", "removal", "pack"],
       comm_channel: ["email", "sms"],
       comm_status: ["queued", "sent", "failed", "blocked_duplicate"],
       follow_up_outcome: [

@@ -212,7 +212,7 @@ export async function seedMyStatementJobsAction(input: { statement_id: string })
       const day = new Date(a.starts_at).toLocaleDateString("en-CA", { timeZone: UK });
       if (day < stmt.period_start || day > stmt.period_end) continue;
       const who = (a.lead_id ? leadName.get(a.lead_id) : null) ?? "job";
-      const label = `${a.appt_type === "removal" ? "Move" : "Survey"} — ${who}`;
+      const label = `${a.appt_type === "removal" ? "Move" : a.appt_type === "pack" ? "Packing" : "Survey"} — ${who}`;
       const list = byDay.get(day) ?? [];
       list.push(label);
       byDay.set(day, list);

@@ -308,7 +308,11 @@ export default async function MyJobsPage() {
                     data-tour={day === orderedDays[0] && ji === 0 ? "crew-job-card" : undefined}
                     className={
                       "overflow-hidden rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] " +
-                      (j.appt_type === "removal" ? "border-l-[3px] border-l-mm-red" : "border-l-[3px] border-l-survey")
+                      (j.appt_type === "removal"
+                        ? "border-l-[3px] border-l-mm-red"
+                        : j.appt_type === "pack"
+                          ? "border-l-[3px] border-l-warn"
+                          : "border-l-[3px] border-l-survey")
                     }
                   >
                     {/* Card body opens the full job page; buttons below stay their own targets. */}
@@ -317,17 +321,24 @@ export default async function MyJobsPage() {
                         <div className="min-w-0">
                           <p className="text-base font-semibold text-foreground">{j.lead_name ?? j.title ?? "Job"}</p>
                           <p className="mt-0.5 text-sm text-mist-500">
-                            {apptWindow(j)} · <span className="capitalize">{j.appt_type === "removal" ? "Move" : j.appt_type}</span>
+                            {apptWindow(j)} ·{" "}
+                            <span className="capitalize">
+                              {j.appt_type === "removal" ? "Move" : j.appt_type === "pack" ? "Packing" : j.appt_type}
+                            </span>
                           </p>
                         </div>
                         <span className="flex shrink-0 items-center gap-1.5">
                           <span
                             className={
                               "rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
-                              (j.appt_type === "removal" ? "bg-mm-red text-white" : "bg-muted text-mist-500")
+                              (j.appt_type === "removal"
+                                ? "bg-mm-red text-white"
+                                : j.appt_type === "pack"
+                                  ? "bg-warn-bg text-warn"
+                                  : "bg-muted text-mist-500")
                             }
                           >
-                            {j.appt_type === "removal" ? "Move" : "Survey"}
+                            {j.appt_type === "removal" ? "Move" : j.appt_type === "pack" ? "Packing" : "Survey"}
                           </span>
                           <ChevronRight className="size-4 text-mist-400" strokeWidth={1.75} />
                         </span>
@@ -361,7 +372,7 @@ export default async function MyJobsPage() {
                     </Link>
 
                     <div className="mt-3 flex flex-wrap gap-2">
-                      {j.appt_type === "removal" ? (
+                      {j.appt_type === "removal" || j.appt_type === "pack" ? (
                         <span data-tour="crew-jobsheet">
                           <JobSheetButton appointmentId={j.id} fileHint={j.lead_name ?? j.title ?? "job"} />
                         </span>

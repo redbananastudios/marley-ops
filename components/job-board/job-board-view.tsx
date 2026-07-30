@@ -714,6 +714,7 @@ function JobCard({
   const router = useRouter();
   const [pending, start] = useTransition();
   const isRemoval = appt.appt_type === "removal";
+  const isPack = appt.appt_type === "pack";
   const staffById = new Map(staff.map((s) => [s.id, s]));
   const vehicleById = new Map(vehicles.map((v) => [v.id, v]));
   const assignedStaff = assigned.filter((a) => a.staff_id);
@@ -731,7 +732,10 @@ function JobCard({
   }
 
   const req = appt.required;
-  const under = isRemoval && req ? assignedVehicles.length < req.vans || assignedStaff.length < req.men : false;
+  // A pack is under-crewed with nobody on it; its vans requirement is 0, so a
+  // van-less pack never reads "short" on vans.
+  const under =
+    (isRemoval || isPack) && req ? assignedVehicles.length < req.vans || assignedStaff.length < req.men : false;
   // Warn-only: a removal with a van assigned needs at least one driver on the crew.
   const assignedDrivers = assignedStaff.filter((a) => staffById.get(a.staff_id!)?.is_driver).length;
   const driverWarn = isRemoval && needsDriverWarning({ assignedVans: assignedVehicles.length, assignedDrivers });
@@ -758,11 +762,14 @@ function JobCard({
       }}
       className={cn(
         "rounded-md border bg-card p-2.5 text-xs shadow-xs transition-colors",
-        // Job identity by colour: moves carry the solid red rail, surveys sit
-        // on the teal family (dashed = lighter commitment than a move).
+        // Job identity by colour: moves carry the solid red rail, packs an amber
+        // rail (crew-only, day-before), surveys sit on the teal family (dashed =
+        // lighter commitment than a move).
         isRemoval
           ? "border-l-[3px] border-l-mm-red border-border"
-          : "border-dashed border-survey-border bg-survey-bg/40",
+          : isPack
+            ? "border-l-[3px] border-l-warn border-border"
+            : "border-dashed border-survey-border bg-survey-bg/40",
         highlight && "border-mm-red bg-mm-red-tint/40",
       )}
     >
@@ -779,8 +786,13 @@ function JobCard({
             {multiDay ? <CalendarRange className="size-3 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
             {apptWindow(appt)}
             <span className="text-mist-300">·</span>
-            <span className={cn("font-semibold capitalize", isRemoval ? "text-mm-red-deep" : "text-survey-deep")}>
-              {isRemoval ? "Move" : appt.appt_type}
+            <span
+              className={cn(
+                "font-semibold capitalize",
+                isRemoval ? "text-mm-red-deep" : isPack ? "text-warn" : "text-survey-deep",
+              )}
+            >
+              {isRemoval ? "Move" : isPack ? "Pack" : appt.appt_type}
             </span>
           </p>
         </div>
@@ -805,7 +817,9 @@ function JobCard({
 
       {req ? (
         <p className={cn("tabular mt-1 text-[11px] font-semibold", under ? "text-danger" : "text-success")}>
-          Vans {assignedVehicles.length}/{req.vans} · Crew {assignedStaff.length}/{req.men}
+          {isPack
+            ? `Crew ${assignedStaff.length}/${req.men}${assignedVehicles.length ? ` · Van ${assignedVehicles.length}` : ""}`
+            : `Vans ${assignedVehicles.length}/${req.vans} · Crew ${assignedStaff.length}/${req.men}`}
           {under ? " — short" : " ✓"}
         </p>
       ) : null}

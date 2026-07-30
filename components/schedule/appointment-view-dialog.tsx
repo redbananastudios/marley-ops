@@ -197,7 +197,7 @@ export function AppointmentViewDialog({
       >
         <DialogHeader>
           <DialogTitle className="font-display flex flex-wrap items-center gap-2 pr-6">
-            {target.title || (target.apptType === "removal" ? "Removal" : "Survey")}
+            {target.title || (target.apptType === "removal" ? "Removal" : target.apptType === "pack" ? "Packing" : "Survey")}
             <span className={cn("rounded-pill px-2 py-0.5 text-xs font-medium", badge.cls)}>{badge.label}</span>
             <button
               type="button"

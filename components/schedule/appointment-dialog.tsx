@@ -43,10 +43,11 @@ import {
   updateAppointment,
   deleteAppointment,
   rescheduleAppointment,
+  setPackDayAction,
 } from "@/app/(dashboard)/schedule/actions";
 import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 
-export type ApptType = "survey" | "removal";
+export type ApptType = "survey" | "removal" | "pack";
 
 export interface LeadOption {
   id: string;
@@ -86,6 +87,9 @@ export interface EditTarget {
   notes: string | null;
   startsAt: string; // ISO
   endsAt: string; // ISO
+  /** Removal edit only: the lead's scheduled packing day (yyyy-mm-dd), if any —
+   *  seeds the "packing day" checkbox so the office can add/move/remove it. */
+  packDate?: string | null;
 }
 
 const NO_LEAD = "__none__";
@@ -306,6 +310,9 @@ export function AppointmentDialog({
   const [notes, setNotes] = useState<string>("");
   const [allDay, setAllDay] = useState<boolean>(false);
   const [busy, setBusy] = useState(false);
+  // Packing day (removals only): crew-only visit, usually the day before.
+  const [packOn, setPackOn] = useState(false);
+  const [packDate, setPackDate] = useState<string>("");
 
   // (Re)seed the form whenever the dialog opens or its target changes.
   useEffect(() => {
@@ -317,6 +324,8 @@ export function AppointmentDialog({
       setEnd(toLocalInput(edit.endsAt));
       setNotes(edit.notes ?? "");
       setAllDay(false);
+      setPackOn(!!edit.packDate);
+      setPackDate(edit.packDate ?? "");
     } else {
       const s = presetStart ?? toLocalInput(roundUpTo15(new Date()));
       setLeadId(presetLeadId ?? NO_LEAD);
@@ -330,6 +339,8 @@ export function AppointmentDialog({
       setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
       setNotes("");
       setAllDay(!!presetAllDay);
+      setPackOn(false);
+      setPackDate("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edit?.id]);
@@ -352,8 +363,19 @@ export function AppointmentDialog({
   }
 
   // Surveys are a fixed 1-hour visit (no end field — just a label). Removals use
-  // the editable end. Derive the effective end the same way for both submit paths.
-  const effectiveEnd = apptType === "survey" ? addHoursLocal(start, SURVEY_HOURS) : end;
+  // the editable end. A pack has no End field either: it keeps its ORIGINAL
+  // duration when its start moves, so editing the date can never silently turn
+  // it into a multi-day pack (the stale hidden `end` used to do exactly that).
+  const packDurationHours =
+    edit && apptType === "pack"
+      ? Math.max(1, (new Date(edit.endsAt).getTime() - new Date(edit.startsAt).getTime()) / 3_600_000)
+      : 7;
+  const effectiveEnd =
+    apptType === "survey"
+      ? addHoursLocal(start, SURVEY_HOURS)
+      : apptType === "pack"
+        ? addHoursLocal(start, packDurationHours)
+        : end;
   const surveyEndLabel = start ? addHoursLocal(start, SURVEY_HOURS).slice(11, 16) : "";
 
   function selectLead(id: string) {
@@ -402,10 +424,22 @@ export function AppointmentDialog({
             return;
           }
         }
+        // Packing day add/move/remove — only when it actually changed.
+        if (apptType === "removal" && edit.leadId) {
+          const desired = packOn && packDate ? packDate : null;
+          const original = edit.packDate ?? null;
+          if (desired !== original) {
+            const p = await setPackDayAction(edit.leadId, desired);
+            if (!p.ok) {
+              toast.error(p.error || "Could not update the packing day.");
+              return;
+            }
+          }
+        }
         toast.success("Appointment updated.");
       } else {
         const res = await createAppointment({
-          apptType,
+          apptType: apptType as "survey" | "removal",
           leadId: lead,
           clientId,
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
@@ -415,10 +449,14 @@ export function AppointmentDialog({
           // pickup address (the survey happens where the move starts).
           notes: notes.trim() || undefined,
           allDay,
+          packDate: apptType === "removal" && packOn && packDate ? packDate : null,
         });
         if (!res.ok) {
           toast.error(res.error || "Could not create appointment.");
           return;
+        }
+        if ("packWarning" in res && res.packWarning) {
+          toast.error(`Removal booked, but the packing day failed: ${res.packWarning}`);
         }
         if (apptType === "survey" && "comms" in res && res.comms) {
           const { email, sms } = res.comms;
@@ -550,6 +588,54 @@ export function AppointmentDialog({
               This is a booked removal — move its date with the <strong>Change date</strong> button
               (Bookings page or the diary) so what&apos;s been paid is handled correctly.
             </p>
+          ) : null}
+
+          {/* Packing day — crew-only visit before the move (van optional). On a
+              reschedule it follows the move automatically, so the date here is
+              only its STARTING position. In edit mode the section only renders
+              when the caller LOADED the pack state (packDate !== undefined) —
+              an unseeded checkbox would misreport an existing pack. */}
+          {apptType === "removal" && (!isEdit || (!!edit?.leadId && edit?.packDate !== undefined)) ? (
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <label className="flex cursor-pointer items-center gap-2.5 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={packOn}
+                  onChange={(e) => {
+                    setPackOn(e.target.checked);
+                    if (e.target.checked && !packDate && start) {
+                      const d = new Date(`${start.slice(0, 10)}T00:00:00`);
+                      d.setDate(d.getDate() - 1);
+                      const pad = (n: number) => String(n).padStart(2, "0");
+                      const dayBefore = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+                      const now = new Date();
+                      const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+                      // A move booked for today would default the pack to
+                      // YESTERDAY — clamp to today (the server rejects the past).
+                      setPackDate(dayBefore < today ? today : dayBefore);
+                    }
+                  }}
+                  className="size-4 accent-[#C03838]"
+                />
+                Add a packing day (crew only, van optional)
+              </label>
+              {packOn ? (
+                <div className="mt-2.5 grid gap-1.5">
+                  <Label htmlFor="appt-pack-date">Packing date</Label>
+                  <Input
+                    id="appt-pack-date"
+                    type="date"
+                    value={packDate}
+                    onChange={(e) => setPackDate(e.target.value)}
+                    className="max-w-[200px]"
+                  />
+                  <p className="text-xs text-mist-400">
+                    Usually the day before. It shows on the schedule, takes up the crew you assign,
+                    and lands on their job sheets. If the move is rescheduled, the packing day moves with it.
+                  </p>
+                </div>
+              ) : null}
+            </div>
           ) : null}
 
           <div className="grid gap-2">

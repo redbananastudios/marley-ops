@@ -38,6 +38,8 @@ import { z } from "zod";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
+import { dayDelta } from "@/lib/schedule/pack-days";
+import { shiftPackDays } from "@/lib/schedule/pack-days-io";
 import { accountsFrom } from "@/lib/comms/sender";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
 import { voidInvoice } from "@/lib/zoho";
@@ -384,6 +386,13 @@ export async function changeBookingDateAction(
     .from("appointment_assignments")
     .update({ reminded_at: null } as never)
     .eq("appointment_id", newAppt.id);
+
+  // The packing day travels with its move (same rule as the free-reschedule
+  // path): shift the lead's scheduled packs by the same day delta. Fail-soft —
+  // shiftPackDays alerts the office itself if a pack could not be moved.
+  if (oldMoveDay && newMoveDay && oldMoveDay !== newMoveDay) {
+    await shiftPackDays(admin, leadId, dayDelta(oldMoveDay, newMoveDay), newAppt.id);
+  }
 
   // The commitment ladder's one-shot stamps are per MOVE DATE, not per quote:
   // moving the date re-arms the T-10 chase (email/call task fires again for

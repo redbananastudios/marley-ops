@@ -42,7 +42,8 @@ const fmtDate = (d: string): string => {
     : t.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC" });
 };
 
-const kindLabel = (apptType: string): string => (apptType === "removal" ? "Move" : apptType === "survey" ? "Survey" : apptType);
+const kindLabel = (apptType: string): string =>
+  apptType === "removal" ? "Move" : apptType === "survey" ? "Survey" : apptType === "pack" ? "Packing" : apptType;
 
 function addrBlock(title: string, a: DailyJob["sheet"]["from"]): any {
   const accessBits = [

@@ -8,6 +8,8 @@ import { commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { ukInstant } from "@/lib/uk-time";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
+import { dayDelta } from "@/lib/schedule/pack-days";
+import { shiftPackDays } from "@/lib/schedule/pack-days-io";
 import { ownerFrom } from "@/lib/comms/sender";
 import {
   surveyConfirmEmailHtml,
@@ -42,6 +44,9 @@ export interface CreateAppointmentInput {
   location?: string;
   notes?: string;
   allDay?: boolean;
+  /** Removal only: also put a crew-only packing day on the diary (yyyy-mm-dd,
+   *  usually the day before the move). Created 09:00–16:00 UK on that day. */
+  packDate?: string | null;
 }
 
 export type ConfirmSendState = "sent" | "failed" | "skipped";
@@ -112,6 +117,21 @@ export async function createAppointment(input: CreateAppointmentInput) {
     .single();
 
   if (error) return { ok: false as const, error: error.message };
+
+  // Removal with a packing day ticked → a second, crew-only appointment on the
+  // same lead. Fail-soft: the removal is booked either way; a pack failure is
+  // surfaced, never silently swallowed into a half-booked state.
+  let packWarning: string | null = null;
+  if (input.apptType === "removal" && input.packDate && /^\d{4}-\d{2}-\d{2}$/.test(input.packDate)) {
+    const r = await upsertPackDay(sb, {
+      leadId: input.leadId ?? null,
+      clientId: lead?.client_id ?? null,
+      leadName: lead?.name ?? null,
+      location: lead ? [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null : null,
+      packDay: input.packDate,
+    });
+    if (!r.ok) packWarning = r.error;
+  }
 
   // Booking a survey nudges the lead to survey_booked (never regresses a later status)
   // and counts as contact — you can't book a visit without having spoken to them.
@@ -198,7 +218,126 @@ export async function createAppointment(input: CreateAppointmentInput) {
   }
 
   revalidateSchedule();
-  return { ok: true as const, id: appt.id, comms };
+  return { ok: true as const, id: appt.id, comms, packWarning };
+}
+
+/* ------------------------------------------------------------- pack days */
+
+type Sb = Awaited<ReturnType<typeof createClient>>;
+
+/** Create (or move) the lead's packing day. One scheduled pack per lead — a
+ *  second call reschedules the existing one rather than stacking duplicates. */
+async function upsertPackDay(
+  sb: Sb,
+  input: { leadId: string | null; clientId: string | null; leadName: string | null; location: string | null; packDay: string },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!input.leadId) return { ok: false, error: "A packing day needs a customer attached." };
+  const todayUk = new Date().toLocaleDateString("en-CA", { timeZone: UK_TZ });
+  if (input.packDay < todayUk) {
+    return { ok: false, error: "The packing date is in the past — pick today or later." };
+  }
+  const [y, m, d] = input.packDay.split("-").map(Number);
+  const startsAt = ukInstant(y, m, d, 9, 0).toISOString();
+  const endsAt = ukInstant(y, m, d, 16, 0).toISOString();
+
+  const moveExisting = async (packId: string) => {
+    const { error } = await sb.from("appointments").update({ starts_at: startsAt, ends_at: endsAt }).eq("id", packId);
+    if (error) return { ok: false as const, error: `Could not move the packing day: ${error.message}` };
+    // New day → the night-before crew sheet must re-fire for whoever is on it.
+    await sb.from("appointment_assignments").update({ reminded_at: null } as never).eq("appointment_id", packId);
+    return { ok: true as const };
+  };
+
+  const findScheduledPack = async () => {
+    const { data } = await sb
+      .from("appointments")
+      .select("id")
+      .eq("lead_id", input.leadId!)
+      .eq("appt_type", "pack" as never)
+      .eq("status", "scheduled")
+      .order("starts_at")
+      .limit(1)
+      .maybeSingle();
+    return data;
+  };
+
+  const existing = await findScheduledPack();
+  if (existing) return moveExisting(existing.id);
+
+  // A pack must belong to a live booking — without this, an edit dialog left
+  // open across a cancellation could resurrect a pack on a dead booking that
+  // nothing would ever clean up.
+  const { data: removal } = await sb
+    .from("appointments")
+    .select("id")
+    .eq("lead_id", input.leadId)
+    .eq("appt_type", "removal")
+    .eq("status", "scheduled")
+    .limit(1)
+    .maybeSingle();
+  if (!removal) return { ok: false, error: "This booking is no longer scheduled — no packing day was added." };
+
+  const { error } = await sb.from("appointments").insert({
+    appt_type: "pack" as never,
+    lead_id: input.leadId,
+    client_id: input.clientId,
+    title: input.leadName ? `Packing — ${input.leadName}` : "Packing",
+    location: input.location,
+    starts_at: startsAt,
+    ends_at: endsAt,
+    all_day: false,
+    status: "scheduled",
+  });
+  if (error) {
+    // 23505 = the one-scheduled-pack-per-lead index: another session inserted
+    // first — treat it as ours to move (the upsert's whole point).
+    if ((error as { code?: string }).code === "23505") {
+      const winner = await findScheduledPack();
+      if (winner) return moveExisting(winner.id);
+    }
+    return { ok: false, error: `Could not add the packing day: ${error.message}` };
+  }
+  return { ok: true };
+}
+
+/** Set, move or remove the packing day for a removal's lead — the edit-dialog
+ *  path. `packDay: null` cancels any scheduled pack (never deletes: mirrors
+ *  the cancel-not-delete rule for appointments with history). */
+export async function setPackDayAction(
+  leadId: string,
+  packDay: string | null,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { sb } = await ctx();
+  if (packDay === null) {
+    const { error } = await sb
+      .from("appointments")
+      .update({ status: "cancelled" as never })
+      .eq("lead_id", leadId)
+      .eq("appt_type", "pack" as never)
+      .eq("status", "scheduled");
+    if (error) return { ok: false, error: error.message };
+    revalidateSchedule();
+    revalidatePath("/schedule");
+    return { ok: true };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(packDay)) return { ok: false, error: "Pick a valid packing date." };
+  const { data: lead } = await sb
+    .from("leads")
+    .select("id, client_id, name, from_address, from_postcode")
+    .eq("id", leadId)
+    .maybeSingle();
+  if (!lead) return { ok: false, error: "Lead not found." };
+  const r = await upsertPackDay(sb, {
+    leadId: lead.id,
+    clientId: lead.client_id,
+    leadName: lead.name,
+    location: [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null,
+    packDay,
+  });
+  if (!r.ok) return r;
+  revalidateSchedule();
+  revalidatePath("/schedule");
+  return { ok: true };
 }
 
 export async function rescheduleAppointment(id: string, startsAt: string, endsAt: string) {
@@ -316,6 +455,14 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
       revalidatePath("/bookings");
       revalidatePath(`/leads/${appt.lead_id}`);
     }
+
+    // The packing day travels WITH its move: shift the lead's scheduled pack
+    // appointments by the same day delta so "the day before" stays the day
+    // before. Fail-soft: a pack shift failure never blocks the reschedule,
+    // but the office is told (a stranded pack day misleads crew + capacity).
+    if (oldDay && oldDay !== newDay) {
+      await shiftPackDays(sb, appt.lead_id, dayDelta(oldDay, newDay), id);
+    }
   }
 
   revalidateSchedule();
@@ -338,6 +485,26 @@ export async function updateAppointment(
     })
     .eq("id", id);
   if (error) return { ok: false as const, error: error.message };
+
+  // Cancelling a REMOVAL cancels its packing day too — an appointment-level
+  // cancel (view-modal action) bypasses cancelBookingAction's lead-wide sweep,
+  // and a surviving pack would keep consuming crew, render on the board and
+  // still send the crew to a cancelled customer.
+  if (patch.status === "cancelled") {
+    const { data: cancelled } = await sb
+      .from("appointments")
+      .select("appt_type, lead_id")
+      .eq("id", id)
+      .maybeSingle();
+    if (cancelled?.appt_type === "removal" && cancelled.lead_id) {
+      await sb
+        .from("appointments")
+        .update({ status: "cancelled" as never })
+        .eq("lead_id", cancelled.lead_id)
+        .eq("appt_type", "pack" as never)
+        .eq("status", "scheduled");
+    }
+  }
 
   // Survey done → the next step is the quote. If the lead has no quote yet,
   // queue a "build the quote" follow-up so completed surveys can't go cold.
@@ -382,6 +549,13 @@ export async function updateAppointment(
 
 export async function deleteAppointment(id: string) {
   const { sb } = await ctx();
+  // Snapshot BEFORE the delete — a removal's packing day must not outlive it
+  // (same rationale as the cancel cascade above).
+  const { data: target } = await sb
+    .from("appointments")
+    .select("appt_type, lead_id")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await sb.from("appointments").delete().eq("id", id);
   if (error) {
     // FK RESTRICT (migration 0026): a signed-off job's completion record must
@@ -393,6 +567,14 @@ export async function deleteAppointment(id: string) {
       };
     }
     return { ok: false as const, error: error.message };
+  }
+  if (target?.appt_type === "removal" && target.lead_id) {
+    await sb
+      .from("appointments")
+      .update({ status: "cancelled" as never })
+      .eq("lead_id", target.lead_id)
+      .eq("appt_type", "pack" as never)
+      .eq("status", "scheduled");
   }
   revalidateSchedule();
   return { ok: true as const };

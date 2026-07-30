@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { crewRequired } from "@/lib/job-board";
+import { packRequirement } from "@/lib/schedule/pack-days";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -138,6 +139,13 @@ export default async function SchedulePage({
     sigNeededByLead.set(q.lead_id, !signedQuoteIds.has(q.id));
   }
 
+  // Crew assigned per appointment — a pack day's demand follows its allocation
+  // (packRequirement: at least one person, van optional).
+  const crewByAppt = new Map<string, number>();
+  for (const a of assignments) {
+    if (a.staff_id) crewByAppt.set(a.appointment_id, (crewByAppt.get(a.appointment_id) ?? 0) + 1);
+  }
+
   const boardCards: BoardAppt[] = appts.map((a) => {
     const lead = a.lead_id ? leadById.get(a.lead_id) : null;
     return {
@@ -152,23 +160,35 @@ export default async function SchedulePage({
       lead_status: lead?.status ?? null,
       from_postcode: lead?.from_postcode ?? null,
       to_postcode: lead?.to_postcode ?? null,
-      required: a.appt_type === "removal" && a.lead_id ? (reqByLead.get(a.lead_id) ?? null) : null,
+      required:
+        a.appt_type === "removal" && a.lead_id
+          ? (reqByLead.get(a.lead_id) ?? null)
+          : a.appt_type === "pack"
+            ? packRequirement(crewByAppt.get(a.id) ?? 0)
+            : null,
       sigNeeded: a.appt_type === "removal" && a.lead_id ? (sigNeededByLead.get(a.lead_id) ?? false) : false,
     };
   });
 
-  // Availability month = the factual diary: confirmed removals only (starts_at is
-  // non-null in the DB, but the shared BoardAppt type is nullable — narrow it here).
+  // Availability month = the factual diary: confirmed removals + their packing
+  // days (both consume capacity; starts_at is non-null in the DB, but the shared
+  // BoardAppt type is nullable — narrow it here).
   const removals = boardCards.filter(
-    (c): c is BoardAppt & { starts_at: string } => c.appt_type === "removal" && c.starts_at != null,
+    (c): c is BoardAppt & { starts_at: string } =>
+      (c.appt_type === "removal" || c.appt_type === "pack") && c.starts_at != null,
   );
-  const removalLeadIds = new Set(removals.map((r) => r.lead_id).filter(Boolean) as string[]);
+  // Soft-demand exclusion counts REMOVALS only — an orphaned pack must never
+  // hide a deposit-paid lead from the "thinking about it" sell panel.
+  const removalLeadIds = new Set(
+    removals.filter((r) => r.appt_type === "removal").map((r) => r.lead_id).filter(Boolean) as string[],
+  );
 
   const apptById = new Map(appts.map((a) => [a.id, a]));
   const availAppts: AvailAppt[] = removals.map((r) => {
     const raw = apptById.get(r.id);
     return {
       id: r.id,
+      appt_type: r.appt_type,
       lead_id: r.lead_id,
       lead_name: r.lead_name,
       starts_at: r.starts_at,

@@ -48,6 +48,9 @@ import {
 
 export interface AvailAppt {
   id: string;
+  /** 'removal' | 'pack' — packs are crew-only day-before jobs that consume
+   *  capacity but carry no money chips of their own. */
+  appt_type: string;
   lead_id: string | null;
   lead_name: string | null;
   starts_at: string;
@@ -308,9 +311,23 @@ export function ScheduleAllocationView(props: {
   }
 
   function toEditTarget(a: AvailAppt): EditTarget {
+    // A removal's edit form manages its packing day too — find the lead's
+    // scheduled pack (if any) in the full event set so the checkbox seeds true.
+    const pack =
+      a.appt_type === "removal" && a.lead_id
+        ? events.find(
+            (e) =>
+              (e as { lead_id?: string | null }).lead_id === a.lead_id &&
+              (e as { appt_type?: string }).appt_type === "pack" &&
+              (e as { status?: string | null }).status === "scheduled",
+          )
+        : undefined;
+    const packDate = pack?.starts_at
+      ? new Date(pack.starts_at).toLocaleDateString("en-CA", { timeZone: "Europe/London" })
+      : null;
     return {
       id: a.id,
-      apptType: "removal",
+      apptType: (a.appt_type === "pack" ? "pack" : "removal") as EditTarget["apptType"],
       leadId: a.lead_id,
       estimatorId: a.estimator_id,
       status: a.status,
@@ -319,6 +336,7 @@ export function ScheduleAllocationView(props: {
       notes: null, // not loaded into this payload; edit overwrites only if changed
       startsAt: a.starts_at,
       endsAt: a.ends_at ?? a.starts_at,
+      packDate,
     };
   }
 
@@ -585,10 +603,15 @@ export function ScheduleAllocationView(props: {
                           {jobs.slice(0, 2).map((j) => (
                             <div
                               key={j.id}
-                              className="flex items-center gap-1 rounded-[4px] bg-foreground px-1.5 py-0.5 text-[10px] font-semibold text-card"
+                              className={cn(
+                                "flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold",
+                                j.appt_type === "pack" ? "bg-warn-bg text-warn ring-1 ring-inset ring-warn-border" : "bg-foreground text-card",
+                              )}
                             >
                               <span className="tabular shrink-0 opacity-70">{startLabel(j)}</span>
-                              <span className="truncate">{j.lead_name ?? "Move"}</span>
+                              <span className="truncate">
+                                {j.appt_type === "pack" ? `Pack · ${j.lead_name ?? "job"}` : (j.lead_name ?? "Move")}
+                              </span>
                             </div>
                           ))}
                           {jobs.length > 2 ? (
@@ -736,21 +759,32 @@ export function ScheduleAllocationView(props: {
                               </p>
                             ) : null}
                             <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                              <Estimate vans={j.requiredVans} crew={j.requiredCrew} />
-                              <PropertyTag type={j.property_type} />
-                              <span
-                                className={cn(
-                                  "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
-                                  j.commitment
-                                    ? "border-success-border bg-success-bg text-success"
-                                    : "border-border bg-muted text-mist-500",
-                                )}
-                              >
-                                {j.commitment ? "25% ✓" : "25% due"}
-                              </span>
+                              {j.appt_type === "pack" ? (
+                                <>
+                                  <span className="rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
+                                    Packing · crew only
+                                  </span>
+                                  <Estimate vans={null} crew={j.requiredCrew} />
+                                </>
+                              ) : (
+                                <>
+                                  <Estimate vans={j.requiredVans} crew={j.requiredCrew} />
+                                  <PropertyTag type={j.property_type} />
+                                  <span
+                                    className={cn(
+                                      "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
+                                      j.commitment
+                                        ? "border-success-border bg-success-bg text-success"
+                                        : "border-border bg-muted text-mist-500",
+                                    )}
+                                  >
+                                    {j.commitment ? "25% ✓" : "25% due"}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </button>
-                          {j.lead_id ? (
+                          {j.lead_id && j.appt_type !== "pack" ? (
                             <button
                               type="button"
                               onClick={() => openBookedDetails(j)}
