@@ -235,7 +235,11 @@ export function ScheduleAllocationView(props: {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [tab, setTab] = useState<"availability" | "alloc">("availability");
+  // ?tab=alloc deep-links straight into Day Allocation (the Bookings page's
+  // "No crew allocated" chips land here); anything else = Availability.
+  const [tab, setTab] = useState<"availability" | "alloc">(() =>
+    searchParams.get("tab") === "alloc" ? "alloc" : "availability",
+  );
   const [monthCursor, setMonthCursor] = useState(() => {
     const d = new Date(`${selectedDate}T00:00:00Z`);
     return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
