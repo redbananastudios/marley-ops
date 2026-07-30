@@ -53,7 +53,9 @@ describe("daily operational issue digest", () => {
       to: "ops@example.test",
       subject: expect.stringContaining("72 open"),
       html: expect.stringContaining("Plus 71 more open issues."),
-      idempotencyKey: "marley-ops-daily/2026-07-20",
+      // Day + payload-hash scoped: identical retries dedupe at the provider,
+      // a changed payload is never rejected as a modified-body key reuse.
+      idempotencyKey: expect.stringMatching(/^marley-ops-daily\/2026-07-20\/[a-f0-9]{16}$/),
     }));
     expect(fake.rpc).toHaveBeenCalledWith("claim_operational_issue_digest", expect.objectContaining({
       p_issue_count: 72,

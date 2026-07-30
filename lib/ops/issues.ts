@@ -185,13 +185,21 @@ export async function deliverDailyOperationalIssueDigest(
   }
 
   const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // The provider idempotency key must be scoped to the PAYLOAD as well as the
+  // day: Resend rejects a reused key whose body changed ("request body was
+  // modified"), and issue occurrence_counts move all day — a day-only key
+  // deadlocked every retry after the first send on 2026-07-30 (each failure
+  // report changed the counts, guaranteeing the next body differed). The claim
+  // machinery above is the once-per-day gate; the key only dedupes true
+  // same-payload retries.
+  const payloadKeyHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
   const result = await sendEmail({
     to: opsAlertRecipient("system"),
     subject: `[Marley Ops] Daily operational issues — ${payload.totalCount} open`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6"><p>${payload.totalCount} operational issue${payload.totalCount === 1 ? " is" : "s are"} open:</p><ul>${payload.issues
       .map((issue) => `<li><strong>${esc(issue.severity.toUpperCase())}</strong> ${esc(issue.message)} (${issue.occurrence_count})</li>`)
       .join("")}</ul>${payload.omittedCount ? `<p>Plus ${payload.omittedCount} more open issue${payload.omittedCount === 1 ? "" : "s"}.</p>` : ""}<p><a href="https://ops.marleymoves.co.uk/automations">Open Marley Ops automations</a></p></div>`,
-    idempotencyKey: `marley-ops-daily/${snapshotDate}`,
+    idempotencyKey: `marley-ops-daily/${snapshotDate}/${payloadKeyHash}`,
   });
   if (!result.ok) {
     const { data: failed, error: failError } = await sb.rpc("fail_operational_issue_digest", {
