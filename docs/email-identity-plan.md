@@ -78,7 +78,7 @@ already-scheduled go-live step. No schema change, no new Settings UI.
 | Follow-ups "Message" dialog | hello@ | **Owner** |
 | Office compose (ad-hoc) | hello@ (hardcoded) | **The logged-in sender's own identity** (we know the actor) + add the missing tokenized Reply-To |
 
-**Money — From "Marley Moves Accounts &lt;accounts@marleymoves.co.uk&gt;"**. Reply-To: tokenized relay where a quote token exists (so chase-pause/logging still works), direct `accounts@` where none does.
+**Money — From "Marley Moves &lt;accounts@marleymoves.co.uk&gt;"** (display name de-"Accounts"-ed by Peter 2026-07-30 — the address alone marks the money desk). Reply-To: tokenized relay where a quote token exists (so chase-pause/logging still works), direct `accounts@` where none does.
 
 | Email | Current From | Proposed From |
 |---|---|---|

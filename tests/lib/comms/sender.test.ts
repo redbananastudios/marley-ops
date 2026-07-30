@@ -79,9 +79,9 @@ describe("capName", () => {
 describe("accounts identity", () => {
   it("defaults to the money desk and honours the env override", () => {
     expect(accountsAddress()).toBe("accounts@marleymoves.co.uk");
-    expect(accountsFrom()).toBe("Marley Moves Accounts <accounts@marleymoves.co.uk>");
+    expect(accountsFrom()).toBe("Marley Moves <accounts@marleymoves.co.uk>");
     process.env.ACCOUNTS_EMAIL = "money@marleymoves.co.uk";
-    expect(accountsFrom()).toBe("Marley Moves Accounts <money@marleymoves.co.uk>");
+    expect(accountsFrom()).toBe("Marley Moves <money@marleymoves.co.uk>");
   });
 });
 

@@ -210,7 +210,7 @@ const refundLinesCard = (title, linesVar, totalLabel, totalVar) => `  <tr><td st
    emails.ts — the template mirrors the fallback so the two paths never drift.
    Copy rule (test-enforced): the word "penalty" appears NOWHERE; held money is
    always "held against your original date, refunded in full if we re-book it". */
-const MONEY_FROM = "Marley Moves Accounts <accounts@marleymoves.co.uk>";
+const MONEY_FROM = "Marley Moves <accounts@marleymoves.co.uk>";
 
 const dateConfirmationHtml = shellHtml(
   "Your move date is confirmed. Here's what happens next with your booking.",

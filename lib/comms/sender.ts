@@ -27,7 +27,9 @@ export function accountsAddress(): string {
   return process.env.ACCOUNTS_EMAIL || "accounts@marleymoves.co.uk";
 }
 export function accountsFrom(): string {
-  return `Marley Moves Accounts <${accountsAddress()}>`;
+  // Display name is the plain brand (Peter, 2026-07-30) — customers see
+  // "Marley Moves" everywhere; only the address marks the money desk.
+  return `Marley Moves <${accountsAddress()}>`;
 }
 
 /** Capitalise a name segment that arrives all-lower ("freddy") or all-upper
