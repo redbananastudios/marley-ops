@@ -67,6 +67,7 @@ const SEED = {
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
+  draftQuote: { name: "E2E Draft Quote", quoteRef: "E2E-DRAFT-001", total: 1200 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
   markLost: { name: "E2E Mark Lost" },
   storageAgreement: { client: "E2E Storage Client", signToken: "e2e-storage-sign-token-0001", site: "E2E Storage Site", unitCode: "E2E-U1" },
