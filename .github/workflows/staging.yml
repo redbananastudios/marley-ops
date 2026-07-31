@@ -83,15 +83,21 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The seed/create-users scripts talk to the staging DB directly; the specs
-      # sign in through the live staging app at E2E_BASE_URL. ZOHO_ORG_ID + card
-      # PANs are intentionally NOT set, so the money/Zoho specs test.skip until
-      # staging sandbox creds are wired (see docs/staging-and-ci.md).
+      # sign in through the live staging app at E2E_BASE_URL. Zoho points at the
+      # STAGING org (Demo Removals) — a separate account that physically can't
+      # reach Connor's live books — so the money/Zoho specs run and assert against
+      # the staging invoices. Card PANs (E2E_CARD_*) stay unset, so the card P0s
+      # remain fixme'd. See docs/staging-and-ci.md.
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
       E2E_BASE_URL: https://staging.ops.marleymoves.co.uk
       E2E_OFFICE_PASSWORD: ${{ secrets.E2E_OFFICE_PASSWORD }}
       E2E_ESTIMATOR_PASSWORD: ${{ secrets.E2E_ESTIMATOR_PASSWORD }}
       E2E_CREW_PASSWORD: ${{ secrets.E2E_CREW_PASSWORD }}
+      ZOHO_ORG_ID: ${{ secrets.STAGING_ZOHO_ORG_ID }}
+      ZOHO_CLIENT_ID: ${{ secrets.STAGING_ZOHO_CLIENT_ID }}
+      ZOHO_CLIENT_SECRET: ${{ secrets.STAGING_ZOHO_CLIENT_SECRET }}
+      ZOHO_REFRESH_TOKEN: ${{ secrets.STAGING_ZOHO_REFRESH_TOKEN }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
