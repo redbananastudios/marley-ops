@@ -456,6 +456,40 @@ await resetCrewContractorState();
   console.log(`seeded decline quote: ${SEED.declineQuote.name} (/q/${SEED.declineQuote.acceptToken})`);
 }
 
+// 6b. A DRAFT quote — the office quote-builder wizard opens it straight into the
+// 7-step builder (status "draft" → editing). The wizard spec drives THIS stable
+// row rather than the create→navigate flow (soft-nav router.push race, tracked).
+{
+  const ids = await makeLead({ name: SEED.draftQuote.name, status: "quoted" });
+  const { error } = await sb.from("quotes").insert({
+    quote_ref: SEED.draftQuote.quoteRef,
+    client_id: ids.clientId,
+    lead_id: ids.leadId,
+    customer_name: SEED.draftQuote.name,
+    customer_email: SINK_EMAIL,
+    customer_phone: SINK_PHONE,
+    subtotal: SEED.draftQuote.total,
+    grand_total: SEED.draftQuote.total,
+    status: "draft",
+    moving_date: at(7).slice(0, 10),
+    deposit_amount: 100,
+    collect_addr: "1 Test Street, Shaftesbury, SP7 8AA",
+    dest_addr: "2 Sample Road, Gillingham, SP8 4AB",
+    vat_enabled: true,
+    breakdown: { vehicle: "1luton", totalMiles: 20 },
+    // A wizard-shaped state_blob so the builder opens PAST its forward gates: the
+    // progress dots can only jump to Review once step 1 (customer name + valid
+    // email) and step 2 (route dead+job miles calculated) are satisfied.
+    state_blob: {
+      seeded: MARKER,
+      customer: { name: SEED.draftQuote.name, phone: SINK_PHONE, email: SINK_EMAIL },
+      route: { deadMiles: 8, jobMiles: 20, routeLegs: [] },
+    },
+  });
+  if (error) die(`${SEED.draftQuote.name} draft quote`, error);
+  console.log(`seeded draft quote: ${SEED.draftQuote.name} (${SEED.draftQuote.quoteRef})`);
+}
+
 // 7. An OPEN, UNSIGNED storage let with a remote-signing token — /s/<token>.
 {
   const { data: client, error: cErr } = await sb

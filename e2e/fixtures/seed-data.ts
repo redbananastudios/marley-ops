@@ -58,6 +58,11 @@ export const SEED = {
   /** A second SENT quote used to test the DECLINE flow (so it never consumes the
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
+  /** A DRAFT quote — the office quote-builder wizard. A draft opens straight into
+   *  the 7-step builder (status==="draft" → editing), so the wizard spec drives it
+   *  via a stable seeded row instead of the create→navigate flow (that soft-nav is
+   *  a separate, tracked router.push race — see the quote-builder spec header). */
+  draftQuote: { name: "E2E Draft Quote", quoteRef: "E2E-DRAFT-001", total: 1200 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
   /** A quoted lead used ONLY by the office mark-lost test — dedicated so marking
    *  it lost never consumes a lead another spec depends on. */
