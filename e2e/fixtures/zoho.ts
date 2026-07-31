@@ -95,10 +95,33 @@ export async function stagingInvoicesByRefPrefix(prefix: string): Promise<Stagin
 }
 
 /** Void + delete every E2E-prefixed invoice in staging (teardown only). Zoho
- *  won't delete a sent invoice, so void first. Returns how many were removed. */
+ *  won't delete a sent invoice, so void first — and it won't void a PAID one
+ *  either, so un-apply its payment first. Missing this leaves a stale paid test
+ *  invoice in the org that the accept flow's reference-orphan adoption then
+ *  latches onto on the NEXT run (it shadowed the £100 deposit assertion with a
+ *  £15 leftover). Returns how many were removed. */
 export async function purgeStagingInvoices(prefix = "E2E-"): Promise<number> {
   const e = env();
   const tok = await accessToken(e);
+  const headers = {
+    Authorization: `Zoho-oauthtoken ${tok}`,
+    "X-com-zoho-invoice-organizationid": e.org,
+  };
+  // A paid invoice can neither be voided nor deleted until its payment is
+  // removed — and Zoho does NOT reliably surface that payment on the invoice
+  // detail (the `payments` array came back empty for a genuinely-paid one). This
+  // is a dedicated staging org, so any customer payment carrying the test prefix
+  // is ours: sweep them first. Reference is the quote ref (e.g. "E2E-SENT-001"),
+  // which shares the same prefix as the invoices ("E2E-SENT-001-DEP").
+  const pays = await zget(e, tok, `/customerpayments?per_page=200`);
+  for (const p of pays.customerpayments ?? []) {
+    if (!p.payment_id || !String(p.reference_number ?? "").startsWith(prefix)) continue;
+    await fetch(`${e.api}/invoice/v3/customerpayments/${p.payment_id}`, {
+      method: "DELETE",
+      headers,
+    }).catch(() => {});
+  }
+
   const list = await zget(e, tok, `/invoices?per_page=200`);
   const matches = (list.invoices ?? []).filter((i: any) =>
     String(i.reference_number ?? "").startsWith(prefix),
@@ -107,11 +130,11 @@ export async function purgeStagingInvoices(prefix = "E2E-"): Promise<number> {
   for (const m of matches) {
     await fetch(`${e.api}/invoice/v3/invoices/${m.invoice_id}/status/void`, {
       method: "POST",
-      headers: { Authorization: `Zoho-oauthtoken ${tok}`, "X-com-zoho-invoice-organizationid": e.org },
+      headers,
     }).catch(() => {});
     const del = await fetch(`${e.api}/invoice/v3/invoices/${m.invoice_id}`, {
       method: "DELETE",
-      headers: { Authorization: `Zoho-oauthtoken ${tok}`, "X-com-zoho-invoice-organizationid": e.org },
+      headers,
     }).catch(() => null);
     if (del?.ok) n++;
   }

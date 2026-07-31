@@ -8,6 +8,17 @@ import { expect, type Page, type Locator } from "@playwright/test";
  * reload) instead of running the server action — the checkboxes/fields are wiped
  * and nothing happens. On a miss this re-runs `prepare` (re-tick, re-fill) and
  * clicks again, so the second attempt (now hydrated) runs the real action.
+ *
+ * `perAttemptMs` is the success window per attempt, and it must cover the WHOLE
+ * hydrated path: server action + `router.push` + the destination page's first
+ * paint. Against staging the app (OVH box) and DB (Supabase Cloud, eu-west-1)
+ * are in different regions, so a create-then-navigate round-trips the internet
+ * and routinely takes >8s — the old default. Too short a window is actively
+ * harmful here: the action ALREADY succeeded, so a premature retry re-submits
+ * and creates a DUPLICATE record (three E2E leads, 8s apart, were the tell).
+ * 30s comfortably clears the cross-region navigation while staying well inside
+ * the 90s test budget, so a hydrated submit wins on the first attempt and never
+ * duplicates; the retry path stays only for a genuine pre-hydration miss.
  */
 export async function submitUntil(
   page: Page,
@@ -24,7 +35,7 @@ export async function submitUntil(
     if (opts.prepare) await opts.prepare();
     await opts.click.click();
     try {
-      await opts.expected.waitFor({ state: "visible", timeout: opts.perAttemptMs ?? 8000 });
+      await opts.expected.waitFor({ state: "visible", timeout: opts.perAttemptMs ?? 30_000 });
       return;
     } catch {
       if (i === attempts) break;

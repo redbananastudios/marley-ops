@@ -36,7 +36,13 @@ test.describe("Office — Claims working page", () => {
     await step("advance it to Assessing (non-terminal — no resolution needed)", page, async () => {
       await pickStatus("Assessing");
       await page.getByRole("button", { name: "Save claim" }).click();
-      await expect(page.locator("#claim-status")).toContainText("Assessing", { timeout: 15_000 });
+      // Wait for the SERVER to confirm the save — the success toast fires only
+      // after updateClaimAction resolves ok — before doing anything (the reload
+      // below) that would abort the in-flight action. #claim-status alone is the
+      // optimistic Select value: it flips instantly and proves nothing about
+      // persistence, so on a slow cross-region save the reload used to race an
+      // uncommitted write and read back "Open".
+      await expect(page.getByText("Claim saved.")).toBeVisible({ timeout: 15_000 });
     });
 
     await step("reload so the settle reads a fresh concurrency token", page, async () => {
@@ -63,6 +69,10 @@ test.describe("Office — Claims working page", () => {
       await goodwill.click();
       await page.locator("#claim-amount").fill("150");
       await page.getByRole("button", { name: "Save claim" }).click();
+      // Same rule as the Assessing save: wait for the server-confirmed toast so
+      // the settled state is asserted from a committed write, not the optimistic
+      // Select value, on a slow cross-region round-trip.
+      await expect(page.getByText("Claim saved.")).toBeVisible({ timeout: 15_000 });
     });
 
     await step("the claim reads as settled with the payout", page, async () => {
