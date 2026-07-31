@@ -219,14 +219,50 @@ describe("matchTransaction — a suggestion REQUIRES the exact amount", () => {
     ).toBeNull();
   });
 
-  it("amount-only matches ONLY when unambiguous", () => {
+  it("amount-only needs BOTH a unique amount AND a corroborating payer name", () => {
     const items = [open({}), open({ quoteId: "q2", quoteRef: "MMR002", amount: 100 })];
-    expect(matchTransaction({ amount: 100, reference: "moving money", description: null }, items)).toBeNull();
+    // ambiguous amount (two open £100) → never, whatever the name:
     expect(
-      matchTransaction({ amount: 920, reference: null, description: null }, [
+      matchTransaction({ amount: 100, reference: "moving money", description: null, counterparty: "Jane Smith" }, items),
+    ).toBeNull();
+    // unique amount + the payer name matches the customer → confirmable:
+    expect(
+      matchTransaction({ amount: 920, reference: null, description: null, counterparty: "JANE SMITH" }, [
         open({ kind: "balance", amount: 920 }),
       ]),
     ).toMatchObject({ type: "suggestion", confidence: "amount", kind: "balance" });
+    // a shortened bank name still corroborates on the surname:
+    expect(
+      matchTransaction({ amount: 920, reference: null, description: null, counterparty: "J SMITH" }, [
+        open({ kind: "balance", amount: 920 }),
+      ]),
+    ).toMatchObject({ type: "suggestion", confidence: "amount" });
+  });
+
+  it("amount-only from an UNRELATED payer is never a suggestion (2026-07-31 Dingley regression)", () => {
+    // A stranger's £100 must NOT one-tap-match someone else's £100 deposit.
+    expect(
+      matchTransaction({ amount: 100, reference: "Dingley", description: null, counterparty: "E Dingley" }, [
+        open({ customer: "Rebecca Eldred" }),
+      ]),
+    ).toBeNull();
+    // a missing payer name can't corroborate either — fail safe:
+    expect(
+      matchTransaction({ amount: 100, reference: null, description: null, counterparty: null }, [open({})]),
+    ).toBeNull();
+  });
+
+  it("reference is typo-tolerant: an O-for-0 quote ref matches BY REFERENCE (2026-07-31 MMRO17)", () => {
+    // "MMRO17" (letter O) is how the customer keyed MMR017 — it must ref-match,
+    // not fall through to the weak amount-only path.
+    const m = matchTransaction(
+      { amount: 100, reference: "MMRO17", description: null, counterparty: "ELDRED R A" },
+      [open({ quoteRef: "MMR017", customer: "Rebecca Eldred" })],
+    );
+    expect(m).toMatchObject({ type: "suggestion", confidence: "reference", quoteRef: "MMR017" });
+    // refsInText itself normalises the lookalikes, and the strict form is unaffected:
+    expect(refsInText("MMRO17", null)).toEqual(["MMR017"]);
+    expect(refsInText("MMR017-DEP", null)).toEqual(["MMR017"]);
   });
 
   it("storage references are tagged storage, not quote-matched", () => {

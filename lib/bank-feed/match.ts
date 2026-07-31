@@ -9,7 +9,12 @@
  * records off £500 received).
  *
  * Result kinds:
- *   suggestion — quote ref (or unique amount) AND exact amount: confirmable.
+ *   suggestion — a quote ref (typo-tolerant: O/0, I/1 … normalised) with the
+ *                exact amount, OR a UNIQUE exact amount whose payer NAME also
+ *                corroborates the customer. Confirmable. Amount alone is never
+ *                enough — a coincidental amount from an unrelated payer is not a
+ *                suggestion (2026-07-31: a stranger's £100 must not one-tap-match
+ *                someone else's quote).
  *   mismatch   — the reference names an open quote but NO open item has this
  *                exact amount (part-payment / overpayment / duplicate):
  *                surfaced on /payments as "record manually", never confirmable.
@@ -49,9 +54,47 @@ const STORAGE_REF = /MMS-[A-Za-z0-9]{6,}/i;
 
 const norm = (s: string | null | undefined): string => (s ?? "").toUpperCase();
 
+/**
+ * Common keying/OCR slips inside a quote ref's numeric tail — a customer types
+ * their ref as "MMRO17" (letter O for zero) or "MMRl23". Normalising the
+ * lookalikes to digits lets a correctly-referenced payment still match by
+ * REFERENCE instead of falling through to the weak amount-only path.
+ * (2026-07-31 incident: an "MMRO17" transfer went unmatched while a stranger's
+ * £100 amount-matched the very same quote.)
+ */
+const DIGIT_LOOKALIKE: Record<string, string> = { O: "0", I: "1", L: "1", B: "8", S: "5", Z: "2" };
+function canonicalizeQuoteRefs(hay: string): string {
+  // Only ever touch an MM[RC] token whose tail is digits-or-lookalikes; storage
+  // (MMS-…) and legacy MM-YYMMDD-NNN refs never match this and stay untouched.
+  return hay.replace(/\bMM([RC])([0-9OILBSZ]{3,})\b/g, (_m, kind: string, tail: string) =>
+    "MM" + kind + tail.replace(/[OILBSZ]/g, (c) => DIGIT_LOOKALIKE[c] ?? c),
+  );
+}
+
+/** Name tokens ≥3 chars, uppercased — "E Dingley" → ["DINGLEY"]. */
+function nameTokens(name: string | null | undefined): string[] {
+  return norm(name)
+    .split(/[^A-Z]+/)
+    .filter((t) => t.length >= 3);
+}
+
+/**
+ * The payer name plausibly belongs to the customer: they share a ≥3-char token
+ * (a surname-ish overlap). A missing name on EITHER side is NOT corroboration —
+ * amount-only is a weak signal, so it must fail safe. This is what stops a
+ * stranger's transfer being one-tap-confirmable against an unrelated quote just
+ * because the pennies happen to line up.
+ */
+function namesCorroborate(payer: string | null | undefined, customer: string | null | undefined): boolean {
+  const payerTokens = nameTokens(payer);
+  if (!payerTokens.length) return false;
+  const customerTokens = new Set(nameTokens(customer));
+  return payerTokens.some((t) => customerTokens.has(t));
+}
+
 /** All quote refs mentioned in the transaction's reference/description text. */
 export function refsInText(reference: string | null, description: string | null): string[] {
-  const hay = `${norm(reference)} ${norm(description)}`;
+  const hay = canonicalizeQuoteRefs(`${norm(reference)} ${norm(description)}`);
   const found = new Set<string>();
   for (const re of REF_PATTERNS) {
     re.lastIndex = 0;
@@ -63,10 +106,10 @@ export function refsInText(reference: string | null, description: string | null)
 const pennies = (n: number): number => Math.round(n * 100);
 
 export function matchTransaction(
-  tx: { amount: number; reference: string | null; description: string | null },
+  tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
   open: OpenItem[],
 ): MatchResult | null {
-  const hay = `${norm(tx.reference)} ${norm(tx.description)}`;
+  const hay = canonicalizeQuoteRefs(`${norm(tx.reference)} ${norm(tx.description)}`);
 
   if (STORAGE_REF.test(hay)) return { type: "storage" };
 
@@ -99,9 +142,12 @@ export function matchTransaction(
     return { type: "mismatch", kind: c.kind, quoteId: c.quoteId, quoteRef: c.quoteRef };
   }
 
-  // No reference → amount-only, and only when it's unambiguous.
+  // No reference → amount-only. Confirmable ONLY when it's unambiguous (exactly
+  // one open item of this amount) AND the payer name corroborates that
+  // customer. Amount alone is too weak to move money: a coincidental £100 from
+  // an unrelated payer must stay unmatched for a human, never a one-tap match.
   const byAmount = open.filter((o) => pennies(o.amount) === pennies(tx.amount));
-  if (byAmount.length === 1) {
+  if (byAmount.length === 1 && namesCorroborate(tx.counterparty, byAmount[0].customer)) {
     const o = byAmount[0];
     return {
       type: "suggestion",

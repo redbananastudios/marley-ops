@@ -284,6 +284,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
               amount: Number(row.amount),
               reference: row.reference as string | null,
               description: row.description as string | null,
+              counterparty: row.counterparty as string | null,
             },
             remaining,
           )
