@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { computeQuote } from "@/lib/quote/pricing";
@@ -169,6 +170,20 @@ export async function createQuoteWithLeadAction(
   const quoteRes = await createDraftQuote({ leadId: leadRes.leadId });
   if (!quoteRes.ok) return { ok: false, error: quoteRes.error };
   return { ok: true, quoteId: quoteRes.id };
+}
+
+/**
+ * Create the lead + draft quote and land the user in the builder via a
+ * SERVER-SIDE redirect (see createLeadAndOpenAction for the why: the old
+ * client router.push raced the server action's revalidation and reliably
+ * bounced back to the empty /quotes/new form, creating duplicate drafts). On a
+ * validation error it returns {ok:false} for the form to surface; on success it
+ * never returns — the redirect performs the navigation atomically.
+ */
+export async function createQuoteWithLeadAndOpenAction(input: NewLeadInput) {
+  const res = await createQuoteWithLeadAction(input);
+  if (!res.ok) return { ok: false as const, error: res.error };
+  redirect(`/quotes/${res.quoteId}`);
 }
 
 /** Persist wizard state + the computed breakdown. Money columns always come from computeQuote(). */

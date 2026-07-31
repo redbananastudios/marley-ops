@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -9,8 +8,8 @@ import { TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
 import { newLeadSchema, MANUAL_ENTRY_CHANNELS, PROPERTY_SIZES, type NewLeadInput } from "@/lib/leads/schema";
-import { checkDuplicateAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
-import { createQuoteWithLeadAction } from "@/app/(dashboard)/quotes/actions";
+import { checkDuplicateAction, createLeadAndOpenAction } from "@/app/(dashboard)/leads/actions";
+import { createQuoteWithLeadAndOpenAction } from "@/app/(dashboard)/quotes/actions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -81,7 +80,6 @@ export function AddLeadForm({
    *  were picked in the combobox. */
   initialClientId?: string;
 }) {
-  const router = useRouter();
   const initialClient = initialClientId ? (clients.find((c) => c.id === initialClientId) ?? null) : null;
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
   const [clientId, setClientId] = useState<string | null>(initialClient?.id ?? null);
@@ -170,23 +168,16 @@ export function AddLeadForm({
       from_address: formatAddress(fromAddr),
       to_address: formatAddress(toAddr),
     };
-    if (mode === "quote") {
-      const res = await createQuoteWithLeadAction(payload);
-      if (!res.ok) {
-        toast.error(res.error);
-        return;
-      }
-      toast.success("Quote started");
-      router.push(`/quotes/${res.quoteId}`);
-      return;
-    }
-    const res = await createLeadAction(payload);
-    if (!res.ok) {
-      toast.error(res.error);
-      return;
-    }
-    toast.success("Lead added");
-    router.push(`/leads/${res.leadId}`);
+    // These actions redirect server-side on success — the navigation IS the
+    // action's response, so there is no client push that could lose a race to
+    // the action's revalidation and bounce back to this form (which stranded
+    // users on an empty form and let them re-submit into duplicate records).
+    // They only RETURN on a validation error, which we surface here.
+    const res =
+      mode === "quote"
+        ? await createQuoteWithLeadAndOpenAction(payload)
+        : await createLeadAndOpenAction(payload);
+    if (res && !res.ok) toast.error(res.error);
   };
 
   const phoneReg = register("phone");

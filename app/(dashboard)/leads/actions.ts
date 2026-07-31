@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -116,6 +117,24 @@ export async function createLeadAction(input: NewLeadInput) {
   revalidatePath("/leads");
   revalidatePath("/");
   return { ok: true as const, leadId: lead.id, matchedExistingClient: matched };
+}
+
+/**
+ * Create a lead and land the user on its detail page via a SERVER-SIDE redirect.
+ *
+ * The form used to `await createLeadAction()` then client-side `router.push()`.
+ * That push races the server action's automatic revalidation of the page it was
+ * called from, and on a higher-latency deploy the revalidation wins — bouncing
+ * the user back to the empty /leads/new form (nothing shows, so they re-submit
+ * and create a DUPLICATE lead). A server redirect is atomic: the navigation IS
+ * the action's response, so there is no client push to lose the race. Returns
+ * the {ok:false} validation error unchanged; on success it never returns (the
+ * redirect throws NEXT_REDIRECT, which Next turns into the navigation).
+ */
+export async function createLeadAndOpenAction(input: NewLeadInput) {
+  const res = await createLeadAction(input);
+  if (!res.ok) return res;
+  redirect(`/leads/${res.leadId}`);
 }
 
 /**
