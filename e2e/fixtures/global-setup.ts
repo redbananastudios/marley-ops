@@ -13,8 +13,10 @@ export default async function globalSetup() {
     }
   })();
 
-  const PROD_HOSTS = ["ops.marleymoves.co.uk"];
-  if (PROD_HOSTS.some((h) => host.includes(h))) {
+  // EXACT host match, not substring: `staging.ops.marleymoves.co.uk` contains
+  // the prod host as a substring, so `.includes()` would wrongly refuse staging.
+  const PROD_HOSTS = ["ops.marleymoves.co.uk", "www.ops.marleymoves.co.uk"];
+  if (PROD_HOSTS.some((h) => host === h)) {
     throw new Error(
       `E2E refuses to run against a production host (${host}). Point E2E_BASE_URL at staging or local dev.`,
     );

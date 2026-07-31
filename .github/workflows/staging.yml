@@ -1,0 +1,119 @@
+name: CI + Deploy to Staging
+
+# Push to `staging` → test gate on a GitHub runner, then build + restart the
+# staging container on the self-hosted OVH runner, then run the Playwright e2e
+# suite against the LIVE staging deployment. The `e2e` job is the required check
+# that gates promotion of this commit to `master` (prod).
+on:
+  push:
+    branches: [staging]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+
+  deploy-staging:
+    needs: test
+    runs-on: [self-hosted, ovh]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build staging image (NEXT_PUBLIC_* from staging app.env)
+        run: |
+          set -euo pipefail
+          sudo docker tag marley-ops-staging:latest marley-ops-staging:prev 2>/dev/null || true
+          URL=$(sudo grep '^NEXT_PUBLIC_SUPABASE_URL=' /opt/marley-ops-staging/app.env | cut -d= -f2-)
+          ANON=$(sudo grep '^NEXT_PUBLIC_SUPABASE_ANON_KEY=' /opt/marley-ops-staging/app.env | cut -d= -f2-)
+          APP=$(sudo grep '^NEXT_PUBLIC_APP_URL=' /opt/marley-ops-staging/app.env | cut -d= -f2-)
+          sudo docker build \
+            --build-arg NEXT_PUBLIC_SUPABASE_URL="$URL" \
+            --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY="$ANON" \
+            --build-arg NEXT_PUBLIC_APP_URL="$APP" \
+            --build-arg GIT_SHA="${GITHUB_SHA::7}" \
+            -t marley-ops-staging:latest .
+      - name: Restart staging + health-check (auto-rollback on failure)
+        run: |
+          set -euo pipefail
+          health() {
+            for i in $(seq 1 12); do
+              sleep 3
+              code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/login || true)
+              echo "staging login -> $code"
+              if [ "$code" = "200" ]; then return 0; fi
+            done
+            return 1
+          }
+          start() {
+            sudo docker rm -f marley-ops-staging 2>/dev/null || true
+            sudo docker run -d --name marley-ops-staging --restart unless-stopped \
+              --network rbs -p 127.0.0.1:3001:3000 --env-file /opt/marley-ops-staging/app.env "$1"
+          }
+          start marley-ops-staging:latest
+          if health; then echo "healthy"; exit 0; fi
+          echo "staging did not become healthy"; sudo docker logs --tail 40 marley-ops-staging
+          if sudo docker image inspect marley-ops-staging:prev >/dev/null 2>&1; then
+            echo "ROLLING BACK to previous image"
+            start marley-ops-staging:prev
+            health && echo "rollback healthy" || echo "rollback ALSO unhealthy - manual intervention needed"
+          fi
+          exit 1
+      - name: Prune old images
+        if: always()
+        run: sudo docker image prune -f >/dev/null 2>&1 || true
+
+  e2e:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    env:
+      # The seed/create-users scripts talk to the staging DB directly; the specs
+      # sign in through the live staging app at E2E_BASE_URL. ZOHO_ORG_ID + card
+      # PANs are intentionally NOT set, so the money/Zoho specs test.skip until
+      # staging sandbox creds are wired (see docs/staging-and-ci.md).
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+      E2E_BASE_URL: https://staging.ops.marleymoves.co.uk
+      E2E_OFFICE_PASSWORD: ${{ secrets.E2E_OFFICE_PASSWORD }}
+      E2E_ESTIMATOR_PASSWORD: ${{ secrets.E2E_ESTIMATOR_PASSWORD }}
+      E2E_CREW_PASSWORD: ${{ secrets.E2E_CREW_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Provision e2e users on staging
+        env:
+          E2E_USERS_CONFIRM: "yes"
+        run: node scripts/create-e2e-users.mjs
+      - name: Seed staging DB
+        env:
+          SEED_CONFIRM: "yes"
+          SEED_REMOTE_CONFIRM: "yes"
+        run: node scripts/seed-e2e.mjs
+      - name: Playwright e2e against the live staging deployment
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-report
+          path: e2e/artefacts/report
+          retention-days: 7
