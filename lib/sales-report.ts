@@ -136,7 +136,11 @@ export function buildSalesReport(
 
   let paidTotal = 0;
   let paidCount = 0;
-  for (const q of quotes) {
+  // Iterate `live` (superseded + draft excluded), not the raw quotes: a re-quote
+  // carries the paid deposit's stamp onto the new accepted quote but LEAVES it on
+  // the now-superseded old row (supersedeSiblingQuotes), so one real deposit lives
+  // on two rows. Counting only live rows credits the carried deposit exactly once.
+  for (const q of live) {
     if (inRange(ukDayOf(q.deposit_paid_at)) && q.deposit_amount) {
       paidTotal += Number(q.deposit_amount);
       paidCount++;

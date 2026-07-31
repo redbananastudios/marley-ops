@@ -7,6 +7,7 @@ import { fetchAdSpend } from "@/lib/google-ads";
 import {
   buildPeriodStats,
   classifySource,
+  isWonQuote,
   periodWindow,
   SOURCES,
   type LeadLite,
@@ -14,6 +15,7 @@ import {
   type PeriodStats,
   type ProgressSets,
 } from "@/lib/dashboard/compute";
+import { classifyBooking } from "@/lib/bookings/queue";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { vehicleHasExpiryDue } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
@@ -119,6 +121,80 @@ export default async function DashboardPage() {
           releasableSince: q.date_releasable_at,
         }));
     })(),
+    // "Balance due" needs-action count — money owed NOW. Classifies each booked
+    // job through the SAME /bookings queue (lib/bookings/queue.classifyBooking)
+    // and counts only balance_due + balance_overdue. A confirmed booking months
+    // out with no balance invoice is 'all_set' and must NOT show as a balance
+    // owed (it did before — every confirmed, balance-unpaid lead was counted).
+    (async (): Promise<number> => {
+      const ukToday = new Date().toLocaleDateString("en-CA", { timeZone: UK_TZ });
+      const ukDayOf = (iso: string): string => new Date(iso).toLocaleDateString("en-CA", { timeZone: UK_TZ });
+      const { data: bdQuotes } = await supabase
+        .from("quotes")
+        .select(
+          "lead_id, accepted_at, deposit_paid_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+        )
+        .eq("status", "accepted")
+        .is("booking_cancelled_at", null)
+        .not("lead_id", "is", null);
+      const bdLeadIds = [...new Set((bdQuotes ?? []).map((q) => q.lead_id).filter(Boolean))] as string[];
+      if (!bdLeadIds.length) return 0;
+      const [{ data: bdLeads }, { data: bdAppts }, { data: bdDetails }] = await Promise.all([
+        supabase.from("leads").select("id, balance_paid_at").in("id", bdLeadIds).eq("status", "confirmed"),
+        supabase
+          .from("appointments")
+          .select("lead_id, starts_at")
+          .eq("appt_type", "removal")
+          .in("status", ["scheduled", "completed"])
+          .in("lead_id", bdLeadIds),
+        supabase
+          .from("booking_details")
+          .select("lead_id, approx_window, approx_month, provisional_date")
+          .in("lead_id", bdLeadIds),
+      ]);
+      const bdLeadById = new Map((bdLeads ?? []).map((l) => [l.id, l]));
+      // Earliest removal slot per lead (matches /bookings apptByLead).
+      const bdApptByLead = new Map<string, string>();
+      for (const a of bdAppts ?? []) {
+        const cur = bdApptByLead.get(a.lead_id as string);
+        if (a.starts_at && (!cur || (a.starts_at as string) < cur)) bdApptByLead.set(a.lead_id as string, a.starts_at as string);
+      }
+      const bdDetailByLead = new Map((bdDetails ?? []).map((b) => [b.lead_id as string, b]));
+      // One accepted quote per confirmed lead — the most recently accepted.
+      const seen = new Set<string>();
+      const sorted = (bdQuotes ?? []).slice().sort((a, b) => (b.accepted_at ?? "").localeCompare(a.accepted_at ?? ""));
+      let count = 0;
+      for (const q of sorted) {
+        const leadId = q.lead_id as string;
+        const lead = bdLeadById.get(leadId);
+        if (!lead || seen.has(leadId)) continue;
+        seen.add(leadId);
+        const apptStartsAt = bdApptByLead.get(leadId) ?? null;
+        const bd = bdDetailByLead.get(leadId);
+        const bucket = classifyBooking(
+          {
+            depositPaidAt: q.deposit_paid_at,
+            hasRemovalAppt: !!apptStartsAt,
+            apptDayUk: apptStartsAt ? ukDayOf(apptStartsAt) : null,
+            provisionalDate: (bd?.provisional_date as string | null) ?? null,
+            approxWindow: (bd?.approx_window as string | null) ?? null,
+            approxMonth: (bd?.approx_month as string | null) ?? null,
+            commitmentPaidAt: (q.commitment_paid_at as string | null) ?? null,
+            commitmentInvoiceAmount: Number(q.commitment_invoice_amount ?? 0),
+            commitmentDueDate: (q.commitment_due_date as string | null) ?? null,
+            dateReleasableAt: (q.date_releasable_at as string | null) ?? null,
+            balancePaidAt: lead.balance_paid_at as string | null,
+            balanceInvoiceNumber:
+              q.zoho_balance_invoice_id && q.zoho_balance_invoice_id !== "pending"
+                ? (q.zoho_balance_invoice_number as string | null)
+                : null,
+          },
+          ukToday,
+        );
+        if (bucket === "balance_due" || bucket === "balance_overdue") count++;
+      }
+      return count;
+    })(),
   ]);
 
   // Unbounded, all-time tables → page through fetchAllRows (PostgREST caps a
@@ -145,7 +221,7 @@ export default async function DashboardPage() {
       fetchAllRows((f, t) =>
         supabase
           .from("quotes")
-          .select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at")
+          .select("id, status, grand_total, agreed_price, lead_id, breakdown, state_blob, deposit_paid_at, booking_cancelled_at")
           .order("id")
           .range(f, t),
       { strict: true },
@@ -185,12 +261,12 @@ export default async function DashboardPage() {
     quoted: new Set(quotes.filter((q) => q.lead_id).map((q) => q.lead_id as string)),
     won: new Map(
       quotes
-        .filter((q) => q.status === "accepted" && q.lead_id)
+        .filter(isWonQuote)
         .map((q) => [q.lead_id as string, Number(q.agreed_price ?? q.grand_total ?? 0)]),
     ),
     cost: new Map(
       quotes
-        .filter((q) => q.status === "accepted" && q.lead_id)
+        .filter(isWonQuote)
         .map((q) => {
           const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
           const blob = (q.state_blob as { items?: Record<string, number>; job?: { days?: number } } | null) ?? null;
@@ -252,8 +328,15 @@ export default async function DashboardPage() {
   /* needs-action (now) */
   const statusCounts = new Map<string, number>();
   for (const l of leads) statusCounts.set(l.status, (statusCounts.get(l.status) ?? 0) + 1);
-  const [fleetResult, [acceptedResult, signedResult], claimsResult, followUpsResult, refundQueueResult, datesAtRisk] =
-    await attentionPromise;
+  const [
+    fleetResult,
+    [acceptedResult, signedResult],
+    claimsResult,
+    followUpsResult,
+    refundQueueResult,
+    datesAtRisk,
+    balanceDueCount,
+  ] = await attentionPromise;
   const signedIds = new Set((signedResult.data ?? []).map((signature) => signature.quote_id));
   let followUpsOverdue = 0;
   let followUpsDueToday = 0;
@@ -274,11 +357,11 @@ export default async function DashboardPage() {
     ).length,
     quotesAwaiting: quotes.filter((q) => q.status === "sent").length,
     // Money pipeline (mirrors /bookings): provisional = accepted awaiting the
-    // deposit; confirmed with balance unpaid = balance due before move day.
+    // deposit; balanceDue = booked jobs the /bookings queue classifies as
+    // balance_due / balance_overdue (money owed NOW), NOT every deposit-paid
+    // booking (far-future all_set bookings owe nothing yet).
     awaitingDeposit: statusCounts.get("provisional") ?? 0,
-    balanceDue: leads.filter(
-      (l) => l.status === "confirmed" && !(l as { balance_paid_at?: string | null }).balance_paid_at,
-    ).length,
+    balanceDue: balanceDueCount,
     // Fleet compliance: active vehicles with any expiry (MOT/tax/insurance/
     // service/lease) due ≤30d or overdue — the full fleet-reminder scope.
     fleetDocsDue: (fleetResult.data ?? []).filter((vehicle) => vehicleHasExpiryDue(vehicle)).length,
@@ -290,18 +373,6 @@ export default async function DashboardPage() {
     followUpsOverdue,
     followUpsDueToday,
   };
-
-  /* median first-response (all-time pulse) */
-  const respMins = leads
-    .map((l) => {
-      const start = l.submitted_at || l.created_at;
-      if (!l.first_contacted_at || !start) return null;
-      const m = (new Date(l.first_contacted_at).getTime() - new Date(start).getTime()) / 60000;
-      return Number.isFinite(m) && m >= 0 ? m : null;
-    })
-    .filter((m): m is number => m != null)
-    .sort((a, b) => a - b);
-  const medianRespMins = respMins.length ? respMins[Math.floor(respMins.length / 2)] : null;
 
   /* recent — today's, else latest few */
   const tsOf = (l: LeadLite) => new Date(l.submitted_at || l.created_at || 0).getTime();
@@ -317,7 +388,6 @@ export default async function DashboardPage() {
 
   const data: DashboardData = {
     periods,
-    medianRespMins,
     needsAction,
     datesAtRisk,
     recent,

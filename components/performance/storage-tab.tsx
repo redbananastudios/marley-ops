@@ -312,7 +312,9 @@ export function StorageTab({
                     <td className="px-2 py-3 text-mist-500">{fmtDate(l.start_date)}</td>
                     <td className="tabular px-2 py-3 text-right text-foreground">{l.weeks}</td>
                     <td className="tabular px-5 py-3 text-right font-semibold text-foreground">
-                      {l.rate != null ? `${gbp(Number(l.rate))}/${l.rate_period === "month" ? "mo" : "wk"}` : "—"}
+                      {l.rate != null
+                        ? `${gbp(Number(l.rate))}/${l.rate_period === "month" ? "mo" : l.rate_period === "day" ? "day" : "wk"}`
+                        : "—"}
                     </td>
                   </tr>
                 ))}

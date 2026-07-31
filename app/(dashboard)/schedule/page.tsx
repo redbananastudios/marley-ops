@@ -3,6 +3,7 @@ import { PageHeader } from "@/components/page-header";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { crewRequired } from "@/lib/job-board";
 import { packRequirement } from "@/lib/schedule/pack-days";
+import { MIN_BOOKED_REQUIREMENT } from "@/lib/schedule/capacity";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -62,7 +63,7 @@ export default async function SchedulePage({
       fetchAllRows((f, t) =>
         supabase
           .from("quotes")
-          .select("id, lead_id, status, breakdown, deposit_paid_at, commitment_paid_at, moving_date")
+          .select("id, lead_id, status, breakdown, deposit_paid_at, commitment_paid_at, booking_cancelled_at, moving_date")
           .eq("status", "accepted")
           .order("id")
           .range(f, t),
@@ -196,8 +197,12 @@ export default async function SchedulePage({
       all_day: r.all_day,
       from_postcode: r.from_postcode,
       to_postcode: r.to_postcode,
-      requiredVans: r.required?.vans ?? 0,
-      requiredCrew: r.required?.men ?? 0,
+      // A booked removal with no priceable quote (or a lead-less manual block) has a
+      // null requirement — floor it to a real move's minimum so its day is never graded
+      // as needing nothing (which would overstate sellable capacity). Packs always carry
+      // a packRequirement, so this floor only ever hits genuine removals.
+      requiredVans: r.required?.vans ?? (r.appt_type === "removal" ? MIN_BOOKED_REQUIREMENT.requiredVans : 0),
+      requiredCrew: r.required?.men ?? (r.appt_type === "removal" ? MIN_BOOKED_REQUIREMENT.requiredCrew : 0),
       property_type: r.lead_id ? (bdByLead.get(r.lead_id)?.property_type ?? null) : null,
       approx_window: r.lead_id ? (bdByLead.get(r.lead_id)?.approx_window ?? null) : null,
       approx_month: r.lead_id ? (bdByLead.get(r.lead_id)?.approx_month ?? null) : null,
@@ -213,8 +218,12 @@ export default async function SchedulePage({
   });
 
   // Soft demand ("thinking about it") = deposit paid but no removal on the diary yet.
+  // A cancelled booking keeps quote.status='accepted' + deposit_paid_at (cancelBookingAction
+  // only stamps booking_cancelled_at and cancels the removal appointment), so without the
+  // booking_cancelled_at guard a refunded customer re-enters "thinking about it" and staff
+  // ring them to reserve against a deposit already given back.
   const softDemand: SoftDemandItem[] = quotes
-    .filter((q) => q.lead_id && q.deposit_paid_at && !removalLeadIds.has(q.lead_id))
+    .filter((q) => q.lead_id && q.deposit_paid_at && !q.booking_cancelled_at && !removalLeadIds.has(q.lead_id))
     .map((q) => {
       const lead = leadById.get(q.lead_id!);
       const bd = bdByLead.get(q.lead_id!);
@@ -239,13 +248,11 @@ export default async function SchedulePage({
     return t.toISOString().slice(0, 10);
   };
   const selectedDate = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : ukToday;
-  const fleet = { vans: (vehicles ?? []).length, crew: (staff ?? []).length };
 
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
       <PageHeader eyebrow="Schedule" title="Schedule & Allocation" />
       <ScheduleAllocationView
-        fleet={fleet}
         availAppts={availAppts}
         softDemand={softDemand}
         selectedDate={selectedDate}

@@ -212,6 +212,12 @@ export default async function RefundsPage() {
     todayUkDay: ukDayOf(new Date().toISOString()) ?? new Date().toISOString().slice(0, 10),
   });
 
+  // The "To pay out" money value (outstandingPence) only sums refund-still-due,
+  // so its sub-count must scope to entries that actually contribute: date-change
+  // rows (refund due £0 while the booking stands) and already-executed-but-not-
+  // closed rows both have outstanding £0 and would inflate a raw toExecuteCount.
+  const payingOutCount = view.toExecute.filter((i) => i.outstandingPence > 0).length;
+
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
       <PageHeader eyebrow="Finance" title="Refunds" />
@@ -225,7 +231,7 @@ export default async function RefundsPage() {
         <Stat
           label="To pay out"
           value={gbpPence(view.totals.outstandingPence)}
-          sub={`across ${view.totals.toExecuteCount} ${view.totals.toExecuteCount === 1 ? "entry" : "entries"}`}
+          sub={`across ${payingOutCount} ${payingOutCount === 1 ? "entry" : "entries"}`}
         />
         <Stat
           label="Held on open entries"

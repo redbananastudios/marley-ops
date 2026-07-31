@@ -210,8 +210,8 @@ export default async function PaymentsPage({
     suggested: BankFeedTx[];
     mismatches: BankFeedTx[];
     dayRows: BankFeedTx[];
+    unmatched: BankFeedTx[];
     lastSync: string | null;
-    unmatchedCount: number;
   } | null = null;
   if (bankFeedConfigured()) {
     const TX_COLS =
@@ -236,9 +236,23 @@ export default async function PaymentsPage({
         .from("bank_transactions")
         .select(TX_COLS)
         .eq("tx_date", window.day)
-        .neq("status", "info") // inbound rows are exactly the non-info ones
+        // inbound rows are the non-info ones; dismissed money is cleared and
+        // must disappear from the day feed (it's already off the counts).
+        .not("status", "in", "(info,dismissed)")
         .order("tx_time", { ascending: false }),
-      sb.from("bank_transactions").select("id", { count: "exact", head: true }).eq("status", "unmatched"),
+      // Plain unmatched inbound across ALL dates — money we don't recognise
+      // (old-system transfers, non-customer credits). matched_quote_id is null
+      // so this never overlaps the mismatch queue (those NAME a quote). Each
+      // row is clearable; surfacing them all-dates is what makes the count and
+      // the visible list agree instead of counting prior-day rows the day feed
+      // hides.
+      sb
+        .from("bank_transactions")
+        .select(TX_COLS)
+        .eq("status", "unmatched")
+        .is("matched_quote_id", null)
+        .order("tx_date", { ascending: false })
+        .limit(50),
       sb
         .from("cron_runs")
         .select("finished_at, status")
@@ -292,8 +306,8 @@ export default async function PaymentsPage({
       suggested: (sugRes.data ?? []).map(toTx),
       mismatches: (misRes.data ?? []).map(toTx),
       dayRows: (dayRes.data ?? []).map(toTx),
+      unmatched: (unmatchedRes.data ?? []).map(toTx),
       lastSync,
-      unmatchedCount: unmatchedRes.count ?? 0,
     };
   }
 
@@ -364,9 +378,9 @@ export default async function PaymentsPage({
           suggested={bank.suggested}
           mismatches={bank.mismatches}
           dayRows={bank.dayRows}
+          unmatched={bank.unmatched}
           dayLabelText={window.isToday ? "so far today" : `on ${dayLabel(window.day, false)}`}
           lastSync={bank.lastSync}
-          unmatchedCount={bank.unmatchedCount}
         />
       ) : (
         <Card className="flex items-start gap-3 border-dashed px-5 py-4">

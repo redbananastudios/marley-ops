@@ -321,6 +321,12 @@ function MarkRailDialog({
 function CompleteDialog({ item, isDateChange }: { item: QueueItemView; isDateChange: boolean }) {
   const [open, setOpen] = useState(false);
   const { processing, busy, run } = useRun();
+  // The email itemises one line PER PAYMENT with a refund due (refundLinesFor
+  // iterates rail.payments), not per rail — a single card rail can hold several
+  // card payments, so counting rails would understate what the customer sees.
+  const refundLineCount = item.rails
+    .flatMap((r) => r.payments)
+    .filter((p) => p.refundDuePence > 0).length;
   return (
     <Dialog
       open={open}
@@ -355,8 +361,8 @@ function CompleteDialog({ item, isDateChange }: { item: QueueItemView; isDateCha
             <>
               This closes the entry and sends the customer ONE itemised email confirming{" "}
               {gbpPence(item.refundDuePence)} has been returned across{" "}
-              {item.rails.filter((r) => r.refundDuePence > 0).length}{" "}
-              {item.rails.filter((r) => r.refundDuePence > 0).length === 1 ? "payment" : "payments"}.
+              {refundLineCount}{" "}
+              {refundLineCount === 1 ? "payment" : "payments"}.
             </>
           )}
         </p>

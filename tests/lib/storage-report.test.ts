@@ -45,6 +45,11 @@ describe("weeklyRate", () => {
     expect(weeklyRate({ rate: 130, rate_period: "month" })).toBeCloseTo(30, 5);
     expect(weeklyRate({ rate: null, rate_period: "week" })).toBeNull();
   });
+
+  it("normalises daily (crate) rates to weekly (×7) — not treated as £/week", () => {
+    expect(weeklyRate({ rate: 3, rate_period: "day" })).toBe(21);
+    expect(weeklyRate({ rate: null, rate_period: "day" })).toBeNull();
+  });
 });
 
 describe("buildStorageReport", () => {
@@ -92,6 +97,15 @@ describe("buildStorageReport", () => {
     expect(r.recurring.pricedLets).toBe(2);
     expect(r.recurring.unpricedLets).toBe(1);
     expect(r.avgWeeklyRate).toBe(27.5);
+  });
+
+  it("crate day-rate lets contribute their weekly-equivalent, not the day rate as £/week", () => {
+    // One open crate at £3/day, started 28 days before TODAY (2026-06-12 → 2026-07-10).
+    const lets = [let_({ id: "crate", unit_id: "u1", rate: 3, rate_period: "day", start_date: "2026-06-12" })];
+    const r = buildStorageReport(sites, units, lets, TODAY);
+    expect(r.recurring.perWeek).toBe(21); // £3/day → £21/week run-rate, not £3
+    expect(r.avgWeeklyRate).toBe(21);
+    expect(r.earnedToDate).toBe(84); // 4 weeks × £21, not letWeeks × £3
   });
 
   it("earned-to-date covers open lets up to today and ended lets to their end", () => {

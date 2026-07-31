@@ -102,6 +102,29 @@ export function marginPct(revenue: number, cost: number): number {
 }
 
 /**
+ * Revenue to use for a job's MARGIN — the gross price the customer paid minus the
+ * VAT the business actually hands to HMRC, so pass-through tax isn't read as profit.
+ *
+ * A quote's agreed_price / grand_total is the GROSS (VAT-inclusive when the quote
+ * charged VAT). The rate-card jobCost carries no VAT, so to compare like-for-like we
+ * strip the VAT LIABILITY off revenue (mirrors lib/finance/invoices.ts `vatOwed`):
+ *   - vatEnabled false → the price carried no VAT; nothing to strip → net = gross.
+ *   - standard scheme  → owe the 20% charged             → net = gross / 1.2.
+ *   - flat_rate (FRS)  → owe flatPct × VAT-inclusive gross → net = gross × (1 − flatPct/100).
+ * Under the FRS the business keeps the VAT surplus (20% charged − flat % paid), so that
+ * surplus is genuine margin and only the flat % owed to HMRC is removed.
+ */
+export function marginRevenue(gross: number, vatEnabled: boolean, s: BusinessSettings): number {
+  if (!(gross > 0)) return 0;
+  if (!vatEnabled) return gross;
+  if (s.vatScheme === "flat_rate") {
+    const pct = Number.isFinite(s.vatFlatRatePct) ? Math.max(0, s.vatFlatRatePct) : 0;
+    return gross * (1 - pct / 100);
+  }
+  return gross / 1.2;
+}
+
+/**
  * A lead's 3rd-party referral commission as a job cost. Some manually-added
  * leads carry a fee owed to whoever referred them — profit/margin surfaces
  * (dashboard KPI, Performance "Jobs & margin") add it to the rate-card job

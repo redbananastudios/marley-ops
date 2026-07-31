@@ -4,6 +4,43 @@ import { FollowUpsQueue, type FollowUpRow } from "@/components/followups/followu
 
 export const dynamic = "force-dynamic";
 
+type QuoteContextRow = {
+  lead_id: string | null;
+  quote_ref: string;
+  status: string;
+  agreed_price: number | null;
+  grand_total: number | null;
+  created_at: string;
+};
+
+/**
+ * Best quote context per lead for the chase amount: an accepted quote always wins;
+ * otherwise the latest LIVE ('sent') quote by created_at desc. Superseded / rejected /
+ * draft quotes are never used, so we can't latch onto a stale value (L5, audit 2026-07-31).
+ * Ordering is enforced here (not by DB physical order) so the result is deterministic.
+ */
+export function pickBestQuoteByLead(
+  quotes: QuoteContextRow[],
+): Map<string, { ref: string; value: number | null }> {
+  const valueOf = (q: QuoteContextRow) =>
+    q.agreed_price != null ? Number(q.agreed_price) : q.grand_total != null ? Number(q.grand_total) : null;
+  const byNewest = [...quotes].sort((a, b) => b.created_at.localeCompare(a.created_at));
+  const out = new Map<string, { ref: string; value: number | null }>();
+  const acceptedLeads = new Set<string>();
+  for (const q of byNewest) {
+    if (!q.lead_id) continue;
+    if (q.status === "accepted") {
+      if (!acceptedLeads.has(q.lead_id)) out.set(q.lead_id, { ref: q.quote_ref, value: valueOf(q) });
+      acceptedLeads.add(q.lead_id); // first (newest) accepted wins
+      continue;
+    }
+    if (acceptedLeads.has(q.lead_id)) continue; // accepted beats any sent quote
+    if (q.status !== "sent") continue; // ignore superseded / rejected / draft
+    if (!out.has(q.lead_id)) out.set(q.lead_id, { ref: q.quote_ref, value: valueOf(q) }); // newest sent
+  }
+  return out;
+}
+
 export default async function FollowUpsPage() {
   const sb = await createClient();
 
@@ -29,19 +66,12 @@ export default async function FollowUpsPage() {
     leadIds.length
       ? sb
           .from("quotes")
-          .select("id, lead_id, quote_ref, status, agreed_price, grand_total")
+          .select("id, lead_id, quote_ref, status, agreed_price, grand_total, created_at")
           .in("lead_id", leadIds)
       : Promise.resolve({ data: [] }),
   ]);
   const leadOf = new Map((leads ?? []).map((l) => [l.id, l]));
-  // Best quote context per lead: accepted first, else the latest by ref.
-  const quoteOf = new Map<string, { ref: string; value: number | null }>();
-  for (const q of quotes ?? []) {
-    if (!q.lead_id) continue;
-    const cur = quoteOf.get(q.lead_id);
-    const value = q.agreed_price != null ? Number(q.agreed_price) : q.grand_total != null ? Number(q.grand_total) : null;
-    if (!cur || q.status === "accepted") quoteOf.set(q.lead_id, { ref: q.quote_ref, value });
-  }
+  const quoteOf = pickBestQuoteByLead((quotes ?? []) as QuoteContextRow[]);
 
   const rows: FollowUpRow[] = open.map((f) => {
     const lead = leadOf.get(f.lead_id);

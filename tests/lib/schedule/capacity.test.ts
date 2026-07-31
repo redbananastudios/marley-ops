@@ -3,10 +3,23 @@ import {
   dayCapacityState,
   sumRequired,
   needsDriverWarning,
+  usableFleetForDay,
+  MIN_BOOKED_REQUIREMENT,
   DEFAULT_THRESHOLDS,
+  type FleetVehicle,
 } from "@/lib/schedule/capacity";
 
 const fleet = { vans: 3, crew: 6 };
+
+/** A road-legal vehicle (no expiry dates set → never auto off-road). */
+const van = (id: string): FleetVehicle => ({
+  id,
+  tax_due: null,
+  mot_due: null,
+  insurance_renewal: null,
+  service_due: null,
+  end_of_term: null,
+});
 
 describe("dayCapacityState", () => {
   it("is available when a spare van AND crew remain", () => {
@@ -75,6 +88,69 @@ describe("sumRequired", () => {
 
   it("empty day sums to zero", () => {
     expect(sumRequired([])).toEqual({ requiredVans: 0, requiredCrew: 0 });
+  });
+});
+
+describe("usableFleetForDay", () => {
+  const day = "2026-08-05";
+  const vehicles = [van("v1"), van("v2")];
+
+  it("counts crew working that day and all road-legal vans", () => {
+    // working_days = every day → available regardless of the calendar weekday.
+    const staff = [
+      { id: "s1", working_days: [1, 2, 3, 4, 5, 6, 7] },
+      { id: "s2", working_days: [1, 2, 3, 4, 5, 6, 7] },
+    ];
+    expect(
+      usableFleetForDay({ day, staff, vehicles, availByStaff: new Map(), unavailByVehicle: new Map() }),
+    ).toEqual({ vans: 2, crew: 2 });
+  });
+
+  it("drops crew who don't work that day — the weekend bug: 0 usable crew, not the full headcount", () => {
+    // No set working days → off every day unless an explicit override says otherwise.
+    const staff = [
+      { id: "s1", working_days: [] },
+      { id: "s2", working_days: [] },
+    ];
+    const r = usableFleetForDay({ day, staff, vehicles, availByStaff: new Map(), unavailByVehicle: new Map() });
+    expect(r.crew).toBe(0); // matches the Job Board's 0 crew on a non-working day
+    expect(r.vans).toBe(2); // vans are unaffected by the crew pattern
+  });
+
+  it("a per-date 'available' override brings an off-pattern crew member back", () => {
+    const staff = [{ id: "s1", working_days: [] }];
+    const availByStaff = new Map([[
+      "s1",
+      [{ date: day, status: "available" as const, note: null }],
+    ]]);
+    expect(
+      usableFleetForDay({ day, staff, vehicles: [], availByStaff, unavailByVehicle: new Map() }).crew,
+    ).toBe(1);
+  });
+
+  it("drops a van inside an off-road window", () => {
+    const unavailByVehicle = new Map([[
+      "v1",
+      [{ start_date: day, end_date: day, reason: "repair" }],
+    ]]);
+    const r = usableFleetForDay({ day, staff: [], vehicles, availByStaff: new Map(), unavailByVehicle });
+    expect(r.vans).toBe(1); // v1 off the road, v2 still usable
+  });
+});
+
+describe("MIN_BOOKED_REQUIREMENT", () => {
+  it("floors a booked-but-unpriced removal at a van and a two-person crew (never zero)", () => {
+    expect(MIN_BOOKED_REQUIREMENT).toEqual({ requiredVans: 1, requiredCrew: 2 });
+  });
+
+  it("keeps a day carrying one unpriced booked move from grading as sellable-empty", () => {
+    // One committed move, a fleet of exactly a van + two crew → everything is committed.
+    const graded = dayCapacityState({
+      ...sumRequired([MIN_BOOKED_REQUIREMENT]),
+      fleet: { vans: 1, crew: 2 },
+    });
+    expect(graded.state).toBe("full");
+    expect(graded).toMatchObject({ freeVans: 0, freeCrew: 0 });
   });
 });
 

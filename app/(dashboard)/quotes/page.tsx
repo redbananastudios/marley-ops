@@ -10,7 +10,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 export const dynamic = "force-dynamic";
 
 const QUOTE_COLUMNS =
-  "id, quote_ref, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, accepted_at, lead_id, created_at, updated_at, deposit_paid_at";
+  "id, quote_ref, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, lead_id, created_at, updated_at, deposit_paid_at";
 
 export default async function QuotesPage({
   searchParams,

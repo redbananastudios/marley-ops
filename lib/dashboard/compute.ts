@@ -86,6 +86,9 @@ export interface PeriodStats {
   margin: number;
   /** margin as a % of wonValue */
   marginPct: number;
+  /** median minutes to first contact, over the leads that CAME IN this period
+   *  (null when none were contacted) — cohort-scoped like every other tile. */
+  medianRespMins: number | null;
   leadToSurveyPct: number;
   leadToJobPct: number;
   surveyToJobPct: number;
@@ -162,6 +165,19 @@ export function classifySource(l: SourceSignals): SourceKey {
 }
 
 const pct = (num: number, den: number): number => (den > 0 ? Math.round((num / den) * 100) : 0);
+
+/** An accepted quote only counts as a WON job while its booking stands. A
+ *  cancelled booking leaves the quote at status='accepted' but stamps
+ *  booking_cancelled_at (and flips the lead to 'declined'); it must NOT land in
+ *  the won/margin/ROAS/estimator KPIs — /bookings and lib/sales-report drop it
+ *  too, and the dashboard must match. */
+export function isWonQuote(q: {
+  status: string;
+  lead_id: string | null;
+  booking_cancelled_at?: string | null;
+}): boolean {
+  return q.status === "accepted" && !q.booking_cancelled_at && !!q.lead_id;
+}
 
 export interface ProgressSets {
   /** lead ids with a (non-cancelled) survey appointment */
@@ -312,6 +328,18 @@ export function buildPeriodStats(
     .filter((l) => classifySource(l) === "google_ads")
     .reduce((sum, l) => sum + (prog.won.get(l.id) ?? 0), 0);
 
+  /* median first-response for THIS cohort (re-scopes with the period toggle) */
+  const respMins = cohort
+    .map((l) => {
+      const start = l.submitted_at || l.created_at;
+      if (!l.first_contacted_at || !start) return null;
+      const m = (new Date(l.first_contacted_at).getTime() - new Date(start).getTime()) / 60000;
+      return Number.isFinite(m) && m >= 0 ? m : null;
+    })
+    .filter((m): m is number => m != null)
+    .sort((a, b) => a - b);
+  const medianRespMins = respMins.length ? respMins[Math.floor(respMins.length / 2)] : null;
+
   return {
     key,
     label: LABELS[key].label,
@@ -326,6 +354,7 @@ export function buildPeriodStats(
     wonCost,
     margin,
     marginPct: marginPctVal,
+    medianRespMins,
     leadToSurveyPct: pct(surveys, newLeads),
     leadToJobPct: pct(jobs, newLeads),
     surveyToJobPct: pct(jobs, surveys),

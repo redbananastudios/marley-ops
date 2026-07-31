@@ -270,6 +270,12 @@ export default async function BookingsPage() {
     seen.add(lead.id);
     const agreed = Number(q.agreed_price ?? q.grand_total ?? 0);
     const deposit = Number(q.deposit_amount ?? settings.defaultDeposit);
+    // Raised 25% commitment carved out of the balance, mirroring the
+    // authoritative computeBalanceCredits (accept-flow.ts): the balance invoice
+    // will be agreed − deposit − commitment. commitment_invoice_amount is
+    // written atomically with the real Zoho id (only >0 once the -COM invoice
+    // is raised), so it's the correct pre-invoice credit signal.
+    const commitmentCredit = Number(q.commitment_invoice_amount ?? 0);
     const appt = apptByLead.get(lead.id) ?? null;
     const bd = bdByLead.get(lead.id);
     const row: Omit<Row, "bucket"> = {
@@ -282,7 +288,7 @@ export default async function BookingsPage() {
       depositPaidAt: q.deposit_paid_at,
       depositSelfreportAt: q.deposit_selfreport_at,
       commitmentPaidAt: (q.commitment_paid_at as string | null) ?? null,
-      commitmentInvoiceAmount: Number(q.commitment_invoice_amount ?? 0),
+      commitmentInvoiceAmount: commitmentCredit,
       commitmentDueDate: (q.commitment_due_date as string | null) ?? null,
       dateReleasableAt: (q.date_releasable_at as string | null) ?? null,
       acceptedAt: q.accepted_at,
@@ -295,7 +301,11 @@ export default async function BookingsPage() {
         q.zoho_balance_invoice_id && q.zoho_balance_invoice_id !== "pending"
           ? (q.zoho_balance_invoice_number as string | null)
           : null,
-      balanceAmount: Number(q.balance_invoice_amount ?? balanceDue(agreed, deposit)),
+      // Once the balance invoice is raised we trust its frozen amount; before
+      // it exists, subtract BOTH the deposit and the raised commitment so the
+      // displayed "outstanding" matches what createBalanceInvoiceFlow will
+      // actually raise (agreed − deposit − commitment). balanceDue clamps ≥ 0.
+      balanceAmount: Number(q.balance_invoice_amount ?? balanceDue(agreed, deposit + commitmentCredit)),
       apptId: appt?.id ?? null,
       apptStartsAt: appt?.startsAt ?? null,
       apptEndsAt: appt?.endsAt ?? null,

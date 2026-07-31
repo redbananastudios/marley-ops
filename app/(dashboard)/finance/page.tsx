@@ -138,6 +138,8 @@ export default async function FinancePage({
   let quarterInvoices: ZohoInvoiceListItem[] = [];
   let unpaidInvoices: ZohoInvoiceListItem[] = [];
   let unpaidTruncated = false;
+  let mtdTruncated = false;
+  let quarterTruncated = false;
   let zohoError: string | null = null;
   try {
     const [dayL, mtdL, quarterL, unpaidL] = await Promise.all([
@@ -151,6 +153,11 @@ export default async function FinancePage({
     quarterInvoices = quarterL.invoices;
     unpaidInvoices = unpaidL.invoices;
     unpaidTruncated = unpaidL.truncated;
+    // The month/quarter windows can also hit the 2,000-row cap — surface it, or
+    // an over-cap quarter silently UNDERSTATES the "authoritative" VAT/turnover.
+    // (A single day can't plausibly exceed the cap, so dayL.truncated is moot.)
+    mtdTruncated = mtdL.truncated;
+    quarterTruncated = quarterL.truncated;
   } catch (err) {
     zohoError = err instanceof Error ? err.message : "Could not reach Zoho.";
   }
@@ -224,12 +231,20 @@ export default async function FinancePage({
         <Stat
           label="Month so far"
           value={fmtGBP(mtdSummary.gross)}
-          sub={`owed ${fmtGBP(mtdVat.owed)}${frs ? ` (FRS ${pct}%)` : " VAT"} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`}
+          sub={
+            mtdTruncated
+              ? `first 2,000 invoices only — figure UNDERSTATES, check Zoho`
+              : `owed ${fmtGBP(mtdVat.owed)}${frs ? ` (FRS ${pct}%)` : " VAT"} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`
+          }
         />
         <Stat
           label="VAT quarter to date"
           value={fmtGBP(quarterVat.owed)}
-          sub={`${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)}${frs ? ` · FRS ${pct}%` : ""} · cycle in Settings`}
+          sub={
+            quarterTruncated
+              ? `first 2,000 invoices only — VAT owed UNDERSTATES, check Zoho`
+              : `${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)}${frs ? ` · FRS ${pct}%` : ""} · cycle in Settings`
+          }
         />
         <Stat
           label="Outstanding"
@@ -249,7 +264,7 @@ export default async function FinancePage({
             Invoices raised {isToday ? "today" : dayLabel(day)}
           </h2>
           <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-semibold tabular text-mist-500">
-            {dayInvoices.length}
+            {daySummary.count}
           </span>
         </div>
         {dayInvoices.length === 0 ? (

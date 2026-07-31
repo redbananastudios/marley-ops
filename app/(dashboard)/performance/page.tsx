@@ -7,7 +7,7 @@ import { Card } from "@/components/ui/card";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { getBusinessSettings } from "@/lib/settings";
-import { jobCost, marginPct, boxesFromItems, commissionCost } from "@/lib/margin";
+import { jobCost, marginPct, marginRevenue, boxesFromItems, commissionCost } from "@/lib/margin";
 import { lossReasonLabel } from "@/lib/quote/chase";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import { SalesTab } from "@/components/performance/sales-tab";
@@ -336,11 +336,18 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const jobs = (acceptedQuotes ?? []).map((q) => {
     const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
     const blob = (q.state_blob as { items?: Record<string, number>; job?: { days?: number } } | null) ?? null;
-    const revenue = Number(q.agreed_price ?? q.grand_total ?? 0);
+    // Margin compares like-for-like ex-VAT: strip the VAT the customer merely passes
+    // through to HMRC off the gross price (Marley is VAT-registered, quotes default
+    // VAT-on) so pass-through tax isn't counted as profit against the VAT-free rate card.
+    const gross = Number(q.agreed_price ?? q.grand_total ?? 0);
+    const revenue = marginRevenue(gross, b.vatEnabled ?? true, settings);
     const cost = jobCost(
       {
         vehicle: b.vehicle ?? "1luton",
         sevenFiveT: b.sevenFiveT ?? (b.has75T ? 1 : 0),
+        // Add-on Transit vans carry crew labour + fuel; the revenue was priced with
+        // them, so the cost must include them too (else margin is overstated).
+        transitVans: b.transitVans ?? 0,
         totalMiles: Number(b.totalMiles ?? 0),
         boxes: boxesFromItems(blob?.items),
         days: Math.max(1, Number(blob?.job?.days ?? 1)),

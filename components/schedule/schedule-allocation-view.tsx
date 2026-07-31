@@ -20,7 +20,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarClock, CalendarRange, ChevronLeft, ChevronRight, Plus, SquarePen, TriangleAlert, Truck, UsersRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apptDays, apptWindow } from "@/lib/job-board";
-import { dayCapacityState, sumRequired, type CapacityState } from "@/lib/schedule/capacity";
+import { dayCapacityState, sumRequired, usableFleetForDay, type CapacityState } from "@/lib/schedule/capacity";
+import { type AvailabilityRow } from "@/lib/staff/availability";
+import { type UnavailabilityWindow } from "@/lib/fleet/availability";
 import {
   BookingDetailsDialog,
   type BookingDetailsContext,
@@ -212,7 +214,6 @@ function Estimate({ vans, crew }: { vans: number | null; crew: number | null }):
 }
 
 export function ScheduleAllocationView(props: {
-  fleet: { vans: number; crew: number };
   availAppts: AvailAppt[];
   softDemand: SoftDemandItem[];
   selectedDate: string; // YYYY-MM-DD
@@ -233,7 +234,7 @@ export function ScheduleAllocationView(props: {
     today: string;
   };
 }): React.JSX.Element {
-  const { fleet, availAppts, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
+  const { availAppts, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -378,8 +379,36 @@ export function ScheduleAllocationView(props: {
     return m;
   }, [availAppts]);
 
+  // Per-day availability lookups, built from the SAME board data the Job Board uses —
+  // so the Availability calendar and Day Allocation grade a day against the identical
+  // "who's actually working / which vans are on the road" picture.
+  const availByStaff = useMemo(() => {
+    const m = new Map<string, AvailabilityRow[]>();
+    for (const a of board.staffAvailability) {
+      const list = m.get(a.staff_id) ?? [];
+      list.push({ date: a.date, status: a.status as "available" | "unavailable", note: a.note });
+      m.set(a.staff_id, list);
+    }
+    return m;
+  }, [board.staffAvailability]);
+  const unavailByVehicle = useMemo(() => {
+    const m = new Map<string, UnavailabilityWindow[]>();
+    for (const u of board.unavailability) {
+      const list = m.get(u.vehicle_id) ?? [];
+      list.push({ start_date: u.start_date, end_date: u.end_date, reason: u.reason });
+      m.set(u.vehicle_id, list);
+    }
+    return m;
+  }, [board.unavailability]);
+
+  // The fleet genuinely usable on a given day (crew off / vans off-road excluded),
+  // NOT a constant all-time headcount — a weekend nobody works reads 0 crew, matching
+  // the Job Board's 0/0 instead of the calendar falsely showing full crew.
+  const fleetForDay = (iso: string) =>
+    usableFleetForDay({ day: iso, staff: board.staff, vehicles: board.vehicles, availByStaff, unavailByVehicle });
+
   // Grade a day for sellability — worst of vans/crew wins (see lib/schedule/capacity).
-  const gradeOf = (iso: string) => dayCapacityState({ ...sumRequired(apptsByDay.get(iso) ?? []), fleet });
+  const gradeOf = (iso: string) => dayCapacityState({ ...sumRequired(apptsByDay.get(iso) ?? []), fleet: fleetForDay(iso) });
 
   // 42-cell Mon-first grid for the cursor month.
   const cells = useMemo(() => {
@@ -442,6 +471,7 @@ export function ScheduleAllocationView(props: {
     });
   }, [softDemand, selectedDate]);
 
+  const selFleet = fleetForDay(selectedDate);
   const sel = gradeOf(selectedDate);
   const dayJobs = useMemo(
     () =>
@@ -697,7 +727,7 @@ export function ScheduleAllocationView(props: {
                     </p>
                     <p className={cn("tabular mt-0.5 text-lg font-bold", metricTone(sel.freeVans))}>
                       {sel.freeVans}
-                      <span className="text-xs font-medium text-mist-400"> / {fleet.vans}</span>
+                      <span className="text-xs font-medium text-mist-400"> / {selFleet.vans}</span>
                     </p>
                   </div>
                   <div className="rounded-md border border-border bg-muted/40 p-2.5">
@@ -707,7 +737,7 @@ export function ScheduleAllocationView(props: {
                     </p>
                     <p className={cn("tabular mt-0.5 text-lg font-bold", metricTone(sel.freeCrew))}>
                       {sel.freeCrew}
-                      <span className="text-xs font-medium text-mist-400"> / {fleet.crew}</span>
+                      <span className="text-xs font-medium text-mist-400"> / {selFleet.crew}</span>
                     </p>
                   </div>
                 </div>

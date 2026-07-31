@@ -11,6 +11,7 @@ import { requireOfficeProfile } from "@/lib/ai/auth";
 import {
   CLAIM_CHANNEL_LABEL,
   CLAIM_RESOLUTION_LABEL,
+  OPEN_CLAIM_STATUSES,
   claimRef,
   daysOpen,
   isOpenClaimStatus,
@@ -56,19 +57,28 @@ export default async function ClaimsPage({
   const tab = (TABS.find((t) => t.key === sp.tab)?.key ?? "open") as "open" | "closed" | "all";
 
   const sb = await createClient();
-  const { data: rows } = await sb
-    .from("claims")
-    .select(
-      "id, claim_no, lead_id, client_id, status, reported_at, reported_channel, description, resolution, resolution_amount, closed_at",
-    )
-    .order("reported_at", { ascending: false })
-    .limit(400);
+  // Open-claim badge is the live-liability signal, so it must be the TRUE total,
+  // not "open within the 400 most-recently-reported" — a head count query keeps
+  // it independent of the display window (which caps at 400 for render weight).
+  const [{ data: rows }, { count: openTotal }] = await Promise.all([
+    sb
+      .from("claims")
+      .select(
+        "id, claim_no, lead_id, client_id, status, reported_at, reported_channel, description, resolution, resolution_amount, closed_at",
+      )
+      .order("reported_at", { ascending: false })
+      .limit(400),
+    sb
+      .from("claims")
+      .select("id", { count: "exact", head: true })
+      .in("status", [...OPEN_CLAIM_STATUSES]),
+  ]);
 
   const all = rows ?? [];
   const claims = all.filter((c) =>
     tab === "all" ? true : tab === "open" ? isOpenClaimStatus(c.status) : !isOpenClaimStatus(c.status),
   );
-  const openCount = all.filter((c) => isOpenClaimStatus(c.status)).length;
+  const openCount = openTotal ?? all.filter((c) => isOpenClaimStatus(c.status)).length;
 
   const leadIds = [...new Set(claims.map((c) => c.lead_id))];
   // PostgREST .in() rides the GET query string — past ~200 UUIDs it 414s and

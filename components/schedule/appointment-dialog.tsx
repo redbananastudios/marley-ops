@@ -127,6 +127,17 @@ function defaultDuration(type: ApptType): number {
   return type === "removal" ? 3 : 1;
 }
 
+/** A removal is a single-day job: keep the END on the SAME calendar day as the
+ *  start. All day → a full-day end; otherwise start + the default duration,
+ *  clamped so it can never roll onto the next date (Peter, 2026-07-31). */
+function sameDayEnd(startLocal: string, allDayFlag: boolean): string {
+  if (!startLocal) return "";
+  const datePart = startLocal.slice(0, 10);
+  if (allDayFlag) return `${datePart}T17:00`;
+  const withHours = addHoursLocal(startLocal, defaultDuration("removal"));
+  return withHours.slice(0, 10) === datePart ? withHours : `${datePart}T23:45`;
+}
+
 /** One line per address part (street / town / postcode stacked). Module-scope
  *  so it isn't re-created on every render of the panels. */
 function AddrBlock({ lines }: { lines: string[] }) {
@@ -336,7 +347,12 @@ export function AppointmentDialog({
         defaultType === "removal" ? presetLead?.surveyEstimatorId ?? NO_EST : defaultEstimatorId ?? NO_EST,
       );
       setStart(s);
-      setEnd(presetEnd ?? addHoursLocal(s, defaultDuration(defaultType)));
+      setEnd(
+        presetEnd ??
+          (defaultType === "removal"
+            ? sameDayEnd(s, !!presetAllDay)
+            : addHoursLocal(s, defaultDuration(defaultType))),
+      );
       setNotes("");
       setAllDay(!!presetAllDay);
       setPackOn(false);
@@ -345,10 +361,14 @@ export function AppointmentDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edit?.id]);
 
-  // Keep end ahead of start in create mode when start moves.
+  // Keep end ahead of start in create mode when start moves. A removal stays a
+  // single-day job, so its End tracks the start's DATE (and All day if set).
   function onStartChange(v: string) {
     setStart(v);
-    if (!isEdit && v && (!end || new Date(end) <= new Date(v))) {
+    if (isEdit) return;
+    if (apptType === "removal") {
+      setEnd(sameDayEnd(v, allDay));
+    } else if (v && (!end || new Date(end) <= new Date(v))) {
       setEnd(addHoursLocal(v, defaultDuration(apptType)));
     }
   }
@@ -566,14 +586,30 @@ export function AppointmentDialog({
             </div>
             {apptType === "removal" ? (
               <div className="grid gap-2">
-                <Label htmlFor="appt-end">Ends</Label>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="appt-end">Ends</Label>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs font-medium text-mist-500">
+                    <input
+                      type="checkbox"
+                      checked={allDay}
+                      onChange={(e) => {
+                        const c = e.target.checked;
+                        setAllDay(c);
+                        setEnd(sameDayEnd(start, c));
+                      }}
+                      disabled={lockTiming}
+                      className="size-3.5 accent-mm-red"
+                    />
+                    All day
+                  </label>
+                </div>
                 <Input
                   id="appt-end"
                   type="datetime-local"
                   step={900}
                   value={end}
                   onChange={(e) => setEnd(e.target.value)}
-                  disabled={lockTiming}
+                  disabled={lockTiming || allDay}
                 />
               </div>
             ) : null}

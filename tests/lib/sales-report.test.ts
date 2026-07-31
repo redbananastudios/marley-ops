@@ -177,6 +177,31 @@ describe("buildSalesReport", () => {
     expect(org).toMatchObject({ enquiries: 1, won: 0, value: 0 });
   });
 
+  it("a deposit carried onto a re-quote counts once, not per superseded row", () => {
+    // Re-quote path: old quote superseded, its paid deposit copied onto the new
+    // accepted quote — the stamp exists on BOTH rows. Only the live one may count.
+    const quotes = [
+      quote({
+        id: "old",
+        lead_id: "L",
+        status: "superseded",
+        deposit_amount: 100,
+        deposit_paid_at: "2026-07-05T10:00:00+01:00",
+      }),
+      quote({
+        id: "new",
+        lead_id: "L",
+        status: "accepted",
+        agreed_price: 2200,
+        accepted_at: "2026-07-06T10:00:00+01:00",
+        deposit_amount: 100,
+        deposit_paid_at: "2026-07-05T10:00:00+01:00",
+      }),
+    ];
+    const r = buildSalesReport(quotes, [lead({ id: "L", status: "confirmed" })], [], FROM, TO);
+    expect(r.paid).toEqual({ total: 100, count: 1 }); // the single £100 actually received
+  });
+
   it("empty period returns nulls, not divide-by-zero", () => {
     const r = buildSalesReport([], [], [], FROM, TO);
     expect(r.conversionPct).toBeNull();

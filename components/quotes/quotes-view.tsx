@@ -41,6 +41,11 @@ export interface QuoteRow {
   lead_id: string | null;
   created_at: string | null;
   updated_at: string | null;
+  /** The real send timestamp. Unlike updated_at (reset by the BEFORE-UPDATE
+   *  trigger on any row write) this only stamps when the quote is emailed, so
+   *  it's the honest anchor for the "sent … ago" chase clock. Optional so the
+   *  view stays safe if the page query hasn't selected it. */
+  email_sent_at?: string | null;
   deposit_paid_at?: string | null;
 }
 
@@ -71,7 +76,10 @@ function ago(d: string | null, now: number): string {
  *  once per mount upstream (react-hooks/purity: no Date.now() in render). */
 function FollowUp({ quote, now }: { quote: QuoteRow; now: number }) {
   if (quote.status !== "sent") return null;
-  const since = quote.updated_at || quote.created_at;
+  // Anchor on the true send time. updated_at is reset to now() by the quotes
+  // BEFORE-UPDATE trigger on any row write (edit, reassign), which would flip a
+  // genuinely-cold quote back to "sent 0m ago" and drop it off the chase radar.
+  const since = quote.email_sent_at ?? quote.created_at;
   const days = since ? Math.floor((now - new Date(since).getTime()) / 86_400_000) : 0;
   const tone = days >= 7 ? "bg-danger-bg text-danger" : days >= 3 ? "bg-warn-bg text-warn" : "bg-mist-100 text-charcoal";
   return (
@@ -79,6 +87,48 @@ function FollowUp({ quote, now }: { quote: QuoteRow; now: number }) {
       sent {ago(since, now)} ago · follow up
     </span>
   );
+}
+
+/** One quote per lead — prefer the accepted one, else the latest by created_at;
+ *  draft + superseded excluded. Orphans (no lead_id) each stand alone. Mirrors
+ *  lib/sales-report.ts dedupePerLead so the win rate agrees with the Sales tab. */
+export function dedupePerLead(quotes: QuoteRow[]): QuoteRow[] {
+  const byLead = new Map<string, QuoteRow>();
+  const orphans: QuoteRow[] = [];
+  for (const q of quotes) {
+    if (q.status === "superseded" || q.status === "draft") continue;
+    if (!q.lead_id) {
+      orphans.push(q);
+      continue;
+    }
+    const cur = byLead.get(q.lead_id);
+    if (!cur) {
+      byLead.set(q.lead_id, q);
+      continue;
+    }
+    const better =
+      (q.status === "accepted" && cur.status !== "accepted") ||
+      ((q.status === "accepted") === (cur.status === "accepted") &&
+        (q.created_at ?? "") > (cur.created_at ?? ""));
+    if (better) byLead.set(q.lead_id, q);
+  }
+  return [...byLead.values(), ...orphans];
+}
+
+/** Summary-band figures. Win rate is deduped per lead with draft + superseded
+ *  dropped (a superseded re-quote is the SAME opportunity, not a separate loss),
+ *  matching lib/sales-report.ts — so re-quoting a lead no longer deflates the rate. */
+export function computeQuoteStats(quotes: QuoteRow[]) {
+  const deduped = dedupePerLead(quotes);
+  const accepted = quotes.filter((q) => q.status === "accepted");
+  const sent = quotes.filter((q) => q.status === "sent");
+  const dedupedAccepted = deduped.filter((q) => q.status === "accepted").length;
+  return {
+    openValue: sent.reduce((s, q) => s + (q.grand_total ?? 0), 0),
+    wonValue: accepted.reduce((s, q) => s + (q.agreed_price ?? q.grand_total ?? 0), 0),
+    winRate: deduped.length ? Math.round((dedupedAccepted / deduped.length) * 100) : 0,
+    awaiting: sent.length,
+  };
 }
 
 function routeLine(q: QuoteRow): string {
@@ -146,17 +196,7 @@ export function QuotesView({
     cancelPendingSearch();
   }
 
-  const stats = useMemo(() => {
-    const nonDraft = quotes.filter((q) => q.status !== "draft");
-    const accepted = quotes.filter((q) => q.status === "accepted");
-    const sent = quotes.filter((q) => q.status === "sent");
-    return {
-      openValue: sent.reduce((s, q) => s + (q.grand_total ?? 0), 0),
-      wonValue: accepted.reduce((s, q) => s + (q.agreed_price ?? q.grand_total ?? 0), 0),
-      winRate: nonDraft.length ? Math.round((accepted.length / nonDraft.length) * 100) : 0,
-      awaiting: sent.length,
-    };
-  }, [quotes]);
+  const stats = useMemo(() => computeQuoteStats(quotes), [quotes]);
 
   const counts = useMemo(
     () => ({
@@ -190,7 +230,7 @@ export function QuotesView({
       <section className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Stat label="Open pipeline" value={gbp(stats.openValue)} sub={`${stats.awaiting} awaiting reply`} />
         <Stat label="Won" value={gbp(stats.wonValue)} good={stats.wonValue > 0} />
-        <Stat label="Win rate" value={`${stats.winRate}%`} sub="of sent quotes" />
+        <Stat label="Win rate" value={`${stats.winRate}%`} sub="of quoted leads" />
         <Stat label="Quotes" value={String(counts.all)} sub={`${counts.draft} draft`} />
       </section>
 

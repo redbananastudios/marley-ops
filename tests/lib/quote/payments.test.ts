@@ -37,6 +37,38 @@ describe("balanceDue", () => {
   });
 });
 
+describe("balance fallback carves out the raised 25% commitment (Payments Policy v2)", () => {
+  // Pins the /bookings pre-invoice fallback: before the -BAL invoice exists,
+  // the displayed "Balance outstanding" must equal what createBalanceInvoiceFlow
+  // will raise — agreed − deposit − commitment (computeBalanceCredits) — not the
+  // naive agreed − deposit, which double-counts the commitment. The page expresses
+  // this as balanceDue(agreed, deposit + commitmentCredit).
+  it("worked example: £2000 gross, £100 deposit, £400 commitment → £1500 balance", () => {
+    const agreed = 2000;
+    const deposit = 100;
+    const commitment = 0.25 * agreed - deposit; // 400
+    expect(commitment).toBe(400);
+    expect(balanceDue(agreed, deposit + commitment)).toBe(1500);
+    // and NOT the pre-fix figure that folded the commitment back in
+    expect(balanceDue(agreed, deposit)).toBe(1900);
+  });
+
+  it("deposit + commitment + balance reconstruct the agreed price", () => {
+    for (const agreed of [636, 1227.5, 1440.01, 3239.99, 2000]) {
+      const deposit = 100;
+      const commitment = round2(Math.max(0, 0.25 * agreed - deposit));
+      const balance = balanceDue(agreed, deposit + commitment);
+      expect(round2(deposit + commitment + balance)).toBe(round2(agreed));
+    }
+  });
+
+  it("zero commitment (deposit ≥ 25% of gross) leaves the balance = agreed − deposit", () => {
+    // Gross £360, deposit £100: 25%×360 = £90 ≤ £100, so no commitment is raised
+    // (commitment_invoice_amount stays 0) and the fallback is unchanged.
+    expect(balanceDue(360, 100 + 0)).toBe(260);
+  });
+});
+
 describe("Zoho references", () => {
   it("deposit and balance references are distinct and quote-derived", () => {
     expect(depositReference("MM-260709-001")).toBe("MM-260709-001-DEP");

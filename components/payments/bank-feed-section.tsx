@@ -62,7 +62,16 @@ const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
   dismissed: { label: "Dismissed", cls: "bg-mist-100 text-mist-400" },
 };
 
-function DismissButton({ txId, busyExternal }: { txId: string; busyExternal?: boolean }) {
+function DismissButton({
+  txId,
+  busyExternal,
+  label,
+}: {
+  txId: string;
+  busyExternal?: boolean;
+  /** When set, renders a text button (e.g. "Clear") instead of an icon-only one. */
+  label?: string;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
@@ -82,10 +91,11 @@ function DismissButton({ txId, busyExternal }: { txId: string; busyExternal?: bo
         });
       }}
       disabled={busy || busyExternal}
-      aria-label="Dismiss"
+      aria-label={label ?? "Dismiss"}
       className="focus-ring inline-flex min-h-9 items-center gap-1 rounded-md border border-input bg-card px-2.5 text-sm text-mist-500 transition-colors hover:bg-muted disabled:opacity-60"
     >
       {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <X className="size-4" strokeWidth={1.75} />}
+      {label ? <span className="font-medium">{label}</span> : null}
     </button>
   );
 }
@@ -197,21 +207,46 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
   );
 }
 
+/** Plain unmatched inbound (all dates): money we couldn't tie to any open
+ *  deposit/balance and that doesn't name a quote — old-system transfers,
+ *  non-customer credits, or a payment still to be recorded by hand. Clearing
+ *  dismisses the row (the sync preserves dismissed rows, so it stays gone). */
+function UnmatchedRow({ tx }: { tx: BankFeedTx }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+      <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
+      <div className="min-w-0 flex-1">
+        <p className="font-medium text-foreground">
+          {tx.counterparty ?? "—"}
+          <span className="ml-2 text-xs font-normal text-mist-400">“{tx.reference ?? "no reference"}”</span>
+        </p>
+        <p className="text-xs text-mist-400">
+          no matching open deposit or balance — record it via Bookings/Zoho if it&apos;s a customer payment,
+          otherwise clear it.
+        </p>
+      </div>
+      <span className="tabular text-sm font-semibold text-foreground">{gbp(tx.amount)}</span>
+      <DismissButton txId={tx.id} label="Clear" />
+    </div>
+  );
+}
+
 export function BankFeedSection({
   suggested,
   mismatches,
   dayRows,
+  unmatched,
   dayLabelText,
   lastSync,
-  unmatchedCount,
 }: {
   suggested: BankFeedTx[];
   mismatches: BankFeedTx[];
   dayRows: BankFeedTx[];
+  /** All-dates plain unmatched inbound (no quote match) — clearable review queue. */
+  unmatched: BankFeedTx[];
   dayLabelText: string;
   /** "3 min ago · ok" style line, or null if the cron has never run. */
   lastSync: string | null;
-  unmatchedCount: number;
 }) {
   return (
     <>
@@ -253,13 +288,36 @@ export function BankFeedSection({
         </Card>
       ) : null}
 
+      {unmatched.length ? (
+        <Card className="p-0">
+          <div className="flex items-center gap-2 border-b px-5 py-3.5">
+            <Landmark className="size-4 text-mist-400" strokeWidth={1.75} />
+            <h2 className="font-display text-lg font-semibold text-foreground">
+              Unmatched inbound
+            </h2>
+            <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-bold tabular text-mist-500">
+              {unmatched.length}
+            </span>
+          </div>
+          <p className="border-b px-5 py-2.5 text-xs text-mist-400">
+            Inbound transfers across all dates that don&apos;t match an open deposit or balance. Record real
+            customer payments via Bookings/Zoho, then clear them; clear anything that isn&apos;t a customer
+            payment to take it off this list.
+          </p>
+          <div className="divide-y">
+            {unmatched.map((tx) => (
+              <UnmatchedRow key={tx.id} tx={tx} />
+            ))}
+          </div>
+        </Card>
+      ) : null}
+
       <Card className="p-0">
         <div className="flex flex-wrap items-center gap-2 border-b px-5 py-3.5">
           <Landmark className="size-4 text-mist-400" strokeWidth={1.75} />
           <h2 className="font-display text-lg font-semibold text-foreground">Bank feed</h2>
           <span className="text-xs text-mist-400">
             {lastSync ? `synced ${lastSync}` : "waiting for the first sync"}
-            {unmatchedCount ? ` · ${unmatchedCount} unmatched inbound to review` : ""}
           </span>
           <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-semibold tabular text-mist-500">
             {dayRows.length}

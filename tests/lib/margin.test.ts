@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boxesFromItems, commissionCost, crewSize, jobCost, marginPct } from "@/lib/margin";
+import { boxesFromItems, commissionCost, crewSize, jobCost, marginPct, marginRevenue } from "@/lib/margin";
 import type { BusinessSettings } from "@/lib/settings";
 
 const RATES: BusinessSettings = {
@@ -153,6 +153,41 @@ describe("marginPct", () => {
   it("is margin over revenue, rounded", () => {
     expect(marginPct(1000, 650)).toBe(35);
     expect(marginPct(0, 100)).toBe(0);
+  });
+});
+
+describe("marginRevenue (strip pass-through VAT before margin)", () => {
+  it("flat-rate scheme: removes only the flat % owed to HMRC, keeping the FRS surplus", () => {
+    // £1,200 gross (£1,000 + £200 VAT) on the FRS at 9%: HMRC gets 9% of gross = £108,
+    // so revenue kept for margin = £1,092 (NOT the ex-20%-VAT £1,000).
+    expect(marginRevenue(1200, true, { ...RATES, vatScheme: "flat_rate", vatFlatRatePct: 9 })).toBeCloseTo(1092, 6);
+    // Worked example: £600 rate-card cost → margin £492, ~45% of the £1,092 kept.
+    const rev = marginRevenue(1200, true, { ...RATES, vatScheme: "flat_rate", vatFlatRatePct: 9 });
+    expect(rev - 600).toBeCloseTo(492, 6);
+    expect(marginPct(rev, 600)).toBe(45);
+  });
+
+  it("standard scheme: strips the full 20% charged (net = gross / 1.2)", () => {
+    expect(marginRevenue(1200, true, { ...RATES, vatScheme: "standard" })).toBeCloseTo(1000, 6);
+  });
+
+  it("VAT-exclusive quote: nothing to strip — gross is already the margin revenue", () => {
+    expect(marginRevenue(1000, false, RATES)).toBe(1000);
+    expect(marginRevenue(1000, false, { ...RATES, vatScheme: "standard" })).toBe(1000);
+  });
+
+  it("guards zero / negative gross", () => {
+    expect(marginRevenue(0, true, RATES)).toBe(0);
+    expect(marginRevenue(-50, true, RATES)).toBe(0);
+  });
+
+  it("does NOT treat pass-through VAT as profit (regression on the old gross-vs-net-cost bug)", () => {
+    // The bug showed £1,200 gross vs £600 cost = 50%. The FRS-correct figure is lower.
+    const buggy = marginPct(1200, 600); // old behaviour
+    const fixed = marginPct(marginRevenue(1200, true, { ...RATES, vatFlatRatePct: 9 }), 600);
+    expect(buggy).toBe(50);
+    expect(fixed).toBeLessThan(buggy);
+    expect(fixed).toBe(45);
   });
 });
 

@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { StatusBoard, type BoardLead } from "@/components/board/status-board";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
+import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 
 export const dynamic = "force-dynamic";
@@ -66,7 +67,7 @@ export default async function BoardPage() {
       property_size: l.property_size,
       first_contacted_at: l.first_contacted_at,
       phone: l.phone,
-      estimator_id: surveyEstimator.get(l.id) ?? null,
+      estimator_id: ownerEstimatorId(l.estimator_id, surveyEstimator.get(l.id)),
       submitted_at: l.submitted_at,
       created_at: l.created_at,
       value: v ? (v.accepted ?? v.latest) : null,

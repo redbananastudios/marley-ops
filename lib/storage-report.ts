@@ -32,7 +32,7 @@ export interface ReportLet {
   start_date: string;
   end_date: string | null;
   rate: number | null;
-  rate_period: string; // week | month
+  rate_period: string; // day | week | month
 }
 
 export interface StorageReport {
@@ -119,11 +119,18 @@ export function letWeeks(start: string, endOrToday: string): number {
   return Math.max(1, Math.ceil(span / WEEK_MS));
 }
 
-/** A let's rate normalised to £/week (month → × 12/52). */
+/** A let's rate normalised to £/week (month → × 12/52, day → × 7). */
 export function weeklyRate(l: { rate: number | null; rate_period: string }): number | null {
   if (l.rate == null) return null;
   const r = Number(l.rate);
-  return l.rate_period === "month" ? (r * 12) / 52 : r;
+  switch (l.rate_period) {
+    case "month":
+      return (r * 12) / 52;
+    case "day":
+      return r * 7;
+    default: // week
+      return r;
+  }
 }
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
