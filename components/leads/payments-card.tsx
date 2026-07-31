@@ -6,13 +6,21 @@
  * due on its due date. No processing, no ledger — Zoho later.
  */
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, PoundSterling } from "lucide-react";
+import { Banknote, Landmark, Loader2, PoundSterling } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   requestDepositAction,
   markPaymentPaidAction,
@@ -36,6 +44,89 @@ function fmt(d: string | null): string {
   if (!d) return "";
   const t = new Date(d);
   return Number.isNaN(t.getTime()) ? "" : t.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+/**
+ * Guarded "received" button — marking paid records the payment in Zoho, emails the
+ * customer their confirmation, and closes the chase. That is live money with no undo,
+ * so it's gated behind a confirm dialog that also forces the how (bank transfer vs
+ * cash) so a cash payment is never booked as a phantom bank transfer. Mirrors the
+ * Bookings-row MarkPaidButton UX.
+ */
+function MarkReceivedButton({
+  leadId,
+  kind,
+  amount,
+}: {
+  leadId: string;
+  kind: "deposit" | "balance";
+  amount: number | null;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, start] = useTransition();
+
+  function pay(method: "bank_transfer" | "cash") {
+    start(async () => {
+      const res = await markPaymentPaidAction(leadId, kind, method);
+      if (!res.ok) {
+        toast.error(res.error || "Something went wrong.");
+        return;
+      }
+      toast.success(
+        `${kind === "deposit" ? "Deposit" : "Balance"} marked paid (${method === "cash" ? "cash" : "bank transfer"}).`,
+      );
+      setOpen(false);
+      router.refresh();
+    });
+  }
+
+  return (
+    <>
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        {kind === "deposit" ? "Deposit received" : "Balance received"}
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl">
+              {gbp(amount)} {kind} received
+            </DialogTitle>
+            <DialogDescription>
+              How did it arrive? This records the payment in Zoho and emails their confirmation.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-2 py-2">
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => pay("bank_transfer")}
+              className="h-14 flex-col gap-1"
+            >
+              <Landmark className="size-5 text-mm-red" strokeWidth={1.75} />
+              Bank transfer
+            </Button>
+            <Button
+              variant="outline"
+              disabled={pending}
+              onClick={() => pay("cash")}
+              className="h-14 flex-col gap-1"
+            >
+              <Banknote className="size-5 text-success" strokeWidth={1.75} />
+              Cash
+            </Button>
+          </div>
+          <DialogFooter>
+            {pending ? <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} /> : null}
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
 }
 
 export function PaymentsCard({
@@ -92,9 +183,7 @@ export function PaymentsCard({
                 {gbp(state.depositAmount)} requested {fmt(state.depositRequestedAt)}{" "}
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => markPaymentPaidAction(leadId, "deposit"), "Deposit marked paid.")}>
-                Deposit received
-              </Button>
+              <MarkReceivedButton leadId={leadId} kind="deposit" amount={state.depositAmount} />
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -134,9 +223,7 @@ export function PaymentsCard({
                 {gbp(state.balanceAmount)} due {fmt(state.balanceDueDate)}{" "}
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
-              <Button size="sm" variant="outline" disabled={busy} onClick={() => run(() => markPaymentPaidAction(leadId, "balance"), "Balance marked paid.")}>
-                Balance received
-              </Button>
+              <MarkReceivedButton leadId={leadId} kind="balance" amount={state.balanceAmount} />
             </div>
           ) : (
             <div className="space-y-2">

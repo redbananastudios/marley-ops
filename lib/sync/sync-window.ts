@@ -18,6 +18,16 @@ function validTimestamp(s: string | null | undefined): string | null {
   return isNaN(d.getTime()) ? null : s;
 }
 
+/** Resolve the LEAD_SYNC_SINCE env to a valid ISO timestamp, or null when it is
+ *  unset/empty/garbled. Fail-closed sibling of resolveBankFeedFloor
+ *  (lib/bank-feed/parse.ts): a null return is the signal for the caller to
+ *  REFUSE an unfloored full/empty-DB import rather than silently backfill every
+ *  pre-go-live submission. (applySyncFloor keeps its own fail-OPEN behaviour for
+ *  the incremental path, which is protected by its own cutoff.) */
+export function resolveLeadFloor(raw: string | null | undefined): string | null {
+  return validTimestamp(raw);
+}
+
 /** Combine a resolved `since` cutoff with the env floor: whichever is LATER wins. */
 export function applySyncFloor(
   since: string | undefined,

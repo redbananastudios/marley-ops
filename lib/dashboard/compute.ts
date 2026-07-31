@@ -145,13 +145,15 @@ export function classifySource(l: SourceSignals): SourceKey {
     /cpc|ppc|paid/i.test(l.utm_medium ?? "")
   )
     return "google_ads";
-  // Same rule as google_ads above: a hand-entered "Phone — Facebook" source only
-  // means the customer SAID they found us on Facebook — with no fbclid we can't
-  // know it was a paid click, so it must not inflate Meta/ROAS. If unsure it
-  // falls through to organic (Peter, 2026-07-30).
+  // Same rule as google_ads above: a lead only counts as PAID Meta on a real paid
+  // signal — the fbclid ad click id, or a Meta utm_source PAIRED with a paid
+  // utm_medium. A hand-entered or organic "Facebook" source with no fbclid and no
+  // paid medium only means the customer SAID they found us on Facebook, so it must
+  // NOT inflate Meta/ROAS — it falls through to organic (Peter, 2026-07-30).
   if (
     l.fbclid ||
-    /facebook|meta|instagram|^fb$|^ig$/i.test(l.utm_source ?? "")
+    (/facebook|meta|instagram|^fb$|^ig$/i.test(l.utm_source ?? "") &&
+      /cpc|ppc|paid/i.test(l.utm_medium ?? ""))
   )
     return "meta";
   if (l.entry_channel === "manual") return "manual";

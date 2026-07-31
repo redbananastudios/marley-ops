@@ -64,10 +64,12 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     seed.customer = { name: lead.name ?? "", phone: lead.phone ?? "", email: lead.email ?? "" };
     // Parse "street, town" + postcode into the structured fields so the form opens
     // with each part in its own input (not everything dumped into Street address).
-    seed.job.collectAddress = addressFromString(
-      [lead.from_address, lead.from_postcode].filter(Boolean).join(", "),
-    );
-    seed.job.destAddress = addressFromString([lead.to_address, lead.to_postcode].filter(Boolean).join(", "));
+    // from_address already ends with the postcode (formatAddress joins line1, town,
+    // postcode) — re-appending from_postcode doubled it into the Town field. Only fall
+    // back to the bare postcode when from_address is empty (website-sync leads store
+    // postcode-only). Same for the destination.
+    seed.job.collectAddress = addressFromString(lead.from_address || lead.from_postcode);
+    seed.job.destAddress = addressFromString(lead.to_address || lead.to_postcode);
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
     // Carry the lead's requested move date into the wizard. It is the customer's

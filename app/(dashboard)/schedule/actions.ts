@@ -109,7 +109,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
       ends_at: input.endsAt,
       all_day: input.allDay ?? false,
       // The visit happens where the move starts — derived from the lead, not typed in.
-      location: input.location || (lead ? [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null : null),
+      location: input.location || (lead ? lead.from_address || lead.from_postcode || null : null),
       notes: input.notes || null,
       status: "scheduled",
     })
@@ -127,7 +127,7 @@ export async function createAppointment(input: CreateAppointmentInput) {
       leadId: input.leadId ?? null,
       clientId: lead?.client_id ?? null,
       leadName: lead?.name ?? null,
-      location: lead ? [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null : null,
+      location: lead ? lead.from_address || lead.from_postcode || null : null,
       packDay: input.packDate,
     });
     if (!r.ok) packWarning = r.error;
@@ -331,7 +331,7 @@ export async function setPackDayAction(
     leadId: lead.id,
     clientId: lead.client_id,
     leadName: lead.name,
-    location: [lead.from_address, lead.from_postcode].filter(Boolean).join(", ") || null,
+    location: lead.from_address || lead.from_postcode || null,
     packDay,
   });
   if (!r.ok) return r;

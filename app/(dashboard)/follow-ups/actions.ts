@@ -237,7 +237,11 @@ export async function requestDepositAction(leadId: string, amount: number) {
  *  When the lead has an accepted quote in the Zoho flow, this routes through the
  *  full paid pipeline instead — Zoho payment record (BACS), customer confirmation
  *  email, lead Confirmed — so the one-tap does everything, not just the stamp. */
-export async function markPaymentPaidAction(leadId: string, kind: "deposit" | "balance") {
+export async function markPaymentPaidAction(
+  leadId: string,
+  kind: "deposit" | "balance",
+  method: "bank_transfer" | "cash" = "bank_transfer",
+) {
   const { sb, userId } = await ctx();
   const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).single();
 
@@ -254,11 +258,11 @@ export async function markPaymentPaidAction(leadId: string, kind: "deposit" | "b
     const res =
       kind === "deposit"
         ? await markDepositPaid(sb, acceptedQuote.id, {
-            method: "bank_transfer",
+            method,
             actorId: userId,
             recordInZoho: true,
           })
-        : await markBalancePaid(sb, acceptedQuote.id, userId, true);
+        : await markBalancePaid(sb, acceptedQuote.id, userId, true, method);
     if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
     // markDepositPaid stamps the quote+lead; mirror the lead stamp for the
     // manual-deposit case where only the quote knew the amount.

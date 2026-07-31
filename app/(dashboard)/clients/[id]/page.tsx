@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft, FileDown, FileText, Phone, MessageCircle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { Card } from "@/components/ui/card";
 import { BookSurveyButton } from "@/components/clients/book-survey-button";
+import { ClientEditControls } from "@/components/clients/edit-client-dialog";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { UK_TZ } from "@/lib/uk-time";
@@ -45,8 +47,12 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const { id } = await params;
   const sb = await createClient();
 
-  const { data: client } = await sb.from("clients").select("*").eq("id", id).single();
+  const [{ data: client }, profile] = await Promise.all([
+    sb.from("clients").select("*").eq("id", id).single(),
+    getSessionProfile(),
+  ]);
   if (!client) notFound();
+  const isAdmin = profile?.role === "admin";
 
   const [{ data: leads }, { data: quotes }] = await Promise.all([
     sb
@@ -130,7 +136,14 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         <div className="flex flex-wrap items-start justify-between gap-4 p-5">
           <div className="min-w-0">
             <p className="eyebrow">Client</p>
-            <h1 className="mt-1 font-display text-2xl font-semibold text-foreground">{client.display_name ?? "Unnamed client"}</h1>
+            <h1 className="mt-1 flex flex-wrap items-center gap-2 font-display text-2xl font-semibold text-foreground">
+              {client.display_name ?? "Unnamed client"}
+              {client.is_active === false ? (
+                <span className="rounded-pill bg-mist-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mist-400">
+                  Archived
+                </span>
+              ) : null}
+            </h1>
           </div>
           <span className="text-sm text-mist-400">
             {leadRows.length} {leadRows.length === 1 ? "enquiry" : "enquiries"}
@@ -178,6 +191,8 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
               className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md border border-input bg-card px-3 text-sm font-medium text-foreground hover:bg-muted"
             />
           ) : null}
+          {/* Record management: edit the client's details, plus archive/restore (admin). */}
+          <ClientEditControls client={client} isAdmin={isAdmin} />
         </div>
       </Card>
 

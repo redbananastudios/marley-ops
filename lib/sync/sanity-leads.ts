@@ -1,9 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
 import { isImportedUnackedRow } from "@/lib/lead-alerts";
-import { applySyncFloor } from "@/lib/sync/sync-window";
+import { applySyncFloor, resolveLeadFloor } from "@/lib/sync/sync-window";
 import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
+import { log } from "@/lib/log";
 import type { Database } from "@/lib/supabase/database.types";
 
 type LeadStatus = Database["public"]["Enums"]["lead_status"];
@@ -123,6 +124,19 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   }
   // Hard go-live floor — history before LEAD_SYNC_SINCE never imports, even in
   // full mode with an empty (freshly-flushed) database. See lib/sync/sync-window.ts.
+  //
+  // FAIL CLOSED: if the floor can't be resolved (LEAD_SYNC_SINCE unset, empty or
+  // garbled) AND we have no incremental cutoff (`since` still undefined — a full
+  // sync, or an incremental run against a freshly-flushed empty leads table with
+  // no latest row), the GROQ filter would be empty and re-import EVERY pre-go-live
+  // submission. Refuse instead of importing unfloored. Incremental runs that DID
+  // resolve a cutoff are unaffected — their own lower bound protects them, so the
+  // floor legitimately stays fail-open there (reviewer, 2026-07-31).
+  const leadFloor = resolveLeadFloor(process.env.LEAD_SYNC_SINCE);
+  if (!leadFloor && !since) {
+    log.warn("sanity-leads.floor_unresolved", { raw: process.env.LEAD_SYNC_SINCE ?? null });
+    return { ok: false, synced: 0, inserted: 0, updated: 0, failed: 0, error: "LEAD_SYNC_SINCE floor unresolved" };
+  }
   since = applySyncFloor(since, process.env.LEAD_SYNC_SINCE);
 
   const filter = since ? ` && submittedAt >= "${since}"` : "";

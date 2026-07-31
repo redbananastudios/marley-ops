@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
+import { getSessionProfile } from "@/lib/auth";
 import { findExistingClient } from "@/lib/leads/resolver";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
@@ -13,6 +14,22 @@ async function actor() {
   } = await sb.auth.getUser();
   return { sb, userId: user?.id ?? null };
 }
+
+/** Archiving a client hides a shared record other rows (leads, quotes, signatures)
+ *  point at — an admin-only action, mirroring setStaffActiveAction in the settings
+ *  actions. Editing the record stays office-level (same gate as createClientAction). */
+async function requireAdmin() {
+  const profile = await getSessionProfile();
+  if (!profile) return { error: "Not signed in." as const };
+  if (profile.role !== "admin") return { error: "Admins only." as const };
+  const sb = await createClient();
+  return { sb, userId: profile.id };
+}
+
+// A lead is "live" while it's anywhere in the active pipeline — terminal states
+// (completed / declined) don't block archiving. Mirrors the OPEN set the client
+// detail page uses to find a reusable enquiry.
+const LIVE_LEAD_STATUSES = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed"] as const;
 
 /** Live dedupe check for the Add-client dialog. Read-only. */
 export async function checkClientDuplicateAction(input: { phone?: string; email?: string }) {
@@ -132,6 +149,118 @@ export async function createClientAction(input: CreateClientInput) {
   } catch (e) {
     return { ok: false as const, error: e instanceof Error ? e.message : "Could not add client." };
   }
+}
+
+/** Edit an existing client's full record. Office-level (same gate as
+ *  createClientAction) — an estimator maintaining a client is expected. Recomputes
+ *  the display_name from the name fields exactly as create does, and carries the
+ *  same phone/email unique-collision handling: the partial-unique index rejects a
+ *  phone/email already held by ANOTHER live client, which we surface as a friendly
+ *  message rather than a raw Postgres error. Editing a client to keep its own
+ *  phone/email never collides (the index excludes the row's own value). */
+export async function updateClientAction(id: string, input: CreateClientInput) {
+  if (!id) return { ok: false as const, error: "Missing client." };
+
+  const isCompany = !!input.isCompany;
+  const companyName = clean(input.companyName);
+  const firstName = clean(input.firstName);
+  const lastName = clean(input.lastName);
+
+  const personName = [firstName, lastName].filter(Boolean).join(" ").trim() || null;
+  const displayName = (isCompany ? companyName : personName) ?? companyName ?? personName;
+  if (!displayName) return { ok: false as const, error: "A name is required." };
+
+  const { sb, userId } = await actor();
+
+  const addr = input.address ?? {};
+  const secondaryEmails = (input.secondaryEmails ?? [])
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
+  try {
+    const { error } = await sb
+      .from("clients")
+      .update({
+        display_name: displayName,
+        is_company: isCompany,
+        company_name: companyName,
+        business_number: clean(input.businessNumber),
+        first_name: firstName,
+        last_name: lastName,
+        email: normalizeEmail(input.email),
+        secondary_emails: secondaryEmails,
+        phone_raw: clean(input.phone),
+        phone_e164: normalizePhone(input.phone),
+        alt_phone: clean(input.altPhone),
+        address_line1: clean(addr.line1),
+        town: clean(addr.town),
+        county: clean(addr.county),
+        postcode_home: clean(addr.postcode),
+        country: clean(addr.country) ?? "United Kingdom",
+        notes: clean(input.notes),
+      })
+      .eq("id", id);
+
+    if (error) {
+      const dupe = /duplicate|unique/i.test(error.message);
+      return {
+        ok: false as const,
+        error: dupe ? "That phone or email already belongs to another client." : error.message,
+      };
+    }
+
+    await sb.from("activities").insert({
+      client_id: id,
+      actor_id: userId,
+      type: "note",
+      summary: "Client details updated",
+    });
+
+    revalidatePath("/clients");
+    revalidatePath(`/clients/${id}`);
+    return { ok: true as const, clientId: id };
+  } catch (e) {
+    return { ok: false as const, error: e instanceof Error ? e.message : "Could not update client." };
+  }
+}
+
+/** Archive / restore a client. Flips is_active (the list query filters on it), so
+ *  we never hard-delete a record linked leads, quotes and signatures point at.
+ *  Admin-only, mirroring setStaffActiveAction. Archiving is money-aware: it is
+ *  BLOCKED while the client still has a live enquiry or an accepted quote, so an
+ *  in-flight job can't be hidden out from under its paperwork. Restoring (active =
+ *  true) is always allowed. */
+export async function setClientActiveAction(id: string, isActive: boolean) {
+  if (!id) return { ok: false as const, error: "Missing client." };
+  const ctx = await requireAdmin();
+  if ("error" in ctx) return { ok: false as const, error: ctx.error };
+  const { sb } = ctx;
+
+  if (!isActive) {
+    const [{ data: liveLeads }, { data: acceptedQuotes }] = await Promise.all([
+      sb.from("leads").select("id").eq("client_id", id).in("status", LIVE_LEAD_STATUSES).limit(1),
+      sb.from("quotes").select("id").eq("client_id", id).eq("status", "accepted").limit(1),
+    ]);
+    if (liveLeads && liveLeads.length) {
+      return {
+        ok: false as const,
+        error: "This client has a live enquiry. Close or complete it before archiving them.",
+      };
+    }
+    if (acceptedQuotes && acceptedQuotes.length) {
+      return {
+        ok: false as const,
+        error: "This client has an accepted quote. Archiving is blocked so the job and its paperwork stay linked.",
+      };
+    }
+  }
+
+  const { error } = await sb.from("clients").update({ is_active: isActive }).eq("id", id);
+  if (error) return { ok: false as const, error: error.message };
+
+  revalidatePath("/clients");
+  revalidatePath(`/clients/${id}`);
+  return { ok: true as const };
 }
 
 /**

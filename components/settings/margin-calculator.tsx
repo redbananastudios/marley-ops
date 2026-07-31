@@ -47,15 +47,28 @@ const PRESETS: { label: string; job: Job }[] = [
 const numCls =
   "tabular h-9 w-full rounded-md border border-input bg-card px-2 text-sm text-foreground focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30";
 
-function NumIn({ value, onChange, step = 1 }: { value: number; onChange: (n: number) => void; step?: number }) {
+function NumIn({
+  value,
+  onChange,
+  step = 1,
+  min = 0,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  step?: number;
+  min?: number;
+}) {
   return (
     <input
       type="number"
       inputMode="decimal"
-      min={0}
+      min={min}
       step={step}
       value={value}
-      onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+      // Clamp to `min` so a per-field floor (e.g. Days min=1, mirroring the quote
+      // wizard's Stepper) can't be defeated by typing below it — a 0-day job zeroes
+      // the cost side while charges stand, wildly overstating the modelled margin.
+      onChange={(e) => onChange(e.target.value === "" ? min : Math.max(min, Number(e.target.value)))}
       className={numCls}
     />
   );
@@ -277,7 +290,7 @@ export function MarginCalculator({ settings }: { settings: BusinessSettings }) {
           </Select>
         </label>
         <label className="grid gap-1"><span className="eyebrow">Miles (total)</span><NumIn value={job.miles} onChange={(n) => setJ("miles", n)} /></label>
-        <label className="grid gap-1"><span className="eyebrow">Days</span><NumIn value={job.days} onChange={(n) => setJ("days", n)} /></label>
+        <label className="grid gap-1"><span className="eyebrow">Days</span><NumIn value={job.days} onChange={(n) => setJ("days", n)} min={1} /></label>
         <label className="grid gap-1"><span className="eyebrow">Boxes</span><NumIn value={job.boxes} onChange={(n) => setJ("boxes", n)} /></label>
         <label className="grid gap-1">
           <span className="eyebrow">Transit add-on</span>

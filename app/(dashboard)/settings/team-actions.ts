@@ -103,3 +103,112 @@ export async function resetTeamPasswordAction(id: string, password: string) {
   if (rErr) return { ok: false as const, error: rErr.message };
   return { ok: true as const };
 }
+
+/** Tables where a profile shows up as an actor / author / estimator. A HARD
+ *  delete is refused if the user appears in ANY of them, because deleting the
+ *  profile would strip their name off real live records (some FKs are SET NULL,
+ *  which would silently blank the "who did this" on jobs, signatures, pay). Those
+ *  users must be DEACTIVATED instead — that keeps the history. The NO-ACTION FKs
+ *  (quotes/leads/appointments/communications/…) also backstop this at the DB
+ *  layer: deleting a referenced profile raises 23503, caught below. So only a
+ *  login with zero footprint (a mistake, a retired test account) is hard-deleted. */
+const HISTORY_REFS: { table: string; column: string; label: string }[] = [
+  { table: "quotes", column: "estimator_id", label: "quotes" },
+  { table: "leads", column: "estimator_id", label: "leads" },
+  { table: "appointments", column: "estimator_id", label: "diary appointments" },
+  { table: "surveys", column: "estimator_id", label: "surveys" },
+  { table: "cubic_surveys", column: "created_by", label: "video surveys" },
+  { table: "communications", column: "sent_by", label: "sent emails" },
+  { table: "signatures", column: "collected_by", label: "collected signatures" },
+  { table: "job_completions", column: "completed_by", label: "completed jobs" },
+  { table: "job_notes", column: "author_id", label: "job notes" },
+  { table: "staff_statements", column: "created_by", label: "pay statements" },
+  { table: "estimator_payouts", column: "estimator_id", label: "estimator payouts" },
+  { table: "claims", column: "opened_by", label: "claims" },
+  { table: "refund_queue", column: "determined_by", label: "refund decisions" },
+  { table: "card_payments", column: "refunded_by", label: "processed refunds" },
+];
+
+/** First table (if any) where this profile has left a footprint. A query error
+ *  (renamed table/col) is treated as clean here — the DB FK backstop still
+ *  protects the NO-ACTION references below. */
+async function firstHistoryRef(
+  admin: ReturnType<typeof createAdminClient>,
+  id: string,
+): Promise<string | null> {
+  const hits = await Promise.all(
+    HISTORY_REFS.map(async (r) => {
+      const { count, error } = await admin
+        .from(r.table as never)
+        .select("*", { count: "exact", head: true })
+        .eq(r.column as never, id);
+      return !error && (count ?? 0) > 0 ? r.label : null;
+    }),
+  );
+  return hits.find(Boolean) ?? null;
+}
+
+/** Permanently remove a login (admin only). Refuses to delete yourself, the last
+ *  admin, or any user who has history in the system — those must be Deactivated
+ *  so their footprint on quotes/jobs/emails stays intact. Only an unused login
+ *  (a mistake or a retired test account) is actually hard-deleted. */
+export async function deleteTeamUserAction(id: string) {
+  if (typeof id !== "string" || !/^[0-9a-f-]{36}$/i.test(id)) {
+    return { ok: false as const, error: "Invalid user id" };
+  }
+  const { userId, error } = await requireAdmin();
+  if (error) return { ok: false as const, error };
+  if (id === userId) return { ok: false as const, error: "You can't delete your own account." };
+
+  const admin = createAdminClient();
+
+  const { data: target } = await admin
+    .from("profiles")
+    .select("role, full_name")
+    .eq("id", id)
+    .maybeSingle();
+  if (!target) return { ok: false as const, error: "That user no longer exists." };
+  const who = (target.full_name as string) || "This user";
+
+  // Never leave the business unable to sign in as an admin.
+  if (target.role === "admin") {
+    const { count } = await admin
+      .from("profiles")
+      .select("*", { count: "exact", head: true })
+      .eq("role", "admin");
+    if ((count ?? 0) <= 1) return { ok: false as const, error: "You can't delete the last admin account." };
+  }
+
+  const ref = await firstHistoryRef(admin, id);
+  if (ref) {
+    return {
+      ok: false as const,
+      error: `${who} has ${ref} on record — deactivate them instead so their history stays intact.`,
+    };
+  }
+
+  // Unlink any Staff & Fleet row first (that FK is NO-ACTION and would otherwise
+  // block the delete). The staff record itself is kept — only the login goes.
+  await admin.from("staff").update({ profile_id: null } as never).eq("profile_id", id);
+
+  // Delete the profile first so any reference we didn't pre-check surfaces as a
+  // clean FK error (23503) rather than a half-done delete.
+  const { error: pErr } = await admin.from("profiles").delete().eq("id", id);
+  if (pErr) {
+    const referenced = pErr.code === "23503" || /foreign key/i.test(pErr.message);
+    return {
+      ok: false as const,
+      error: referenced
+        ? `${who} still has activity on record — deactivate them instead.`
+        : pErr.message,
+    };
+  }
+
+  const { error: aErr } = await admin.auth.admin.deleteUser(id);
+  if (aErr) {
+    return { ok: false as const, error: `Profile removed but the login could not be deleted: ${aErr.message}` };
+  }
+
+  revalidatePath("/settings");
+  return { ok: true as const };
+}

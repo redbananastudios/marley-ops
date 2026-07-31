@@ -9,7 +9,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, Loader2, Plus, UserRound } from "lucide-react";
+import { KeyRound, Loader2, Plus, Trash2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,6 +34,7 @@ import {
   createTeamUserAction,
   updateTeamUserAction,
   resetTeamPasswordAction,
+  deleteTeamUserAction,
 } from "@/app/(dashboard)/settings/team-actions";
 
 export interface TeamMember {
@@ -49,6 +50,7 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [pwFor, setPwFor] = useState<TeamMember | null>(null);
+  const [delFor, setDelFor] = useState<TeamMember | null>(null);
 
   async function run(id: string, fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {
     setBusyId(id);
@@ -145,6 +147,19 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
                 <KeyRound className="size-4" strokeWidth={1.75} />
                 Password
               </Button>
+
+              <Button
+                type="button"
+                variant="outline"
+                size="icon-sm"
+                className="size-9 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                disabled={busy || isMe}
+                onClick={() => setDelFor(u)}
+                aria-label={`Delete ${u.full_name}`}
+                title={isMe ? "You can't delete your own account" : "Delete this login"}
+              >
+                <Trash2 className="size-4" strokeWidth={1.75} />
+              </Button>
             </li>
           );
         })}
@@ -152,7 +167,53 @@ export function TeamForm({ users, meId }: { users: TeamMember[]; meId: string | 
 
       <AddUserDialog open={addOpen} onOpenChange={setAddOpen} />
       <PasswordDialog user={pwFor} onOpenChange={(v) => !v && setPwFor(null)} />
+      <DeleteUserDialog user={delFor} onOpenChange={(v) => !v && setDelFor(null)} />
     </Card>
+  );
+}
+
+function DeleteUserDialog({ user, onOpenChange }: { user: TeamMember | null; onOpenChange: (v: boolean) => void }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    if (!user) return;
+    setBusy(true);
+    const res = await deleteTeamUserAction(user.id);
+    setBusy(false);
+    if (!res.ok) {
+      // Users with history are refused server-side — surface the reason so the
+      // office knows to Deactivate instead.
+      toast.error(res.error || "Could not delete the user.");
+      return;
+    }
+    toast.success(`${user.full_name || "User"} deleted.`);
+    onOpenChange(false);
+    router.refresh();
+  }
+
+  return (
+    <Dialog open={!!user} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle className="font-display">Delete user?</DialogTitle>
+          <DialogDescription>
+            {user
+              ? `Permanently removes ${user.full_name || "this login"} (${user.email || "no email"}). This can't be undone. If they have any history in the system you'll be asked to deactivate instead.`
+              : ""}
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy} className="h-10">
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={submit} disabled={busy} className="h-10">
+            {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <Trash2 className="size-4" strokeWidth={1.75} />}
+            Delete user
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
