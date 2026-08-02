@@ -5,6 +5,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { extractReplyText } from "@/lib/comms/extract-reply";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
@@ -132,7 +133,7 @@ async function processInbound(
         html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
           <p>An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.</p>
           <hr style="border:none;border-top:1px solid #e4e4e7;">
-          <div style="white-space:pre-wrap;">${esc(content?.text?.trim() || "(no message body retrieved)")}</div>
+          <div style="white-space:pre-wrap;">${esc(extractReplyText(content?.text) || content?.text?.trim() || "(no message body retrieved)")}</div>
         </div>`,
         replyTo: from,
         idempotencyKey: `marley-inbound-unmatched/${eventId}`,
@@ -142,7 +143,10 @@ async function processInbound(
   }
 
   const content = emailId ? await fetchReceivedEmail(emailId) : null;
-  const bodyText = content?.text?.trim() || "(open the forwarded copy for the message)";
+  // Forward (and log) only the customer's NEW words — strip the quoted quote email
+  // their client appends, which otherwise arrives as an unreadable "| | |" wall.
+  // Fall back to the raw text if trimming would leave nothing (unusual bottom-post).
+  const bodyText = extractReplyText(content?.text) || content?.text?.trim() || "(open the forwarded copy for the message)";
 
   if (quote.lead_id) {
     const { error } = await sb.from("leads").update({ chase_paused: true }).eq("id", quote.lead_id);
