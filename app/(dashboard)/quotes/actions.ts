@@ -11,7 +11,7 @@ import {
   composeAddr,
   type QuoteFormValues,
 } from "@/lib/quote/form-types";
-import { addressFromString } from "@/lib/places/parse";
+import { addressFromLead } from "@/lib/places/parse";
 import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
 import { markLeadLostAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
 import type { NewLeadInput } from "@/lib/leads/schema";
@@ -50,6 +50,23 @@ async function nextQuoteRef(
 export async function createDraftQuote(opts: { leadId?: string } = {}) {
   const { sb } = await ctx();
 
+  // Resume an existing open DRAFT for this lead rather than piling up orphan drafts
+  // each time "Quote without survey" / "New quote" is opened (Peter, 2026-08-02:
+  // "we end up with multiple drafts"). Only a draft is resumed — a sent/accepted
+  // quote is history, so "New quote" from there deliberately starts a fresh draft.
+  // Newest draft wins if a lead already accumulated several.
+  if (opts.leadId) {
+    const { data: existingDraft } = await sb
+      .from("quotes")
+      .select("id, quote_ref")
+      .eq("lead_id", opts.leadId)
+      .eq("status", "draft")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingDraft) return { ok: true as const, id: existingDraft.id, quoteRef: existingDraft.quote_ref };
+  }
+
   let lead = null;
   if (opts.leadId) {
     const { data } = await sb.from("leads").select("*").eq("id", opts.leadId).single();
@@ -65,12 +82,12 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
     seed.customer = { name: lead.name ?? "", phone: lead.phone ?? "", email: lead.email ?? "" };
     // Parse "street, town" + postcode into the structured fields so the form opens
     // with each part in its own input (not everything dumped into Street address).
-    // from_address already ends with the postcode (formatAddress joins line1, town,
-    // postcode) — re-appending from_postcode doubled it into the Town field. Only fall
-    // back to the bare postcode when from_address is empty (website-sync leads store
-    // postcode-only). Same for the destination.
-    seed.job.collectAddress = addressFromString(lead.from_address || lead.from_postcode);
-    seed.job.destAddress = addressFromString(lead.to_address || lead.to_postcode);
+    // Website-sync leads keep the postcode in from_postcode/to_postcode SEPARATELY
+    // from the address line, so addressFromLead re-joins them (without doubling a
+    // postcode a manual lead already baked into from_address) — otherwise the town
+    // and postcode were silently dropped (Peter, 2026-08-02). Same for destination.
+    seed.job.collectAddress = addressFromLead(lead.from_address, lead.from_postcode);
+    seed.job.destAddress = addressFromLead(lead.to_address, lead.to_postcode);
     seed.job.collectAddr = composeAddr(seed.job.collectAddress);
     seed.job.destAddr = composeAddr(seed.job.destAddress);
     // Carry the lead's requested move date into the wizard. It is the customer's
