@@ -170,18 +170,41 @@ async function processInbound(
   if (commError?.code !== "23505") requireDb(commError, "log inbound communication");
 
   if (quote.lead_id) {
-    const { error: followUpError } = await sb.from("follow_ups").insert({
-      lead_id: quote.lead_id,
-      client_id: quote.client_id,
+    // One live "respond" task per lead. A customer who replies several times
+    // before anyone actions it should REFRESH the same follow-up, not stack a
+    // fresh identical card for every reply (2026-08-02: a lead showed twice on
+    // /follow-ups — two inbound replies, two open tasks). The per-event unique
+    // index (follow_ups_inbound_event_uq) already guards replay of ONE event;
+    // this collapses DISTINCT replies, matching the "one open chase max" pattern
+    // used throughout follow-ups/actions.ts.
+    const followUpFields = {
       quote_id: quote.id,
-      reason: "custom",
       due_at: new Date().toISOString(),
-      assigned_to: quote.estimator_id,
-      source: "inbound_reply",
       notes: `Customer replied to a chase email — respond. Subject: ${subject}`,
       metadata: { inbound_event_id: eventId },
-    });
-    if (followUpError?.code !== "23505") requireDb(followUpError, "create inbound follow-up");
+    };
+    const { data: openReply } = await sb
+      .from("follow_ups")
+      .select("id")
+      .eq("lead_id", quote.lead_id)
+      .eq("source", "inbound_reply")
+      .eq("status", "open")
+      .limit(1)
+      .maybeSingle();
+    if (openReply) {
+      const { error: refreshError } = await sb.from("follow_ups").update(followUpFields).eq("id", openReply.id);
+      requireDb(refreshError, "refresh inbound follow-up");
+    } else {
+      const { error: followUpError } = await sb.from("follow_ups").insert({
+        lead_id: quote.lead_id,
+        client_id: quote.client_id,
+        reason: "custom",
+        assigned_to: quote.estimator_id,
+        source: "inbound_reply",
+        ...followUpFields,
+      });
+      if (followUpError?.code !== "23505") requireDb(followUpError, "create inbound follow-up");
+    }
 
     const { error: activityError } = await sb.from("activities").insert({
       lead_id: quote.lead_id,

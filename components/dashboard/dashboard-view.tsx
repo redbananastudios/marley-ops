@@ -122,13 +122,13 @@ export function DashboardView({ data }: { data: DashboardData }) {
 
       {/* headline KPI strip */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi label="New leads" value={s.newLeads} icon={UserPlus} tone="red" accent>
+        <Kpi label="New leads" value={s.newLeads} icon={UserPlus} tone="red" accent href="/leads">
           <Delta delta={delta} sub={s.vsLabel} />
         </Kpi>
-        <Kpi label="Contacted" value={s.contacted} icon={PhoneCall} tone="blue" sub={`${pctOf(s.contacted, s.newLeads)} of leads`} />
-        <Kpi label="Surveys booked" value={s.surveys} icon={CalendarCheck2} tone="teal" sub={`${s.leadToSurveyPct}% of leads`} />
-        <Kpi label="Jobs won" value={s.jobs} icon={Trophy} tone="green" sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} />
-        <Kpi label="Median response" value={fmtDuration(s.medianRespMins)} icon={Clock3} tone="amber">
+        <Kpi label="Contacted" value={s.contacted} icon={PhoneCall} tone="blue" sub={`${pctOf(s.contacted, s.newLeads)} of leads`} href="/leads" />
+        <Kpi label="Surveys booked" value={s.surveys} icon={CalendarCheck2} tone="teal" sub={`${s.leadToSurveyPct}% of leads`} href="/schedule/surveys" />
+        <Kpi label="Jobs won" value={s.jobs} icon={Trophy} tone="green" sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} href="/bookings" />
+        <Kpi label="Median response" value={fmtDuration(s.medianRespMins)} icon={Clock3} tone="amber" href="/performance">
           <span className="text-xs text-mist-400">to first contact</span>
         </Kpi>
       </section>
@@ -313,6 +313,7 @@ function Kpi({
   good,
   icon,
   tone = "neutral",
+  href,
   children,
 }: {
   label: string;
@@ -322,12 +323,15 @@ function Kpi({
   good?: boolean;
   icon: LucideIcon;
   tone?: "red" | "blue" | "teal" | "green" | "amber" | "violet" | "neutral";
+  /** When set, the whole tile is a link through to the list/page it summarises. */
+  href?: string;
   children?: React.ReactNode;
 }) {
-  return (
+  const card = (
     <Card
       className={
         "relative gap-0 overflow-hidden border-t-2 p-4 " +
+        (href ? "h-full transition-colors hover:bg-muted " : "") +
         (tone === "red"
           ? "border-t-mm-red"
           : tone === "blue"
@@ -359,6 +363,13 @@ function Kpi({
         </div>
       </div>
     </Card>
+  );
+  return href ? (
+    <Link href={href} className="focus-ring block rounded-xl">
+      {card}
+    </Link>
+  ) : (
+    card
   );
 }
 
