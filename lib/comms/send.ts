@@ -15,6 +15,16 @@ export interface SendResult {
 
 const DRYRUN = process.env.COMMS_DRYRUN === "true";
 
+/**
+ * Backoff between in-process email retries (3 attempts total). Kept short so a
+ * user-facing send path isn't held up for long; the comms-retry worker is the
+ * durable backstop for anything a quick retry can't rescue. Skipped under the
+ * test runner so the suite stays fast while still exercising the retry loop.
+ */
+const EMAIL_RETRY_DELAYS_MS = [400, 1200];
+const retryDelay = (ms: number): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, process.env.VITEST ? 0 : ms));
+
 export interface SendEmailInput {
   to: string;
   subject: string;
@@ -50,11 +60,7 @@ export function emailPayloadHash(input: SendEmailInput): string {
   return createHash("sha256").update(JSON.stringify(emailRequestPayload(input))).digest("hex");
 }
 
-export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
-  if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}`, simulated: true };
-  const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
-  if (!key) return { ok: false, error: "Resend API key not configured" };
-  if (!input.template && !input.html) return { ok: false, error: "No email body (html or template) given" };
+async function sendEmailOnce(input: SendEmailInput, key: string): Promise<SendResult> {
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -77,6 +83,30 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
     // A retry with the same Idempotency-Key is safe even if the response was lost.
     return { ok: false, error: err instanceof Error ? err.message : "Email send failed", outcomeUnknown: true };
   }
+}
+
+export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
+  if (DRYRUN) return { ok: true, providerId: `dryrun-email-${Date.now()}`, simulated: true };
+  const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
+  if (!key) return { ok: false, error: "Resend API key not configured" };
+  if (!input.template && !input.html) return { ok: false, error: "No email body (html or template) given" };
+
+  // In-process retry, but ONLY when an idempotency key is present. Resend retains
+  // a key for 24h and returns the original result on reuse, so re-sending after a
+  // timeout / 5xx cannot double-send — it just turns a transient provider blip
+  // (exactly the "operation aborted due to timeout" that stranded a real deposit
+  // chase, 2026-08-03) into a delivered email. Without a key a retry could
+  // duplicate, so those send exactly once. A definite reject (bad address, 4xx)
+  // has outcomeUnknown=false and returns immediately — retrying it only wastes
+  // time. The comms-retry worker is the durable backstop beyond these attempts.
+  const attempts = input.idempotencyKey ? EMAIL_RETRY_DELAYS_MS.length + 1 : 1;
+  let result: SendResult = { ok: false, error: "Email send failed" };
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await retryDelay(EMAIL_RETRY_DELAYS_MS[i - 1]);
+    result = await sendEmailOnce(input, key);
+    if (result.ok || !result.outcomeUnknown) return result;
+  }
+  return result;
 }
 
 export async function sendSms(input: { to: string; body: string }): Promise<SendResult> {

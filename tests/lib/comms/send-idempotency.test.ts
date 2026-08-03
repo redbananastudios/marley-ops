@@ -52,3 +52,65 @@ describe("provider delivery safety", () => {
       .resolves.toMatchObject({ ok: false, outcomeUnknown: true });
   });
 });
+
+describe("in-process email retry (idempotency-safe)", () => {
+  beforeEach(() => {
+    process.env.MARLEY_RESEND_API_KEY = "test-resend-key";
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  const ok = (id: string) => ({ ok: true, json: async () => ({ id }) });
+  const httpErr = (status: number, message: string) => ({ ok: false, status, json: async () => ({ message }) });
+
+  it("retries a transient 5xx and then succeeds on the reused key", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(httpErr(503, "upstream busy"))
+      .mockResolvedValueOnce(ok("email-2"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await sendEmail({ to: "c@example.com", subject: "s", html: "<p>x</p>", idempotencyKey: "marley-comm/1" });
+    expect(result).toEqual({ ok: true, providerId: "email-2" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // Every attempt reuses the SAME idempotency key, so Resend can't double-send.
+    expect(fetchMock.mock.calls[0][1].headers["Idempotency-Key"]).toBe("marley-comm/1");
+    expect(fetchMock.mock.calls[1][1].headers["Idempotency-Key"]).toBe("marley-comm/1");
+  });
+
+  it("recovers from a timeout exception (the real stranded-chase case)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("The operation was aborted due to timeout"))
+      .mockResolvedValueOnce(ok("email-after-timeout"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await sendEmail({ to: "c@example.com", subject: "s", html: "<p>x</p>", idempotencyKey: "marley-comm/2" });
+    expect(result).toEqual({ ok: true, providerId: "email-after-timeout" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT retry a definite reject (4xx) — retrying a bad address is pointless", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(httpErr(422, "invalid to address"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await sendEmail({ to: "bad", subject: "s", html: "<p>x</p>", idempotencyKey: "marley-comm/3" });
+    expect(result).toMatchObject({ ok: false, outcomeUnknown: false });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT retry when there is no idempotency key — a retry could double-send", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(httpErr(500, "boom"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await sendEmail({ to: "c@example.com", subject: "s", html: "<p>x</p>" });
+    expect(result).toMatchObject({ ok: false, outcomeUnknown: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after 3 attempts on a persistent unknown outcome", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("socket reset"));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await sendEmail({ to: "c@example.com", subject: "s", html: "<p>x</p>", idempotencyKey: "marley-comm/4" });
+    expect(result).toMatchObject({ ok: false, outcomeUnknown: true });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+});
