@@ -133,6 +133,16 @@ export const CRON_JOBS: CronJobMeta[] = [
     endpoint: "/api/cron/health-watchdog",
   },
   {
+    slug: "comms-retry",
+    label: "Message delivery retry",
+    schedule: "*/5 * * * *",
+    cadence: "Every 5 minutes",
+    description:
+      "Re-drives any customer email/SMS whose provider send failed or timed out, reusing the stored idempotency key so it can't double-send; escalates after repeated failures instead of dropping the message.",
+    maxAgeMins: 20,
+    endpoint: "/api/cron/comms-retry",
+  },
+  {
     slug: "fleet-reminders",
     label: "Fleet reminders",
     schedule: "0 7 * * *",

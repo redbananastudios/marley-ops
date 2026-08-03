@@ -5,7 +5,7 @@
 
 import { createHash, randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { Database } from "@/lib/supabase/database.types";
+import type { Database, Json } from "@/lib/supabase/database.types";
 import { contentHash, normRecipient } from "@/lib/comms/hash";
 import { emailPayloadHash, sendEmail, sendSms, type SendEmailInput } from "@/lib/comms/send";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
@@ -16,6 +16,18 @@ import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issue
 
 type Sb = SupabaseClient<Database>;
 type CommunicationRow = Database["public"]["Tables"]["communications"]["Row"];
+
+/**
+ * The exact provider request, stored on the communication row so a failed send
+ * can be re-driven later (by the comms-retry worker) with the SAME idempotency
+ * key and the SAME payload — no lossy reconstruction from the display columns.
+ * The idempotency key is NOT stored here; it is always `marley-comm/<id>`.
+ */
+export interface ProviderRequest {
+  channel: "email" | "sms";
+  email?: SendEmailInput;
+  sms?: { to: string; body: string };
+}
 
 export interface DispatchCommInput {
   channel: "email" | "sms";
@@ -162,6 +174,9 @@ export async function dispatchComm(
   const providerPayloadHash = emailInput
     ? emailPayloadHash(emailInput)
     : createHash("sha256").update(JSON.stringify({ to: toNorm, body: input.bodyText })).digest("hex");
+  const providerRequest: ProviderRequest = emailInput
+    ? { channel: "email", email: emailInput }
+    : { channel: "sms", sms: { to: input.to, body: input.bodyText } };
   const opsSb = createAdminClient();
   const baseRow = {
     client_id: input.clientId ?? null,
@@ -199,6 +214,58 @@ export async function dispatchComm(
   const claimToken = claim.row.claim_token;
   if (!claimToken) return { ok: false, error: "Communication claim token was not returned." };
 
+  // Persist the exact provider request so the comms-retry worker can re-drive a
+  // failed send with the SAME idempotency key (marley-comm/<id>) and payload —
+  // no lossy reconstruction, no drift. A no-op re-write on the reclaim path.
+  await sb
+    .from("communications")
+    .update({ provider_request: providerRequest as unknown as Json } as never)
+    .eq("id", communicationId)
+    .eq("claim_token", claimToken);
+
+  return runProviderSend(sb, opsSb, {
+    communicationId,
+    claimToken,
+    channel: input.channel,
+    providerRequest,
+    leadId: input.leadId ?? null,
+    clientId: input.clientId ?? null,
+    actorId,
+    to: input.to,
+    subject: input.subject ?? null,
+    claimIssueKey: `communication-claim:${hash}`,
+    override: !!input.override,
+  });
+}
+
+/**
+ * Drive a CLAIMED communication row to the provider and finalise it. Shared by
+ * dispatchComm (first send) and the comms-retry worker (re-drive) so there is
+ * ONE implementation of start → send → finalise/fail → resolve/report. The
+ * caller must already hold the claim (`claimToken`); this reads the payload from
+ * `providerRequest` and always sends email under the stable `marley-comm/<id>`
+ * idempotency key, so a re-drive cannot double-send.
+ */
+export async function runProviderSend(
+  sb: Sb,
+  opsSb: Sb,
+  a: {
+    communicationId: string;
+    claimToken: string;
+    channel: "email" | "sms";
+    providerRequest: ProviderRequest;
+    leadId: string | null;
+    clientId: string | null;
+    actorId: string | null;
+    to: string;
+    subject: string | null;
+    claimIssueKey?: string | null;
+    override?: boolean;
+    retried?: boolean;
+  },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { communicationId, claimToken, channel } = a;
+
   const { data: providerStarted, error: providerStartError } = await sb.rpc("start_communication_provider", {
     p_id: communicationId,
     p_claim_token: claimToken,
@@ -210,17 +277,14 @@ export async function dispatchComm(
       source: "communications",
       event: "comm.provider_start.failed",
       message: "A claimed communication could not be marked before provider dispatch.",
-      context: { communicationId, channel: input.channel, error: providerStartError?.message },
+      context: { communicationId, channel, error: providerStartError?.message },
     });
     return { ok: false, error: "Message was not sent because its durable claim could not be confirmed." };
   }
 
-  const result = input.channel === "email"
-    ? await sendEmail({
-        ...emailInput!,
-        idempotencyKey: `marley-comm/${communicationId}`,
-      })
-    : await sendSms({ to: input.to, body: input.bodyText });
+  const result = channel === "email"
+    ? await sendEmail({ ...(a.providerRequest.email as SendEmailInput), idempotencyKey: `marley-comm/${communicationId}` })
+    : await sendSms(a.providerRequest.sms ?? { to: a.to, body: "" });
 
   if (!result.ok) {
     const errMsg = result.error ?? "Send failed";
@@ -237,7 +301,7 @@ export async function dispatchComm(
       .eq("claim_token", claimToken);
     await reportOperationalIssue(opsSb, {
       key: `communication:${communicationId}`,
-      severity: result.outcomeUnknown && input.channel === "sms" ? "critical" : "error",
+      severity: result.outcomeUnknown && channel === "sms" ? "critical" : "error",
       source: "communications",
       event: "comm.provider.failed",
       message: result.outcomeUnknown
@@ -245,7 +309,7 @@ export async function dispatchComm(
         : "The communication provider rejected the send.",
       context: {
         communicationId,
-        channel: input.channel,
+        channel,
         outcomeUnknown: !!result.outcomeUnknown,
         error: errMsg,
         failureLogError: failureLogError?.message,
@@ -269,23 +333,25 @@ export async function dispatchComm(
       source: "communications",
       event: "comm.finalize.failed",
       message: "Provider accepted a communication but database finalisation failed.",
-      context: { communicationId, channel: input.channel, error: finaliseError?.message },
+      context: { communicationId, channel, error: finaliseError?.message },
     });
     return { ok: true };
   }
   await resolveOperationalIssue(opsSb, `communication:${communicationId}`);
-  await resolveOperationalIssue(opsSb, `communication-claim:${hash}`);
+  if (a.claimIssueKey) await resolveOperationalIssue(opsSb, a.claimIssueKey);
 
-  if (input.leadId || input.clientId) {
+  if (a.leadId || a.clientId) {
     const { error: activityError } = await sb.from("activities").insert({
-      lead_id: input.leadId ?? null,
-      client_id: input.clientId ?? null,
-      actor_id: actorId,
-      type: input.channel === "email" ? "email_sent" : "sms_sent",
-      summary: `${input.channel === "email" ? "Email" : "SMS"} sent to ${input.to}${
-        input.subject ? ` — ${input.subject}` : ""
-      }`,
-      meta: { provider_id: result.providerId ?? null, override: !!input.override },
+      lead_id: a.leadId ?? null,
+      client_id: a.clientId ?? null,
+      actor_id: a.actorId,
+      type: channel === "email" ? "email_sent" : "sms_sent",
+      summary: `${channel === "email" ? "Email" : "SMS"} sent to ${a.to}${a.subject ? ` — ${a.subject}` : ""}`,
+      meta: {
+        provider_id: result.providerId ?? null,
+        override: a.override ?? false,
+        ...(a.retried ? { retried: true } : {}),
+      },
     });
     if (activityError) {
       await reportOperationalIssue(opsSb, {
