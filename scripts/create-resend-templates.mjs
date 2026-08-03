@@ -561,6 +561,30 @@ const reviewRequestHtml = shellHtml(
   ].join("\n"),
 );
 
+/* ---- crew portal invite (internal — set-your-own-password link) ------------ */
+
+const crewInviteHtml = shellHtml(
+  "You've been added to the Marley Moves crew portal — set your password to sign in.",
+  [
+    greetRow("{{{CREW_FIRST_NAME}}}"),
+    headlineRow("Set up your crew login."),
+    sublineRow(
+      `You've been added to the <strong style="color:${INK};">Marley Moves crew portal</strong>. Set your password to see your jobs, day sheets, availability and pay, all in one place.`,
+    ),
+    linkButton("Set your password&nbsp;&rarr;", "{{{SET_PASSWORD_URL}}}"),
+    stepsRow([
+      { t: "Set your password", d: "Choose a password using the button above." },
+      { t: "Sign in", d: "Use your email and that password at ops.marleymoves.co.uk." },
+      { t: "Add Face ID or fingerprint", d: "Turn on quick sign-in so you never type it again." },
+    ]),
+    sublineRow(
+      `This link is just for you and expires in 7 days. If you weren't expecting it, ignore this email or call <strong style="color:${RED};">01747 637070</strong>.`,
+      "0 36px 8px",
+    ),
+    signoffRow(),
+  ].join("\n"),
+);
+
 /* ---- chase emails: personal, from the lead owner ({{{OWNER_NAME}}}) --------- */
 
 const ownerSignoffRow = () => `  <tr><td style="padding:8px 36px 30px;">
@@ -711,6 +735,18 @@ const TEMPLATES = [
         type: "string",
         fallback_value: "https://g.page/r/CXD_Yh4RUF1cEBM/review",
       },
+    ],
+  },
+  {
+    name: "crew-portal-invite",
+    envVar: "RESEND_TEMPLATE_CREW_INVITE",
+    subject: "Set up your Marley Moves crew login",
+    from: "Marley Moves <hello@marleymoves.co.uk>",
+    reply_to: "hello@marleymoves.co.uk",
+    html: crewInviteHtml,
+    variables: [
+      { key: "CREW_FIRST_NAME", type: "string", fallback_value: "there" },
+      { key: "SET_PASSWORD_URL", type: "string", fallback_value: "https://ops.marleymoves.co.uk/auth/set-password" },
     ],
   },
   {

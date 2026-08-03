@@ -16,10 +16,12 @@ import {
   ArchiveRestore,
   CalendarDays,
   CarFront,
+  KeyRound,
   Loader2,
   Pencil,
   Phone,
   Plus,
+  Send,
   ShieldAlert,
   ShieldCheck,
   Trash2,
@@ -61,6 +63,7 @@ import {
   type StaffInput,
   type VehicleInput,
 } from "@/app/(dashboard)/resources/actions";
+import { activateCrewLoginAction, sendCrewInviteAction } from "@/app/(dashboard)/resources/crew-login-actions";
 import { docStatus, VEHICLE_DOCS, VEHICLE_TYPES } from "@/lib/vehicles";
 import { groupAvailabilityRuns, patternLabel, type AvailabilitySegment } from "@/lib/staff/availability";
 import { StaffWallChart } from "@/components/resources/staff-wall-chart";
@@ -89,6 +92,8 @@ export interface StaffRow {
   working_days: number[] | null;
   notes: string | null;
   is_active: boolean;
+  /** The linked auth login, if this staff member has been activated for the crew portal. */
+  profile_id: string | null;
 }
 
 export interface StaffOnboardingState {
@@ -412,6 +417,70 @@ export function ResourcesView({
 
 /* ------------------------------------------------------------------ staff */
 
+/**
+ * Portal-login control on a staff card (admin only). Two deliberate steps so no
+ * crew member is emailed by accident: "Activate crew login" creates the login
+ * silently; "Send invite" is the only thing that emails them a set-your-password
+ * link. Needs an email on the staff record before a login can be made.
+ */
+function CrewLoginControl({ staff }: { staff: StaffRow }) {
+  const router = useRouter();
+  const [pending, start] = useTransition();
+
+  function activate() {
+    start(async () => {
+      const res = await activateCrewLoginAction(staff.id);
+      if (!res.ok) toast.error(res.error);
+      else {
+        toast.success("Crew login created. Use “Send invite” when you’re ready to email them.");
+        router.refresh();
+      }
+    });
+  }
+  function sendInvite() {
+    start(async () => {
+      const res = await sendCrewInviteAction(staff.id);
+      if (!res.ok) toast.error(res.error);
+      else toast.success("Invite sent — they can now set their own password.");
+    });
+  }
+
+  if (!staff.profile_id) {
+    if (!staff.email) {
+      return <p className="text-[11px] text-mist-400">Add an email to enable a portal login.</p>;
+    }
+    return (
+      <button
+        type="button"
+        onClick={activate}
+        disabled={pending}
+        className="focus-ring inline-flex w-fit items-center gap-1.5 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-mist-500 hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        {pending ? <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} /> : <KeyRound className="size-3.5" strokeWidth={1.75} />}
+        Activate crew login
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-success">
+        <KeyRound className="size-3.5" strokeWidth={1.75} /> Portal login active
+      </span>
+      <button
+        type="button"
+        onClick={sendInvite}
+        disabled={pending}
+        title="Email them a link to set their password"
+        className="focus-ring inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium text-mist-500 hover:bg-muted hover:text-foreground disabled:opacity-50"
+      >
+        {pending ? <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} /> : <Send className="size-3.5" strokeWidth={1.75} />}
+        Send invite
+      </button>
+    </div>
+  );
+}
+
 function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: AvailabilitySegment[]; isAdmin: boolean; onEdit: () => void }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -480,6 +549,8 @@ function StaffCard({ s, segments, isAdmin, onEdit }: { s: StaffRow; segments: Av
           ) : null}
         </div>
       ) : null}
+
+      {isAdmin && s.is_active ? <CrewLoginControl staff={s} /> : null}
 
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
         {isAdmin ? (
