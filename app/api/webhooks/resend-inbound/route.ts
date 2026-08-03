@@ -5,7 +5,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { extractReplyText } from "@/lib/comms/extract-reply";
+import { extractReplyText, htmlToText } from "@/lib/comms/extract-reply";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
@@ -42,6 +42,17 @@ function verifySvix(payload: string, headers: Headers, secret: string): boolean 
 }
 
 const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The customer's message source: the plain-text part, or the HTML flattened to
+ * text when the reply is HTML-only (Gmail/iPhone Mail) with an empty text part.
+ * Without the HTML fallback an HTML-only reply is lost entirely (Priscilla Kong,
+ * MMR020, 2026-08-03). Feed the result through extractReplyText to strip quotes.
+ */
+function replyBodySource(content: { text?: string; html?: string } | null): string {
+  const text = content?.text?.trim();
+  return text ? content!.text! : htmlToText(content?.html);
+}
 
 async function fetchReceivedEmail(emailId: string): Promise<{ text?: string; html?: string } | null> {
   const key = process.env.MARLEY_RESEND_API_KEY || process.env.RESEND_API_KEY;
@@ -127,13 +138,14 @@ async function processInbound(
   if (!quote) {
     if (shouldForwardUnmatched(from)) {
       const content = emailId ? await fetchReceivedEmail(emailId) : null;
+      const rawUnmatched = replyBodySource(content);
       await sendDurableWebhookEmail(sb, eventId, leaseToken, "unmatched_forward", {
         to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
         subject: `Unmatched inbound email — ${subject}`,
         html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
           <p>An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.</p>
           <hr style="border:none;border-top:1px solid #e4e4e7;">
-          <div style="white-space:pre-wrap;">${esc(extractReplyText(content?.text) || content?.text?.trim() || "(no message body retrieved)")}</div>
+          <div style="white-space:pre-wrap;">${esc(extractReplyText(rawUnmatched) || rawUnmatched.trim() || "(no message body retrieved)")}</div>
         </div>`,
         replyTo: from,
         idempotencyKey: `marley-inbound-unmatched/${eventId}`,
@@ -145,8 +157,11 @@ async function processInbound(
   const content = emailId ? await fetchReceivedEmail(emailId) : null;
   // Forward (and log) only the customer's NEW words — strip the quoted quote email
   // their client appends, which otherwise arrives as an unreadable "| | |" wall.
-  // Fall back to the raw text if trimming would leave nothing (unusual bottom-post).
-  const bodyText = extractReplyText(content?.text) || content?.text?.trim() || "(open the forwarded copy for the message)";
+  // An HTML-only reply (empty text part) is flattened from the HTML first, else
+  // the message is lost to a placeholder (MMR020). Fall back to the raw body if
+  // trimming would leave nothing (unusual bottom-post).
+  const rawReply = replyBodySource(content);
+  const bodyText = extractReplyText(rawReply) || rawReply.trim() || "(open the forwarded copy for the message)";
 
   if (quote.lead_id) {
     const { error } = await sb.from("leads").update({ chase_paused: true }).eq("id", quote.lead_id);

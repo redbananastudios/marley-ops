@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractReplyText } from "@/lib/comms/extract-reply";
+import { extractReplyText, htmlToText } from "@/lib/comms/extract-reply";
 
 describe("extractReplyText", () => {
   it("keeps only the new message from a Yahoo reply (the reported wall of text)", () => {
@@ -154,5 +154,54 @@ describe("extractReplyText", () => {
     expect(extractReplyText("")).toBe("");
     expect(extractReplyText(null)).toBe("");
     expect(extractReplyText(undefined)).toBe("");
+  });
+});
+
+describe("htmlToText (HTML-only reply fallback)", () => {
+  it("recovers the message from an HTML-only iPhone/Gmail reply (the MMR020 case)", () => {
+    // Real shape: an HTML-only reply (empty text part) with the quoted quote
+    // email inside a <blockquote>. Before the fallback this was lost entirely.
+    const html = `<div dir="ltr">Hi,<div><br></div><div>Just to confirm, I&#39;ve accepted your quote and paid &pound;100 deposit.</div><div><br></div><div>Thank you very much!</div><div><br></div><div>Regards,<br>Priscilla</div><div><br></div><div>Sent from my iPhone</div></div>` +
+      `<div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Sun, 3 Aug 2026 at 12:00, Marley Moves &lt;q-abc@reply.marleymoves.co.uk&gt; wrote:<br></div>` +
+      `<blockquote class="gmail_quote"><div>Your fixed price from Marley Moves: £2,100. | | | Accept your quote online →</div></blockquote></div>`;
+    const flattened = htmlToText(html);
+    // The quoted quote-email table wall is gone.
+    expect(flattened).not.toContain("| |");
+    expect(flattened).not.toContain("Accept your quote online");
+    // Feeding it through extractReplyText strips the surviving attribution line
+    // and the "Sent from my iPhone" tagline, leaving just the customer's words.
+    const message = extractReplyText(flattened);
+    expect(message).toContain("I've accepted your quote and paid £100 deposit");
+    expect(message).toContain("Regards,");
+    expect(message).not.toContain("wrote:");
+    expect(message).not.toContain("Sent from my iPhone");
+  });
+
+  it("turns block tags into line breaks and decodes entities", () => {
+    const out = htmlToText("<p>Line one</p><div>Line two</div>Tom &amp; Jerry &lt;3 &#39;quote&#39;");
+    expect(out).toBe("Line one\nLine two\nTom & Jerry <3 'quote'");
+  });
+
+  it("drops script/style and blockquote quoted history", () => {
+    const out = htmlToText(
+      `<style>.x{color:red}</style><p>Real message</p><blockquote>old quoted thread that should vanish</blockquote>`,
+    );
+    expect(out).toContain("Real message");
+    expect(out).not.toContain("old quoted thread");
+    expect(out).not.toContain("color:red");
+  });
+
+  it("returns empty for empty/null/undefined", () => {
+    expect(htmlToText("")).toBe("");
+    expect(htmlToText(null)).toBe("");
+    expect(htmlToText(undefined)).toBe("");
+  });
+
+  it("stays linear on a large unclosed-tag body (no catastrophic backtracking)", () => {
+    const big = "<blockquote>" + "a ".repeat(100_000); // never closed
+    const start = performance.now();
+    const out = htmlToText(big);
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(typeof out).toBe("string");
   });
 });

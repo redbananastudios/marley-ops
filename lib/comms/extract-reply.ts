@@ -128,3 +128,53 @@ export function extractReplyText(raw: string | null | undefined): string {
 
   return out;
 }
+
+/**
+ * Flatten an HTML email body to plain text for the reply extractor. Inbound
+ * replies are sometimes HTML-only (Gmail, iPhone Mail) with an EMPTY text part,
+ * so a caller that only reads the text part loses the message entirely and the
+ * office sees a "(open the forwarded copy)" placeholder (Priscilla Kong, MMR020,
+ * 2026-08-03 — "I've accepted your quote and paid £100 deposit" was dropped).
+ *
+ * Quoted history lives in <blockquote> (Gmail/Apple Mail) — drop it here so the
+ * flattened table "| | |" wall never reaches the caller. Any attribution line
+ * ("On <date> … wrote:") that sits OUTSIDE the blockquote survives as text and
+ * is handled by extractReplyText downstream, so feed the output through that.
+ *
+ * Linear-time (no catastrophic backtracking): every quantifier is bounded or
+ * anchored, and whitespace runs are collapsed in one pass before the trailing
+ * trim — this runs on untrusted inbound content from the public webhook.
+ */
+const NAMED_ENTITIES: Record<string, string> = {
+  nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"',
+  apos: "'", rsquo: "’", lsquo: "‘", rdquo: "”", ldquo: "“",
+  pound: "£", euro: "€", cent: "¢", yen: "¥", // money — matters in this domain
+  copy: "©", reg: "®", trade: "™", hellip: "…", mdash: "—", ndash: "–",
+  middot: "·", bull: "•", deg: "°",
+};
+
+export function htmlToText(html: string | null | undefined): string {
+  const h = (html ?? "").replace(/\r\n?/g, "\n");
+  if (!h) return "";
+  return h
+    .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<blockquote\b[^>]*>[\s\S]*?<\/blockquote>/gi, "\n") // quoted history
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    // Numeric entities first, then named — so a literal "&amp;#163;" (rare double
+    // encode) doesn't wrongly resolve to £.
+    .replace(/&#[xX]([0-9a-fA-F]{1,6});/g, (_, hex) => {
+      const n = parseInt(hex, 16);
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : "";
+    })
+    .replace(/&#(\d{1,7});/g, (_, d) => {
+      const n = Number(d);
+      return n > 0 && n < 0x110000 ? String.fromCodePoint(n) : "";
+    })
+    .replace(/&([a-zA-Z]+);/g, (m, name) => NAMED_ENTITIES[name.toLowerCase()] ?? m)
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
