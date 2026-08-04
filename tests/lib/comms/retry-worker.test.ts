@@ -2,18 +2,22 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Stub the shared send path + issue reporter so we test the worker's ORCHESTRATION
 // (which rows it re-drives, backs off, caps, escalates) — not the provider call.
-const { runProviderSend, reportOperationalIssue } = vi.hoisted(() => ({
+const { runProviderSend, sendOpsAlert, reportOperationalIssue, resolveOperationalIssue } = vi.hoisted(() => ({
   runProviderSend: vi.fn(),
+  sendOpsAlert: vi.fn(),
   reportOperationalIssue: vi.fn(),
+  resolveOperationalIssue: vi.fn(),
 }));
-vi.mock("@/lib/comms/dispatch", () => ({ runProviderSend }));
-vi.mock("@/lib/ops/issues", () => ({ reportOperationalIssue }));
+vi.mock("@/lib/comms/dispatch", () => ({ runProviderSend, sendOpsAlert }));
+vi.mock("@/lib/ops/issues", () => ({ reportOperationalIssue, resolveOperationalIssue }));
 
 import {
   runCommsRetry,
+  escalateUnretryableComms,
   commsRetryBackoffMs,
   commsRetryDue,
   COMMS_RETRY_MAX_ATTEMPTS,
+  COMMS_RECLAIM_WINDOW_HOURS,
 } from "@/lib/comms/retry-worker";
 
 const nowMs = 1_700_000_000_000;
@@ -136,5 +140,128 @@ describe("runCommsRetry", () => {
     const s = await runCommsRetry(sb, NOW);
     expect(s).toMatchObject({ redriven: 1, recovered: 0, escalated: 0 });
     expect(reportOperationalIssue).not.toHaveBeenCalled();
+  });
+});
+
+/* ------------------------------------------------- backstop: un-retryable rows */
+
+const unRow = (o: Record<string, unknown> = {}) => ({
+  id: "u1",
+  channel: "email",
+  to_address: "m@example.com",
+  subject: "One last step to secure your booking",
+  provider_request: null, // no stored payload → un-retryable
+  provider_outcome_unknown: true, // a timeout — outcome genuinely unknown
+  provider_started_at: new Date(nowMs - 26 * 60 * 60_000).toISOString(),
+  created_at: new Date(nowMs - 26 * 60 * 60_000).toISOString(),
+  attempt_count: 1,
+  ...o,
+});
+
+/** Supabase double for the exact calls escalateUnretryableComms makes: the
+ *  communications sweep (awaited via then), the per-row open-issue lookup
+ *  (maybeSingle), and the attempt_count cap (update().eq().eq()). */
+function fakeUnretryableSb(rows: unknown[], opts: { openIssue?: boolean } = {}) {
+  const openIssue = opts.openIssue ?? true;
+  const updates: unknown[] = [];
+  const sb = {
+    from() {
+      return {
+        select() {
+          const b: Record<string, unknown> = {};
+          for (const m of ["eq", "lt", "or", "order", "limit"]) b[m] = () => b;
+          b.maybeSingle = () => Promise.resolve({ data: openIssue ? { id: "iss" } : null });
+          b.then = (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null });
+          return b;
+        },
+        update(patch: unknown) {
+          return { eq: () => ({ eq: () => { updates.push(patch); return Promise.resolve({ data: null, error: null }); } }) };
+        },
+      };
+    },
+    async rpc() {
+      return { data: null };
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { sb: sb as any, updates };
+}
+
+describe("escalateUnretryableComms", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    sendOpsAlert.mockResolvedValue(true);
+  });
+
+  it("notifies once, resolves the issue, and caps a payload-less failed row", async () => {
+    const { sb, updates } = fakeUnretryableSb([unRow()]);
+    const s = await escalateUnretryableComms(sb, NOW);
+    expect(s).toEqual({ stranded: 1 });
+    expect(sendOpsAlert).toHaveBeenCalledTimes(1);
+    // system-category, single-fire idempotency key scoped to the row.
+    expect(sendOpsAlert.mock.calls[0][2]).toBe("system");
+    expect(sendOpsAlert.mock.calls[0][3]).toBe("comm-unretryable/u1");
+    expect(resolveOperationalIssue).toHaveBeenCalledWith(expect.anything(), "communication:u1");
+    expect(updates).toEqual([{ attempt_count: COMMS_RETRY_MAX_ATTEMPTS }]);
+  });
+
+  it("handles a past-window row that still has its payload (reclaim would refuse it)", async () => {
+    const stale = new Date(nowMs - (COMMS_RECLAIM_WINDOW_HOURS + 1) * 60 * 60_000).toISOString();
+    const { sb } = fakeUnretryableSb([
+      unRow({ id: "u2", provider_request: { channel: "email", email: { to: "m@example.com" } }, provider_started_at: stale }),
+    ]);
+    const s = await escalateUnretryableComms(sb, NOW);
+    expect(s).toEqual({ stranded: 1 });
+    expect(resolveOperationalIssue).toHaveBeenCalledWith(expect.anything(), "communication:u2");
+  });
+
+  it("skips a row that is still retryable (payload present, within the window) — never hides a live retry", async () => {
+    const recent = new Date(nowMs - 60 * 60_000).toISOString(); // 1h ago, well inside the window
+    const { sb, updates } = fakeUnretryableSb([
+      unRow({ id: "u3", provider_request: { channel: "email", email: { to: "m@example.com" } }, provider_started_at: recent }),
+    ]);
+    const s = await escalateUnretryableComms(sb, NOW);
+    expect(s).toEqual({ stranded: 0 });
+    expect(sendOpsAlert).not.toHaveBeenCalled();
+    expect(resolveOperationalIssue).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("does NOT clear the signal when the human could not be notified", async () => {
+    sendOpsAlert.mockResolvedValue(false);
+    const { sb, updates } = fakeUnretryableSb([unRow()]);
+    const s = await escalateUnretryableComms(sb, NOW);
+    expect(s).toEqual({ stranded: 0 });
+    expect(resolveOperationalIssue).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+  });
+
+  it("caps silently WITHOUT an alert when the issue is already resolved (no spurious noise)", async () => {
+    const { sb, updates } = fakeUnretryableSb([unRow()], { openIssue: false });
+    const s = await escalateUnretryableComms(sb, NOW);
+    expect(s).toEqual({ stranded: 0 });
+    expect(sendOpsAlert).not.toHaveBeenCalled();
+    expect(resolveOperationalIssue).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ attempt_count: COMMS_RETRY_MAX_ATTEMPTS }]); // still capped
+  });
+
+  it("names the RIGHT console per channel — Webex for SMS, not Resend (a duplicate-send trap)", async () => {
+    const stale = new Date(nowMs - (COMMS_RECLAIM_WINDOW_HOURS + 1) * 60 * 60_000).toISOString();
+    const { sb } = fakeUnretryableSb([
+      unRow({ id: "sms1", channel: "sms", provider_request: { channel: "sms", sms: { to: "+44", body: "x" } }, provider_started_at: stale }),
+    ]);
+    await escalateUnretryableComms(sb, NOW);
+    const lines = (sendOpsAlert.mock.calls[0][1] as string[]).join(" ");
+    expect(lines).toContain("Webex");
+    expect(lines).not.toContain("Resend");
+  });
+
+  it("does not claim 'may have been delivered' for a hard reject (known-undelivered)", async () => {
+    const { sb } = fakeUnretryableSb([unRow({ id: "hr1", provider_outcome_unknown: false })]);
+    await escalateUnretryableComms(sb, NOW);
+    expect(sendOpsAlert.mock.calls[0][0]).toBe("Customer message failed to send — resend by hand");
+    const lines = (sendOpsAlert.mock.calls[0][1] as string[]).join(" ");
+    expect(lines).toContain("was NOT delivered");
+    expect(lines).not.toMatch(/may already have been delivered/i);
   });
 });
