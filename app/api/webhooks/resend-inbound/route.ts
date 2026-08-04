@@ -5,7 +5,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { extractReplyText, htmlToText } from "@/lib/comms/extract-reply";
+import { htmlToText, splitReply } from "@/lib/comms/extract-reply";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
@@ -42,6 +42,27 @@ function verifySvix(payload: string, headers: Headers, secret: string): boolean 
 }
 
 const esc = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+/**
+ * The forwarded-reply body: the customer's NEW words in a prominent card, then —
+ * when we could separate it — the quoted original they replied to in a muted,
+ * clearly-labelled block underneath (Peter, 2026-08-04: "separating the original
+ * that they are replying to and their response, so this will be easy to read").
+ * The quoted half is context, not content, so it's capped rather than complete.
+ */
+function forwardBodyHtml(intro: string, replyText: string, quotedText: string, footer: string): string {
+  const cappedQuote = quotedText.length > 1800 ? `${quotedText.slice(0, 1800).trimEnd()}…` : quotedText;
+  const quotedBlock = cappedQuote
+    ? `<p style="margin:18px 0 6px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:0.08em;color:#a1a1aa;">They were replying to</p>
+      <div style="color:#71717a;font-size:12.5px;line-height:1.6;border-left:2px solid #e4e4e7;padding:2px 0 2px 12px;white-space:pre-wrap;">${esc(cappedQuote)}</div>`
+    : "";
+  return `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;max-width:640px;">
+    <p style="margin:0 0 14px;">${intro}</p>
+    <div style="background:#fafaf9;border:1px solid #e4e4e7;border-left:3px solid #c03838;border-radius:6px;padding:14px 18px;white-space:pre-wrap;">${esc(replyText)}</div>
+    ${quotedBlock}
+    <p style="margin:18px 0 0;font-size:12px;color:#71717a;">${footer}</p>
+  </div>`;
+}
 
 /**
  * The customer's message source: the plain-text part, or the HTML flattened to
@@ -139,14 +160,17 @@ async function processInbound(
     if (shouldForwardUnmatched(from)) {
       const content = emailId ? await fetchReceivedEmail(emailId) : null;
       const rawUnmatched = replyBodySource(content);
+      const parts = splitReply(rawUnmatched);
+      const unmatchedText = parts.reply || rawUnmatched.trim() || "(no message body retrieved)";
       await sendDurableWebhookEmail(sb, eventId, leaseToken, "unmatched_forward", {
         to: process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk",
         subject: `Unmatched inbound email — ${subject}`,
-        html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
-          <p>An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.</p>
-          <hr style="border:none;border-top:1px solid #e4e4e7;">
-          <div style="white-space:pre-wrap;">${esc(extractReplyText(rawUnmatched) || rawUnmatched.trim() || "(no message body retrieved)")}</div>
-        </div>`,
+        html: forwardBodyHtml(
+          `An email arrived at the reply address but couldn't be matched to a job. Reply directly to <strong>${esc(from)}</strong> if it's a real customer.`,
+          unmatchedText,
+          parts.reply ? parts.quoted : "",
+          `From ${esc(from)} · subject: ${esc(subject)}`,
+        ),
         replyTo: from,
         idempotencyKey: `marley-inbound-unmatched/${eventId}`,
       });
@@ -159,9 +183,13 @@ async function processInbound(
   // their client appends, which otherwise arrives as an unreadable "| | |" wall.
   // An HTML-only reply (empty text part) is flattened from the HTML first, else
   // the message is lost to a placeholder (MMR020). Fall back to the raw body if
-  // trimming would leave nothing (unusual bottom-post).
+  // trimming would leave nothing (unusual bottom-post). The quoted half is kept
+  // separately so the forward can show it as muted context — but only when the
+  // reply itself extracted; on the raw fallback it would duplicate the body.
   const rawReply = replyBodySource(content);
-  const bodyText = extractReplyText(rawReply) || rawReply.trim() || "(open the forwarded copy for the message)";
+  const replyParts = splitReply(rawReply);
+  const bodyText = replyParts.reply || rawReply.trim() || "(open the forwarded copy for the message)";
+  const quotedContext = replyParts.reply ? replyParts.quoted : "";
 
   if (quote.lead_id) {
     const { error } = await sb.from("leads").update({ chase_paused: true }).eq("id", quote.lead_id);
@@ -241,16 +269,18 @@ async function processInbound(
   const forwardTo = ownerMailbox || process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk";
   const robotSender = !shouldForwardUnmatched(from);
   if (!robotSender) {
+    const leadLink = quote.lead_id
+      ? ` · <a href="https://ops.marleymoves.co.uk/leads/${quote.lead_id}" style="color:#c03838;">Open the lead in Marley Ops</a>`
+      : "";
     await sendDurableWebhookEmail(sb, eventId, leaseToken, "owner_forward", {
       to: forwardTo,
       subject: `Reply from ${quote.customer_name ?? from} — ${quote.quote_ref}: ${subject}`,
-      html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">
-        <p><strong>${esc(quote.customer_name ?? "Customer")}</strong> (${esc(from)}) replied about quote <strong>${esc(quote.quote_ref)}</strong>. Chasing is paused.</p>
-        <hr style="border:none;border-top:1px solid #e4e4e7;">
-        <div style="white-space:pre-wrap;">${esc(bodyText)}</div>
-        <hr style="border:none;border-top:1px solid #e4e4e7;">
-        <p style="font-size:12px;color:#71717a;">Reply directly to the customer at ${esc(from)}. Lead: https://ops.marleymoves.co.uk/leads/${quote.lead_id ?? ""}</p>
-      </div>`,
+      html: forwardBodyHtml(
+        `<strong>${esc(quote.customer_name ?? "Customer")}</strong> (${esc(from)}) replied about quote <strong>${esc(quote.quote_ref)}</strong>. Chasing is paused.`,
+        bodyText,
+        quotedContext,
+        `Reply directly to the customer at ${esc(from)}${leadLink}`,
+      ),
       replyTo: from,
       idempotencyKey: `marley-inbound-forward/${eventId}`,
     });

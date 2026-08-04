@@ -148,7 +148,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
 
   const { data: comms } = await supabase
     .from("communications")
-    .select("id, channel, to_address, subject, body, status, send_count, last_sent_at, created_at")
+    .select("id, channel, direction, to_address, subject, body, status, send_count, last_sent_at, created_at")
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const commsRows = comms ?? [];
@@ -771,30 +771,50 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               />
             ) : (
               <ul className="divide-y">
-                {commsRows.map((c) => (
-                  <li key={c.id} className="px-5 py-3.5">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-foreground">
-                        <span className="uppercase text-mist-400">{c.channel}</span> · {c.to_address}
-                        {c.send_count > 1 ? <span className="text-mist-400"> ×{c.send_count}</span> : null}
-                      </p>
-                      <span
-                        className={
-                          c.status === "sent"
-                            ? "text-xs text-success"
-                            : c.status === "failed"
-                              ? "text-xs text-danger"
-                              : "text-xs text-mist-400"
-                        }
-                      >
-                        {c.status}
-                      </span>
-                    </div>
-                    {c.subject ? <p className="mt-0.5 text-sm text-foreground">{c.subject}</p> : null}
-                    <p className="mt-0.5 line-clamp-2 text-xs text-mist-400">{c.body}</p>
-                    <p className="mt-1 text-xs text-mist-400">{fmtShort(c.last_sent_at ?? c.created_at)}</p>
-                  </li>
-                ))}
+                {commsRows.map((c) => {
+                  // Inbound rows are the CUSTOMER speaking — they carry the words an
+                  // operative needs, so they read full-width (no clamp) with a badge,
+                  // while our outbound sends stay a compact two-line log.
+                  const inbound = c.direction === "inbound";
+                  return (
+                    <li key={c.id} className={inbound ? "border-l-2 border-mm-red px-5 py-3.5" : "px-5 py-3.5"}>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-foreground">
+                          {inbound ? (
+                            <>
+                              <span className="uppercase text-mm-red-deep">Customer reply</span> · {c.to_address}
+                            </>
+                          ) : (
+                            <>
+                              <span className="uppercase text-mist-400">{c.channel}</span> · {c.to_address}
+                              {c.send_count > 1 ? <span className="text-mist-400"> ×{c.send_count}</span> : null}
+                            </>
+                          )}
+                        </p>
+                        {inbound ? null : (
+                          <span
+                            className={
+                              c.status === "sent"
+                                ? "text-xs text-success"
+                                : c.status === "failed"
+                                  ? "text-xs text-danger"
+                                  : "text-xs text-mist-400"
+                            }
+                          >
+                            {c.status}
+                          </span>
+                        )}
+                      </div>
+                      {c.subject ? <p className="mt-0.5 text-sm text-foreground">{c.subject}</p> : null}
+                      {inbound ? (
+                        <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{c.body}</p>
+                      ) : (
+                        <p className="mt-0.5 line-clamp-2 text-xs text-mist-400">{c.body}</p>
+                      )}
+                      <p className="mt-1 text-xs text-mist-400">{fmtShort(c.last_sent_at ?? c.created_at)}</p>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </Card>

@@ -72,61 +72,134 @@ const LINE_TAGLINES: RegExp[] = [
   /^[ \t]*Sent from (?:Mail for Windows|Outlook)[^\n]*$/gim,
 ];
 
-/** Everything before the earliest of these markers (each already matched, or not). */
-function cutBeforeMarkers(text: string, markers: RegExp[]): string {
-  let cut = text.length;
-  for (const re of markers) {
-    const m = text.match(re);
-    if (m && m.index != null && m.index < cut) cut = m.index;
+/**
+ * Locate the attribution as a character span. The single-line regex catches the
+ * common shapes, but Gmail's plain-text part hard-wraps at ~72 chars, so the
+ * attribution regularly arrives split across two or three physical lines
+ * ("…, Marley Moves <accounts@marleymoves.co.uk>\nwrote:" — MMR015, 2026-08-04:
+ * the single-line test saw no attribution, so nothing was stripped and the full
+ * quoted wall reached the office). For the wrapped case, join each candidate
+ * "On …" line with up to two following lines and retest; newline→space is a 1:1
+ * character replacement, so a match in the joined window maps straight back to
+ * original offsets. Any join-window hit genuinely crosses a line boundary (a
+ * within-one-line match would have been found by the whole-text pass), and all
+ * the guards — date shape right after "On", an <email> in angle brackets,
+ * "wrote:" — still apply, so a customer's prose can't trigger it.
+ */
+function findAttributionSpan(t: string): { start: number; end: number } | null {
+  const single = ATTRIBUTION.exec(t);
+  if (single) return { start: single.index, end: single.index + single[0].length };
+
+  const lines = t.split("\n");
+  if (lines.length < 2) return null;
+  let offset = 0;
+  const starts = lines.map((line) => {
+    const s = offset;
+    offset += line.length + 1;
+    return s;
+  });
+  for (let i = 0; i < lines.length - 1; i++) {
+    if (!/\bOn\b/i.test(lines[i])) continue;
+    for (let width = 2; width <= 3 && i + width <= lines.length; width++) {
+      const joined = lines.slice(i, i + width).join(" ");
+      const m = ATTRIBUTION.exec(joined);
+      if (m) return { start: starts[i] + m.index, end: starts[i] + m.index + m[0].length };
+    }
   }
-  return text.slice(0, cut);
+  return null;
 }
 
-export function extractReplyText(raw: string | null | undefined): string {
-  const t = (raw ?? "").replace(/\r\n?/g, "\n").trim();
-  if (!t) return "";
-
-  const hasQuoteContext = ATTRIBUTION.test(t) || LINE_MARKERS.some((re) => re.test(t));
-  const hasAngleQuotes = /^[ \t]*>/m.test(t);
-
-  let out: string;
-  if (!hasQuoteContext) {
-    // No quote at all → keep everything, including a customer's own ">" bullets.
-    out = t;
-  } else if (hasAngleQuotes) {
-    // ">"-quoted: keep the non-quoted lines (the customer's words, wherever they
-    // sit) and drop the ">" lines + the attribution line. Interleaved-safe.
-    out = t
-      .split("\n")
-      .filter((line) => !/^[ \t]*>/.test(line) && !ATTRIBUTION.test(line))
-      .join("\n");
-    // An Outlook header block isn't ">"-quoted — cut it if one is present.
-    out = cutBeforeMarkers(out, LINE_MARKERS);
-  } else {
-    // Top-posted with an attribution/header but no ">" quoting (incl. flattened
-    // Yahoo) → the reply is above the marker; cut to the end.
-    out = cutBeforeMarkers(t, [ATTRIBUTION, ...LINE_MARKERS]);
-  }
-
-  // Strip client footers (Yahoo inline; others whole-line only).
-  out = out.replace(YAHOO_TAGLINE, " ");
-  for (const re of LINE_TAGLINES) out = out.replace(re, "");
-
-  // Collapse HTML→text table pipe RUNS ("| | |") to a space. Anchored on a real
-  // "|" (then more) so it never backtracks across a pipe-free whitespace run — a
-  // lone "5 | 6" the customer typed is left alone.
-  out = out.replace(/\|(?:[ \t]*\|)+/g, " ");
-
-  // Tidy whitespace. Collapse space RUNS first (single greedy pass) so the later
-  // trailing-space trim can't backtrack across a long run — a whitespace-padded
-  // body from the public webhook must stay linear, not O(n²).
-  out = out
+/** Shared tidy pass: table-pipe runs, whitespace runs, blank-line runs. */
+function tidyWhitespace(text: string): string {
+  return text
+    // Collapse HTML→text table pipe RUNS ("| | |") to a space. Anchored on a real
+    // "|" (then more) so it never backtracks across a pipe-free whitespace run — a
+    // lone "5 | 6" the customer typed is left alone.
+    .replace(/\|(?:[ \t]*\|)+/g, " ")
+    // Collapse space RUNS first (single greedy pass) so the later trailing-space
+    // trim can't backtrack across a long run — a whitespace-padded body from the
+    // public webhook must stay linear, not O(n²).
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
+}
 
-  return out;
+export interface SplitReply {
+  /** The customer's NEW words, tidied ("" when the body was empty). */
+  reply: string;
+  /** The quoted history they replied to — ">" markers stripped, attribution kept
+   * as its natural header — so the office can see context WITHOUT it burying the
+   * reply. "" when the body had no detectable quote. */
+  quoted: string;
+}
+
+export function splitReply(raw: string | null | undefined): SplitReply {
+  const t = (raw ?? "").replace(/\r\n?/g, "\n").trim();
+  if (!t) return { reply: "", quoted: "" };
+
+  const attribution = findAttributionSpan(t);
+  const hasQuoteContext = !!attribution || LINE_MARKERS.some((re) => re.test(t));
+  const hasAngleQuotes = /^[ \t]*>/m.test(t);
+
+  let keep: string;
+  let quoted: string;
+  if (!hasQuoteContext) {
+    // No quote at all → keep everything, including a customer's own ">" bullets.
+    keep = t;
+    quoted = "";
+  } else if (hasAngleQuotes) {
+    // ">"-quoted: keep the non-quoted lines (the customer's words, wherever they
+    // sit) and drop the ">" lines + the attribution line(s). Interleaved-safe.
+    const keptLines: string[] = [];
+    const quotedLines: string[] = [];
+    let off = 0;
+    for (const line of t.split("\n")) {
+      const lineStart = off;
+      off += line.length + 1;
+      const inAttribution =
+        !!attribution && lineStart < attribution.end && lineStart + line.length > attribution.start;
+      if (inAttribution) {
+        quotedLines.push(line);
+      } else if (/^[ \t]*>/.test(line)) {
+        quotedLines.push(line.replace(/^[ \t]*>[ \t]?/, ""));
+      } else {
+        keptLines.push(line);
+      }
+    }
+    keep = keptLines.join("\n");
+    // An Outlook header block isn't ">"-quoted — cut it if one is present.
+    let markerCut = keep.length;
+    for (const re of LINE_MARKERS) {
+      const m = keep.match(re);
+      if (m && m.index != null && m.index < markerCut) markerCut = m.index;
+    }
+    if (markerCut < keep.length) {
+      quotedLines.push(keep.slice(markerCut));
+      keep = keep.slice(0, markerCut);
+    }
+    quoted = quotedLines.join("\n");
+  } else {
+    // Top-posted with an attribution/header but no ">" quoting (incl. flattened
+    // Yahoo) → the reply is above the earliest marker; everything after is quote.
+    let cut = attribution ? attribution.start : t.length;
+    for (const re of LINE_MARKERS) {
+      const m = t.match(re);
+      if (m && m.index != null && m.index < cut) cut = m.index;
+    }
+    keep = t.slice(0, cut);
+    quoted = t.slice(cut);
+  }
+
+  // Strip client footers from the reply (Yahoo inline; others whole-line only).
+  keep = keep.replace(YAHOO_TAGLINE, " ");
+  for (const re of LINE_TAGLINES) keep = keep.replace(re, "");
+
+  return { reply: tidyWhitespace(keep), quoted: tidyWhitespace(quoted) };
+}
+
+export function extractReplyText(raw: string | null | undefined): string {
+  return splitReply(raw).reply;
 }
 
 /**

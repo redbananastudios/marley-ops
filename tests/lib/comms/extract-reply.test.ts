@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractReplyText, htmlToText } from "@/lib/comms/extract-reply";
+import { extractReplyText, htmlToText, splitReply } from "@/lib/comms/extract-reply";
 
 describe("extractReplyText", () => {
   it("keeps only the new message from a Yahoo reply (the reported wall of text)", () => {
@@ -115,6 +115,36 @@ describe("extractReplyText", () => {
     expect(extractReplyText(raw)).toBe("Yes that's great.");
   });
 
+  // --- hard-wrapped attributions (Gmail wraps plain text at ~72 chars) ---
+
+  it("strips a '>'-quoted history whose attribution is wrapped across two lines (MMR015)", () => {
+    // The real Greig James payload shape, 2026-08-04: Gmail put "wrote:" on its
+    // own line, the single-line attribution test failed, and the ENTIRE quoted
+    // deposit email reached the office + the lead's comms log.
+    const raw =
+      "Hi Luke,\n\nPlease could you let me have 10 medium boxes, one roll of tape and a pack\nof paper - I can pick up from yours in Shaftesbury?\n\nMany thanks\nJames\n\n\n" +
+      "On Tue, 4 Aug 2026 at 11:06, Marley Moves <accounts@marleymoves.co.uk>\nwrote:\n\n" +
+      "> We've received your £100 deposit. Your move date is secured.\n> [image: Marley Moves]\n>\n> Hi Greig,\n> Thank you for booking with Marley Moves.\n";
+    const out = extractReplyText(raw);
+    expect(out).toBe(
+      "Hi Luke,\n\nPlease could you let me have 10 medium boxes, one roll of tape and a pack\nof paper - I can pick up from yours in Shaftesbury?\n\nMany thanks\nJames",
+    );
+  });
+
+  it("cuts a top-posted reply whose attribution is wrapped across three lines", () => {
+    const raw =
+      "Yes please book it, thanks.\n\n" +
+      "On Tue, 4 Aug 2026 at\n11:06, Marley Moves\n<accounts@marleymoves.co.uk> wrote:\nYour fixed price from Marley Moves | | | Accept online";
+    expect(extractReplyText(raw)).toBe("Yes please book it, thanks.");
+  });
+
+  it("still keeps a customer's own multi-line prose containing 'On' and an email address", () => {
+    // No date shape after "On" and no "wrote:" → not an attribution, keep it all.
+    const raw =
+      "On arrival please call my partner\n<jane@example.com> for the gate code.\nThanks, Mark";
+    expect(extractReplyText(raw)).toBe(raw);
+  });
+
   it("processes a huge whitespace-padded body in linear time (no ReDoS on the public webhook)", () => {
     const raw = "Please quote for my move." + " ".repeat(200_000) + "thanks";
     const result = extractReplyText(raw);
@@ -154,6 +184,37 @@ describe("extractReplyText", () => {
     expect(extractReplyText("")).toBe("");
     expect(extractReplyText(null)).toBe("");
     expect(extractReplyText(undefined)).toBe("");
+  });
+});
+
+describe("splitReply (reply vs quoted history)", () => {
+  it("returns the customer's words AND the quoted history separately", () => {
+    const raw =
+      "Hi Luke,\n\nYes Tuesday works great.\n\n" +
+      "On Fri, 1 Aug 2026 at 09:00, Luke at Marley Moves <luke@marleymoves.co.uk> wrote:\n" +
+      "> Your fixed price from Marley Moves\n> £1,856.40\n";
+    const { reply, quoted } = splitReply(raw);
+    expect(reply).toBe("Hi Luke,\n\nYes Tuesday works great.");
+    expect(quoted).toContain("On Fri, 1 Aug 2026 at 09:00");
+    expect(quoted).toContain("Your fixed price from Marley Moves");
+    // ">" markers are stripped for clean rendering.
+    expect(quoted).not.toMatch(/^>/m);
+  });
+
+  it("captures the wrapped-attribution quote (MMR015) in the quoted half", () => {
+    const raw =
+      "Please could I have 10 medium boxes?\n\n" +
+      "On Tue, 4 Aug 2026 at 11:06, Marley Moves <accounts@marleymoves.co.uk>\nwrote:\n\n" +
+      "> We've received your £100 deposit.\n> Your date and crew are now secured.\n";
+    const { reply, quoted } = splitReply(raw);
+    expect(reply).toBe("Please could I have 10 medium boxes?");
+    expect(quoted).toContain("wrote:");
+    expect(quoted).toContain("We've received your £100 deposit.");
+  });
+
+  it("returns an empty quoted half when there is no quote", () => {
+    expect(splitReply("Yes please go ahead.")).toEqual({ reply: "Yes please go ahead.", quoted: "" });
+    expect(splitReply("")).toEqual({ reply: "", quoted: "" });
   });
 });
 

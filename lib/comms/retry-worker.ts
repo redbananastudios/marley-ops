@@ -169,6 +169,7 @@ interface UnretryableRow {
   channel: "email" | "sms";
   to_address: string;
   subject: string | null;
+  lead_id: string | null;
   provider_request: ProviderRequest | null;
   provider_outcome_unknown: boolean | null;
   provider_started_at: string | null;
@@ -206,7 +207,7 @@ export async function escalateUnretryableComms(sb: Sb, now = new Date()): Promis
   const { data, error } = await sb
     .from("communications")
     .select(
-      "id, channel, to_address, subject, provider_request, provider_outcome_unknown, provider_started_at, created_at, attempt_count",
+      "id, channel, to_address, subject, lead_id, provider_request, provider_outcome_unknown, provider_started_at, created_at, attempt_count",
     )
     .eq("status", "failed")
     .lt("attempt_count", COMMS_RETRY_MAX_ATTEMPTS)
@@ -265,6 +266,13 @@ export async function escalateUnretryableComms(sb: Sb, now = new Date()): Promis
       [
         `An outbound ${row.channel} to <strong>${escapeHtml(row.to_address)}</strong>${subjectNote} could not be delivered automatically (${reason}).`,
         `${deliveryLine} This alert fires once.`,
+        // One click to the customer context, so "verify by hand" doesn't start
+        // with a search (Peter, 2026-08-04: the MMR019 alert arrived linkless).
+        ...(row.lead_id
+          ? [
+              `Lead: <a href="${(process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, "")}/leads/${row.lead_id}">open in Marley Ops</a>`,
+            ]
+          : []),
       ],
       "system",
       `comm-unretryable/${row.id}`,

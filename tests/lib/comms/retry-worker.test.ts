@@ -205,6 +205,18 @@ describe("escalateUnretryableComms", () => {
     expect(updates).toEqual([{ attempt_count: COMMS_RETRY_MAX_ATTEMPTS }]);
   });
 
+  it("links the lead when the row has one, and omits the line when it doesn't", async () => {
+    const linked = fakeUnretryableSb([unRow({ lead_id: "lead-9" })]);
+    await escalateUnretryableComms(linked.sb, NOW);
+    expect((sendOpsAlert.mock.calls[0][1] as string[]).join(" ")).toContain("/leads/lead-9");
+
+    vi.clearAllMocks();
+    sendOpsAlert.mockResolvedValue(true);
+    const bare = fakeUnretryableSb([unRow()]);
+    await escalateUnretryableComms(bare.sb, NOW);
+    expect((sendOpsAlert.mock.calls[0][1] as string[]).join(" ")).not.toContain("/leads/");
+  });
+
   it("handles a past-window row that still has its payload (reclaim would refuse it)", async () => {
     const stale = new Date(nowMs - (COMMS_RECLAIM_WINDOW_HOURS + 1) * 60 * 60_000).toISOString();
     const { sb } = fakeUnretryableSb([
