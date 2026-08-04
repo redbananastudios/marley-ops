@@ -156,8 +156,11 @@ describe("commitment-received email", () => {
       "CUSTOMER_FIRST_NAME",
       "MOVE_DATE_LABEL",
       "QUOTE_REF",
+      "RECEIPT_BLOCK",
     ]);
     expect(vars.AMOUNT).toBe("£500");
+    // No receipt supplied here → the receipt block variable is empty.
+    expect(vars.RECEIPT_BLOCK).toBe("");
     expect(vars.CUSTOMER_FIRST_NAME).not.toContain("<b>");
   });
 });

@@ -44,8 +44,11 @@ import {
   depositReceivedTemplateVars,
   balanceInvoiceTemplateVars,
   balanceReceivedTemplateVars,
+  ukReceiptDate,
+  paymentMethodLabel,
   type DepositReceivedMeta,
   type BalanceInvoiceMeta,
+  type ReceiptDetails,
 } from "@/lib/comms/payment-email";
 import {
   buildCommitmentReceivedEmailHtml,
@@ -994,6 +997,8 @@ export interface DepositPaidOpts {
    *  the Zoho record, the customer email and the lead — money truth follows the
    *  charge, not a possibly-since-edited quote figure. */
   amountPence?: number;
+  /** Last 4 of the card (card path only) — shown on the receipt. */
+  cardLast4?: string | null;
 }
 
 const zohoMode = (method: string): "banktransfer" | "cash" | "creditcard" =>
@@ -1095,14 +1100,26 @@ export async function markDepositPaid(
   // template (dashboard-editable copy); the in-repo HTML is the fallback.
   if (quote.customer_email) {
     const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+    const receipt: ReceiptDetails = {
+      receiptNumber: depositReference(quote.quote_ref),
+      paidAtLabel: ukReceiptDate(new Date(now)),
+      method: opts.method,
+      cardLast4: opts.cardLast4 ?? null,
+      forLabel: "Booking deposit",
+      amount: deposit,
+    };
     const meta: DepositReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       amount: deposit,
       moveDateLabel: moveDateLabel(quote.moving_date),
       balanceAmount: balanceDue(agreed, deposit),
+      receipt,
     };
-    const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIVED;
+    // New RECEIPT template var (falls back to the in-repo builder, which now
+    // renders the receipt). The old RESEND_TEMPLATE_DEPOSIT_RECEIVED template
+    // lacks the receipt panel, so it is deliberately no longer read here.
+    const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIPT;
     await dispatchComm(sb, opts.actorId, {
       channel: "email",
       // Money desk identity — receipts come from accounts@, not the salesperson
@@ -1110,7 +1127,7 @@ export async function markDepositPaid(
       from: accountsFrom(),
       to: quote.customer_email,
       subject: `Deposit received. You're booked in (${quote.quote_ref})`,
-      bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref}. Your move date is secured.`,
+      bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method, opts.cardLast4).toLowerCase()} on ${receipt.paidAtLabel}. Your move date is secured.`,
       ...(templateId
         ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) } }
         : { bodyHtml: buildDepositReceivedEmailHtml(meta) }),
@@ -1340,19 +1357,27 @@ export async function markCommitmentPaid(
   // Customer confirmation (duplicate-guarded; template preferred, in-repo
   // fallback). Money mail comes from the accounts desk.
   if (quote.customer_email && amount > 0) {
+    const receipt: ReceiptDetails = {
+      receiptNumber: commitmentReference(quote.quote_ref),
+      paidAtLabel: ukReceiptDate(new Date(now)),
+      method: opts.method,
+      forLabel: "Booking commitment",
+      amount,
+    };
     const meta: CommitmentReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       amount,
       moveDateLabel: moveDateLabel(quote.moving_date),
+      receipt,
     };
-    const templateId = process.env.RESEND_TEMPLATE_COMMITMENT_RECEIVED;
+    const templateId = process.env.RESEND_TEMPLATE_COMMITMENT_RECEIPT;
     await dispatchComm(sb, opts.actorId, {
       channel: "email",
       from: accountsFrom(),
       to: quote.customer_email,
       subject: `Payment received: commitment for your move (${quote.quote_ref})`,
-      bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. It counts towards your final bill; the remaining balance is due before move day.`,
+      bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method).toLowerCase()} on ${receipt.paidAtLabel}. It counts towards your final bill; the remaining balance is due before move day.`,
       ...(templateId
         ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) } }
         : { bodyHtml: buildCommitmentReceivedEmailHtml(meta) }),
@@ -1980,19 +2005,27 @@ export async function markBalancePaid(
   );
 
   if (quote.customer_email && amount > 0) {
+    const receipt: ReceiptDetails = {
+      receiptNumber: balanceReference(quote.quote_ref),
+      paidAtLabel: ukReceiptDate(new Date(now)),
+      method,
+      forLabel: "Final balance",
+      amount,
+    };
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       amount,
       moveDateLabel: moveDateLabel(quote.moving_date),
+      receipt,
     };
-    const templateId = process.env.RESEND_TEMPLATE_BALANCE_RECEIVED;
+    const templateId = process.env.RESEND_TEMPLATE_BALANCE_RECEIPT;
     await dispatchComm(sb, actorId, {
       channel: "email",
       from: accountsFrom(),
       to: quote.customer_email,
       subject: `Payment received — all settled (${quote.quote_ref})`,
-      bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref}. Nothing more to pay.`,
+      bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay.`,
       ...(templateId
         ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) } }
         : { bodyHtml: buildBalanceReceivedEmailHtml(meta) }),

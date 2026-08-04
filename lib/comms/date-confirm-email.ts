@@ -17,7 +17,7 @@
  * Pure server utils — no React, no DOM, no IO.
  */
 
-import { BANK_DETAILS } from "@/lib/comms/payment-email";
+import { BANK_DETAILS, receiptDetailsBlock, receiptBlockVar, type ReceiptDetails } from "@/lib/comms/payment-email";
 
 const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
 
@@ -230,6 +230,7 @@ export interface CommitmentReceivedMeta {
   /** Gross amount received. */
   amount: number;
   moveDateLabel?: string | null;
+  receipt?: ReceiptDetails | null; // folds a formal receipt panel into the email
 }
 
 export function commitmentReceivedTemplateVars(m: CommitmentReceivedMeta): Record<string, string> {
@@ -238,6 +239,7 @@ export function commitmentReceivedTemplateVars(m: CommitmentReceivedMeta): Recor
     QUOTE_REF: escapeHtml(m.quoteRef),
     AMOUNT: gbp(m.amount),
     MOVE_DATE_LABEL: escapeHtml(m.moveDateLabel ?? "your booked date"),
+    RECEIPT_BLOCK: receiptBlockVar(m.receipt),
   };
 }
 
@@ -252,7 +254,7 @@ export function buildCommitmentReceivedEmailHtml(m: CommitmentReceivedMeta): str
     subline(
       `We have received your <strong style="color:#1A1A1A;">${gbp(m.amount)}</strong> commitment payment${when}. It counts towards your final bill.`,
     ),
-    amountCard("Commitment paid", m.amount),
+    m.receipt ? receiptDetailsBlock(m.receipt) : amountCard("Commitment paid", m.amount),
     subline(
       `Your remaining balance is due in full before move day and we will send the final invoice nearer the time. Any questions, call Connor on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.`,
     ),

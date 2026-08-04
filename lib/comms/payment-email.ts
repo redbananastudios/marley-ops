@@ -102,6 +102,77 @@ function bankCard(reference: string): string {
   </td></tr>`;
 }
 
+/* ---------------------------------------------------------- payment receipt
+   A formal receipt panel folded into every "payment received" email so each one
+   doubles as the customer's receipt (Peter, 2026-08-04). Shared by the deposit,
+   balance (this file) and commitment (date-confirm-email.ts) confirmations. */
+
+export type PaymentMethod = "card" | "bank_transfer" | "cash";
+
+export interface ReceiptDetails {
+  /** Receipt number — the Zoho document reference (e.g. "MMR019-DEP"). */
+  receiptNumber: string;
+  /** Pre-formatted UK date the payment landed, e.g. "4 August 2026". */
+  paidAtLabel: string;
+  method: PaymentMethod;
+  /** Last 4 of the card, when method === "card" (nice-to-have). */
+  cardLast4?: string | null;
+  /** What the payment was for, e.g. "Booking deposit". */
+  forLabel: string;
+  /** Amount received (gross). */
+  amount: number;
+}
+
+/** UK date a customer sees on a receipt, e.g. "4 August 2026". */
+export const ukReceiptDate = (d: Date = new Date()): string =>
+  new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(d);
+
+/** Human payment-method label for a receipt. */
+export function paymentMethodLabel(method: PaymentMethod, cardLast4?: string | null): string {
+  if (method === "card") return cardLast4 ? `Card ending ${cardLast4}` : "Card";
+  if (method === "cash") return "Cash";
+  return "Bank transfer";
+}
+
+/**
+ * The receipt panel: receipt number, date paid, method, what it was for, and the
+ * amount received — house style (bordered card, red left accent, Georgia amount).
+ * Pure; every interpolated value is HTML-escaped. Used as both the in-repo block
+ * and the `{{RECEIPT_BLOCK}}` template variable so the two stay in step.
+ */
+export function receiptDetailsBlock(r: ReceiptDetails): string {
+  const line = (label: string, value: string) => `<tr>
+            <td style="padding:9px 0;border-bottom:1px solid #F0EDE8;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8A857E;width:44%;">${label}</td>
+            <td style="padding:9px 0;border-bottom:1px solid #F0EDE8;font-size:14px;color:#1A1A1A;font-weight:600;text-align:right;">${value}</td>
+          </tr>`;
+  return `  <tr><td style="padding:0 36px 24px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:12px;">Receipt</div>
+        <table width="100%" cellpadding="0" cellspacing="0">
+          ${line("Receipt no.", escapeHtml(r.receiptNumber))}
+          ${line("Date paid", escapeHtml(r.paidAtLabel))}
+          ${line("Payment", escapeHtml(paymentMethodLabel(r.method, r.cardLast4)))}
+          ${line("For", escapeHtml(r.forLabel))}
+          <tr>
+            <td style="padding:13px 0 0;font-size:11px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:#8A857E;">Amount received</td>
+            <td style="padding:13px 0 0;text-align:right;"><span style="font-family:Georgia,'Times New Roman',serif;font-size:24px;font-weight:700;color:#1A1A1A;">${gbp(r.amount)}</span></td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </td></tr>`;
+}
+
+/** The receipt block as a template variable (empty string when absent). */
+export const receiptBlockVar = (receipt?: ReceiptDetails | null): string =>
+  receipt ? receiptDetailsBlock(receipt) : "";
+
 /* ------------------------------------------------- template variables
    Each customer email prefers its published Resend template (copy editable in
    the dashboard, no deploy); these helpers compose the send-time variables so
@@ -121,6 +192,7 @@ export function depositReceivedTemplateVars(m: DepositReceivedMeta): Record<stri
     AMOUNT: gbp(m.amount),
     MOVE_DATE_LABEL: escapeHtml(m.moveDateLabel ?? "your booked date"),
     BALANCE_LINE: balanceLine,
+    RECEIPT_BLOCK: receiptBlockVar(m.receipt),
   };
 }
 
@@ -148,12 +220,14 @@ export function balanceReceivedTemplateVars(m: {
   quoteRef: string;
   amount: number;
   moveDateLabel?: string | null;
+  receipt?: ReceiptDetails | null;
 }): Record<string, string> {
   return {
     CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
     QUOTE_REF: escapeHtml(m.quoteRef),
     AMOUNT: gbp(m.amount),
     MOVE_DAY_LABEL: escapeHtml(m.moveDateLabel ?? "move day"),
+    RECEIPT_BLOCK: receiptBlockVar(m.receipt),
   };
 }
 
@@ -165,6 +239,7 @@ export interface DepositReceivedMeta {
   amount: number;
   moveDateLabel?: string | null; // pre-formatted, e.g. "Monday 20 July"
   balanceAmount?: number | null; // remaining balance, if known
+  receipt?: ReceiptDetails | null; // folds a formal receipt panel into the email
 }
 
 export function buildDepositReceivedEmailHtml(m: DepositReceivedMeta): string {
@@ -177,20 +252,26 @@ export function buildDepositReceivedEmailHtml(m: DepositReceivedMeta): string {
       ? `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`
       : `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
 
-  const inner = [
-    pill(`Deposit received · ${escapeHtml(m.quoteRef)}`),
-    headline(`You're booked in${name ? ", " + escapeHtml(name) : ""}`),
-    subline(
-      `We have received your ${gbp(m.amount)} deposit${when}. Your date and team are now secured.`,
-    ),
-    `  <tr><td style="padding:0 36px 26px;">
+  // When we have receipt detail, the receipt panel carries the amount (and more);
+  // otherwise fall back to the simple "Deposit paid £X" card.
+  const amountPanel = m.receipt
+    ? receiptDetailsBlock(m.receipt)
+    : `  <tr><td style="padding:0 36px 26px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">Deposit paid</div>
         <div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(m.amount)}</div>
       </td></tr>
     </table>
-  </td></tr>`,
+  </td></tr>`;
+
+  const inner = [
+    pill(`Deposit received · ${escapeHtml(m.quoteRef)}`),
+    headline(`You're booked in${name ? ", " + escapeHtml(name) : ""}`),
+    subline(
+      `We have received your ${gbp(m.amount)} deposit${when}. Your date and team are now secured.`,
+    ),
+    amountPanel,
     subline(
       `${balanceLine} Any questions in the meantime, call Connor on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.`,
     ),
@@ -208,6 +289,7 @@ export function buildBalanceReceivedEmailHtml(m: {
   quoteRef: string;
   amount: number;
   moveDateLabel?: string | null;
+  receipt?: ReceiptDetails | null;
 }): string {
   const name = (m.firstName ?? "").trim().split(/\s+/)[0];
   const when = m.moveDateLabel
@@ -219,6 +301,7 @@ export function buildBalanceReceivedEmailHtml(m: {
     subline(
       `We have received your balance of <strong style="color:#1A1A1A;">${gbp(m.amount)}</strong>, so there is nothing more to pay.${when} Any last-minute questions, call Connor on <strong style="color:#C03838;">01747 637070</strong>.`,
     ),
+    ...(m.receipt ? [receiptDetailsBlock(m.receipt)] : []),
   ].join("\n");
   return shell(`Balance of ${gbp(m.amount)} received. You're all set for move day.`, inner);
 }

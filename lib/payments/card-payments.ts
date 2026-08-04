@@ -287,7 +287,10 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
   // customer/Zoho/confirm pipeline — it's against a real quote token.
   if (row.is_test) return { ok: true, state: "paid" };
 
-  await runPaidPipeline(sb, row, fields.xref ?? null);
+  // Pass the gateway's masked PAN explicitly — `row` is the PRE-settle snapshot
+  // (card_number_mask still null on it); the mask only lands in `patch` above, so
+  // deriving the receipt's last-4 from `row` would always be null.
+  await runPaidPipeline(sb, row, fields.xref ?? null, fields.cardNumberMask ?? null);
   return { ok: true, state: "paid" };
 }
 
@@ -298,15 +301,25 @@ export async function settleCardPayment(sb: Sb, fields: GatewayResponse): Promis
  * than propagating out and leaving a `paid` card row with an unconfirmed quote
  * that the pending-only reconcile cron would never revisit.
  */
-async function runPaidPipeline(sb: Sb, row: CardPaymentRow, xref: string | null): Promise<void> {
+async function runPaidPipeline(
+  sb: Sb,
+  row: CardPaymentRow,
+  xref: string | null,
+  cardMask?: string | null,
+): Promise<void> {
   try {
     // Money truth uses the amount actually captured (row.amount_pence), not a
     // possibly-since-edited quote.deposit_amount.
+    // Prefer the mask passed by the caller (fresh from the gateway on the settle
+    // path); fall back to the row's own mask (populated on reconcile-recovery).
+    const mask = cardMask ?? row.card_number_mask;
     const paid = await markDepositPaid(sb, row.quote_id, {
       method: "card",
       actorId: null,
       recordInZoho: true,
       amountPence: row.amount_pence,
+      // Last 4 for the receipt (masked PAN → digits only → last four).
+      cardLast4: mask ? String(mask).replace(/\D/g, "").slice(-4) || null : null,
     });
     if (paid.already) {
       // Deposit was ALSO marked paid another way (BACS tap, or the two-tab
