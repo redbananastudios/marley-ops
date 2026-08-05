@@ -4,6 +4,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import {
   applyBankFeedFloor,
   BANK_FEED_TAB,
+  isAcquirerSettlement,
   isInboundPayment,
   parseSheetRows,
   resolveBankFeedFloor,
@@ -135,6 +136,8 @@ export type BankFeedSyncSummary = {
   suggested: number;
   mismatched: number;
   unmatched: number;
+  /** Acquirer settlement payouts (Elavon/takepayments) kept out of the queues. */
+  settlements?: number;
   /** Admin push notifications fired for transfers surfaced THIS pass. */
   notified: number;
 };
@@ -267,9 +270,29 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // transfer a newly-raised invoice just claimed) — these page the admins.
   const arrivals: BankFeedArrival[] = [];
   const freshCutoff = new Date(Date.now() - SUGGESTION_FRESH_DAYS * 86_400_000).toISOString().slice(0, 10);
+  let settlements = 0;
   for (const row of pending) {
     const inbound = isInboundPayment({ amount: Number(row.amount), txType: row.tx_type as string | null });
     if (!inbound) continue; // stays info
+
+    // An acquirer settlement (Elavon paying out card takings) is inbound by
+    // type but NOT customer money to record — the card payment already ran the
+    // paid pipeline. Keep it out of matching and the queues; demote one that a
+    // pre-classifier pass already surfaced as unmatched back to info
+    // (status-guarded, so a concurrent office action always wins). It stays
+    // browsable on the /payments day feed with a "Card settlement" chip.
+    if (isAcquirerSettlement({ counterparty: row.counterparty as string | null, reference: row.reference as string | null })) {
+      if (row.status === "unmatched" && !row.matched_quote_id) {
+        const { error: demoteError } = await sb
+          .from("bank_transactions")
+          .update({ status: "info", matched_quote_id: null, match_kind: null, match_confidence: null } as never)
+          .eq("id", row.id)
+          .eq("status", "unmatched");
+        if (demoteError) log.error("bank-feed.settlement-demote.failed", { txId: row.id as string, error: demoteError.message });
+        else settlements++;
+      }
+      continue;
+    }
     // Stale transfers can't form a NEW suggestion (they'd consume the open
     // item a fresh transfer is really for); an EXISTING suggestion stays
     // re-matchable so it keeps tracking its open item until confirmed.
@@ -387,6 +410,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     suggested,
     mismatched,
     unmatched,
+    settlements,
     notified: events.length,
   };
 }

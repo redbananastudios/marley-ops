@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBankFeedFloor,
+  isAcquirerSettlement,
   isInboundPayment,
   parseAmount,
   parseSheetRows,
@@ -120,6 +121,34 @@ const tx = (txDate: string): BankTxRow => ({
   reference: null,
   description: null,
   raw: {},
+});
+
+describe("isAcquirerSettlement (Elavon/takepayments payouts are not customer money)", () => {
+  it("recognises the real Elavon payout shape (counterparty + EMS reference)", () => {
+    // The live row that sat in "Unmatched inbound" on 2026-08-05.
+    expect(
+      isAcquirerSettlement({ counterparty: "US Bank Europe Dac", reference: "EMS723080500083798" }),
+    ).toBe(true);
+  });
+
+  it("recognises by counterparty alone (reference renamed or blank)", () => {
+    expect(isAcquirerSettlement({ counterparty: "US BANK EUROPE DAC", reference: null })).toBe(true);
+    expect(isAcquirerSettlement({ counterparty: "Elavon Financial Services", reference: "payout" })).toBe(true);
+  });
+
+  it("recognises by EMS reference alone (counterparty display name changed)", () => {
+    expect(isAcquirerSettlement({ counterparty: "Settlement", reference: "EMS723080600091234" })).toBe(true);
+  });
+
+  it("never fires on ordinary customers", () => {
+    // A customer transfer with a quote ref.
+    expect(isAcquirerSettlement({ counterparty: "JANE SMITH", reference: "MMR001-DEP" })).toBe(false);
+    // A surname that contains 'ems' letters, and an EMS-ish word with no digits.
+    expect(isAcquirerSettlement({ counterparty: "P EMSWORTH", reference: "EMSWORTH REMOVAL" })).toBe(false);
+    // "bank" in a customer's own name is not the acquirer.
+    expect(isAcquirerSettlement({ counterparty: "Eleanor Banks", reference: "deposit" })).toBe(false);
+    expect(isAcquirerSettlement({ counterparty: null, reference: null })).toBe(false);
+  });
 });
 
 describe("bank-feed go-live floor (BANK_FEED_SINCE — mirrors LEAD_SYNC_SINCE)", () => {

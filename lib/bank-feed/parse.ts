@@ -143,6 +143,27 @@ export function isInboundPayment(tx: Pick<BankTxRow, "amount" | "txType">): bool
   return t.includes("faster payment") || t.includes("bacs") || t.includes("monzo-to-monzo");
 }
 
+/**
+ * Card-acquirer settlement payout — takepayments settles via Elavon, whose
+ * paying entity is "US Bank Europe DAC" and whose payout references start
+ * "EMS<digits>". These arrive as ordinary Faster Payment credits, so
+ * isInboundPayment can't exclude them by type — but they are NOT customer
+ * money to record: the card payment was already recorded (and receipted) the
+ * moment the gateway settled it. Left unclassified they sit in "Unmatched
+ * inbound" every payout day with a "record it via Bookings/Zoho" instruction
+ * that would DOUBLE-COUNT if followed (Peter, 2026-08-05: a £100 Elavon payout
+ * on screen while the office hunted a customer's £100 bank transfer). Both
+ * signals are checked so a customer named e.g. "Emsworth" (no digits) or a
+ * coincidental reference from a normal payer can't trip it alone incorrectly:
+ * counterparty is the strong signal, the EMS ref the fallback for a renamed
+ * counterparty.
+ */
+export function isAcquirerSettlement(tx: Pick<BankTxRow, "counterparty" | "reference">): boolean {
+  const name = (tx.counterparty ?? "").toLowerCase();
+  if (/\bus bank europe\b/.test(name) || /\belavon\b/.test(name)) return true;
+  return /^EMS\d{8,}$/i.test((tx.reference ?? "").trim());
+}
+
 /** Go-live floor for the bank feed — mirrors the Sanity LEAD_SYNC_SINCE
  *  no-backfill floor (lib/sync/sync-window.ts). The Monzo sheet holds history
  *  back to April 2025; the floor stops that pre-go-live history importing.

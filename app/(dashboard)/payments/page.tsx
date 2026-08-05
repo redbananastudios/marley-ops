@@ -10,6 +10,7 @@ import {
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { bankFeedConfigured } from "@/lib/bank-feed/sync";
+import { isAcquirerSettlement } from "@/lib/bank-feed/parse";
 import { BankFeedSection, type BankFeedTx } from "@/components/payments/bank-feed-section";
 
 /**
@@ -236,9 +237,11 @@ export default async function PaymentsPage({
         .from("bank_transactions")
         .select(TX_COLS)
         .eq("tx_date", window.day)
-        // inbound rows are the non-info ones; dismissed money is cleared and
-        // must disappear from the day feed (it's already off the counts).
-        .not("status", "in", "(info,dismissed)")
+        // Dismissed money is cleared and must disappear from the day feed
+        // (it's already off the counts). info rows are fetched but filtered
+        // below to JUST acquirer settlements — the payout stays browsable with
+        // a "Card settlement" chip while outbound/pot noise stays hidden.
+        .neq("status", "dismissed")
         .order("tx_time", { ascending: false }),
       // Plain unmatched inbound across ALL dates — money we don't recognise
       // (old-system transfers, non-customer credits). matched_quote_id is null
@@ -260,7 +263,10 @@ export default async function PaymentsPage({
         .order("started_at", { ascending: false })
         .limit(1),
     ]);
-    const rows = [...(sugRes.data ?? []), ...(misRes.data ?? []), ...(dayRes.data ?? [])];
+    const settlementRow = (r: { counterparty?: string | null; reference?: string | null }) =>
+      isAcquirerSettlement({ counterparty: r.counterparty ?? null, reference: r.reference ?? null });
+    const dayData = (dayRes.data ?? []).filter((r) => r.status !== "info" || settlementRow(r));
+    const rows = [...(sugRes.data ?? []), ...(misRes.data ?? []), ...dayData];
     const qIds = [...new Set(rows.map((r) => r.matched_quote_id).filter(Boolean))] as string[];
     const { data: qRows } = qIds.length
       ? await sb
@@ -298,6 +304,7 @@ export default async function PaymentsPage({
         quoteCustomer: (q?.customer_name as string | null) ?? null,
         leadId: (q?.lead_id as string | null) ?? null,
         expectedAmount,
+        isSettlement: settlementRow(r),
       };
     };
     const last = syncRes.data?.[0];
@@ -305,7 +312,7 @@ export default async function PaymentsPage({
     bank = {
       suggested: (sugRes.data ?? []).map(toTx),
       mismatches: (misRes.data ?? []).map(toTx),
-      dayRows: (dayRes.data ?? []).map(toTx),
+      dayRows: dayData.map(toTx),
       unmatched: (unmatchedRes.data ?? []).map(toTx),
       lastSync,
     };

@@ -42,6 +42,9 @@ export interface BankFeedTx {
   leadId: string | null;
   /** The open item's amount (for mismatch rows: what the quote actually wants). */
   expectedAmount: number | null;
+  /** Acquirer payout (Elavon/takepayments) — already recorded at card-payment
+   * time, shown in the day feed for visibility but never actionable. */
+  isSettlement: boolean;
 }
 
 const gbp = (n: number): string =>
@@ -331,9 +334,13 @@ export function BankFeedSection({
           <div className="divide-y">
             {dayRows.map((tx) => {
               const mismatch = tx.status === "unmatched" && tx.quoteRef;
-              const chip = mismatch
-                ? { label: "Amount differs — needs a human", cls: "bg-warn-bg text-warn" }
-                : (STATUS_CHIP[tx.status] ?? { label: tx.status, cls: "bg-mist-100 text-mist-500" });
+              // A card settlement is Elavon paying out card takings — recorded
+              // when the card was charged, so it must never read as actionable.
+              const chip = tx.isSettlement
+                ? { label: "Card settlement — already recorded", cls: "bg-mist-100 text-mist-500" }
+                : mismatch
+                  ? { label: "Amount differs — needs a human", cls: "bg-warn-bg text-warn" }
+                  : (STATUS_CHIP[tx.status] ?? { label: tx.status, cls: "bg-mist-100 text-mist-500" });
               return (
                 <div key={tx.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3">
                   <span className="tabular w-12 shrink-0 text-xs text-mist-400">
