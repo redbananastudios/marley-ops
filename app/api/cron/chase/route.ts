@@ -156,8 +156,37 @@ export async function GET(req: Request) {
     commitmentChases: 0,
     commitmentCallTasks: 0,
     datesAtRisk: 0,
+    retiredLostQuotes: 0,
     errors: 0,
   };
+
+  // Self-heal: retire any pre-acceptance quote whose lead is already lost.
+  // mark-lost and the 30-day lapse now retire quotes at the moment of loss,
+  // but quotes lost BEFORE that shipped (Alex Randall MMR025, 2026-08-05) —
+  // or via any future path that only touches the lead — would otherwise sit
+  // on /quotes as "Awaiting reply" forever. Runs before the early return so
+  // a quiet chase day still heals.
+  {
+    const { data: stragglers } = await sb
+      .from("quotes")
+      .select("id, leads!inner(status, lost_reason)")
+      .in("status", ["draft", "sent"])
+      .eq("leads.status", "declined")
+      .limit(50);
+    for (const q of stragglers ?? []) {
+      const lead = (Array.isArray(q.leads) ? q.leads[0] : q.leads) as { lost_reason?: string | null } | null;
+      const { error } = await sb
+        .from("quotes")
+        .update({
+          status: "rejected",
+          declined_at: now.toISOString(),
+          declined_reason: lead?.lost_reason ?? "other",
+        } as never)
+        .eq("id", q.id)
+        .in("status", ["draft", "sent"]);
+      if (!error) summary.retiredLostQuotes++;
+    }
+  }
 
   const { data: leads } = await sb
     .from("leads")
@@ -269,6 +298,17 @@ export async function GET(req: Request) {
           if (!downgraded?.length) continue; // lead moved on in the race window
           await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" })
             .eq("lead_id", lead.id).eq("status", "open");
+          // Retire the quote too (same as office mark-lost) — otherwise a
+          // lapsed-lost lead's quote sits on /quotes as "Awaiting reply" with
+          // an escalating follow-up nudge forever, and counts in open pipeline.
+          await sb.from("quotes")
+            .update({
+              status: "rejected",
+              declined_at: now.toISOString(),
+              declined_reason: "no_response",
+            } as never)
+            .eq("lead_id", lead.id)
+            .in("status", ["draft", "sent"]);
           await sb.from("activities").insert({
             lead_id: lead.id,
             client_id: lead.client_id,

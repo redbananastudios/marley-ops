@@ -49,7 +49,7 @@ export interface QuoteRow {
   deposit_paid_at?: string | null;
 }
 
-type PresetKey = "all" | "draft" | "sent" | "accepted";
+type PresetKey = "all" | "draft" | "sent" | "accepted" | "rejected";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n)
@@ -204,6 +204,7 @@ export function QuotesView({
       draft: quotes.filter((q) => q.status === "draft").length,
       sent: quotes.filter((q) => q.status === "sent").length,
       accepted: quotes.filter((q) => q.status === "accepted").length,
+      rejected: quotes.filter((q) => q.status === "rejected").length,
     }),
     [quotes],
   );
@@ -222,6 +223,10 @@ export function QuotesView({
     { key: "draft", label: "Draft" },
     { key: "sent", label: "Awaiting reply" },
     { key: "accepted", label: "Accepted" },
+    // Rejected online + office/auto mark-lost both land here — kept off the
+    // default funnels but findable (the old gap left lost quotes under
+    // "Awaiting reply" forever).
+    { key: "rejected", label: "Lost" },
   ];
 
   return (

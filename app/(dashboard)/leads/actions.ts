@@ -507,6 +507,27 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     await sb.from("follow_ups").update({ status: "cancelled", outcome: "declined" }).eq("id", fu.id);
   }
 
+  // Retire the quotes themselves — the same vocabulary the customer's online
+  // decline uses. Without this a lost lead's sent quote lingered on /quotes
+  // under "Awaiting reply" with a live follow-up nudge and an open-pipeline
+  // value (Alex Randall MMR025, 2026-08-05). Only pre-acceptance quotes flip:
+  // an ACCEPTED quote's cancellation is the booking_cancelled_at marker + the
+  // money unwind below, and the reopen path depends on its status surviving.
+  const { error: retireError } = await sb
+    .from("quotes")
+    .update({
+      status: "rejected",
+      declined_at: new Date().toISOString(),
+      declined_reason: reason,
+    } as never)
+    .eq("lead_id", leadId)
+    .in("status", ["draft", "sent"]);
+  if (retireError) {
+    await sendOpsAlert(`Quote retirement failed on mark-lost — lead ${leadId}`, [
+      `The lead was marked lost but its open quote(s) could not be set to rejected (${retireError.message}) — they will still show as awaiting reply on /quotes.`,
+    ], "system");
+  }
+
   // --- unwind the booking, not just the status -------------------------------
   // A cancelled job must leave nothing live behind it: diary slots are freed,
   // unpaid Zoho invoices are voided (they stay on the books as void), and paid
