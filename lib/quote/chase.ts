@@ -16,7 +16,11 @@
 
 import { capName, ownerFrom } from "@/lib/comms/sender";
 import { round2 } from "@/lib/quote/payments";
-import { COMMITMENT_DUE_DAYS_BEFORE, CONFIRM_CALL_DAYS_BEFORE } from "@/lib/payments-policy";
+import {
+  COMMITMENT_DUE_DAYS_BEFORE,
+  COMMITMENT_FLAG_GRACE_HOURS,
+  CONFIRM_CALL_DAYS_BEFORE,
+} from "@/lib/payments-policy";
 import { ukDayOf } from "@/lib/sales-report";
 
 export const QUOTE_CHASE_DAYS = [2, 5, 10] as const;
@@ -307,7 +311,11 @@ export function tokenFromReplyAddress(address: string): string | null {
  *        ("confirm_date_call") — same one-shot stamp.
  *   T-7  (move − 7 UK days, still unpaid) → "flag": stamp date_releasable_at.
  *        A discretion marker only — the "Dates at risk" dashboard card. NEVER
- *        an automatic release and never a customer email.
+ *        an automatic release and never a customer email. The flag also waits
+ *        until the chase is ≥ COMMITMENT_FLAG_GRACE_HOURS old (paused leads:
+ *        until confirmation is that old), so it can never fire in the same
+ *        breath as the customer's first reminder — a late booker gets a real
+ *        chance to pay before the office alarm sounds.
  *
  * Day maths is UK wall-clock (a 23:30 UTC summer instant is already tomorrow
  * in the UK). Both thresholds are inclusive (<=) so a late confirmation or a
@@ -352,8 +360,9 @@ function daysUntilUkDay(day: string, now: Date): number | null {
 /**
  * Which commitment-ladder actions are due for one confirmed lead's accepted
  * quote right now. Pure — the cron route does the IO and stamps the columns
- * only after each send/insert succeeds. Can return BOTH "chase" and "flag" in
- * one run (a late confirmation lands inside both thresholds at once).
+ * only after each send/insert succeeds. "chase" and "flag" can never fire in
+ * the same run: the flag's grace window is anchored to the chase stamp, so a
+ * late confirmation chases first and flags no sooner than 24h later.
  */
 export function dueCommitmentActions(
   input: CommitmentSweepInput,
@@ -387,7 +396,19 @@ export function dueCommitmentActions(
   if (days <= CONFIRM_CALL_DAYS_BEFORE && !input.commitmentChaseT10At && !input.chasePaused) {
     actions.push("chase");
   }
-  if (days <= COMMITMENT_DUE_DAYS_BEFORE && !input.dateReleasableAt) {
+  // The flag's grace anchor is the chase itself — the customer must have had
+  // COMMITMENT_FLAG_GRACE_HOURS to act on their reminder before the office is
+  // alarmed (Brydee Thomas MMR034: flagged 48 min after paying her deposit).
+  // A PAUSED lead never gets the chase, so its anchor falls back to the date
+  // confirmation — the flag arrives later but is never hidden (the documented
+  // invariant). Un-paused with no stamp = the chase hasn't gone out yet (this
+  // run sends it, or the send keeps failing and its own alarms fire) — the
+  // grace clock starts when it lands.
+  const anchorIso = input.commitmentChaseT10At ?? (input.chasePaused ? input.dateConfirmedAt : null);
+  const anchorMs = anchorIso ? Date.parse(anchorIso) : NaN;
+  const graceServed =
+    Number.isFinite(anchorMs) && now.getTime() - anchorMs >= COMMITMENT_FLAG_GRACE_HOURS * 3_600_000;
+  if (days <= COMMITMENT_DUE_DAYS_BEFORE && !input.dateReleasableAt && graceServed) {
     actions.push("flag");
   }
   return actions;

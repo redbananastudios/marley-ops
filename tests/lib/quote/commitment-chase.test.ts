@@ -47,28 +47,44 @@ describe("dueCommitmentActions — T-10 chase threshold", () => {
 });
 
 describe("dueCommitmentActions — T-7 flag threshold", () => {
-  it("flags at exactly 7 days out (and the un-stamped chase fires in the same run)", () => {
-    expect(dueCommitmentActions({ ...base, movingDate: "2026-08-08" }, NOW)).toEqual([
-      "chase",
-      "flag",
-    ]);
+  it("never flags in the same run as the first chase — the chase goes out alone (Brydee MMR034)", () => {
+    // A late confirmation lands inside both windows at once; the customer must
+    // get their reminder AND the grace window before the office alarm sounds.
+    expect(dueCommitmentActions({ ...base, movingDate: "2026-08-08" }, NOW)).toEqual(["chase"]);
   });
 
   it("does not flag at 8 days out", () => {
     expect(dueCommitmentActions({ ...base, movingDate: "2026-08-09" }, NOW)).toEqual(["chase"]);
   });
 
-  it("flags on move day itself (day 0)", () => {
-    expect(dueCommitmentActions({ ...base, movingDate: "2026-08-01" }, NOW)).toEqual([
-      "chase",
-      "flag",
-    ]);
+  it("on move day an un-chased booking still only chases (the queue's overdue bucket covers visibility)", () => {
+    expect(dueCommitmentActions({ ...base, movingDate: "2026-08-01" }, NOW)).toEqual(["chase"]);
   });
 
-  it("flag fires alone once the T-10 chase is already stamped", () => {
+  it("flag fires alone once the T-10 chase is already stamped (normal path: stamp is days old)", () => {
     expect(
       dueCommitmentActions(
         { ...base, movingDate: "2026-08-08", commitmentChaseT10At: "2026-07-29T09:00:00Z" },
+        NOW,
+      ),
+    ).toEqual(["flag"]);
+  });
+
+  it("the flag waits until the chase is 24h old — a fresh chase stamp defers it", () => {
+    // Chased 2h ago: the customer is mid-grace; paying now ends the ladder
+    // silently and the office alarm never sounds.
+    expect(
+      dueCommitmentActions(
+        { ...base, movingDate: "2026-08-08", commitmentChaseT10At: "2026-08-01T08:00:00Z" },
+        NOW,
+      ),
+    ).toEqual([]);
+  });
+
+  it("flags once the chase is ≥24h old (boundary inclusive)", () => {
+    expect(
+      dueCommitmentActions(
+        { ...base, movingDate: "2026-08-08", commitmentChaseT10At: "2026-07-31T10:00:00Z" },
         NOW,
       ),
     ).toEqual(["flag"]);
@@ -124,10 +140,20 @@ describe("dueCommitmentActions — unconfirmed-date branch", () => {
 
 describe("dueCommitmentActions — chase_paused", () => {
   it("suppresses the chase email but NOT the internal T-7 flag", () => {
-    // A paused conversation must not hide an at-risk date from the office.
+    // A paused conversation must not hide an at-risk date from the office —
+    // the flag's grace anchor falls back to confirmation (12 days old here).
     expect(
       dueCommitmentActions({ ...base, movingDate: "2026-08-08", chasePaused: true }, NOW),
     ).toEqual(["flag"]);
+  });
+
+  it("a paused lead confirmed under 24h ago gets the same grace before the flag", () => {
+    expect(
+      dueCommitmentActions(
+        { ...base, movingDate: "2026-08-08", chasePaused: true, dateConfirmedAt: "2026-08-01T09:00:00Z" },
+        NOW,
+      ),
+    ).toEqual([]);
   });
 
   it("suppresses the T-10 chase outright", () => {
@@ -185,12 +211,15 @@ describe("dueCommitmentActions — date bounds + UK day maths", () => {
 
   it("counts UK wall-clock days, not UTC (23:30Z in summer is already tomorrow in the UK)", () => {
     // 2026-08-01T23:30:00Z = 00:30 BST on 2026-08-02 → the move on 2026-08-09
-    // is 7 UK days out (UTC maths would say 8) → the T-7 flag is due NOW.
+    // is 7 UK days out (UTC maths would say 8) → with the chase already a day
+    // old, the T-7 flag is due NOW.
     const lateNight = new Date("2026-08-01T23:30:00Z");
-    expect(dueCommitmentActions({ ...base, movingDate: "2026-08-09" }, lateNight)).toEqual([
-      "chase",
-      "flag",
-    ]);
+    expect(
+      dueCommitmentActions(
+        { ...base, movingDate: "2026-08-09", commitmentChaseT10At: "2026-07-30T09:00:00Z" },
+        lateNight,
+      ),
+    ).toEqual(["flag"]);
   });
 });
 

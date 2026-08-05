@@ -779,11 +779,28 @@ export async function GET(req: Request) {
                 unpaid_commitment: amount,
               } as never,
             });
+            // The grace rule guarantees this fires ≥24h after the chase (or,
+            // for a paused lead, ≥24h after confirmation) — say which, so the
+            // reader knows the customer has already had their reminder.
+            const chasedAt = quote.commitment_chase_t10_at
+              ? new Date(quote.commitment_chase_t10_at as string).toLocaleString("en-GB", {
+                  timeZone: "Europe/London",
+                  day: "numeric",
+                  month: "short",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : null;
+            const appBase = (process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, "");
             await sendOpsAlert(
               `Date at risk — commitment unpaid at 7 days (${quote.quote_ref})`,
               [
                 `<strong>${lead.name ?? "Customer"}</strong> has a move on ${quote.moving_date} with £${amount.toFixed(2)} of the commitment invoice unpaid.`,
+                chasedAt
+                  ? `Their commitment reminder went out on ${chasedAt} and there's been no payment since.`
+                  : `Chasing is paused for this lead (a conversation is in progress), so no automatic reminder has gone out — check the thread before calling.`,
                 `No automatic release — the date stays booked. Review it on the dashboard ("Dates at risk"); releasing the day is a manual cancel with the standard treatment.`,
+                `Lead: <a href="${appBase}/leads/${quote.lead_id}">open in Marley Ops</a>`,
               ],
               "money",
             );

@@ -33,6 +33,17 @@ export const COMMITMENT_DUE_DAYS_BEFORE = 7;
 /** T-10 human call task: confirm the date / chase the commitment. */
 export const CONFIRM_CALL_DAYS_BEFORE = 10;
 
+/**
+ * The office "date at risk" alarm waits this long after the customer's
+ * commitment chase went out (or, when chasing is paused, after the date was
+ * confirmed) before it can fire. A late booker who confirms inside T-7 lands
+ * in both ladder windows at once — without the grace, Brydee Thomas (MMR034,
+ * 2026-08-05) was flagged "at risk" 48 minutes after paying her deposit,
+ * before she'd had any real chance to pay the £50 top-up. Paying inside the
+ * grace window ends the ladder silently — no alarm ever sounds.
+ */
+export const COMMITMENT_FLAG_GRACE_HOURS = 24;
+
 /** Customer-stated refund SLA (working assumption used in refund emails). */
 export const REFUND_CUSTOMER_SLA_DAYS = 14;
 
