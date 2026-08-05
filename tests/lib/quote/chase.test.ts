@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  depositLabel,
   dueChaseStep,
   isQuoteLapsed,
   quoteChaseEmail,
@@ -182,5 +183,37 @@ describe("expiryLabelFrom", () => {
     expect(expiryLabelFrom("2026-07-09T10:00:00Z", "2026-07-01T00:00:00Z")).toBe("8 August");
     // falls back to created when never emailed
     expect(expiryLabelFrom(null, "2026-07-01T00:00:00Z")).toBe("31 July");
+  });
+});
+
+describe("deposit amount in chase copy (found by /qa 2026-08-05)", () => {
+  const ctx = {
+    firstName: "Jane Smith",
+    quoteRef: "MM-T-9",
+    acceptUrl: "https://ops.marleymoves.co.uk/q/tok123",
+    expiryLabel: "8 August",
+  };
+
+  it("interpolates the real ask — a £300 late-booking deposit never reads as £100", () => {
+    const bumped = { ...ctx, depositAmount: "£300" };
+    expect(depositChaseEmail(1, bumped).text).toContain("£300 deposit");
+    expect(depositChaseEmail(1, bumped).text).not.toContain("£100");
+    expect(depositChaseEmail(2, bumped).text).toContain("£300 deposit");
+    expect(quoteChaseEmail(2, bumped).text).toContain("£300 deposit");
+    expect(quoteChaseEmail(3, bumped).text).toContain("£300 deposit");
+    expect(depositChaseEmail(1, bumped).variables.DEPOSIT_AMOUNT).toBe("£300");
+  });
+
+  it("defaults to £100 when no amount is passed (pre-existing rows, settings default)", () => {
+    expect(depositChaseEmail(1, ctx).text).toContain("£100 deposit");
+    expect(depositChaseEmail(1, ctx).variables.DEPOSIT_AMOUNT).toBe("£100");
+  });
+
+  it("depositLabel formats whole pounds and pence honestly", () => {
+    expect(depositLabel(100)).toBe("£100");
+    expect(depositLabel(300)).toBe("£300");
+    expect(depositLabel(187.5)).toBe("£187.50");
+    expect(depositLabel(null)).toBe("£100");
+    expect(depositLabel(0)).toBe("£100");
   });
 });

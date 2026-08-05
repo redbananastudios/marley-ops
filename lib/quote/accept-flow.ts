@@ -74,6 +74,7 @@ import {
 import {
   chaseTextToHtml,
   depositChaseEmail,
+  depositLabel,
   expiryLabelFrom,
   replyAddressFor,
 } from "@/lib/quote/chase";
@@ -734,6 +735,10 @@ export async function acceptQuoteByStaff(
       expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
       ownerName: owner.name,
       ownerEmail: owner.email,
+      // The FROZEN ask — a late booking's 25% collapse or an office-set deposit
+      // must read the same here as on /q and the Zoho invoice (/qa 2026-08-05:
+      // a £300 ask whose payment email said £100).
+      depositAmount: depositLabel(deposit),
     });
     const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
     const res = await dispatchComm(sb, actorId, {

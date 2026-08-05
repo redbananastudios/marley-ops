@@ -9,6 +9,7 @@ import { acceptUrlFor, ensureAcceptToken } from "@/lib/quote/accept-flow";
 import {
   chaseTextToHtml,
   depositChaseEmail,
+  depositLabel,
   dueChaseStep,
   dueCommitmentActions,
   DEPOSIT_CHASE_DAYS,
@@ -25,6 +26,8 @@ import {
   composeCommitmentChaseEmail,
 } from "@/lib/comms/commitment-chase-email";
 import { ukTimeAt } from "@/lib/uk-time";
+import { requestedDeposit } from "@/lib/payments-policy";
+import { getBusinessSettings } from "@/lib/settings";
 import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 
@@ -80,6 +83,22 @@ interface QuoteRow {
   deposit_paid_at: string | null;
   moving_date: string | null;
   created_at: string;
+  deposit_amount: number | null;
+  agreed_price: number | null;
+  grand_total: number | null;
+}
+
+/** The deposit a chase email should quote — the live requestedDeposit for a
+ *  still-sent quote (matches what /q shows if they click through today, incl.
+ *  the ≤7-day late-booking collapse), the FROZEN deposit once accepted. The
+ *  emails used to hardcode "£100", silently contradicting any bumped or
+ *  office-set deposit (found by /qa 2026-08-05: a £300 late-booking ask whose
+ *  payment email said £100). */
+function chaseDepositLabel(quote: QuoteRow, defaultDeposit: number): string {
+  const base = Number(quote.deposit_amount ?? defaultDeposit);
+  if (quote.status === "accepted") return depositLabel(base);
+  const agreed = Number(quote.agreed_price ?? quote.grand_total ?? 0);
+  return depositLabel(requestedDeposit(agreed, base, quote.moving_date));
 }
 
 /** Today as a UK wall-clock yyyy-mm-dd (en-CA = ISO date format). */
@@ -133,6 +152,7 @@ export async function GET(req: Request) {
   const run = await runCron("chase", async () => {
   const sb = createAdminClient();
   const now = new Date();
+  const settings = await getBusinessSettings(sb);
 
   // Chases are personal, from the lead's owner: name for the voice, login email
   // for the From address (Luke's chases send as luke@ — sender.ts ownerFrom;
@@ -198,7 +218,7 @@ export async function GET(req: Request) {
 
   const { data: quotes } = await sb
     .from("quotes")
-    .select("id, lead_id, quote_ref, status, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at")
+    .select("id, lead_id, quote_ref, status, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
   const allQuotes = (quotes ?? []) as QuoteRow[];
@@ -345,6 +365,7 @@ export async function GET(req: Request) {
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
           ownerName: owner.name,
           ownerEmail: owner.email,
+          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
         });
         const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
@@ -412,6 +433,7 @@ export async function GET(req: Request) {
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
           ownerName: owner.name,
           ownerEmail: owner.email,
+          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
         });
         const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token);
         if (sent) {

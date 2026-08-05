@@ -91,6 +91,13 @@ export interface ChaseContext {
   depositAmount?: string | null;
 }
 
+/** "£100" / "£300" / "£187.50" — the deposit as customers should read it. */
+export function depositLabel(amount: number | null | undefined): string {
+  const n = Number(amount ?? 0);
+  if (!(n > 0)) return "£100";
+  return "£" + (Number.isInteger(n) ? String(n) : n.toFixed(2));
+}
+
 export interface ChaseEmail {
   subject: string;
   text: string;
@@ -127,6 +134,7 @@ function vars(c: ChaseContext): Record<string, string> {
 }
 
 export function quoteChaseEmail(step: 1 | 2 | 3, c: ChaseContext): ChaseEmail {
+  const dep = c.depositAmount ?? "£100";
   const name = first(c.firstName);
   const owner = ownerFirst(c.ownerName);
   const from = chaseFromFor(c.ownerName, c.ownerEmail);
@@ -159,7 +167,7 @@ I'm checking in on quote ${c.quoteRef}. Dates are starting to fill for the comin
 
 If your completion date isn't confirmed yet, that's completely normal. Most of our customers only have theirs two or three weeks before the move. Accepting now simply adds you to our priority list, so when your date does land we're best placed to accommodate it.
 
-If you'd like to go ahead, accept online and pay the £100 deposit to secure your place and your crew:
+If you'd like to go ahead, accept online and pay the ${dep} deposit to secure your place and your crew:
 ${c.acceptUrl}
 
 If you're still deciding, or anything in the quote needs changing, just reply and I'll help.
@@ -176,7 +184,7 @@ ${owner}`,
 
 I hope the move plans are coming along. Just to let you know, quote ${c.quoteRef} remains valid until ${c.expiryLabel}. After that I'd need to take a fresh look at price and availability before we could confirm anything.
 
-You can go ahead whether or not your date is confirmed. The £100 deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure:
+You can go ahead whether or not your date is confirmed. The ${dep} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure:
 ${c.acceptUrl}
 
 If you no longer need the quote, reply with "not going ahead" and I won't follow up again. If you've chosen someone else, a one-line note about what made the difference would genuinely help us improve.
@@ -189,6 +197,7 @@ ${owner}`,
 }
 
 export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
+  const dep = c.depositAmount ?? "£100";
   const name = first(c.firstName);
   const owner = ownerFirst(c.ownerName);
   const from = chaseFromFor(c.ownerName, c.ownerEmail);
@@ -197,7 +206,7 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
       subject: `One last step to secure your booking (${c.quoteRef})`,
       text: `Hi ${name},
 
-It's ${owner} here. Great to have you booked in. The last step is your £100 deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
+It's ${owner} here. Great to have you booked in. The last step is your ${dep} deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
 
 You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}
@@ -216,7 +225,7 @@ ${owner}`,
     subject: `Your booking is still provisional (${c.quoteRef})`,
     text: `Hi ${name},
 
-Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, the £100 deposit confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:
+Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, the ${dep} deposit confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:
 ${c.acceptUrl}
 
 If your timing has changed or plans have shifted, just reply and let me know.
