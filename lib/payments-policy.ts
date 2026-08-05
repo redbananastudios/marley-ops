@@ -107,6 +107,40 @@ export function commitmentDueDate(
 }
 
 /**
+ * True when the commitment would fall due IMMEDIATELY on confirmation — the
+ * move is 7 UK days away or closer. A missing/invalid move date is NOT
+ * "immediate": with no date there is nothing to secure yet.
+ */
+export function commitmentDueImmediately(
+  movingDate: string | null | undefined,
+  today: Date = new Date(),
+): boolean {
+  if (!ukDayOf(movingDate ?? null)) return false;
+  return commitmentDueDate(movingDate, today) <= ukToday(today);
+}
+
+/**
+ * The deposit actually REQUESTED to secure a booking. Normally the quote's
+ * stored deposit (office-set) or the Settings default — but when the move is
+ * already inside the commitment window (≤7 UK days out), securing the date
+ * costs the full 25%, so the ask becomes max(base, 25% × agreed) in ONE
+ * payment (Peter, 2026-08-05: "if the move is under 7 days just ask for the
+ * 25%"). commitmentAmount(agreed, thisResult) is then ≤ 0, so the separate
+ * commitment invoice never raises — no second invoice minutes after the
+ * deposit, no chase, no date-at-risk alarm (the Brydee Thomas MMR034 dance).
+ */
+export function requestedDeposit(
+  agreed: number,
+  baseDeposit: number,
+  movingDate: string | null | undefined,
+  today: Date = new Date(),
+): number {
+  const base = round2(baseDeposit || 0);
+  if (!commitmentDueImmediately(movingDate, today)) return base;
+  return Math.max(base, round2(COMMITMENT_PCT * (agreed || 0)));
+}
+
+/**
  * Inside the change window ⇔ strictly fewer than 7 UK-calendar days until the
  * move. Boundary rule (test-locked both sides): exactly 7 days out = OUTSIDE
  * (free change); 6 days out = inside. Past or same-day moves are inside. A

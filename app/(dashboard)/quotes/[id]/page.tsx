@@ -25,6 +25,7 @@ import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
+import { requestedDeposit } from "@/lib/payments-policy";
 import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 
@@ -247,7 +248,11 @@ export default async function QuoteDetailPage({
           quoteRef={quote.quote_ref ?? "—"}
           status={statusStr}
           grandTotal={Number(quote.grand_total ?? 0)}
-          depositAmount={settings.defaultDeposit}
+          depositAmount={requestedDeposit(
+            Number(quote.agreed_price ?? quote.grand_total ?? 0),
+            quote.deposit_amount ?? settings.defaultDeposit,
+            quote.moving_date,
+          )}
           readOnly={!editing}
           editHref={`/quotes/${quote.id}?edit=1`}
           leadId={quote.lead_id}

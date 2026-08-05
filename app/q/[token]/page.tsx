@@ -9,6 +9,7 @@ import {
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
+import { requestedDeposit } from "@/lib/payments-policy";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { DateConfirmCard } from "@/components/quote/date-confirm-card";
@@ -220,7 +221,13 @@ export default async function AcceptPage({
   }
 
   const total = quote.agreed_price ?? Number(quote.grand_total ?? 0);
-  const deposit = quote.deposit_amount ?? 100;
+  // Pre-accept, the ask is computed live (a move inside 7 days takes the full
+  // 25% up-front — late-booking collapse); once accepted, deposit_amount is
+  // the frozen truth every money surface reads.
+  const deposit =
+    quote.status === "sent"
+      ? requestedDeposit(total, quote.deposit_amount ?? 100, quote.moving_date)
+      : (quote.deposit_amount ?? 100);
 
   /* ---------------------------------------------------------- sent → accept */
   if (quote.status === "sent") {

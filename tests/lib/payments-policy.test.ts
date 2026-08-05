@@ -4,8 +4,10 @@ import {
   COMMITMENT_PCT,
   commitmentAmount,
   commitmentDueDate,
+  commitmentDueImmediately,
   isInsideChangeWindow,
   refundOutcome,
+  requestedDeposit,
   splitHeldMoney,
   type HeldPayment,
 } from "@/lib/payments-policy";
@@ -97,6 +99,59 @@ describe("commitmentDueDate", () => {
   it("collapses to today when the move date is missing or malformed", () => {
     expect(commitmentDueDate(null, new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
     expect(commitmentDueDate("not-a-date", new Date("2026-07-21T10:00:00Z"))).toBe("2026-07-21");
+  });
+});
+
+/* --------------------------------------- late-booking collapse (25% up-front) */
+
+describe("requestedDeposit — the late-booking collapse", () => {
+  const today = new Date("2026-08-05T10:00:00Z");
+
+  it("Brydee's case: £600 job 7 days out asks £150 up-front, not £100 + £50 later", () => {
+    expect(requestedDeposit(600, 100, "2026-08-12", today)).toBe(150);
+    // ...and the commitment machinery never engages for that deposit.
+    expect(commitmentAmount(600, 150)).toBe(0);
+  });
+
+  it("8 days out is the normal ladder — the base deposit stands", () => {
+    expect(requestedDeposit(600, 100, "2026-08-13", today)).toBe(100);
+  });
+
+  it("a small job's 25% under the base deposit never LOWERS the ask", () => {
+    // £300 job → 25% = £75 < £100 base.
+    expect(requestedDeposit(300, 100, "2026-08-10", today)).toBe(100);
+  });
+
+  it("a big late job asks the full 25%", () => {
+    expect(requestedDeposit(2400, 100, "2026-08-09", today)).toBe(600);
+  });
+
+  it("an office-set base above 25% is respected (max, never a reduction)", () => {
+    expect(requestedDeposit(600, 200, "2026-08-10", today)).toBe(200);
+  });
+
+  it("no move date → no collapse (there is nothing to secure yet)", () => {
+    expect(requestedDeposit(600, 100, null, today)).toBe(100);
+    expect(requestedDeposit(600, 100, "not-a-date", today)).toBe(100);
+  });
+
+  it("rounds to 2dp", () => {
+    expect(requestedDeposit(999.99, 100, "2026-08-10", today)).toBe(250);
+  });
+});
+
+describe("commitmentDueImmediately", () => {
+  const today = new Date("2026-08-05T10:00:00Z");
+
+  it("true at exactly 7 days out and closer, false at 8", () => {
+    expect(commitmentDueImmediately("2026-08-12", today)).toBe(true);
+    expect(commitmentDueImmediately("2026-08-06", today)).toBe(true);
+    expect(commitmentDueImmediately("2026-08-13", today)).toBe(false);
+  });
+
+  it("false with no usable move date (unlike commitmentDueDate's today-collapse)", () => {
+    expect(commitmentDueImmediately(null, today)).toBe(false);
+    expect(commitmentDueImmediately("not-a-date", today)).toBe(false);
   });
 });
 

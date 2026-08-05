@@ -58,7 +58,7 @@ import {
   type CommitmentReceivedMeta,
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
-import { commitmentAmount, commitmentDueDate } from "@/lib/payments-policy";
+import { commitmentAmount, commitmentDueDate, requestedDeposit } from "@/lib/payments-policy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -419,7 +419,10 @@ export async function acceptQuoteOnline(
 
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  // Late-booking collapse: a move inside 7 days is invoiced the full 25% as
+  // ONE up-front payment (requestedDeposit), so the commitment machinery never
+  // engages — no second invoice minutes later, no chase, no at-risk alarm.
+  const deposit = requestedDeposit(agreed, quote.deposit_amount ?? settings.defaultDeposit, quote.moving_date);
 
   const acceptedAt = new Date().toISOString();
   const { data: won, error } = await sb
@@ -601,7 +604,7 @@ export async function acceptQuoteByStaff(
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote) return { ok: false, error: "Quote not found" };
   const settings = await getBusinessSettings(sb);
-  const deposit =
+  const baseDeposit =
     typeof depositOverride === "number" && Number.isFinite(depositOverride) && depositOverride > 0
       ? round2(depositOverride)
       : (quote.deposit_amount ?? settings.defaultDeposit);
@@ -612,7 +615,7 @@ export async function acceptQuoteByStaff(
       ok: true,
       alreadyAccepted: true,
       agreed: quote.agreed_price ?? Number(quote.grand_total ?? 0),
-      deposit,
+      deposit: quote.deposit_amount ?? settings.defaultDeposit, // the frozen truth
       emailed: false,
     };
   }
@@ -624,6 +627,10 @@ export async function acceptQuoteByStaff(
     typeof agreedPrice === "number" && Number.isFinite(agreedPrice) && agreedPrice > 0
       ? round2(agreedPrice)
       : (quote.agreed_price ?? Number(quote.grand_total ?? 0));
+  // Late-booking collapse (applies over an office-typed override too — the
+  // returned/toasted deposit shows the real ask): a move inside 7 days takes
+  // the full 25% up-front, so no commitment invoice ever raises for it.
+  const deposit = requestedDeposit(agreed, baseDeposit, quote.moving_date);
 
   // The payment link (accept page in its post-accept state) + reply routing
   // both hang off the token — make sure it exists before anything sends.
