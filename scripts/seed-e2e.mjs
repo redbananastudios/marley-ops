@@ -415,7 +415,11 @@ await resetCrewContractorState();
     subtotal: SEED.sentQuote.total,
     grand_total: SEED.sentQuote.total,
     status: "sent",
-    moving_date: at(7).slice(0, 10),
+    // 21 days out — comfortably OUTSIDE the ≤7-day late-booking collapse, so
+    // the accept leg exercises the normal path and the £100 deposit-invoice
+    // assertion stays honest (at(7) sat exactly on the collapse boundary and
+    // the accept correctly froze 25% × £1,500 = £375 instead).
+    moving_date: at(21).slice(0, 10),
     deposit_amount: 100,
     accept_token: SEED.sentQuote.acceptToken,
     email_sent_at: at(-1), // sent yesterday — within the 30-day validity window
