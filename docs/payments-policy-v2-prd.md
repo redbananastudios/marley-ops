@@ -285,3 +285,20 @@ The decisions they bound:
     `scripts/create-resend-templates.mjs` (idempotent PATCH-by-name).
 12. **No Zoho credit-note API exists** — consistent with the deferred list (retained
     rows post no credit note; refunds recorded via events_log + Zoho handled manually).
+
+---
+
+## Amendment — 2026-08-05: late-booking collapse (25% up-front)
+
+When a quote is accepted with the move **7 UK days away or closer** (the
+commitment would fall due immediately), the requested deposit becomes
+**max(base deposit, 25% × agreed)** in ONE up-front payment
+(`requestedDeposit`, lib/payments-policy.ts). `commitmentAmount` then clamps
+to 0, so the separate commitment invoice, T-10 chase and T-7 date-at-risk
+flag never engage for that booking. Rationale: the two-step ladder collapsed
+badly for late bookers — Brydee Thomas (MMR034) paid £100 at 14:47, was
+invoiced the £50 top-up at 14:48 and chased at 15:36. Same total money, one
+payment. Bookings 8+ days out keep the unamended ladder. An office-typed
+deposit override is maxed the same way (the returned deposit shows the real
+ask). Decided by Peter, 2026-08-05 ("if the move is under 7 days just ask
+for the 25%"); shipped `402fd65`.
