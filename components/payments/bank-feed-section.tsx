@@ -25,6 +25,7 @@ import {
   confirmBankTransactionAction,
   dismissBankTransactionAction,
 } from "@/app/actions/bank-feed";
+import { AttachDialog } from "@/components/payments/attach-dialog";
 
 export interface BankFeedTx {
   id: string;
@@ -108,7 +109,10 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
   const [busy, setBusy] = useState(false);
   const [, start] = useTransition();
   const storage = tx.matchKind === "storage";
-  const confirmable = !storage && tx.quoteId && (tx.matchKind === "deposit" || tx.matchKind === "balance");
+  const confirmable =
+    !storage &&
+    tx.quoteId &&
+    (tx.matchKind === "deposit" || tx.matchKind === "commitment" || tx.matchKind === "balance");
 
   function confirm() {
     if (!confirmable || !tx.quoteId) return;
@@ -118,7 +122,7 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
         const res = await confirmBankTransactionAction({
           txId: tx.id,
           expectedQuoteId: tx.quoteId!,
-          expectedKind: tx.matchKind as "deposit" | "balance",
+          expectedKind: tx.matchKind as "deposit" | "commitment" | "balance",
         });
         if (!res.ok) {
           toast.error(res.error ?? "Could not record the payment.");
@@ -201,10 +205,12 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
             <span className="font-semibold">{tx.quoteRef}</span>
           )}{" "}
           but the open {tx.matchKind} is {tx.expectedAmount != null ? gbp(tx.expectedAmount) : "a different amount"} —
-          part-payment or duplicate. Record it manually via Bookings/Zoho, then dismiss.
+          part-payment or duplicate. Record it manually via Bookings/Zoho, then dismiss — or attach it
+          if it actually pays a different quote.
         </p>
       </div>
       <span className="tabular text-sm font-semibold text-warn">{gbp(tx.amount)}</span>
+      <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
       <DismissButton txId={tx.id} />
     </div>
   );
@@ -224,11 +230,12 @@ function UnmatchedRow({ tx }: { tx: BankFeedTx }) {
           <span className="ml-2 text-xs font-normal text-mist-400">“{tx.reference ?? "no reference"}”</span>
         </p>
         <p className="text-xs text-mist-400">
-          no matching open deposit or balance — record it via Bookings/Zoho if it&apos;s a customer payment,
+          no matching open payment — attach it to the right quote if it&apos;s a customer payment,
           otherwise clear it.
         </p>
       </div>
       <span className="tabular text-sm font-semibold text-foreground">{gbp(tx.amount)}</span>
+      <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
       <DismissButton txId={tx.id} label="Clear" />
     </div>
   );
@@ -303,9 +310,9 @@ export function BankFeedSection({
             </span>
           </div>
           <p className="border-b px-5 py-2.5 text-xs text-mist-400">
-            Inbound transfers across all dates that don&apos;t match an open deposit or balance. Record real
-            customer payments via Bookings/Zoho, then clear them; clear anything that isn&apos;t a customer
-            payment to take it off this list.
+            Inbound transfers across all dates that don&apos;t match an open deposit, commitment or balance.
+            Attach real customer payments to their quote to record them; clear anything that isn&apos;t a
+            customer payment to take it off this list.
           </p>
           <div className="divide-y">
             {unmatched.map((tx) => (

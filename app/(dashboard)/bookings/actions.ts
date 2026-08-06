@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
-import { markBalancePaid, markDepositPaid } from "@/lib/quote/accept-flow";
+import { markBalancePaid, markCommitmentPaid, markDepositPaid } from "@/lib/quote/accept-flow";
 
 /**
  * Bookings-page actions. Payment method is a human statement of fact (how the
@@ -39,6 +39,23 @@ export async function markQuoteDepositPaidAction(
   refresh(q?.lead_id, quoteId);
   // `already` must survive: the bank feed treats an already-recorded item as a
   // likely DUPLICATE customer payment and refuses to mark its row confirmed.
+  return { ok: true as const, already: res.already === true };
+}
+
+/** Commitment invoice paid by BACS/cash — runs the full commitment-paid
+ *  pipeline (Zoho payment record, T-7 flag cleared, chase closed, customer
+ *  receipt). Same `already` contract as deposit/balance: the bank feed treats
+ *  an already-recorded commitment as a likely duplicate payment. */
+export async function markQuoteCommitmentPaidAction(
+  quoteId: string,
+  method: "bank_transfer" | "cash",
+) {
+  const { sb, userId } = await actor();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const res = await markCommitmentPaid(sb, quoteId, { method, actorId: userId, recordInZoho: true });
+  if (!res.ok) return { ok: false as const, error: res.error ?? "Could not mark paid" };
+  const { data: q } = await sb.from("quotes").select("lead_id").eq("id", quoteId).single();
+  refresh(q?.lead_id, quoteId);
   return { ok: true as const, already: res.already === true };
 }
 

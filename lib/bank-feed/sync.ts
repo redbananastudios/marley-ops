@@ -75,14 +75,17 @@ async function fetchSheet() {
   return parseSheetRows(json.values ?? []);
 }
 
-/** Open deposits + balances the matcher can suggest against — mirrors the
- *  Bookings page's definitions of "awaiting deposit" and "balance due". */
-async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
+/** Open deposits, commitment invoices + balances the matcher can suggest
+ *  against — mirrors the Bookings page's definitions of "awaiting deposit"
+ *  and "balance due"; commitment mirrors the chase engine's "invoiced, not
+ *  paid". Exported for the /payments manual attach flow, which must validate
+ *  against exactly the same open-item set the matcher uses. */
+export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
   const quotes = await fetchAllRows((f, t) =>
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total",
+        "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at",
       )
       .eq("status", "accepted")
       .order("id")
@@ -106,6 +109,9 @@ async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
 
   const items: OpenItem[] = [];
   for (const q of quotes) {
+    // A cancelled booking must never suggest money actions — its unwind
+    // (refunds, reopen) owns that state, not the bank feed.
+    if (q.booking_cancelled_at) continue;
     const base = {
       quoteId: q.id as string,
       quoteRef: (q.quote_ref as string) ?? "",
@@ -117,10 +123,25 @@ async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
       items.push({ ...base, kind: "deposit", amount: Number(q.deposit_amount) });
     }
     if (q.deposit_paid_at && q.lead_id && !balancePaid.get(q.lead_id)) {
+      // Invoices PARTITION the agreed price (computeBalanceCredits): once a
+      // commitment invoice is RAISED (paid or not), the balance is agreed −
+      // deposit − commitment. Without the carve-out the open set would offer
+      // commitment + gross balance simultaneously — more than is owed.
       const balance =
         Number(q.balance_invoice_amount) ||
-        Math.max(0, Number(q.agreed_price ?? q.grand_total ?? 0) - Number(q.deposit_amount ?? 0));
+        Math.max(
+          0,
+          Number(q.agreed_price ?? q.grand_total ?? 0) -
+            Number(q.deposit_amount ?? 0) -
+            Number(q.commitment_invoice_amount ?? 0),
+        );
       if (balance > 0) items.push({ ...base, kind: "balance", amount: balance });
+    }
+    // Commitment: invoiced (amount only ever set when the Zoho invoice landed)
+    // and not yet paid. Pushed AFTER deposit/balance so suffix-less same-amount
+    // ties keep today's deposit-first pick.
+    if (!q.commitment_paid_at && Number(q.commitment_invoice_amount) > 0) {
+      items.push({ ...base, kind: "commitment", amount: Number(q.commitment_invoice_amount) });
     }
   }
   return items;

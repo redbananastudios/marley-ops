@@ -306,3 +306,90 @@ describe("matchTransaction — a suggestion REQUIRES the exact amount", () => {
     expect(refsInText("MMR001-DEP", "JANE MMR001 dep")).toEqual(["MMR001"]);
   });
 });
+
+describe("matchTransaction — commitment invoices (2026-08-06 MY SAFETY LTD £50)", () => {
+  // The real gap: MMR034's £50 commitment top-up read as a part-payment
+  // mismatch against the balance because the matcher had no commitment kind.
+  // £600 agreed, £100 deposit paid, £50 commitment RAISED — loadOpenItems
+  // nets the raised commitment out of the balance (invoices partition the
+  // agreed price), so the open set is commitment £50 + balance £450, which
+  // sums to exactly what the customer still owes.
+  const mmr034 = [
+    open({ quoteId: "q34", quoteRef: "MMR034", customer: "Brydee Thomas", kind: "balance", amount: 450 }),
+    open({ quoteId: "q34", quoteRef: "MMR034", customer: "Brydee Thomas", kind: "commitment", amount: 50 }),
+  ];
+
+  it("reference + exact commitment amount → confirmable commitment suggestion", () => {
+    expect(matchTransaction({ amount: 50, reference: "MMR034", description: null }, mmr034)).toMatchObject({
+      type: "suggestion",
+      kind: "commitment",
+      confidence: "reference",
+      quoteId: "q34",
+      amount: 50,
+    });
+  });
+
+  it("the netted balance amount picks the balance on the same quote", () => {
+    expect(matchTransaction({ amount: 450, reference: "MMR034", description: null }, mmr034)).toMatchObject({
+      type: "suggestion",
+      kind: "balance",
+      amount: 450,
+    });
+  });
+
+  it("the GROSS (un-netted) balance figure matches neither item — human territory, never one-tap", () => {
+    // £500 would double-pay the commitment; it must never one-tap-record.
+    expect(matchTransaction({ amount: 500, reference: "MMR034", description: null }, mmr034)).toMatchObject({
+      type: "mismatch",
+      quoteRef: "MMR034",
+    });
+  });
+
+  it("an amount matching NEITHER open item stays a mismatch", () => {
+    expect(matchTransaction({ amount: 75, reference: "MMR034", description: null }, mmr034)).toMatchObject({
+      type: "mismatch",
+      quoteRef: "MMR034",
+    });
+  });
+
+  it("the Zoho -COM suffix breaks a same-amount tie in the commitment's favour", () => {
+    const tied = [
+      open({ kind: "deposit", amount: 100 }),
+      open({ kind: "commitment", amount: 100 }),
+    ];
+    expect(matchTransaction({ amount: 100, reference: "MMR001-COM", description: null }, tied)).toMatchObject({
+      type: "suggestion",
+      kind: "commitment",
+    });
+    // suffix-less keeps today's deposit-first pick (open-items order):
+    expect(matchTransaction({ amount: 100, reference: "MMR001", description: null }, tied)).toMatchObject({
+      type: "suggestion",
+      kind: "deposit",
+    });
+  });
+
+  it("amount-only with a corroborating payer name can suggest a commitment", () => {
+    expect(
+      matchTransaction(
+        { amount: 50, reference: "for the move", description: null, counterparty: "B THOMAS" },
+        [open({ kind: "commitment", amount: 50, customer: "Brydee Thomas" })],
+      ),
+    ).toMatchObject({ type: "suggestion", kind: "commitment", confidence: "amount" });
+  });
+
+  it("a same-amount commitment on an UNRELATED quote must not blind an amount-only match the name resolves", () => {
+    // £800 jobs open £100 commitments, colliding with the standard £100
+    // deposit. Corroboration-first: the payer's surname picks Jane's deposit.
+    const pool = [
+      open({ kind: "deposit", amount: 100, customer: "Jane Smith" }),
+      open({ quoteId: "q9", quoteRef: "MMR009", kind: "commitment", amount: 100, customer: "Brydee Thomas" }),
+    ];
+    expect(
+      matchTransaction({ amount: 100, reference: null, description: null, counterparty: "J SMITH" }, pool),
+    ).toMatchObject({ type: "suggestion", kind: "deposit", quoteId: "q1", confidence: "amount" });
+    // A stranger corroborates neither — still unmatched for a human:
+    expect(
+      matchTransaction({ amount: 100, reference: null, description: null, counterparty: "E Dingley" }, pool),
+    ).toBeNull();
+  });
+});

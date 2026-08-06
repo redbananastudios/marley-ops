@@ -4,8 +4,9 @@
  * Two sources today:
  *   card      takepayments attempts (card_payments) settled or refunded in the
  *             day — the gateway is money-truth for these.
- *   recorded  deposits/balances marked paid in the panel (BACS one-tap, cash) —
- *             quotes.deposit_paid_at / leads.balance_paid_at stamps.
+ *   recorded  deposits/commitments/balances marked paid in the panel (BACS
+ *             one-tap, cash, bank-feed confirm) — quotes.deposit_paid_at /
+ *             quotes.commitment_paid_at / leads.balance_paid_at stamps.
  *
  * A third source arrives with the bank feed (Revolut/Monzo webhook): inbound
  * transfers matched by reference. It slots in as another ReceivedItem source —
@@ -69,7 +70,7 @@ export interface ReceivedItem {
   key: string;
   source: "card" | "recorded";
   /** refund rows carry a negative amount. */
-  kind: "deposit" | "balance" | "refund";
+  kind: "deposit" | "commitment" | "balance" | "refund";
   customer: string;
   quoteRef: string | null;
   leadId: string | null;
@@ -110,6 +111,8 @@ export interface QuoteIn {
   deposit_amount: number | null;
   deposit_paid_at: string | null;
   balance_invoice_amount: number | null;
+  commitment_invoice_amount?: number | null;
+  commitment_paid_at?: string | null;
 }
 
 export interface LeadIn {
@@ -143,6 +146,9 @@ export function buildReceivedDay(input: {
   cardRows: CardRowIn[];
   /** Quotes with deposit_paid_at inside the window. */
   depositQuotes: QuoteIn[];
+  /** Quotes with commitment_paid_at inside the window (BACS/cash only — the
+   *  commitment invoice never takes card, so no card-dedupe is needed). */
+  commitmentQuotes?: QuoteIn[];
   /** Leads with balance_paid_at inside the window. */
   balanceLeads: LeadIn[];
   /** The lead's money quote (most recently accepted) for names/amounts. */
@@ -213,13 +219,30 @@ export function buildReceivedDay(input: {
     });
   }
 
+  for (const q of input.commitmentQuotes ?? []) {
+    if (!inWindow(q.commitment_paid_at ?? null)) continue;
+    items.push({
+      key: `commitment:${q.id}`,
+      source: "recorded",
+      kind: "commitment",
+      customer: q.customer_name || "Customer",
+      quoteRef: q.quote_ref,
+      leadId: q.lead_id,
+      amountPence: poundsToPence(q.commitment_invoice_amount),
+      at: q.commitment_paid_at!,
+    });
+  }
+
   for (const lead of input.balanceLeads) {
     if (!inWindow(lead.balance_paid_at)) continue;
     const quote = input.quoteByLeadId.get(lead.id) ?? null;
     const agreed = Number(quote?.agreed_price ?? quote?.grand_total ?? 0);
     const deposit = Number(quote?.deposit_amount ?? 0);
+    // A RAISED commitment invoice is carved out of the balance (invoices
+    // partition the agreed price — computeBalanceCredits doctrine).
+    const commitment = Number(quote?.commitment_invoice_amount ?? 0);
     const balance =
-      lead.balance_amount ?? quote?.balance_invoice_amount ?? Math.max(0, agreed - deposit);
+      lead.balance_amount ?? quote?.balance_invoice_amount ?? Math.max(0, agreed - deposit - commitment);
     items.push({
       key: `balance:${lead.id}`,
       source: "recorded",

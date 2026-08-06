@@ -27,22 +27,23 @@ export interface OpenItem {
   quoteRef: string;
   leadId: string | null;
   customer: string | null;
-  /** deposit → deposit_amount; balance → the balance actually invoiced/due. */
+  /** deposit → deposit_amount; commitment → commitment_invoice_amount;
+   *  balance → the balance actually invoiced/due. */
   amount: number;
-  kind: "deposit" | "balance";
+  kind: "deposit" | "commitment" | "balance";
 }
 
 export type MatchResult =
   | {
       type: "suggestion";
-      kind: "deposit" | "balance";
+      kind: "deposit" | "commitment" | "balance";
       confidence: "reference" | "amount";
       quoteId: string;
       quoteRef: string;
       /** The open item's amount — MUST equal the transfer amount (invariant). */
       amount: number;
     }
-  | { type: "mismatch"; kind: "deposit" | "balance"; quoteId: string; quoteRef: string }
+  | { type: "mismatch"; kind: "deposit" | "commitment" | "balance"; quoteId: string; quoteRef: string }
   | { type: "storage" };
 
 /** Quote refs recognisable inside free-text bank references. */
@@ -118,14 +119,20 @@ export function matchTransaction(
     const candidates = open.filter((o) => refs.includes(o.quoteRef.toUpperCase()));
     if (!candidates.length) return null; // names a quote we don't have open — human territory
 
-    // A suggestion requires the EXACT amount. The Zoho -DEP/-BAL suffix picks
-    // between a same-amount deposit and balance on one quote (rare but real).
+    // A suggestion requires the EXACT amount. The Zoho -DEP/-COM/-BAL suffix
+    // picks between same-amount open items on one quote (rare but real).
     const exact = candidates.filter((o) => pennies(o.amount) === pennies(tx.amount));
     if (exact.length) {
       const wantsDep = hay.includes("-DEP");
+      const wantsCom = hay.includes("-COM");
       const wantsBal = hay.includes("-BAL");
       const pick =
-        exact.find((o) => (wantsDep && o.kind === "deposit") || (wantsBal && o.kind === "balance")) ?? exact[0];
+        exact.find(
+          (o) =>
+            (wantsDep && o.kind === "deposit") ||
+            (wantsCom && o.kind === "commitment") ||
+            (wantsBal && o.kind === "balance"),
+        ) ?? exact[0];
       return {
         type: "suggestion",
         kind: pick.kind,
@@ -142,13 +149,17 @@ export function matchTransaction(
     return { type: "mismatch", kind: c.kind, quoteId: c.quoteId, quoteRef: c.quoteRef };
   }
 
-  // No reference → amount-only. Confirmable ONLY when it's unambiguous (exactly
-  // one open item of this amount) AND the payer name corroborates that
-  // customer. Amount alone is too weak to move money: a coincidental £100 from
-  // an unrelated payer must stay unmatched for a human, never a one-tap match.
+  // No reference → amount-only. Confirmable ONLY when the payer name
+  // corroborates exactly ONE of the open items at this amount. Corroboration
+  // comes FIRST: with commitment invoices in the pool, same-amount collisions
+  // across unrelated quotes are routine (£100 deposit vs a £100 commitment on
+  // an £800 job) and must not blind a match the name resolves. Amount alone is
+  // still never enough — a coincidental £100 from an unrelated payer stays
+  // unmatched for a human — and two corroborating candidates stay ambiguous.
   const byAmount = open.filter((o) => pennies(o.amount) === pennies(tx.amount));
-  if (byAmount.length === 1 && namesCorroborate(tx.counterparty, byAmount[0].customer)) {
-    const o = byAmount[0];
+  const corroborated = byAmount.filter((o) => namesCorroborate(tx.counterparty, o.customer));
+  if (corroborated.length === 1) {
+    const o = corroborated[0];
     return {
       type: "suggestion",
       kind: o.kind,

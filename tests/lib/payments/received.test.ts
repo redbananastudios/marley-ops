@@ -202,11 +202,45 @@ describe("buildReceivedDay", () => {
     expect(day.totalPence).toBe(10000);
   });
 
+  it("counts a recorded commitment payment (BACS/cash — never card, no dedupe)", () => {
+    const day = build({
+      commitmentQuotes: [
+        quote({ commitment_invoice_amount: 50, commitment_paid_at: "2026-07-15T11:00:00Z" }),
+      ],
+    });
+    expect(day.items).toHaveLength(1);
+    expect(day.items[0]).toMatchObject({
+      source: "recorded",
+      kind: "commitment",
+      quoteRef: "MMR001",
+      amountPence: 5000,
+    });
+    expect(day.recordedPence).toBe(5000);
+    expect(day.totalPence).toBe(5000);
+  });
+
+  it("a commitment paid outside the window does not count", () => {
+    const day = build({
+      commitmentQuotes: [
+        quote({ commitment_invoice_amount: 50, commitment_paid_at: "2026-07-16T11:00:00Z" }),
+      ],
+    });
+    expect(day.items).toHaveLength(0);
+  });
+
   it("falls back agreed − deposit for a balance with no stored amount", () => {
     const day = build({
       balanceLeads: [lead({ balance_paid_at: "2026-07-15T16:00:00Z" })],
     });
     expect(day.items[0].amountPence).toBe(110000); // 1200 − 100
+  });
+
+  it("the balance fallback nets out a RAISED commitment invoice", () => {
+    const day = build({
+      balanceLeads: [lead({ balance_paid_at: "2026-07-15T16:00:00Z" })],
+      quoteByLeadId: new Map([["l1", quote({ commitment_invoice_amount: 200 })]]),
+    });
+    expect(day.items[0].amountPence).toBe(90000); // 1200 − 100 − 200
   });
 
   it("sorts newest first", () => {

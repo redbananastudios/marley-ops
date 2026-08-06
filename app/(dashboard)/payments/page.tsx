@@ -25,7 +25,7 @@ import { RefreshButton } from "@/components/payments/refresh-button";
 export const dynamic = "force-dynamic";
 
 const QUOTE_COLS =
-  "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, deposit_amount, deposit_paid_at, balance_invoice_amount";
+  "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, deposit_amount, deposit_paid_at, balance_invoice_amount, commitment_invoice_amount";
 
 function money(pence: number): string {
   const s = (Math.abs(pence) / 100).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
@@ -156,22 +156,28 @@ export default async function PaymentsPage({
   const endIso = window.end.toISOString();
 
   const sb = await createClient();
-  const [{ data: cardRows }, { data: depositQuotes }, { data: balanceLeads }] = await Promise.all([
-    sb
-      .from("card_payments")
-      .select(
-        "id, kind, status, amount_pence, refunded_pence, is_test, settled_at, refunded_at, refund_reason, quote_id, lead_id, card_number_mask, card_scheme",
-      )
-      .or(
-        `and(settled_at.gte.${startIso},settled_at.lt.${endIso}),and(refunded_at.gte.${startIso},refunded_at.lt.${endIso})`,
-      ),
-    sb.from("quotes").select(QUOTE_COLS).gte("deposit_paid_at", startIso).lt("deposit_paid_at", endIso),
-    sb
-      .from("leads")
-      .select("id, name, balance_paid_at, balance_amount")
-      .gte("balance_paid_at", startIso)
-      .lt("balance_paid_at", endIso),
-  ]);
+  const [{ data: cardRows }, { data: depositQuotes }, { data: commitmentQuotes }, { data: balanceLeads }] =
+    await Promise.all([
+      sb
+        .from("card_payments")
+        .select(
+          "id, kind, status, amount_pence, refunded_pence, is_test, settled_at, refunded_at, refund_reason, quote_id, lead_id, card_number_mask, card_scheme",
+        )
+        .or(
+          `and(settled_at.gte.${startIso},settled_at.lt.${endIso}),and(refunded_at.gte.${startIso},refunded_at.lt.${endIso})`,
+        ),
+      sb.from("quotes").select(QUOTE_COLS).gte("deposit_paid_at", startIso).lt("deposit_paid_at", endIso),
+      sb
+        .from("quotes")
+        .select(`${QUOTE_COLS}, commitment_paid_at`)
+        .gte("commitment_paid_at", startIso)
+        .lt("commitment_paid_at", endIso),
+      sb
+        .from("leads")
+        .select("id, name, balance_paid_at, balance_amount")
+        .gte("balance_paid_at", startIso)
+        .lt("balance_paid_at", endIso),
+    ]);
 
   // Names/refs for card + balance rows come from the lead's accepted quote.
   const leadIds = [
@@ -199,6 +205,7 @@ export default async function PaymentsPage({
     window,
     cardRows: cardRows ?? [],
     depositQuotes: depositQuotes ?? [],
+    commitmentQuotes: commitmentQuotes ?? [],
     balanceLeads: balanceLeads ?? [],
     quoteByLeadId,
   });
@@ -273,7 +280,7 @@ export default async function PaymentsPage({
       ? await sb
           .from("quotes")
           .select(
-            "id, quote_ref, customer_name, lead_id, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total",
+            "id, quote_ref, customer_name, lead_id, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total, commitment_invoice_amount",
           )
           .in("id", qIds)
       : { data: [] };
@@ -284,11 +291,18 @@ export default async function PaymentsPage({
       const expectedAmount = q
         ? kind === "deposit"
           ? Number(q.deposit_amount) || null
-          : kind === "balance"
-            ? Number(q.balance_invoice_amount) ||
-              Math.max(0, Number(q.agreed_price ?? q.grand_total ?? 0) - Number(q.deposit_amount ?? 0)) ||
-              null
-            : null
+          : kind === "commitment"
+            ? Number(q.commitment_invoice_amount) || null
+            : kind === "balance"
+              ? Number(q.balance_invoice_amount) ||
+                Math.max(
+                  0,
+                  Number(q.agreed_price ?? q.grand_total ?? 0) -
+                    Number(q.deposit_amount ?? 0) -
+                    Number(q.commitment_invoice_amount ?? 0),
+                ) ||
+                null
+              : null
         : null;
       return {
         id: r.id as string,

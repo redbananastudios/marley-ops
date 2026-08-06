@@ -172,7 +172,7 @@ export interface BankFeedArrival {
    *  "now matched" push REPLACES the earlier "needs matching" one. */
   rowId: string;
   outcome: "suggested" | "attention";
-  kind: "deposit" | "balance" | "storage" | null;
+  kind: "deposit" | "commitment" | "balance" | "storage" | null;
   /** Matched customer when known, else the payer name off the statement. */
   name: string | null;
   quoteRef: string | null;
