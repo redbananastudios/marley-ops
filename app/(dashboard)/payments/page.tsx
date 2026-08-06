@@ -12,6 +12,7 @@ import { Card } from "@/components/ui/card";
 import { bankFeedConfigured } from "@/lib/bank-feed/sync";
 import { isAcquirerSettlement } from "@/lib/bank-feed/parse";
 import { BankFeedSection, type BankFeedTx } from "@/components/payments/bank-feed-section";
+import { RefreshButton } from "@/components/payments/refresh-button";
 
 /**
  * Payments — everything that landed on a given UK day, newest first.
@@ -345,6 +346,7 @@ export default async function PaymentsPage({
               Today
             </Link>
           ) : null}
+          <RefreshButton />
         </div>
       </PageHeader>
 
