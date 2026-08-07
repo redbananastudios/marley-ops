@@ -293,6 +293,15 @@ export function cardExecutedPence(
   state: CardStateIn | null | undefined,
 ): number {
   if (!state) return 0;
+  // `refunded_pence` is advanced as a RESERVATION before the gateway is called
+  // (card-payments.ts reserves, then calls REFUND_SALE), and on an ambiguous
+  // outcome the row is frozen at 'needs_review' with the reservation intact —
+  // deliberately, so nobody retries a refund that may have gone through. Reading
+  // executed-ness from the pence alone therefore reported an UNCONFIRMED refund
+  // as done: the rail showed "£X refunded · £0 outstanding", the queue row could
+  // be completed, and the customer was emailed "your refund has been issued" for
+  // money that may never have left. Only a settled row counts as executed.
+  if (state.status === "needs_review") return 0;
   const refundedAtSnapshot = Math.max(0, state.amount_pence - plan.amountPence);
   const newRefunds = Math.max(0, state.refunded_pence - refundedAtSnapshot);
   return Math.min(plan.refundDuePence, newRefunds);

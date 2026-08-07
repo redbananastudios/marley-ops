@@ -388,12 +388,58 @@ export async function updateLeadStatusAction(
   // /q + the chase ladder wake back up (it was stamped by the mark-lost /
   // Marley-cancel unwind).
   if (reopening) {
-    await createAdminClient()
+    const admin = createAdminClient();
+    // The unwind VOIDED the Zoho invoices but left their ids on the quote, and
+    // every raiser early-returns when it sees a real id (ensureDepositInvoice,
+    // ensureCommitmentInvoice, createBalanceInvoiceFlow). Clearing only
+    // booking_cancelled_at therefore revived a booking that could never be
+    // invoiced again from the panel: the customer's /q page links a voided
+    // document and the final balance is simply never billed. Drop the dead
+    // references so the raisers mint fresh invoices at the current price.
+    const { error: reviveError } = await admin
       .from("quotes")
-      .update({ booking_cancelled_at: null } as never)
+      .update({
+        booking_cancelled_at: null,
+        zoho_deposit_invoice_id: null,
+        zoho_deposit_invoice_number: null,
+        zoho_deposit_invoice_url: null,
+        zoho_commitment_invoice_id: null,
+        zoho_commitment_invoice_number: null,
+        zoho_commitment_invoice_url: null,
+        commitment_invoice_amount: null,
+        commitment_invoice_created_at: null,
+        zoho_balance_invoice_id: null,
+        zoho_balance_invoice_number: null,
+        zoho_balance_invoice_url: null,
+        balance_invoice_amount: null,
+        balance_invoice_created_at: null,
+      } as never)
       .eq("lead_id", leadId)
       .eq("status", "accepted")
       .not("booking_cancelled_at", "is", null);
+    if (reviveError) {
+      await sendOpsAlert(`Reopened booking may still hold voided invoices — lead ${leadId}`, [
+        `The lead was reopened but clearing its voided Zoho invoice references failed: ${reviveError.message}.`,
+        `Until that is fixed the panel will refuse to raise new deposit/commitment/balance invoices for this job.`,
+      ], "money").catch(() => {});
+    }
+
+    // The cancel queued a refund. Reopening means the money stays with us and
+    // funds the live booking again — the same shape as a date-change rebook,
+    // which closes its row as 'released'. Without this /refunds keeps offering a
+    // live "refund £X" button (pre-confirmation rows are immediately executable)
+    // on a booking that is running again, and the dashboard counts it forever.
+    const { error: refundError } = await admin
+      .from("refund_queue")
+      .update({ status: "released" } as never)
+      .eq("lead_id", leadId)
+      .eq("status", "pending");
+    if (refundError) {
+      await sendOpsAlert(`Reopened booking still has a pending refund — lead ${leadId}`, [
+        `The lead was reopened but its pending refund_queue row could not be superseded: ${refundError.message}.`,
+        `Check /refunds before anyone pays out against a live booking.`,
+      ], "money").catch(() => {});
+    }
   }
 
   await sb.from("activities").insert({

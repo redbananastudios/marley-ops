@@ -1172,6 +1172,10 @@ export async function markDepositPaid(
     { actorUserId: opts.actorId },
   );
 
+  // Captured so the ops alert below can report what actually happened rather
+  // than assuming the customer was emailed.
+  let receiptSend: Awaited<ReturnType<typeof dispatchComm>> | null = null;
+
   // Customer confirmation (duplicate-guarded). Prefers the published Resend
   // template (dashboard-editable copy); the in-repo HTML is the fallback.
   if (quote.customer_email) {
@@ -1196,7 +1200,7 @@ export async function markDepositPaid(
     // renders the receipt). The old RESEND_TEMPLATE_DEPOSIT_RECEIVED template
     // lacks the receipt panel, so it is deliberately no longer read here.
     const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIPT;
-    await dispatchComm(sb, opts.actorId, {
+    receiptSend = await dispatchComm(sb, opts.actorId, {
       channel: "email",
       // Money desk identity — receipts come from accounts@, not the salesperson
       // (docs/email-identity-plan.md); replies still route via the token relay.
@@ -1215,9 +1219,21 @@ export async function markDepositPaid(
     });
   }
 
+  // Say what ACTUALLY happened. This line used to claim "the customer has the
+  // confirmation email" unconditionally — including for a phone-only lead where
+  // no send was even attempted (the email is gated on quote.customer_email
+  // above), and for a send that failed. The accounts desk then moved on
+  // believing a paying customer held written confirmation of their booking.
+  const receiptLine = !quote.customer_email
+    ? `NO EMAIL ON FILE — the customer has NO written confirmation. Confirm the booking by phone.`
+    : receiptSend && "ok" in receiptSend && receiptSend.ok
+      ? `Lead is now Confirmed and the receipt email is on its way to ${quote.customer_email}.`
+      : receiptSend && "duplicate" in receiptSend && receiptSend.duplicate
+        ? `Lead is now Confirmed; the receipt email had already been sent.`
+        : `Lead is now Confirmed but the receipt email to ${quote.customer_email} did NOT send — re-send it from the lead page.`;
   await sendOpsAlert(`Deposit paid — ${quote.quote_ref}`, [
     `£${deposit.toFixed(2)} deposit received for <strong>${quote.quote_ref}</strong> (${quote.customer_name ?? "customer"}) via ${opts.method === "card" ? "card" : "bank transfer"}.`,
-    `Lead is now Confirmed and the customer has the confirmation email.`,
+    receiptLine,
   ], "money");
 
   return { ok: true };
@@ -1863,6 +1879,16 @@ export async function createBalanceInvoiceFlow(
   if (quote.status !== "accepted") {
     return { ok: false, error: "The quote must be accepted before the final invoice is raised." };
   }
+  // Cancelling leaves the quote 'accepted' and only stamps booking_cancelled_at,
+  // so the lead page can still render the Final-invoice button on a cancelled
+  // job. Every sibling money path checks this (ensureCommitmentInvoice,
+  // confirmMoveDate, the bank-feed open-item loader, the post-move sweep); this
+  // one did not, so a tidy-up click could raise a REAL Zoho invoice and email it
+  // to a customer whose booking was cancelled and whose refund is still pending.
+  // Guarded server-side, not just on the button.
+  if (quote.booking_cancelled_at) {
+    return { ok: false, error: "This booking was cancelled — no final invoice can be raised for it." };
+  }
   if (isRealZohoId(quote.zoho_balance_invoice_id)) {
     return {
       ok: false,
@@ -2083,7 +2109,22 @@ export async function markBalancePaid(
     await sb.from("follow_ups").update({ status: "done", outcome: "paid" }).eq("id", fu.id);
   }
 
-  const amount = quote.balance_invoice_amount ?? 0;
+  // The office can set a balance manually ("Set manually" on the follow-up),
+  // which writes leads.balance_amount and raises NO Zoho invoice — so
+  // quotes.balance_invoice_amount stays null. Reading only the quote copy made
+  // this whole block behave as a £0 settlement: the receipt email was suppressed
+  // (it is gated on amount > 0), the timeline read "Balance £0 paid — fully
+  // settled" and the money alert announced "£0.00 balance received", while
+  // /payments showed the real figure. Fall back to the lead's copy.
+  let amount = quote.balance_invoice_amount ?? 0;
+  if (amount <= 0) {
+    const { data: leadBalance } = await sb
+      .from("leads")
+      .select("balance_amount")
+      .eq("id", quote.lead_id)
+      .maybeSingle();
+    amount = Number(leadBalance?.balance_amount ?? 0);
+  }
   await sb.from("activities").insert({
     lead_id: quote.lead_id,
     client_id: quote.client_id,
@@ -2151,7 +2192,15 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
     try {
       const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
       if (s.status === "paid") {
-        await markDepositPaid(sb, quote.id, { method: "card", actorId: null, recordInZoho: false });
+        // BACS, not card — same reasoning as the commitment branch below. No
+        // Zoho card gateway is active, so an invoice reaching 'paid' in Zoho was
+        // recorded by hand (bank transfer or cash); real card money arrives via
+        // takepayments and stamps itself with a card_payments row. Recording it
+        // as 'card' made buildHeldFromSources treat the money as "already
+        // represented by a card row" and skip it entirely, so on cancellation
+        // the deposit vanished from the refund queue, the money alert and the
+        // customer's cancellation acknowledgement — with nothing flagging it.
+        await markDepositPaid(sb, quote.id, { method: "bank_transfer", actorId: null, recordInZoho: false });
         changed = true;
       }
     } catch {

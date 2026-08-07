@@ -98,7 +98,25 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
     .lt("attempt_count", COMMS_RETRY_MAX_ATTEMPTS)
     .order("updated_at", { ascending: true })
     .limit(50);
-  if (error || !data) return empty;
+  if (error) {
+    // Layer 2 of the delivery guarantee going dark must never look like "nothing
+    // to do". A deploy landing before its migration, or an RLS/column change,
+    // would otherwise no-op this sweep every 5 minutes while /automations shows
+    // green runs with 0 candidates — and every failed customer email sits
+    // unretried and un-escalated. Its sibling escalateUnretryableComms already
+    // logs this exact case; match it, and raise an issue so a human sees it.
+    log.warn("comms.retry.query_failed", { error: error.message });
+    await reportOperationalIssue(sb, {
+      key: "comms-retry:query",
+      severity: "error",
+      source: "comms-retry",
+      event: "comm.retry.query_failed",
+      message: "The communication retry sweep could not read its candidates — failed customer emails are not being retried.",
+      context: { error: error.message },
+    }).catch(() => {});
+    return empty;
+  }
+  if (!data) return empty;
 
   const rows = data as unknown as RetryRow[];
   let redriven = 0, recovered = 0, escalated = 0, waiting = 0;

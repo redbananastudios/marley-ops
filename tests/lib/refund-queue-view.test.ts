@@ -216,6 +216,24 @@ describe("cardExecutedPence — ground truth since the snapshot", () => {
     expect(cardExecutedPence({ amountPence: 10000, refundDuePence: 4000 }, state)).toBe(4000);
     expect(cardExecutedPence({ amountPence: 10000, refundDuePence: 4000 }, null)).toBe(0);
   });
+
+  it("an UNCONFIRMED refund never counts as executed", () => {
+    // The gateway timed out mid-REFUND_SALE: the pence reservation stands (so
+    // nobody retries and double-refunds) but the money may never have moved.
+    // Counting it executed let the queue row be completed and the customer
+    // emailed "your refund has been issued" for a refund that never happened.
+    const unconfirmed: CardStateIn = {
+      id: "cp-1",
+      status: "needs_review",
+      amount_pence: 25000,
+      refunded_pence: 25000,
+    };
+    expect(cardExecutedPence({ amountPence: 25000, refundDuePence: 25000 }, unconfirmed)).toBe(0);
+    // Once it settles as a real refund, it counts.
+    expect(
+      cardExecutedPence({ amountPence: 25000, refundDuePence: 25000 }, { ...unconfirmed, status: "refunded" }),
+    ).toBe(25000);
+  });
 });
 
 describe("executionForPlan", () => {
