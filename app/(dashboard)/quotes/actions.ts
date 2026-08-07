@@ -330,6 +330,24 @@ export async function setQuoteStatus(id: string, status: string) {
   // Sending a quote advances the linked lead to Quoted (never regressing a later stage),
   // so the Board reflects reality without a manual status move.
   if (status === "sent" && q?.lead_id) {
+    // The survey's "build and send the quote" reminder is done the moment the
+    // quote goes out — close it, or it sits on /follow-ups going overdue telling
+    // the estimator to do a job they've already finished (Alina, 2026-08-07:
+    // the reminder even races the quote insert inside the complete-survey flow,
+    // so it exists on virtually every surveyed job). Scoped to survey_completed:
+    // chase-engine call tasks ("give them a call") stay open until accept/deposit.
+    const { data: surveyFus } = await sb
+      .from("follow_ups")
+      .select("id")
+      .eq("lead_id", q.lead_id)
+      .eq("reason", "quote_followup")
+      .eq("source", "survey_completed")
+      .eq("status", "open");
+    for (const fu of surveyFus ?? []) {
+      await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" }).eq("id", fu.id);
+    }
+    if (surveyFus?.length) revalidatePath("/follow-ups");
+
     const { data: lead } = await sb
       .from("leads")
       .select("status, first_contacted_at")

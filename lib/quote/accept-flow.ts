@@ -376,6 +376,26 @@ async function supersedeSiblingQuotes(
 
 /* ------------------------------------------------------------- accept */
 
+/**
+ * Acceptance ends the quote chase, so any open "quote follow-up" task — the
+ * survey's "build and send the quote" reminder, a chase-engine call task, a
+ * manual chase — is moot the moment the customer says yes. Close them here or
+ * they sit on /follow-ups going overdue for customers who have already booked
+ * (Peter caught exactly that, 2026-08-07: Alina's card told Connor to "build
+ * and send" a quote she'd been sent the day before).
+ */
+export async function closeOpenQuoteFollowUps(sb: Sb, leadId: string): Promise<void> {
+  const { data: open } = await sb
+    .from("follow_ups")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("reason", "quote_followup")
+    .eq("status", "open");
+  for (const fu of open ?? []) {
+    await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" }).eq("id", fu.id);
+  }
+}
+
 export type AcceptOutcome =
   | { ok: true; alreadyAccepted: boolean }
   | { ok: false; error: string };
@@ -524,6 +544,8 @@ export async function acceptQuoteOnline(
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
     if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+
+    await closeOpenQuoteFollowUps(sb, quote.lead_id);
 
     // One open deposit CALL task max — due day 5 (the chase engine emails
     // automatically on days 1 and 3, so the human only steps in after those).
@@ -675,6 +697,8 @@ export async function acceptQuoteByStaff(
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("provisional")) patch.status = "provisional";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = new Date().toISOString();
     if (Object.keys(patch).length) await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+
+    await closeOpenQuoteFollowUps(sb, quote.lead_id);
 
     // One open deposit CALL task max — day 5, after the day-1/3 auto reminders.
     if (!carriedDeposit) {
@@ -1082,11 +1106,14 @@ export async function markDepositPaid(
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = now;
     await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
 
+    // quote_followup rides along as a backstop: money down means any surviving
+    // quote-chase task (missed by the accept-time close, or accepted offline)
+    // is finished business.
     const { data: open } = await sb
       .from("follow_ups")
       .select("id")
       .eq("lead_id", quote.lead_id)
-      .eq("reason", "deposit")
+      .in("reason", ["deposit", "quote_followup"])
       .eq("status", "open");
     for (const fu of open ?? []) {
       await sb.from("follow_ups").update({ status: "done", outcome: "paid" }).eq("id", fu.id);
