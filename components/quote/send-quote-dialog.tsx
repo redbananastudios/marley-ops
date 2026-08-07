@@ -25,6 +25,7 @@ import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
 import { buildQuoteEmailHtml, quoteEmailTemplateVars } from "@/lib/comms/quote-email";
 import { quotePdfBase64 } from "@/lib/quote/pdf-client";
+import { PdfLoader } from "@/components/quote/pdf-loader";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 
@@ -183,7 +184,17 @@ export function SendQuoteDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+      {/* The send builds the quote PDF in the browser (quotePdfBase64 →
+          window.pdfMake), so the dialog carries its own loader — every surface
+          that can send (builder, quote-detail re-send) gets the scripts by
+          construction instead of each page having to remember. next/script
+          dedupes by id, so the builder's own <PdfLoader/> mount is harmless.
+          Mounted while closed too: the scripts load at page-load, not at the
+          moment the office clicks send. (2026-08-07: Re-send on /quotes/[id]
+          threw "PDF library not loaded" — that page never mounted the loader.) */}
+      <PdfLoader />
+      <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="font-display text-xl">
@@ -281,6 +292,7 @@ export function SendQuoteDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+    </>
   );
 }
