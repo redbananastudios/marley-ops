@@ -91,10 +91,17 @@ export default async function DocumentsPage({
       )
       .order("signed_at", { ascending: false })
       .limit(400),
+    // Same rule as the dashboard tile: legacy iMVE jobs never sign a Marley
+    // contract, and a cancelled booking keeps status='accepted' — listing either
+    // as "Signature needed — crew collect on arrival" sends crew after a
+    // signature that no one will ever collect, sorted to the TOP of the list
+    // because cancelled and past jobs have the earliest move dates.
     sb
       .from("quotes")
       .select("id, quote_ref, customer_name, lead_id, client_id, moving_date, deposit_paid_at, status")
       .eq("status", "accepted")
+      .neq("source", "imve")
+      .is("booking_cancelled_at", null)
       .order("moving_date", { ascending: true, nullsFirst: false })
       .limit(400),
   ]);

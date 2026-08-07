@@ -142,7 +142,13 @@ async function sendChase(
     quoteId: quote.id,
     clientId: lead.client_id ?? undefined,
   });
-  return "ok" in res && res.ok; // a duplicate-guard hit counts as not-sent
+  // A duplicate-guard hit means a byte-identical message ALREADY went to this
+  // customer — i.e. a prior run sent it and died before stamping the step. Treat
+  // that as delivered (the same rule the commitment chase uses further down), or
+  // the step is never stamped, tomorrow recomposes the identical email, the
+  // guard rejects it again, and the lead is wedged on that step forever: no
+  // chase 2 or 3, no final-chase call task, silence until the 30-day lapse.
+  return ("ok" in res && res.ok) || ("duplicate" in res && !!res.duplicate);
 }
 
 export async function GET(req: Request) {
@@ -208,19 +214,35 @@ export async function GET(req: Request) {
     }
   }
 
-  const { data: leads } = await sb
+  // Both driving queries are error-CHECKED and throw. Swallowing these is the
+  // worst failure mode in the job: a null result silently means "nothing due
+  // today" for EVERY customer — no quote chases, no deposit reminders — while
+  // the run records status 'ok' with all counters at zero, indistinguishable
+  // from a quiet Sunday. Throwing lets runCron mark the run failed and open the
+  // cron:chase operational issue. Oldest-neglected first so that if the 200-row
+  // cap is ever reached, the same leads aren't starved every single day.
+  const { data: leads, error: leadsError } = await sb
     .from("leads")
     .select("id, client_id, estimator_id, name, email, status, chase_paused, quote_chase_step, deposit_chase_step")
     .in("status", ["quoted", "provisional"])
     .eq("chase_paused", false)
+    .order("quote_chase_at", { ascending: true, nullsFirst: true })
     .limit(200);
+  if (leadsError) {
+    log.error("cron.chase.leads_query_failed", { error: leadsError.message });
+    throw new Error(`chase: leads query failed — ${leadsError.message}`);
+  }
   if (!leads?.length) return summary;
 
-  const { data: quotes } = await sb
+  const { data: quotes, error: quotesError } = await sb
     .from("quotes")
     .select("id, lead_id, quote_ref, status, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
+  if (quotesError) {
+    log.error("cron.chase.quotes_query_failed", { error: quotesError.message });
+    throw new Error(`chase: quotes query failed — ${quotesError.message}`);
+  }
   const allQuotes = (quotes ?? []) as QuoteRow[];
 
   // Survey-derived owner fallback: a lead with no explicit estimator_id is
@@ -369,10 +391,17 @@ export async function GET(req: Request) {
         });
         const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
-          await sb
+          // The email is already out. Losing this stamp wedges the lead on this
+          // step forever (see sendChase), so a failure is counted and logged
+          // rather than discarded.
+          const { error: stampError } = await sb
             .from("leads")
             .update({ quote_chase_step: step, quote_chase_at: now.toISOString() } as never)
             .eq("id", lead.id);
+          if (stampError) {
+            summary.errors++;
+            log.error("cron.chase.quote_step_stamp_failed", { leadId: lead.id, step, error: stampError.message });
+          }
           await sb.from("activities").insert({
             lead_id: lead.id,
             client_id: lead.client_id,
@@ -437,10 +466,14 @@ export async function GET(req: Request) {
         });
         const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token);
         if (sent) {
-          await sb
+          const { error: stampError } = await sb
             .from("leads")
             .update({ deposit_chase_step: step, deposit_chase_at: now.toISOString() } as never)
             .eq("id", lead.id);
+          if (stampError) {
+            summary.errors++;
+            log.error("cron.chase.deposit_step_stamp_failed", { leadId: lead.id, step, error: stampError.message });
+          }
           await sb.from("activities").insert({
             lead_id: lead.id,
             client_id: lead.client_id,
@@ -466,14 +499,28 @@ export async function GET(req: Request) {
   // 'completed' included: crew sign-off marks the appointment completed on move
   // day, and those jobs must still auto-complete the lead / chase the balance
   // (audit 2026-07-10 — scheduled-only silently skipped every signed-off job).
-  const { data: pastAppts } = await sb
+  // Ordered + floored, because rows never LEAVE this set: 'completed' is inside
+  // the filter and an unpaid job stays 'scheduled', so without a bound the 50
+  // slots silently fill with historical jobs and genuinely-new moves stop being
+  // settled at all — while the run still reports success. The floor keeps the
+  // window to jobs recent enough to act on (the iMVE import alone lands ~20
+  // past-dated removals); oldest-first so nothing is starved indefinitely.
+  const POST_MOVE_LOOKBACK_DAYS = 60;
+  const lookbackFloor = new Date(now.getTime() - POST_MOVE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const { data: pastAppts, error: pastApptsError } = await sb
     .from("appointments")
     .select("id, lead_id, ends_at")
     .eq("appt_type", "removal")
     .in("status", ["scheduled", "completed"])
     .lt("ends_at", cutoff)
+    .gte("ends_at", lookbackFloor)
     .not("lead_id", "is", null)
+    .order("ends_at", { ascending: true })
     .limit(50);
+  if (pastApptsError) {
+    summary.errors++;
+    log.error("cron.chase.postmove_query_failed", { error: pastApptsError.message });
+  }
 
   for (const appt of pastAppts ?? []) {
     try {
@@ -516,14 +563,24 @@ export async function GET(req: Request) {
 
       if (outstanding > 0 && q) {
         // Money at risk: the job ran but the balance never landed.
+        //
+        // Scoped to OUR source, not to reason='balance' generally. Raising the
+        // final invoice always opens a reason='balance' task due the day BEFORE
+        // the move (accept-flow createBalanceInvoiceFlow), so a lead-wide check
+        // was satisfied by that pre-existing card on every invoiced job — which
+        // suppressed the task, the ops alert AND the counter together, and made
+        // the run read `overdueBalances: 0` as though nothing was wrong. Both
+        // halves shipped in a39bf19, so this alarm had never once fired.
         const { data: open } = await sb
           .from("follow_ups")
           .select("id")
           .eq("lead_id", leadId)
           .eq("reason", "balance")
+          .eq("source", "post_move_overdue")
           .eq("status", "open")
           .limit(1)
           .maybeSingle();
+        const notes = `Move day has passed and £${outstanding.toFixed(2)} of the balance is still unpaid (${q.quote_ref}) — chase it today.`;
         if (!open) {
           await sb.from("follow_ups").insert({
             lead_id: leadId,
@@ -533,7 +590,7 @@ export async function GET(req: Request) {
             due_at: now.toISOString(),
             assigned_to: q.estimator_id,
             source: "post_move_overdue",
-            notes: `Move day has passed and £${outstanding.toFixed(2)} of the balance is still unpaid (${q.quote_ref}) — chase it today.`,
+            notes,
             metadata: { amount: outstanding },
           } as never);
           await sendOpsAlert(`Balance OVERDUE after move day — ${q.quote_ref}`, [
@@ -541,7 +598,21 @@ export async function GET(req: Request) {
             `An urgent task is in Follow-ups; the lead stays in Bookings until it's settled.`,
           ], "money");
           summary.overdueBalances++;
+        } else {
+          // Already alarmed — keep the figure honest as part-payments land
+          // rather than leaving a stale amount on the card.
+          await sb.from("follow_ups").update({ notes, metadata: { amount: outstanding } } as never).eq("id", open.id);
         }
+        // The pre-move balance card (raised at invoice time, due the day before
+        // the move) is now superseded by the overdue one — close it so the board
+        // shows one live item per lead instead of two.
+        await sb
+          .from("follow_ups")
+          .update({ status: "cancelled", outcome: "cancelled" })
+          .eq("lead_id", leadId)
+          .eq("reason", "balance")
+          .eq("status", "open")
+          .neq("source", "post_move_overdue");
         continue; // never auto-complete with money outstanding
       }
 

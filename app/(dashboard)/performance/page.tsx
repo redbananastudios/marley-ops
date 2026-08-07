@@ -200,7 +200,7 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
       sb
         .from("quotes")
         .select(
-          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at",
+          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at, booking_cancelled_at",
         )
         .order("id")
         .range(f, t),
@@ -268,7 +268,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       // map) — order-independent → page through fetchAllRows so they aren't
       // truncated at PostgREST's 1000-row cap once the business grows.
       fetchAllRows((f, t) => sb.from("leads").select("id, name, status, referral_commission").order("id").range(f, t)),
-      fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total").order("id").range(f, t)),
+      fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total, booking_cancelled_at").order("id").range(f, t)),
     ]);
 
   // Accepted quotes in this month = the booked jobs we score margin on.
@@ -276,6 +276,9 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     .from("quotes")
     .select("id, quote_ref, customer_name, lead_id, agreed_price, grand_total, breakdown, state_blob, accepted_at")
     .eq("status", "accepted")
+    // A cancelled booking keeps status='accepted' — counting it here put
+    // refunded money in the month's revenue/cost/margin footer.
+    .is("booking_cancelled_at", null)
     .gte("accepted_at", monthStart.toISOString())
     .lt("accepted_at", monthEnd.toISOString())
     .order("accepted_at", { ascending: false });
@@ -301,7 +304,9 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   for (const l of leads ?? []) if (l.status === "confirmed" || l.status === "completed") wonLeadIds.add(l.id);
   const valueByLead = new Map<string, number>();
   for (const q of quotes ?? []) {
-    if (q.lead_id && q.status === "accepted") {
+    // Cancelled bookings keep status='accepted'; crediting an estimator's "Won"
+    // and "£ Won" with a refunded job overstates their conversion and pay basis.
+    if (q.lead_id && q.status === "accepted" && !q.booking_cancelled_at) {
       valueByLead.set(q.lead_id, Number(q.agreed_price ?? q.grand_total ?? 0));
       wonLeadIds.add(q.lead_id);
     }

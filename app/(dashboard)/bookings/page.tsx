@@ -62,7 +62,16 @@ function dateLabel(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso.length === 10 ? iso + "T00:00:00" : iso);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  // UK wall-clock, like ukDayOf above. The container runs UTC, so without this an
+  // all-day BST move (stored 23:00Z the previous day) printed the WRONG weekday
+  // and date — and contradicted the "(in Nd)" on the same row, which does use UK
+  // time. Safe for the yyyy-mm-dd callers too: they are parsed at local midnight.
+  return d.toLocaleDateString("en-GB", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "Europe/London",
+  });
 }
 
 interface Row {

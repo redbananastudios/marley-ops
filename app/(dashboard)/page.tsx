@@ -81,7 +81,18 @@ export default async function DashboardPage() {
       .select("tax_due, mot_due, insurance_renewal, service_due, end_of_term")
       .eq("is_active", true),
     Promise.all([
-      supabase.from("quotes").select("id").eq("status", "accepted"),
+      // "Unsigned contracts" must only count jobs a signature is actually still
+      // wanted for. Legacy iMVE bookings were made under the old terms and never
+      // sign a Marley contract (the same suppression the schedule board and crew
+      // sheets already apply), and a cancelled booking keeps status='accepted'
+      // by design — without these two filters the tile tells crew to collect
+      // contracts that must never be collected, and grows forever.
+      supabase
+        .from("quotes")
+        .select("id")
+        .eq("status", "accepted")
+        .neq("source", "imve")
+        .is("booking_cancelled_at", null),
       supabase.from("signatures").select("quote_id").eq("kind", "contract"),
     ]),
     supabase

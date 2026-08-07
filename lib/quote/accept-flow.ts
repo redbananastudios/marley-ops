@@ -27,6 +27,8 @@ import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
 import { accountsFrom, ownerIdentity } from "@/lib/comms/sender";
+import { ensureRemovalAppointment } from "@/lib/schedule/ensure-removal-appointment";
+import { log } from "@/lib/log";
 import { sendPushForEvent } from "@/lib/push/send";
 import {
   allAcksConfirmed,
@@ -377,21 +379,39 @@ async function supersedeSiblingQuotes(
 /* ------------------------------------------------------------- accept */
 
 /**
- * Acceptance ends the quote chase, so any open "quote follow-up" task — the
- * survey's "build and send the quote" reminder, a chase-engine call task, a
- * manual chase — is moot the moment the customer says yes. Close them here or
- * they sit on /follow-ups going overdue for customers who have already booked
- * (Peter caught exactly that, 2026-08-07: Alina's card told Connor to "build
- * and send" a quote she'd been sent the day before).
+ * Acceptance ends the pre-sale conversation, so every task that only existed to
+ * get the customer to this point is moot the moment they say yes:
+ *
+ *   quote_followup            the survey's "build and send the quote" reminder,
+ *                             a chase-engine call task, a manual chase
+ *   custom/inbound_reply      "customer replied to a chase email — respond"
+ *   no_answer                 "we rang, no answer" retries
+ *
+ * Close them here or they sit on /follow-ups going overdue for customers who
+ * have already booked, and inflate the dashboard overdue count, the estimator's
+ * "My day" list and the weekly digest with them (Peter caught the quote_followup
+ * case on the live board, 2026-08-07: Alina's card told Connor to "build and
+ * send" a quote she'd been sent the day before).
+ *
+ * Money tasks are deliberately NOT in this set — a deposit or balance card
+ * closes when the money lands, not when the customer accepts.
  */
 export async function closeOpenQuoteFollowUps(sb: Sb, leadId: string): Promise<void> {
-  const { data: open } = await sb
+  const { data: open, error } = await sb
     .from("follow_ups")
-    .select("id")
+    .select("id, reason, source")
     .eq("lead_id", leadId)
-    .eq("reason", "quote_followup")
-    .eq("status", "open");
+    .eq("status", "open")
+    .in("reason", ["quote_followup", "no_answer", "custom"]);
+  if (error) {
+    log.error("followups.close_presale.query_failed", { leadId, error: error.message });
+    return;
+  }
   for (const fu of open ?? []) {
+    // 'custom' carries several unrelated machine-raised tasks (commitment
+    // chases, refund decisions, money alerts). Only the inbound-reply nudge is
+    // answered by acceptance.
+    if (fu.reason === "custom" && fu.source !== "inbound_reply") continue;
     await sb.from("follow_ups").update({ status: "cancelled", outcome: "cancelled" }).eq("id", fu.id);
   }
 }
@@ -1104,20 +1124,36 @@ export async function markDepositPaid(
     const patch: Record<string, unknown> = { deposit_paid_at: now, deposit_amount: deposit };
     if (lead && FUNNEL.indexOf(lead.status) < FUNNEL.indexOf("confirmed")) patch.status = "confirmed";
     if (lead && !lead.first_contacted_at) patch.first_contacted_at = now;
-    await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+    const { error: leadPatchError } = await sb.from("leads").update(patch as never).eq("id", quote.lead_id);
+    // The lead copy is what the lead page, the sales report and the bank-feed
+    // matcher read. Silently losing this write strands the job Provisional with
+    // a "Deposit received" button that no-ops forever (the quote gate above has
+    // already flipped), so surface it rather than discard it.
+    if (leadPatchError) {
+      await sendOpsAlert(`Deposit recorded but the lead did not update — ${quote.quote_ref}`, [
+        `The deposit for <strong>${quote.quote_ref}</strong> is recorded on the quote, but stamping the lead failed: ${leadPatchError.message}.`,
+        `The job may still read Provisional/unpaid on the lead page — check it before chasing the customer.`,
+      ], "money");
+    }
 
-    // quote_followup rides along as a backstop: money down means any surviving
-    // quote-chase task (missed by the accept-time close, or accepted offline)
-    // is finished business.
+    // A confirmed job belongs in the diary. Fail-soft by construction: the money
+    // is already recorded, and every post-move safeguard keys off this row.
+    await ensureRemovalAppointment(sb, quote);
+
+    // The deposit card is answered by the money — outcome 'paid'.
     const { data: open } = await sb
       .from("follow_ups")
       .select("id")
       .eq("lead_id", quote.lead_id)
-      .in("reason", ["deposit", "quote_followup"])
+      .eq("reason", "deposit")
       .eq("status", "open");
     for (const fu of open ?? []) {
       await sb.from("follow_ups").update({ status: "done", outcome: "paid" }).eq("id", fu.id);
     }
+    // Backstop for the pre-sale tasks: money down is the strongest possible
+    // "this conversation is over" signal, and it catches leads that were
+    // accepted offline or by a path that skipped the accept-time close.
+    await closeOpenQuoteFollowUps(sb, quote.lead_id);
 
     await sb.from("activities").insert({
       lead_id: quote.lead_id,
@@ -1613,6 +1649,11 @@ export async function confirmMoveDate(
       ], "system");
     }
   }
+
+  // Safety net for the diary: a date-certain job must have its slot even if the
+  // deposit was recorded before this hook existed, or landed by a path that
+  // skipped markDepositPaid (a carried deposit on a re-quote).
+  await ensureRemovalAppointment(sb, quote);
 
   // Raise the commitment invoice (fail-soft — it self-heals via /q + cron).
   const refreshed = (await ensureCommitmentInvoice(sb, quote.id)) ?? quote;

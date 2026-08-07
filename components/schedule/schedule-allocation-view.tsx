@@ -69,6 +69,10 @@ export interface AvailAppt {
   provisional_date: string | null;
   deposit: boolean; // £100 paid
   commitment: boolean; // 25% paid
+  /** A 25% commitment was actually invoiced for this job. False when the date was
+   *  never confirmed or the deposit already covered it — in which case there is
+   *  no 25% to be due, and showing the chip sends staff chasing nothing. */
+  commitmentApplies: boolean;
   /** Imported iMVE booking — old-terms job, the 25% commitment never applies. */
   legacy: boolean;
   // For the view/edit/reschedule dialogs (same payload the removals diary carries).
@@ -811,7 +815,7 @@ export function ScheduleAllocationView(props: {
                                     >
                                       Legacy (iMVE)
                                     </span>
-                                  ) : (
+                                  ) : j.commitmentApplies ? (
                                     <span
                                       className={cn(
                                         "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
@@ -822,7 +826,7 @@ export function ScheduleAllocationView(props: {
                                     >
                                       {j.commitment ? "25% ✓" : "25% due"}
                                     </span>
-                                  )}
+                                  ) : null}
                                 </>
                               )}
                             </div>

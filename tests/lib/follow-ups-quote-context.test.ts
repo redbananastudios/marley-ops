@@ -15,12 +15,14 @@ type Row = {
   agreed_price: number | null;
   grand_total: number | null;
   created_at: string;
+  moving_date: string | null;
 };
 
 const q = (o: Partial<Row> & Pick<Row, "quote_ref" | "status" | "created_at">): Row => ({
   lead_id: "L1",
   agreed_price: null,
   grand_total: null,
+  moving_date: null,
   ...o,
 });
 
@@ -33,9 +35,9 @@ describe("pickBestQuoteByLead", () => {
       q({ quote_ref: "Q-2", status: "sent", grand_total: 800, created_at: "2026-07-05T10:00:00Z" }),
     ];
     // Feed in DB-physical (oldest-first) order to prove we don't depend on input order.
-    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-2", value: 800 });
+    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-2", value: 800, movingDate: null });
     // ...and reversed input yields the same deterministic result.
-    expect(pickBestQuoteByLead([...rows].reverse()).get("L1")).toEqual({ ref: "Q-2", value: 800 });
+    expect(pickBestQuoteByLead([...rows].reverse()).get("L1")).toEqual({ ref: "Q-2", value: 800, movingDate: null });
   });
 
   it("prefers the accepted quote over any sent quote regardless of recency", () => {
@@ -43,7 +45,7 @@ describe("pickBestQuoteByLead", () => {
       q({ quote_ref: "Q-A", status: "accepted", agreed_price: 700, created_at: "2026-07-01T10:00:00Z" }),
       q({ quote_ref: "Q-B", status: "sent", grand_total: 900, created_at: "2026-07-09T10:00:00Z" }),
     ];
-    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-A", value: 700 });
+    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-A", value: 700, movingDate: null });
   });
 
   it("ignores superseded / rejected / draft quotes for the chase amount", () => {
@@ -54,7 +56,7 @@ describe("pickBestQuoteByLead", () => {
       q({ quote_ref: "Q-LIVE", status: "sent", grand_total: 600, created_at: "2026-07-02T10:00:00Z" }),
     ];
     // Even though a superseded row is newer, only the live 'sent' quote is used.
-    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-LIVE", value: 600 });
+    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-LIVE", value: 600, movingDate: null });
   });
 
   it("returns no entry when a lead has only non-live quotes", () => {
@@ -69,7 +71,7 @@ describe("pickBestQuoteByLead", () => {
     const rows: Row[] = [
       q({ quote_ref: "Q-A", status: "accepted", agreed_price: 750, grand_total: 800, created_at: "2026-07-01T10:00:00Z" }),
     ];
-    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-A", value: 750 });
+    expect(pickBestQuoteByLead(rows).get("L1")).toEqual({ ref: "Q-A", value: 750, movingDate: null });
   });
 
   it("keeps leads independent", () => {
@@ -79,8 +81,8 @@ describe("pickBestQuoteByLead", () => {
       q({ lead_id: null, quote_ref: "Q-3", status: "sent", grand_total: 1, created_at: "2026-07-03T10:00:00Z" }),
     ];
     const m = pickBestQuoteByLead(rows);
-    expect(m.get("L1")).toEqual({ ref: "Q-1", value: 500 });
-    expect(m.get("L2")).toEqual({ ref: "Q-2", value: 900 });
+    expect(m.get("L1")).toEqual({ ref: "Q-1", value: 500, movingDate: null });
+    expect(m.get("L2")).toEqual({ ref: "Q-2", value: 900, movingDate: null });
     expect(m.size).toBe(2);
   });
 });

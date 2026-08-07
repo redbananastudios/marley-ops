@@ -11,6 +11,7 @@ type QuoteContextRow = {
   agreed_price: number | null;
   grand_total: number | null;
   created_at: string;
+  moving_date: string | null;
 };
 
 /**
@@ -21,22 +22,27 @@ type QuoteContextRow = {
  */
 export function pickBestQuoteByLead(
   quotes: QuoteContextRow[],
-): Map<string, { ref: string; value: number | null }> {
+): Map<string, { ref: string; value: number | null; movingDate: string | null }> {
   const valueOf = (q: QuoteContextRow) =>
     q.agreed_price != null ? Number(q.agreed_price) : q.grand_total != null ? Number(q.grand_total) : null;
+  const pick = (q: QuoteContextRow) => ({
+    ref: q.quote_ref,
+    value: valueOf(q),
+    movingDate: q.moving_date ?? null,
+  });
   const byNewest = [...quotes].sort((a, b) => b.created_at.localeCompare(a.created_at));
-  const out = new Map<string, { ref: string; value: number | null }>();
+  const out = new Map<string, { ref: string; value: number | null; movingDate: string | null }>();
   const acceptedLeads = new Set<string>();
   for (const q of byNewest) {
     if (!q.lead_id) continue;
     if (q.status === "accepted") {
-      if (!acceptedLeads.has(q.lead_id)) out.set(q.lead_id, { ref: q.quote_ref, value: valueOf(q) });
+      if (!acceptedLeads.has(q.lead_id)) out.set(q.lead_id, pick(q));
       acceptedLeads.add(q.lead_id); // first (newest) accepted wins
       continue;
     }
     if (acceptedLeads.has(q.lead_id)) continue; // accepted beats any sent quote
     if (q.status !== "sent") continue; // ignore superseded / rejected / draft
-    if (!out.has(q.lead_id)) out.set(q.lead_id, { ref: q.quote_ref, value: valueOf(q) }); // newest sent
+    if (!out.has(q.lead_id)) out.set(q.lead_id, pick(q)); // newest sent
   }
   return out;
 }
@@ -66,7 +72,7 @@ export default async function FollowUpsPage() {
     leadIds.length
       ? sb
           .from("quotes")
-          .select("id, lead_id, quote_ref, status, agreed_price, grand_total, created_at")
+          .select("id, lead_id, quote_ref, status, agreed_price, grand_total, created_at, moving_date")
           .in("lead_id", leadIds)
       : Promise.resolve({ data: [] }),
   ]);
@@ -97,7 +103,12 @@ export default async function FollowUpsPage() {
       name: lead?.name ?? null,
       phone: lead?.phone ?? null,
       email: lead?.email ?? null,
-      moveDate: lead?.preferred_date ?? null,
+      // The BOOKED date, not the enquiry's wish. leads.preferred_date is written
+      // once at enquiry and never again — booking and rescheduling only touch
+      // quotes.moving_date — so a rescheduled job showed its original wish date
+      // here AND in the prefilled customer email ("your move on <date>"). Fall
+      // back to preferred_date only for pre-quote leads, where it's all we have.
+      moveDate: quote?.movingDate ?? lead?.preferred_date ?? null,
       propertySize: lead?.property_size ?? null,
       postcode: lead?.from_postcode ?? null,
       quoteRef: quote?.ref ?? null,

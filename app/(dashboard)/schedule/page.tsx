@@ -63,7 +63,7 @@ export default async function SchedulePage({
       fetchAllRows((f, t) =>
         supabase
           .from("quotes")
-          .select("id, lead_id, status, source, breakdown, deposit_paid_at, commitment_paid_at, booking_cancelled_at, moving_date")
+          .select("id, lead_id, status, source, breakdown, deposit_paid_at, commitment_paid_at, commitment_invoice_amount, accepted_at, booking_cancelled_at, moving_date")
           .eq("status", "accepted")
           .order("id")
           .range(f, t),
@@ -111,20 +111,37 @@ export default async function SchedulePage({
     surveyEstimatorId: surveyEst.get(l.id) ?? null,
   }));
 
-  // required vans/crew derived from the lead's first accepted quote (reuse the Job Board's logic).
+  // Required vans/crew + money chips come from the lead's CURRENT accepted quote
+  // (reuse the Job Board's logic). Rows arrive ordered by id — UUID order, i.e.
+  // arbitrary — so a re-quoted lead with two accepted rows used to grade capacity
+  // and render money chips off whichever won the coin toss, and cancelled
+  // bookings were included. Take the most recently accepted live quote, the same
+  // rule /bookings uses.
   const reqByLead = new Map<string, { vans: number; men: number }>();
-  const payByLead = new Map<string, { deposit: boolean; commitment: boolean }>();
+  const payByLead = new Map<string, { deposit: boolean; commitment: boolean; commitmentApplies: boolean }>();
   const legacyLeadIds = new Set<string>();
+  const currentQuoteByLead = new Map<string, (typeof quotes)[number]>();
   for (const q of quotes) {
-    if (!q.lead_id) continue;
-    if (!reqByLead.has(q.lead_id)) {
-      const req = crewRequired((q.breakdown ?? null) as Partial<QuoteBreakdown> | null);
-      if (req) reqByLead.set(q.lead_id, req);
+    if (!q.lead_id || q.booking_cancelled_at) continue;
+    const held = currentQuoteByLead.get(q.lead_id);
+    if (!held || (q.accepted_at ?? "").localeCompare(held.accepted_at ?? "") > 0) {
+      currentQuoteByLead.set(q.lead_id, q);
     }
-    if (!payByLead.has(q.lead_id)) {
-      payByLead.set(q.lead_id, { deposit: !!q.deposit_paid_at, commitment: !!q.commitment_paid_at });
-    }
-    if (q.source === "imve") legacyLeadIds.add(q.lead_id);
+  }
+  for (const [leadId, q] of currentQuoteByLead) {
+    const req = crewRequired((q.breakdown ?? null) as Partial<QuoteBreakdown> | null);
+    if (req) reqByLead.set(leadId, req);
+    payByLead.set(leadId, {
+      deposit: !!q.deposit_paid_at,
+      commitment: !!q.commitment_paid_at,
+      // The 25% chip is only meaningful when a commitment was actually invoiced.
+      // ensureCommitmentInvoice raises nothing when the date was never confirmed
+      // or when the deposit already covers 25%, leaving commitment_paid_at null
+      // forever — so keying the chip off that alone printed "25% due" on
+      // fully-paid jobs and sent the office chasing money never asked for.
+      commitmentApplies: Number(q.commitment_invoice_amount ?? 0) > 0,
+    });
+    if (q.source === "imve") legacyLeadIds.add(leadId);
   }
 
   // Contract-signature state per lead (amber "signature on arrival" flag on the board).
@@ -213,6 +230,7 @@ export default async function SchedulePage({
       provisional_date: r.lead_id ? (bdByLead.get(r.lead_id)?.provisional_date ?? null) : null,
       deposit: r.lead_id ? (payByLead.get(r.lead_id)?.deposit ?? false) : false,
       commitment: r.lead_id ? (payByLead.get(r.lead_id)?.commitment ?? false) : false,
+      commitmentApplies: r.lead_id ? (payByLead.get(r.lead_id)?.commitmentApplies ?? false) : false,
       legacy: r.lead_id ? legacyLeadIds.has(r.lead_id) : false,
       // For the view/edit/reschedule dialogs (mirrors the removals diary payload).
       title: raw?.title ?? null,

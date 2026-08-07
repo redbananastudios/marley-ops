@@ -26,6 +26,10 @@ export interface SalesQuote {
   moving_date: string | null;
   deposit_amount: number | null;
   deposit_paid_at: string | null;
+  /** Stamped when a booking is cancelled. The quote deliberately STAYS
+   *  status='accepted' (the unwind only stamps this), so every "is this won"
+   *  test must read it or refunded jobs count as revenue. */
+  booking_cancelled_at?: string | null;
 }
 
 export interface SalesLead {
@@ -125,7 +129,12 @@ export function buildSalesReport(
   const inRange = (day: string | null): boolean => day != null && day >= fromDay && day <= toDay;
   const leadById = new Map(leads.map((l) => [l.id, l]));
   const live = quotes.filter((q) => q.status !== "superseded" && q.status !== "draft");
-  const accepted = live.filter((q) => q.status === "accepted");
+  // A cancelled booking keeps status='accepted', so without this filter a
+  // refunded job counted in "Revenue generated"/"projected" AND appeared under
+  // declined in the same status breakdown — inflating revenue and conversion at
+  // once. lib/dashboard/compute.isWonQuote already excludes it; this is the
+  // surface that skipped the rule.
+  const accepted = live.filter((q) => q.status === "accepted" && !q.booking_cancelled_at);
 
   const moveDay = (q: SalesQuote): string | null =>
     ukDayOf(q.moving_date) ?? ukDayOf(q.lead_id ? leadById.get(q.lead_id)?.preferred_date : null);
