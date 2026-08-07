@@ -102,6 +102,8 @@ interface Row {
   approxMonth: string | null;
   provisionalDate: string | null;
   propertyType: string | null;
+  /** Imported iMVE booking — old-terms job, all money handling is manual. */
+  legacy: boolean;
   bucket: BookingBucket;
 }
 
@@ -182,7 +184,7 @@ export default async function BookingsPage() {
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+        "id, quote_ref, source, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
       )
       .eq("status", "accepted")
       .not("lead_id", "is", null)
@@ -317,6 +319,7 @@ export default async function BookingsPage() {
       approxMonth: (bd?.approx_month as string | null) ?? null,
       provisionalDate: (bd?.provisional_date as string | null) ?? null,
       propertyType: (bd?.property_type as string | null) ?? null,
+      legacy: q.source === "imve",
     };
     rows.push({
       ...row,
@@ -368,6 +371,14 @@ export default async function BookingsPage() {
       <Link href={`/leads/${r.leadId}`} className="font-medium text-foreground hover:underline">
         {r.customer}
       </Link>
+      {r.legacy ? (
+        <span
+          className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500"
+          title="Imported from iMVE — old-terms booking, payments handled manually"
+        >
+          Legacy (iMVE)
+        </span>
+      ) : null}
       <p className="text-xs text-mist-400">{detail}</p>
     </div>
   );

@@ -579,13 +579,18 @@ export async function GET(req: Request) {
   const horizonDay = new Date(Date.parse(`${todayDay}T00:00:00Z`) + 10 * 24 * 60 * 60 * 1000)
     .toISOString()
     .slice(0, 10);
-  const { data: commitmentQuotes } = await sb
+  const { data: commitmentQuotes, error: commitmentQueryError } = await sb
     .from("quotes")
     .select(
       "id, lead_id, quote_ref, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
+    // Legacy iMVE imports NEVER enter the ladder: those customers booked under
+    // the old system's terms (no 25%-by-T-7 promise), so a T-10 chase email or
+    // a T-7 "date at risk" flag would be chasing money they never owed. All
+    // their payment handling is manual (Peter, 2026-08-07).
+    .neq("source", "imve")
     // Cancelled bookings drop out of the ladder entirely: chase_paused
     // deliberately does NOT suppress the T-7 flag, so without this filter a
     // Marley-cancelled job would still stamp date_releasable_at, alert the
@@ -595,6 +600,12 @@ export async function GET(req: Request) {
     .lte("moving_date", horizonDay)
     .not("lead_id", "is", null)
     .limit(100);
+  // A failed query must not read as a quiet day — the ladder no-oping for ALL
+  // customers (e.g. code deployed before its migration) is a silent outage.
+  if (commitmentQueryError) {
+    summary.errors++;
+    log.error("cron.chase.commitment_query_failed", { error: commitmentQueryError.message });
+  }
 
   type CommitmentQuoteRow = NonNullable<typeof commitmentQuotes>[number];
   // One driving quote per lead: the latest accepted (supersede retires

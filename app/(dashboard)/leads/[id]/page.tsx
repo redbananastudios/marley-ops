@@ -348,6 +348,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <h1 className="font-display text-2xl text-foreground">{lead.name ?? "Unnamed lead"}</h1>
               <LeadStatusBadge status={lead.status} />
+              {lead.source_system === "imve" ? (
+                <span
+                  className="inline-flex items-center rounded-pill bg-muted px-2.5 py-1 text-xs font-semibold text-mist-500"
+                  title="Imported from iMVE — old-terms booking: no automatic chases or payment requests, all money handling is manual"
+                >
+                  Legacy (iMVE)
+                </span>
+              ) : null}
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">

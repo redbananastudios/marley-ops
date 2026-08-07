@@ -36,7 +36,7 @@ export default async function JobBoardPage({
       supabase.from("leads").select("id, name, status, from_postcode, to_postcode").order("id").range(f, t),
     ),
     fetchAllRows((f, t) =>
-      supabase.from("quotes").select("id, lead_id, status, breakdown").eq("status", "accepted").order("id").range(f, t),
+      supabase.from("quotes").select("id, lead_id, status, source, breakdown").eq("status", "accepted").order("id").range(f, t),
     ),
     supabase.from("staff").select("id, full_name, staff_role, working_days, is_driver").eq("is_active", true).order("full_name"),
     supabase
@@ -76,7 +76,9 @@ export default async function JobBoardPage({
   const sigNeededByLead = new Map<string, boolean>();
   for (const q of quotes) {
     if (!q.lead_id || sigNeededByLead.has(q.lead_id)) continue;
-    sigNeededByLead.set(q.lead_id, !signedQuoteIds.has(q.id));
+    // Legacy iMVE jobs signed the old system's paperwork — never nag the crew
+    // to collect a Marley contract that was never part of their deal.
+    sigNeededByLead.set(q.lead_id, q.source === "imve" ? false : !signedQuoteIds.has(q.id));
   }
 
   const cards: BoardAppt[] = appts.map((a) => {

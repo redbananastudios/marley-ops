@@ -940,6 +940,7 @@ export type Database = {
           email_norm: string | null
           first_name: string | null
           id: string
+          import_batch: string | null
           is_active: boolean
           is_company: boolean
           last_name: string | null
@@ -965,6 +966,7 @@ export type Database = {
           email_norm?: string | null
           first_name?: string | null
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           is_company?: boolean
           last_name?: string | null
@@ -990,6 +992,7 @@ export type Database = {
           email_norm?: string | null
           first_name?: string | null
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           is_company?: boolean
           last_name?: string | null
@@ -2363,6 +2366,7 @@ export type Database = {
           gbraid: string | null
           gclid: string | null
           id: string
+          import_batch: string | null
           landing_referrer: string | null
           landing_url: string | null
           li_fat_id: string | null
@@ -2430,6 +2434,7 @@ export type Database = {
           gbraid?: string | null
           gclid?: string | null
           id?: string
+          import_batch?: string | null
           landing_referrer?: string | null
           landing_url?: string | null
           li_fat_id?: string | null
@@ -2497,6 +2502,7 @@ export type Database = {
           gbraid?: string | null
           gclid?: string | null
           id?: string
+          import_batch?: string | null
           landing_referrer?: string | null
           landing_url?: string | null
           li_fat_id?: string | null
@@ -2852,6 +2858,8 @@ export type Database = {
           estimator_id: string | null
           grand_total: number
           id: string
+          imve_ref: string | null
+          imve_zoho_invoice_number: string | null
           lead_id: string | null
           moving_date: string | null
           moving_date_estimated: boolean
@@ -2859,6 +2867,7 @@ export type Database = {
           pdf_path: string | null
           quote_ref: string
           sms_send_count: number
+          source: string
           state_blob: Json
           status: Database["public"]["Enums"]["quote_status"]
           subtotal: number
@@ -2919,6 +2928,8 @@ export type Database = {
           estimator_id?: string | null
           grand_total?: number
           id?: string
+          imve_ref?: string | null
+          imve_zoho_invoice_number?: string | null
           lead_id?: string | null
           moving_date?: string | null
           moving_date_estimated?: boolean
@@ -2926,6 +2937,7 @@ export type Database = {
           pdf_path?: string | null
           quote_ref: string
           sms_send_count?: number
+          source?: string
           state_blob?: Json
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number
@@ -2986,6 +2998,8 @@ export type Database = {
           estimator_id?: string | null
           grand_total?: number
           id?: string
+          imve_ref?: string | null
+          imve_zoho_invoice_number?: string | null
           lead_id?: string | null
           moving_date?: string | null
           moving_date_estimated?: boolean
@@ -2993,6 +3007,7 @@ export type Database = {
           pdf_path?: string | null
           quote_ref?: string
           sms_send_count?: number
+          source?: string
           state_blob?: Json
           status?: Database["public"]["Enums"]["quote_status"]
           subtotal?: number

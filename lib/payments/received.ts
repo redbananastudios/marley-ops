@@ -207,6 +207,9 @@ export function buildReceivedDay(input: {
 
   for (const q of input.depositQuotes) {
     if (!inWindow(q.deposit_paid_at) || cardCoveredQuoteIds.has(q.id)) continue;
+    // £0 "deposits" are settled-by-definition markers (legacy iMVE imports where
+    // the old terms took no deposit) — no money moved, so nothing was received.
+    if (!Number(q.deposit_amount)) continue;
     items.push({
       key: `deposit:${q.id}`,
       source: "recorded",

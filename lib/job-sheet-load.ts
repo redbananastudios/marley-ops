@@ -119,7 +119,7 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     appt.lead_id
       ? admin
           .from("quotes")
-          .select("id, quote_ref, moving_date, state_blob, accepted_at")
+          .select("id, quote_ref, source, moving_date, state_blob, accepted_at")
           .eq("lead_id", appt.lead_id)
           .eq("status", "accepted")
           .order("accepted_at", { ascending: false })
@@ -215,8 +215,11 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
   }
 
   // Contract flag: accepted quote with no signature row = collect on arrival.
-  const quoteId = (quote as { id?: string } | null)?.id ?? null;
-  if (quoteId) {
+  // Legacy iMVE jobs signed the old system's paperwork — no Marley contract to
+  // collect, so the sheet stays silent rather than telling the crew to chase one.
+  const quoteRow = quote as { id?: string; source?: string } | null;
+  const quoteId = quoteRow?.id ?? null;
+  if (quoteId && quoteRow?.source !== "imve") {
     const { data: sig } = await admin
       .from("signatures")
       .select("id")

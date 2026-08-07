@@ -59,7 +59,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -213,9 +213,18 @@ export default async function QuoteDetailPage({
     estimatorOptions = (members ?? []).map((m) => ({ id: m.id, full_name: m.full_name ?? "Unnamed" }));
   }
 
+  const isLegacyImve = quote.source === "imve";
   const headerMeta = (
     <>
       <QuoteStatusPill status={statusStr} />
+      {isLegacyImve ? (
+        <QuoteMetaChip>
+          Legacy (iMVE{quote.imve_ref && quote.imve_ref !== quote.quote_ref ? ` ${quote.imve_ref}` : ""})
+        </QuoteMetaChip>
+      ) : null}
+      {isLegacyImve && quote.imve_zoho_invoice_number ? (
+        <QuoteMetaChip>Zoho draft {quote.imve_zoho_invoice_number}</QuoteMetaChip>
+      ) : null}
       {emailedCount > 0 ? <QuoteMetaChip icon={Mail}>Emailed ×{emailedCount}</QuoteMetaChip> : null}
       {statusStr === "accepted" && quote.agreed_price != null ? (
         <QuoteMetaChip>Agreed {gbp(quote.agreed_price)}</QuoteMetaChip>

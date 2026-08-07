@@ -63,7 +63,7 @@ export default async function SchedulePage({
       fetchAllRows((f, t) =>
         supabase
           .from("quotes")
-          .select("id, lead_id, status, breakdown, deposit_paid_at, commitment_paid_at, booking_cancelled_at, moving_date")
+          .select("id, lead_id, status, source, breakdown, deposit_paid_at, commitment_paid_at, booking_cancelled_at, moving_date")
           .eq("status", "accepted")
           .order("id")
           .range(f, t),
@@ -137,7 +137,9 @@ export default async function SchedulePage({
   const sigNeededByLead = new Map<string, boolean>();
   for (const q of quotes) {
     if (!q.lead_id || sigNeededByLead.has(q.lead_id)) continue;
-    sigNeededByLead.set(q.lead_id, !signedQuoteIds.has(q.id));
+    // Legacy iMVE jobs signed the old system's paperwork — never nag the crew
+    // to collect a Marley contract that was never part of their deal.
+    sigNeededByLead.set(q.lead_id, q.source === "imve" ? false : !signedQuoteIds.has(q.id));
   }
 
   // Crew assigned per appointment — a pack day's demand follows its allocation

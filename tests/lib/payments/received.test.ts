@@ -192,6 +192,14 @@ describe("buildReceivedDay", () => {
     expect(day.totalPence).toBe(120000);
   });
 
+  it("skips £0 deposits (legacy iMVE settled-by-definition markers — no money moved)", () => {
+    const day = build({
+      depositQuotes: [quote({ deposit_paid_at: "2026-07-15T08:00:00Z", deposit_amount: 0 })],
+    });
+    expect(day.items).toHaveLength(0);
+    expect(day.totalPence).toBe(0);
+  });
+
   it("drops the recorded deposit when a card receipt covers the same quote (no double count)", () => {
     const day = build({
       cardRows: [cardRow()],
