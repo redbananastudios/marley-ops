@@ -114,6 +114,7 @@ export default async function SchedulePage({
   // required vans/crew derived from the lead's first accepted quote (reuse the Job Board's logic).
   const reqByLead = new Map<string, { vans: number; men: number }>();
   const payByLead = new Map<string, { deposit: boolean; commitment: boolean }>();
+  const legacyLeadIds = new Set<string>();
   for (const q of quotes) {
     if (!q.lead_id) continue;
     if (!reqByLead.has(q.lead_id)) {
@@ -123,6 +124,7 @@ export default async function SchedulePage({
     if (!payByLead.has(q.lead_id)) {
       payByLead.set(q.lead_id, { deposit: !!q.deposit_paid_at, commitment: !!q.commitment_paid_at });
     }
+    if (q.source === "imve") legacyLeadIds.add(q.lead_id);
   }
 
   // Contract-signature state per lead (amber "signature on arrival" flag on the board).
@@ -211,6 +213,7 @@ export default async function SchedulePage({
       provisional_date: r.lead_id ? (bdByLead.get(r.lead_id)?.provisional_date ?? null) : null,
       deposit: r.lead_id ? (payByLead.get(r.lead_id)?.deposit ?? false) : false,
       commitment: r.lead_id ? (payByLead.get(r.lead_id)?.commitment ?? false) : false,
+      legacy: r.lead_id ? legacyLeadIds.has(r.lead_id) : false,
       // For the view/edit/reschedule dialogs (mirrors the removals diary payload).
       title: raw?.title ?? null,
       status: raw?.status ?? null,

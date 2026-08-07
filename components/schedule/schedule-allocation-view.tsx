@@ -69,6 +69,8 @@ export interface AvailAppt {
   provisional_date: string | null;
   deposit: boolean; // £100 paid
   commitment: boolean; // 25% paid
+  /** Imported iMVE booking — old-terms job, the 25% commitment never applies. */
+  legacy: boolean;
   // For the view/edit/reschedule dialogs (same payload the removals diary carries).
   title: string | null;
   status: string | null;
@@ -800,16 +802,27 @@ export function ScheduleAllocationView(props: {
                                 <>
                                   <Estimate vans={j.requiredVans} crew={j.requiredCrew} />
                                   <PropertyTag type={j.property_type} />
-                                  <span
-                                    className={cn(
-                                      "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
-                                      j.commitment
-                                        ? "border-success-border bg-success-bg text-success"
-                                        : "border-border bg-muted text-mist-500",
-                                    )}
-                                  >
-                                    {j.commitment ? "25% ✓" : "25% due"}
-                                  </span>
+                                  {j.legacy ? (
+                                    // Old-terms iMVE job — no 25% ever applies, so a
+                                    // "25% due" chip would send someone chasing it.
+                                    <span
+                                      className="rounded-pill border border-border bg-muted px-2 py-0.5 text-[10px] font-semibold text-mist-500"
+                                      title="Imported from iMVE — old-terms booking, payments handled manually"
+                                    >
+                                      Legacy (iMVE)
+                                    </span>
+                                  ) : (
+                                    <span
+                                      className={cn(
+                                        "rounded-pill border px-2 py-0.5 text-[10px] font-semibold",
+                                        j.commitment
+                                          ? "border-success-border bg-success-bg text-success"
+                                          : "border-border bg-muted text-mist-500",
+                                      )}
+                                    >
+                                      {j.commitment ? "25% ✓" : "25% due"}
+                                    </span>
+                                  )}
                                 </>
                               )}
                             </div>
