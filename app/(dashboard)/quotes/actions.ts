@@ -348,6 +348,25 @@ export async function setQuoteStatus(id: string, status: string) {
     }
     if (surveyFus?.length) revalidatePath("/follow-ups");
 
+    // A fresh quote arms a fresh chase cadence. dueChaseStep measures the
+    // lead's quote_chase_step against THIS quote's email_sent_at, but nothing
+    // ever reset that counter — so a customer who had been chased 3 times on an
+    // earlier quote got ZERO follow-ups on the revised one (dueChaseStep returns
+    // null once completedSteps >= days.length), then lapsed to "lost — no
+    // response" 30 days later. A partially-advanced counter was just as wrong:
+    // the only chase to fire was step 3, whose copy invites the customer to
+    // reply "not going ahead" about a quote sent yesterday. deposit_chase_step
+    // is already reset this way on acceptance; this is the same idea for the
+    // quote ladder, and un-pausing matches that precedent — sending a revised
+    // quote IS the fresh context, even if an earlier reply paused chasing.
+    const { error: chaseResetError } = await sb
+      .from("leads")
+      .update({ quote_chase_step: 0, quote_chase_at: null, chase_paused: false } as never)
+      .eq("id", q.lead_id);
+    if (chaseResetError) {
+      return { ok: false as const, error: `The quote was sent but its follow-up schedule could not be reset: ${chaseResetError.message}` };
+    }
+
     const { data: lead } = await sb
       .from("leads")
       .select("status, first_contacted_at")

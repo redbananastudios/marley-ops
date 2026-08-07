@@ -313,3 +313,74 @@ export async function escalateUnretryableComms(sb: Sb, now = new Date()): Promis
 
   return { stranded };
 }
+
+export interface StrandedQueuedSummary extends Record<string, unknown> {
+  requeued: number;
+}
+
+/**
+ * Rescue communications stranded in `queued`.
+ *
+ * dispatchComm inserts a row as `queued` under a short claim lease, calls the
+ * provider, then finalises. If that FINALISE write fails (deploy, DB blip) the
+ * send itself may well have succeeded — but the row stays `queued` forever, and
+ * nothing anywhere sweeps that state: both existing sweeps filter on
+ * `status='failed'`, and `communications_claim_expiry_idx` (migration 0070)
+ * indexes exactly this shape while going unused.
+ *
+ * The damage is quiet and disproportionate. `finalize_communication_send` is
+ * what stamps `quotes.email_sent_at`, and the chase engine skips any quote
+ * without it (`if (!quote?.email_sent_at) continue`) — so one failed finalise
+ * means that customer gets NO chase emails at all, and never lapses either,
+ * because the lapse check reads the same column. The lead sits in "Quoted"
+ * forever while a CRITICAL issue nobody can resolve appears in the digest each
+ * morning.
+ *
+ * Rather than guess at delivery, hand the row to the machinery that already
+ * reasons about it safely: flip an EXPIRED-lease `queued` row to `failed`, and
+ * the existing sweeps take over — the retry worker re-drives it under the same
+ * `marley-comm/<id>` idempotency key (so a message that really did send returns
+ * the original result rather than sending twice), and anything unretryable gets
+ * escalated to a human exactly once. Only expired leases are touched, so a send
+ * still in flight is never disturbed.
+ */
+export async function sweepStrandedQueuedComms(sb: Sb, now = new Date()): Promise<StrandedQueuedSummary> {
+  const nowIso = now.toISOString();
+  const { data, error } = await sb
+    .from("communications")
+    .select("id, channel, to_address, subject, lead_id, provider_started_at, claim_expires_at")
+    .eq("status", "queued")
+    .lt("claim_expires_at", nowIso)
+    .order("claim_expires_at", { ascending: true })
+    .limit(50);
+  if (error) {
+    log.warn("comms.stranded_queued.query_failed", { error: error.message });
+    return { requeued: 0 };
+  }
+  if (!data?.length) return { requeued: 0 };
+
+  let requeued = 0;
+  for (const row of data as unknown as { id: string; lead_id: string | null; subject: string | null; provider_started_at: string | null }[]) {
+    // CAS on the state we read — a concurrent finalise must always win.
+    const { data: flipped, error: flipError } = await sb
+      .from("communications")
+      .update({ status: "failed", provider_outcome_unknown: !!row.provider_started_at } as never)
+      .eq("id", row.id)
+      .eq("status", "queued")
+      .lt("claim_expires_at", nowIso)
+      .select("id");
+    if (flipError) {
+      log.warn("comms.stranded_queued.flip_failed", { commId: row.id, error: flipError.message });
+      continue;
+    }
+    if (!flipped?.length) continue; // finalised underneath us — nothing to rescue
+    requeued++;
+    log.warn("comms.stranded_queued.requeued", {
+      commId: row.id,
+      leadId: row.lead_id,
+      subject: row.subject,
+      providerWasCalled: !!row.provider_started_at,
+    });
+  }
+  return { requeued };
+}

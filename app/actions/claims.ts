@@ -11,6 +11,7 @@
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOfficeProfile } from "@/lib/ai/auth";
+import { log } from "@/lib/log";
 import {
   CLAIM_CHANNEL_LABEL,
   CLAIM_RESOLUTION_LABEL,
@@ -176,6 +177,23 @@ export async function updateClaimAction(
       ok: false,
       error: "This claim changed in another tab — reload to see the latest before saving.",
     };
+  }
+
+  // Settling the claim answers the sign-off exception that opened it. Nothing
+  // closed that task, so a resolved claim left a "call the customer in the
+  // morning, agree next steps" card open on /follow-ups indefinitely — going
+  // overdue and inflating the dashboard's overdue count long after the matter
+  // was closed. Only on a terminal outcome; an in-progress claim still needs
+  // the call. Fail-soft: the claim record is the thing that must not be lost.
+  if (check.terminal && existing.lead_id) {
+    const { error: fuError } = await admin
+      .from("follow_ups")
+      .update({ status: "done", outcome: "reached" })
+      .eq("lead_id", existing.lead_id)
+      .eq("reason", "custom")
+      .eq("source", "sign_off_exception")
+      .eq("status", "open");
+    if (fuError) log.warn("claims.signoff_followup_close_failed", { claimId, error: fuError.message });
   }
 
   const ref = claimRef(existing.claim_no);

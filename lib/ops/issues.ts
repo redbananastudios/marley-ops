@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createHash } from "node:crypto";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { errorContext, log, redactedLogContext, type LogContext } from "@/lib/log";
-import { sendEmail } from "@/lib/comms/send";
+import { sendEmail, sendEmailViaSmtpFallback, shouldSmtpFallback, smtpFallbackConfigured } from "@/lib/comms/send";
 import { opsAlertRecipient } from "@/lib/comms/sender";
 
 type Sb = SupabaseClient<Database>;
@@ -193,14 +193,23 @@ export async function deliverDailyOperationalIssueDigest(
   // machinery above is the once-per-day gate; the key only dedupes true
   // same-payload retries.
   const payloadKeyHash = createHash("sha256").update(JSON.stringify(payload)).digest("hex").slice(0, 16);
-  const result = await sendEmail({
+  const digestPayload = {
     to: opsAlertRecipient("system"),
     subject: `[Marley Ops] Daily operational issues — ${payload.totalCount} open`,
     html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;line-height:1.6"><p>${payload.totalCount} operational issue${payload.totalCount === 1 ? " is" : "s are"} open:</p><ul>${payload.issues
       .map((issue) => `<li><strong>${esc(issue.severity.toUpperCase())}</strong> ${esc(issue.message)} (${issue.occurrence_count})</li>`)
       .join("")}</ul>${payload.omittedCount ? `<p>Plus ${payload.omittedCount} more open issue${payload.omittedCount === 1 ? "" : "s"}.</p>` : ""}<p><a href="https://ops.marleymoves.co.uk/automations">Open Marley Ops automations</a></p></div>`,
     idempotencyKey: `marley-ops-daily/${snapshotDate}/${payloadKeyHash}`,
-  });
+  };
+  let result = await sendEmail(digestPayload);
+  // This digest is the surface that would carry a "Resend is failing" notice,
+  // so it cannot itself depend on Resend being up. Same guarded fallback as the
+  // customer path and sendOpsAlert — only when Resend definitively did not send.
+  if (!result.ok && smtpFallbackConfigured() && shouldSmtpFallback(result, true)) {
+    const viaSmtp = await sendEmailViaSmtpFallback(digestPayload);
+    log.warn("ops.issue.digest_smtp_fallback", { snapshotDate, ok: viaSmtp.ok, resendError: result.error });
+    if (viaSmtp.ok) result = viaSmtp;
+  }
   if (!result.ok) {
     const { data: failed, error: failError } = await sb.rpc("fail_operational_issue_digest", {
       p_snapshot_date: snapshotDate,

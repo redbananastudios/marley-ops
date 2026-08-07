@@ -491,14 +491,28 @@ export async function sendOpsAlert(
     .slice(0, 32);
   const issueKey = `ops-alert:${alertHash}`;
   try {
-    const result = await sendEmail({
+    const payload = {
       to,
       subject: `[Marley Ops] ${subject}`,
       html: `<div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;font-size:14px;color:#1a1a1a;line-height:1.7;">${lines
         .map((line) => `<p style="margin:0 0 6px;">${line}</p>`)
         .join("")}</div>`,
       idempotencyKey: idempotencyKey ?? `marley-ops/${alertHash}`,
-    });
+    };
+    let result = await sendEmail(payload);
+    // Alerts must survive the outage class they exist to report. The SMTP
+    // fallback was wired into runProviderSend only, so during a Resend outage
+    // customer mail degraded gracefully to IONOS while EVERY internal alert —
+    // "Date at risk", "Balance OVERDUE after move day", "a customer message may
+    // be undelivered", and the "Resend is failing" notice itself — failed
+    // silently. Same safety reasoning as the customer path: only fall back when
+    // Resend definitively did not send (401/403/429) or the outcome is unknown
+    // under an idempotency key, so this can never double-send.
+    if (!result.ok && smtpFallbackConfigured() && shouldSmtpFallback(result, true)) {
+      const viaSmtp = await sendEmailViaSmtpFallback(payload);
+      log.warn("ops.alert.smtp_fallback", { category, ok: viaSmtp.ok, resendError: result.error });
+      if (viaSmtp.ok) result = viaSmtp;
+    }
     const sb = createAdminClient();
     if (!result.ok) {
       await reportOperationalIssue(sb, {

@@ -1,7 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { sendEmail } = vi.hoisted(() => ({ sendEmail: vi.fn() }));
-vi.mock("@/lib/comms/send", () => ({ sendEmail }));
+const { sendEmail, sendEmailViaSmtpFallback, smtpFallbackConfigured, shouldSmtpFallback } = vi.hoisted(() => ({
+  sendEmail: vi.fn(),
+  sendEmailViaSmtpFallback: vi.fn(),
+  smtpFallbackConfigured: vi.fn(() => false),
+  shouldSmtpFallback: vi.fn(() => false),
+}));
+vi.mock("@/lib/comms/send", () => ({
+  sendEmail,
+  sendEmailViaSmtpFallback,
+  smtpFallbackConfigured,
+  shouldSmtpFallback,
+}));
 vi.mock("@/lib/comms/sender", () => ({ opsAlertRecipient: () => "ops@example.test" }));
 
 import { deliverDailyOperationalIssueDigest } from "@/lib/ops/issues";
@@ -42,7 +52,11 @@ function digestClient(decision = "claimed", totalCount = 1) {
 }
 
 describe("daily operational issue digest", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    smtpFallbackConfigured.mockReturnValue(false);
+    shouldSmtpFallback.mockReturnValue(false);
+  });
 
   it("atomically claims, sends a frozen payload, and records success", async () => {
     sendEmail.mockResolvedValue({ ok: true, providerId: "email-1" });
@@ -80,6 +94,35 @@ describe("daily operational issue digest", () => {
       p_error: "provider unavailable",
     }));
     expect(fake.rpc).toHaveBeenCalledWith("report_operational_issue", expect.any(Object));
+  });
+
+  it("falls back to SMTP when Resend is the thing that is down", async () => {
+    // The digest is the surface that would carry a "Resend is failing" notice,
+    // so it must not itself die with Resend. Guarded the same way as customer
+    // mail: only when Resend definitively did not send.
+    sendEmail.mockResolvedValue({ ok: false, error: "Resend error 401", status: 401 });
+    smtpFallbackConfigured.mockReturnValue(true);
+    shouldSmtpFallback.mockReturnValue(true);
+    sendEmailViaSmtpFallback.mockResolvedValue({ ok: true, providerId: "smtp-1" });
+
+    const fake = digestClient();
+    await expect(deliverDailyOperationalIssueDigest(fake.client, new Date("2026-07-20T12:00:00Z")))
+      .resolves.toBe("sent");
+    expect(sendEmailViaSmtpFallback).toHaveBeenCalledTimes(1);
+    // Same payload as the Resend attempt — no second, differently-keyed message.
+    expect(sendEmailViaSmtpFallback).toHaveBeenCalledWith(
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^marley-ops-daily\/2026-07-20\//) }),
+    );
+  });
+
+  it("does not reach for SMTP when the fallback is not configured", async () => {
+    sendEmail.mockResolvedValue({ ok: false, error: "provider unavailable" });
+    smtpFallbackConfigured.mockReturnValue(false);
+    shouldSmtpFallback.mockReturnValue(true);
+    const fake = digestClient();
+    await expect(deliverDailyOperationalIssueDigest(fake.client, new Date("2026-07-20T12:00:00Z")))
+      .resolves.toBe("failed");
+    expect(sendEmailViaSmtpFallback).not.toHaveBeenCalled();
   });
 
   it("records dry-run delivery as simulated, not sent", async () => {

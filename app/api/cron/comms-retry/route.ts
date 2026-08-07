@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { runCommsRetry, escalateUnretryableComms } from "@/lib/comms/retry-worker";
+import { runCommsRetry, escalateUnretryableComms, sweepStrandedQueuedComms } from "@/lib/comms/retry-worker";
 
 /**
  * Comms-retry worker (cron): re-drives any customer email/SMS whose provider
@@ -26,7 +26,11 @@ export async function GET(req: Request) {
     // (no stored payload, or past the safe-resend window) so it can't strand an
     // open issue forever. Runs after the retry sweep; never sends a customer message.
     const { stranded } = await escalateUnretryableComms(sb);
-    return { ...retry, stranded };
+    // Rescue rows stuck in 'queued' (provider accepted, DB finalise failed).
+    // Runs LAST so anything it hands back as 'failed' is picked up by the next
+    // tick's retry sweep rather than being re-driven inside this one.
+    const { requeued } = await sweepStrandedQueuedComms(sb);
+    return { ...retry, stranded, requeued };
   });
   return NextResponse.json(
     { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
