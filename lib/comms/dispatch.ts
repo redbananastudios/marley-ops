@@ -93,14 +93,22 @@ async function claimCommunication(
   if (existingError || !existing) {
     return { claimed: false, error: existingError?.message ?? "Communication claim disappeared" };
   }
+  // Order matters: a SENT row answers "duplicate" FIRST, payload hash or not.
+  // The dedupe key (contentHash) deliberately ignores attachment BYTES, and a
+  // regenerated quote PDF is never byte-identical (embedded timestamps), so a
+  // re-send's payload hash always differs from the original — comparing it here
+  // made every quote re-send hard-fail (2026-08-07, MMR042) instead of routing
+  // to the dialog's confirm-and-override flow. The payload-hash refuse below
+  // exists to protect RECLAIMS of unsent (queued/failed) rows from silently
+  // swapping the payload under the same claim — sent rows are not reclaimed.
+  if (existing.status === "sent") {
+    return { duplicate: true, lastSentAt: existing.last_sent_at, sendCount: existing.send_count };
+  }
   if (existing.provider_payload_hash && existing.provider_payload_hash !== providerPayloadHash) {
     return {
       claimed: false,
       error: "A previous send used this duplicate key with a different provider payload. Review it before overriding.",
     };
-  }
-  if (existing.status === "sent") {
-    return { duplicate: true, lastSentAt: existing.last_sent_at, sendCount: existing.send_count };
   }
   if (existing.provider_started_at && existing.channel === "sms") {
     return { claimed: false, error: "The previous SMS outcome is unknown. Check Webex before sending an override." };
