@@ -77,6 +77,17 @@ ssh -i ~/.ssh/rbs_vps ubuntu@51.195.253.165 \
   "sudo docker exec supabase-db psql -U postgres -d postgres -c \"notify pgrst, 'reload schema';\""
 ```
 
+## Apply a DB migration to STAGING (do this FIRST — dress-rehearsal)
+
+Staging is the hosted Supabase cloud project `nrghwyfakrgobcczuuca` (**eu-west-1**, despite
+the design doc saying London). Connect from i9 with node `pg` via the session pooler —
+host `aws-0-eu-west-1.pooler.supabase.com:5432`, user `postgres.nrghwyfakrgobcczuuca`,
+db `postgres`, TLS on. Password: `MARLEY_STAGING_SUPABASE_DB_PASSWORD` in
+`F:\My Drive\workspace\credentials.env` (added 2026-08-07 — never hardcode it).
+Wrap the migration in a transaction, print the affected constraint/table definitions
+before AND after, `ON_ERROR_STOP` semantics via try/rollback. First applied: 0086.
+(The eu-west-2 pooler hosts reject the ref — don't waste time on them.)
+
 ## Change an env var
 
 Edit `/opt/marley-ops/app.env` on the box, then `sudo docker restart marley-ops-app`.
