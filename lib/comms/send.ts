@@ -44,6 +44,18 @@ export interface SendEmailInput {
   idempotencyKey?: string;
 }
 
+/** Resend hard-rejects any template variable value over 2,000 characters
+ *  ("The `template, variables, value` field has a 2,000 character limit per
+ *  value") — and it kills the WHOLE send, not just the variable. */
+export const RESEND_TEMPLATE_VAR_LIMIT = 2000;
+
+/** Names of template variables whose value exceeds the provider limit. */
+export function oversizedTemplateVars(vars?: Record<string, string | number>): string[] {
+  return Object.entries(vars ?? {})
+    .filter(([, v]) => String(v).length > RESEND_TEMPLATE_VAR_LIMIT)
+    .map(([k]) => k);
+}
+
 function emailRequestPayload(input: SendEmailInput) {
   return {
     from: input.from || process.env.RESEND_FROM_EMAIL || "Marley Moves <hello@marleymoves.co.uk>",

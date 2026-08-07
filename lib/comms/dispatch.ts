@@ -7,7 +7,7 @@ import { createHash, randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { contentHash, normRecipient } from "@/lib/comms/hash";
-import { emailPayloadHash, sendEmail, sendSms, type SendEmailInput } from "@/lib/comms/send";
+import { emailPayloadHash, oversizedTemplateVars, sendEmail, sendSms, type SendEmailInput } from "@/lib/comms/send";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { log } from "@/lib/log";
 import { opsAlertRecipient, type OpsAlertCategory } from "@/lib/comms/sender";
@@ -158,12 +158,27 @@ export async function dispatchComm(
     body: input.bodyText,
     attachmentRef,
   });
+  // A managed template is only usable when every variable fits Resend's
+  // 2,000-char-per-value limit — an oversized one (a rich HTML block like
+  // COMMITMENT_BLOCK, 2026-08-05 Brydee MMR034) fails the WHOLE send, and the
+  // retry worker re-drives the same stored payload so it can never recover.
+  // Every template sender also passes the in-repo bodyHtml, so fall back to
+  // that; only when there is no fallback do we let the template try its luck.
+  const overLimit = input.template ? oversizedTemplateVars(input.template.variables) : [];
+  const useTemplate = !!input.template && (overLimit.length === 0 || !input.bodyHtml);
+  if (input.template && overLimit.length > 0) {
+    log.warn("comm.template.var_over_limit", {
+      templateId: input.template.id,
+      vars: overLimit,
+      fellBack: !useTemplate,
+    });
+  }
   const emailInput: SendEmailInput | null = input.channel === "email"
     ? {
         to: input.to,
         subject: input.subject ?? "Message from Marley Moves",
-        ...(input.template
-          ? { template: input.template }
+        ...(useTemplate
+          ? { template: input.template! }
           : {
               html:
                 input.bodyHtml ??
