@@ -82,6 +82,9 @@ export async function sendReviewRequest(
     to: lead.email,
     subject: `How did we do, ${first}?`,
     bodyText: `Thanks for moving with Marley Moves. If Connor and the crew looked after you, a quick ${review.platform} review makes a real difference to us: ${review.url}. If anything wasn't right, reply to this email or call the team on 01747 637070 first.`,
+    // bodyHtml rides alongside the template as the rendered fallback (oversize
+    // guard + SMTP outage transport) — the template wins when usable.
+    bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }),
     ...(templateId
       ? {
           template: {
@@ -89,7 +92,7 @@ export async function sendReviewRequest(
             variables: { CUSTOMER_FIRST_NAME: first, REVIEW_PLATFORM: review.platform, REVIEW_URL: review.url },
           },
         }
-      : { bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }) }),
+      : {}),
     replyTo: token ? replyAddressFor(token) : undefined,
     // A personal ask converts better — the review request comes from the lead's
     // owner via the canonical rule (explicit owner, else the surveying

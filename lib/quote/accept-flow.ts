@@ -747,7 +747,7 @@ export async function acceptQuoteByStaff(
       subject: email.subject,
       bodyText: email.text,
       ...(templateId
-        ? { template: { id: templateId, variables: email.variables } }
+        ? { template: { id: templateId, variables: email.variables }, bodyHtml: chaseTextToHtml(email.text) }
         : { bodyHtml: chaseTextToHtml(email.text) }),
       replyTo: replyAddressFor(token),
       from: email.from,
@@ -1141,7 +1141,7 @@ export async function markDepositPaid(
       subject: `Deposit received. You're booked in (${quote.quote_ref})`,
       bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method, opts.cardLast4).toLowerCase()} on ${receipt.paidAtLabel}. Your move date is secured.`,
       ...(templateId
-        ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) }, bodyHtml: buildDepositReceivedEmailHtml(meta) }
         : { bodyHtml: buildDepositReceivedEmailHtml(meta) }),
       // Replies route back into the panel (pause chase, log, follow-up).
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
@@ -1391,7 +1391,7 @@ export async function markCommitmentPaid(
       subject: `Payment received: commitment for your move (${quote.quote_ref})`,
       bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method).toLowerCase()} on ${receipt.paidAtLabel}. It counts towards your final bill; the remaining balance is due before move day.`,
       ...(templateId
-        ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) }, bodyHtml: buildCommitmentReceivedEmailHtml(meta) }
         : { bodyHtml: buildCommitmentReceivedEmailHtml(meta) }),
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id ?? undefined,
@@ -1613,7 +1613,7 @@ export async function confirmMoveDate(
           ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${commitAmt.toFixed(2)} commitment payment is ${dueLabel ? `due by ${dueLabel}` : "due now"}.`
           : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
       ...(templateId
-        ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) }, bodyHtml: buildDateConfirmationEmailHtml(meta) }
         : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),
       attachmentBase64: pdfBase64,
       attachmentName: pdfBase64
@@ -1911,7 +1911,7 @@ export async function createBalanceInvoiceFlow(
         subject: `Your final balance: ${quote.quote_ref} (£${amount.toFixed(2)})`,
         bodyText: `Final balance of £${amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
         ...(templateId
-          ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) } }
+          ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
           : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
         attachmentBase64: pdfBase64,
         attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
@@ -2039,7 +2039,7 @@ export async function markBalancePaid(
       subject: `Payment received — all settled (${quote.quote_ref})`,
       bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay.`,
       ...(templateId
-        ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) }, bodyHtml: buildBalanceReceivedEmailHtml(meta) }
         : { bodyHtml: buildBalanceReceivedEmailHtml(meta) }),
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId: quote.lead_id,

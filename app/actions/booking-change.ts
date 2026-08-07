@@ -269,7 +269,7 @@ export async function changeBookingDateAction(
         subject: dateChangeConfirmationSubject(meta),
         bodyText: dateChangeConfirmationText(meta),
         ...(templateId
-          ? { template: { id: templateId, variables: dateChangeConfirmationTemplateVars(meta) } }
+          ? { template: { id: templateId, variables: dateChangeConfirmationTemplateVars(meta) }, bodyHtml: buildDateChangeConfirmationEmailHtml(meta) }
           : { bodyHtml: buildDateChangeConfirmationEmailHtml(meta) }),
         replyTo,
         leadId,
@@ -505,7 +505,7 @@ export async function changeBookingDateAction(
       subject: cancellationAckSubject(meta),
       bodyText: cancellationAckText(meta),
       ...(templateId
-        ? { template: { id: templateId, variables: cancellationAckTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: cancellationAckTemplateVars(meta) }, bodyHtml: buildCancellationAckEmailHtml(meta) }
         : { bodyHtml: buildCancellationAckEmailHtml(meta) }),
       replyTo,
       leadId,
@@ -788,7 +788,7 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
       subject: marleyCancelSubject(meta),
       bodyText: marleyCancelText(meta),
       ...(templateId
-        ? { template: { id: templateId, variables: marleyCancelTemplateVars(meta) } }
+        ? { template: { id: templateId, variables: marleyCancelTemplateVars(meta) }, bodyHtml: buildMarleyCancelEmailHtml(meta) }
         : { bodyHtml: buildMarleyCancelEmailHtml(meta) }),
       replyTo: quote?.accept_token ? replyAddressFor(quote.accept_token) : undefined,
       leadId,

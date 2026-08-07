@@ -175,6 +175,7 @@ interface UnretryableRow {
   provider_started_at: string | null;
   created_at: string | null;
   attempt_count: number;
+  smtp_fallback_attempted_at: string | null;
 }
 
 export interface UnretryableSummary extends Record<string, unknown> {
@@ -207,7 +208,7 @@ export async function escalateUnretryableComms(sb: Sb, now = new Date()): Promis
   const { data, error } = await sb
     .from("communications")
     .select(
-      "id, channel, to_address, subject, lead_id, provider_request, provider_outcome_unknown, provider_started_at, created_at, attempt_count",
+      "id, channel, to_address, subject, lead_id, provider_request, provider_outcome_unknown, provider_started_at, created_at, attempt_count, smtp_fallback_attempted_at",
     )
     .eq("status", "failed")
     .lt("attempt_count", COMMS_RETRY_MAX_ATTEMPTS)
@@ -256,9 +257,15 @@ export async function escalateUnretryableComms(sb: Sb, now = new Date()): Promis
     const reason = noPayload ? "no stored payload to resend automatically" : "past the safe automatic-resend window";
     const subjectNote = row.subject ? ` ("${escapeHtml(row.subject)}")` : "";
     const aroundWhen = row.created_at ? ` around ${escapeHtml(row.created_at)}` : "";
+    // A row that dialled the IONOS SMTP fallback may have been delivered by a
+    // transport RESEND CANNOT SEE — "check Resend, it's not there, resend by
+    // hand" would manufacture a duplicate. Name the second place to look.
+    const smtpNote = row.smtp_fallback_attempted_at
+      ? " NOTE: this send also attempted the IONOS SMTP fallback (accounts@marleymoves.co.uk) — it will NOT appear in Resend even if delivered; check the accounts@ Sent folder too before resending."
+      : "";
     const deliveryLine = outcomeUnknown
-      ? `Its outcome is unknown, so it MAY already have been delivered. Check ${providerName} for this recipient${aroundWhen} and resend it by hand only if it did not go out.`
-      : `It was NOT delivered (the provider rejected it). Resend it by hand from ${providerName}${aroundWhen}.`;
+      ? `Its outcome is unknown, so it MAY already have been delivered. Check ${providerName} for this recipient${aroundWhen} and resend it by hand only if it did not go out.${smtpNote}`
+      : `It was NOT delivered (the provider rejected it). Resend it by hand from ${providerName}${aroundWhen}.${smtpNote}`;
     const notified = await sendOpsAlert(
       outcomeUnknown
         ? "Customer message may be undelivered — verify by hand"

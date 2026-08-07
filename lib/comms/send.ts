@@ -11,6 +11,10 @@ export interface SendResult {
   simulated?: boolean;
   /** The request left this process but the transport outcome is unknowable. */
   outcomeUnknown?: boolean;
+  /** HTTP status from the provider on a definite reject (fallback classifier). */
+  status?: number;
+  /** Which transport actually delivered — absent means the primary (Resend). */
+  provider?: "smtp-fallback";
 }
 
 const DRYRUN = process.env.COMMS_DRYRUN === "true";
@@ -42,6 +46,10 @@ export interface SendEmailInput {
   from?: string;
   /** Stable logical-send key. Resend retains these for 24 hours. */
   idempotencyKey?: string;
+  /** Rendered in-repo HTML carried alongside a `template` send so the SMTP
+   *  fallback (which cannot render Resend templates) still has a body.
+   *  NEVER part of the provider payload or its hash. */
+  fallbackHtml?: string;
 }
 
 /** Resend hard-rejects any template variable value over 2,000 characters
@@ -89,11 +97,95 @@ async function sendEmailOnce(input: SendEmailInput, key: string): Promise<SendRe
       ok: false,
       error: json.message || `Resend error ${res.status}`,
       outcomeUnknown: res.status === 408 || res.status === 409 || res.status >= 500,
+      status: res.status,
     };
     return { ok: true, providerId: json.id };
   } catch (err) {
     // A retry with the same Idempotency-Key is safe even if the response was lost.
     return { ok: false, error: err instanceof Error ? err.message : "Email send failed", outcomeUnknown: true };
+  }
+}
+
+/* ------------------------------------------------- SMTP fallback (IONOS) */
+
+export const smtpFallbackConfigured = (): boolean =>
+  Boolean(process.env.SMTP_FALLBACK_HOST && process.env.SMTP_FALLBACK_USER && process.env.SMTP_FALLBACK_PASS);
+
+/**
+ * Whether a TERMINAL Resend failure (the in-process retries already ran) may
+ * be retried over the SMTP fallback. Pure so the double-send reasoning is
+ * unit-locked:
+ *  - 401/403 — Resend account-level trouble (revoked key, suspension).
+ *    Resend definitively did NOT send; SMTP is safe and is exactly the outage
+ *    class a backup transport exists for.
+ *  - 429 — only reachable here after the in-process retries ALSO 429'd
+ *    (sendEmail retries 429s: it's normally the per-second rate limit and the
+ *    backoff clears it without degrading the send). A sustained 429 is quota
+ *    exhaustion — outage class, and Resend did not send.
+ *  - outcomeUnknown after the idempotency-keyed retries — Resend down or
+ *    unreachable. The keyed retries make "it actually sent but every response
+ *    was lost" vanishingly unlikely (a reused key returns the ORIGINAL result),
+ *    so we accept the residual double-send risk over stranding the customer.
+ *    WITHOUT a key that mitigation doesn't exist, so never fall back there.
+ *  - Payload rejects (400/422 — bad address, malformed content) never fall
+ *    back: the same payload fails on any transport, twice as embarrassingly.
+ *
+ * The CALLER (runProviderSend) additionally enforces the one-shot rule: a
+ * communication row gets at most ONE SMTP transmission ever, CAS-claimed on
+ * smtp_fallback_attempted_at — SMTP has no idempotency key, so re-dialling on
+ * a re-drive could double-send.
+ */
+export function shouldSmtpFallback(result: SendResult, hadIdempotencyKey: boolean): boolean {
+  if (result.ok) return false;
+  if (result.status === 401 || result.status === 403 || result.status === 429) return true;
+  return !!result.outcomeUnknown && hadIdempotencyKey;
+}
+
+/** Whether a failed Resend ATTEMPT is safe + worth retrying in-process:
+ *  outcome-unknown blips only under an idempotency key (a reused key returns
+ *  the original result, so it cannot double-send), and 429 always (Resend's
+ *  per-second rate limit — it definitively did not send, and the 400/1200ms
+ *  backoff outlasts the ~1s Retry-After). */
+export function shouldRetryResendAttempt(result: SendResult, hadIdempotencyKey: boolean): boolean {
+  if (result.ok) return false;
+  if (result.status === 429) return true;
+  return !!result.outcomeUnknown && hadIdempotencyKey;
+}
+
+export async function sendEmailViaSmtpFallback(input: SendEmailInput): Promise<SendResult> {
+  const html = input.html ?? input.fallbackHtml;
+  if (!html) return { ok: false, error: "SMTP fallback has no HTML body for this send." };
+  try {
+    const nodemailer = await import("nodemailer");
+    const port = Number(process.env.SMTP_FALLBACK_PORT || 465);
+    const user = process.env.SMTP_FALLBACK_USER!;
+    const transport = nodemailer.createTransport({
+      host: process.env.SMTP_FALLBACK_HOST!,
+      port,
+      secure: port === 465,
+      auth: { user, pass: process.env.SMTP_FALLBACK_PASS! },
+      connectionTimeout: 15_000,
+      socketTimeout: 20_000,
+    });
+    const info = await transport.sendMail({
+      // IONOS only relays mail From its authenticated mailbox, so the fallback
+      // sends as the accounts desk regardless of the original identity — an
+      // outage email from accounts@ beats no email. Reply-To is preserved, so
+      // the q-<token> reply relay (chase pausing, logging) keeps working.
+      from: process.env.SMTP_FALLBACK_FROM || `Marley Moves <${user}>`,
+      to: input.to,
+      replyTo: input.replyTo || "hello@marleymoves.co.uk",
+      subject: input.subject,
+      html,
+      attachments: (input.attachments ?? []).map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        encoding: "base64" as const,
+      })),
+    });
+    return { ok: true, providerId: info.messageId, provider: "smtp-fallback" };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? `SMTP fallback: ${err.message}` : "SMTP fallback failed" };
   }
 }
 
@@ -103,20 +195,22 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
   if (!key) return { ok: false, error: "Resend API key not configured" };
   if (!input.template && !input.html) return { ok: false, error: "No email body (html or template) given" };
 
-  // In-process retry, but ONLY when an idempotency key is present. Resend retains
-  // a key for 24h and returns the original result on reuse, so re-sending after a
-  // timeout / 5xx cannot double-send — it just turns a transient provider blip
-  // (exactly the "operation aborted due to timeout" that stranded a real deposit
-  // chase, 2026-08-03) into a delivered email. Without a key a retry could
-  // duplicate, so those send exactly once. A definite reject (bad address, 4xx)
-  // has outcomeUnknown=false and returns immediately — retrying it only wastes
-  // time. The comms-retry worker is the durable backstop beyond these attempts.
-  const attempts = input.idempotencyKey ? EMAIL_RETRY_DELAYS_MS.length + 1 : 1;
+  // In-process retry for two safe classes (shouldRetryResendAttempt): keyed
+  // outcome-unknown blips — Resend retains a key for 24h and returns the
+  // original result on reuse, so re-sending after a timeout / 5xx cannot
+  // double-send (exactly the "operation aborted due to timeout" that stranded
+  // a real deposit chase, 2026-08-03) — and 429s, which are normally the
+  // per-second rate limit that a burst (chase cron, retry sweep) trips: the
+  // backoff clears them without degrading the send. A definite reject (bad
+  // address, 4xx) exits immediately — retrying it only wastes time. The
+  // comms-retry worker is the durable backstop beyond these attempts, and
+  // runProviderSend owns the one-shot SMTP fallback for outage classes.
   let result: SendResult = { ok: false, error: "Email send failed" };
-  for (let i = 0; i < attempts; i++) {
+  for (let i = 0; i < EMAIL_RETRY_DELAYS_MS.length + 1; i++) {
     if (i > 0) await retryDelay(EMAIL_RETRY_DELAYS_MS[i - 1]);
     result = await sendEmailOnce(input, key);
-    if (result.ok || !result.outcomeUnknown) return result;
+    if (result.ok) return result;
+    if (!shouldRetryResendAttempt(result, !!input.idempotencyKey)) break;
   }
   return result;
 }

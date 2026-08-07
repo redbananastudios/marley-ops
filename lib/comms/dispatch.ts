@@ -7,7 +7,16 @@ import { createHash, randomUUID } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { contentHash, normRecipient } from "@/lib/comms/hash";
-import { emailPayloadHash, oversizedTemplateVars, sendEmail, sendSms, type SendEmailInput } from "@/lib/comms/send";
+import {
+  emailPayloadHash,
+  oversizedTemplateVars,
+  sendEmail,
+  sendEmailViaSmtpFallback,
+  sendSms,
+  shouldSmtpFallback,
+  smtpFallbackConfigured,
+  type SendEmailInput,
+} from "@/lib/comms/send";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { log } from "@/lib/log";
 import { opsAlertRecipient, type OpsAlertCategory } from "@/lib/comms/sender";
@@ -165,7 +174,9 @@ export async function dispatchComm(
   // Every template sender also passes the in-repo bodyHtml, so fall back to
   // that; only when there is no fallback do we let the template try its luck.
   const overLimit = input.template ? oversizedTemplateVars(input.template.variables) : [];
-  const useTemplate = !!input.template && (overLimit.length === 0 || !input.bodyHtml);
+  // On oversize, ALWAYS drop the template — even to the plain bodyText render:
+  // a degraded body beats Resend's guaranteed 400 (the Brydee MMR034 failure).
+  const useTemplate = !!input.template && overLimit.length === 0;
   if (input.template && overLimit.length > 0) {
     log.warn("comm.template.var_over_limit", {
       templateId: input.template.id,
@@ -178,7 +189,18 @@ export async function dispatchComm(
         to: input.to,
         subject: input.subject ?? "Message from Marley Moves",
         ...(useTemplate
-          ? { template: input.template! }
+          ? {
+              template: input.template!,
+              // The SMTP fallback can't render Resend templates — carry the
+              // in-repo body so an outage send still has content. Excluded
+              // from the provider payload and its hash (see emailRequestPayload).
+              fallbackHtml:
+                input.bodyHtml ??
+                brandedEmailHtml({
+                  preheader: input.subject ?? input.bodyText.slice(0, 120),
+                  paragraphs: input.bodyText.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean),
+                }),
+            }
           : {
               html:
                 input.bodyHtml ??
@@ -305,9 +327,64 @@ export async function runProviderSend(
     return { ok: false, error: "Message was not sent because its durable claim could not be confirmed." };
   }
 
-  const result = channel === "email"
+  let result = channel === "email"
     ? await sendEmail({ ...(a.providerRequest.email as SendEmailInput), idempotencyKey: `marley-comm/${communicationId}` })
     : await sendSms(a.providerRequest.sms ?? { to: a.to, body: "" });
+
+  // IONOS SMTP fallback — outage classes only (shouldSmtpFallback), and at
+  // most ONE SMTP transmission per row EVER: SMTP has no idempotency key, so
+  // a re-driven row that dialled once must never dial again (an ambiguous
+  // SMTP failure may in fact have delivered). The CAS on
+  // smtp_fallback_attempted_at is that guarantee — claim-first, then dial.
+  if (
+    channel === "email" &&
+    !result.ok &&
+    !result.simulated &&
+    smtpFallbackConfigured() &&
+    shouldSmtpFallback(result, true)
+  ) {
+    const { data: fbClaim } = await sb
+      .from("communications")
+      .update({ smtp_fallback_attempted_at: new Date().toISOString() } as never)
+      .eq("id", communicationId)
+      .eq("claim_token", claimToken)
+      .is("smtp_fallback_attempted_at", null)
+      .select("id");
+    if (fbClaim?.length) {
+      const resendFailure = { error: result.error ?? null, status: result.status ?? null };
+      const fallback = await sendEmailViaSmtpFallback(a.providerRequest.email as SendEmailInput);
+      if (fallback.ok) {
+        result = fallback;
+        // Stamp the audit row FIRST (a later finalize failure must not lose
+        // which transport accepted the send — "check Resend" would find
+        // nothing and invite a duplicate hand-resend), and raise a PERSISTENT
+        // visible issue: a green board during a silent Resend outage is how a
+        // degraded transport becomes permanent.
+        log.warn("comm.sent_via_smtp_fallback", { communicationId, channel, resendFailure });
+        const { error: stampError } = await sb
+          .from("communications")
+          .update({ provider: "smtp-fallback" } as never)
+          .eq("id", communicationId)
+          .eq("claim_token", claimToken);
+        if (stampError) log.error("comm.smtp_fallback.stamp_failed", { communicationId, error: stampError.message });
+        await reportOperationalIssue(opsSb, {
+          key: "resend-fallback-active",
+          severity: "error",
+          source: "communications",
+          event: "comm.smtp_fallback.used",
+          message:
+            "Email is being delivered via the IONOS SMTP fallback (from the accounts desk, plain body) — Resend is failing. Check the Resend key/account.",
+          context: { communicationId, resendFailure },
+        });
+      } else {
+        // The SMTP attempt left the process and failed AMBIGUOUSLY (it may
+        // have delivered). Mark the outcome unknown so the row keeps
+        // provider_started_at (23h re-drive window) and every human-facing
+        // escalation says "outcome unknown", never "provably not delivered".
+        result = { ...result, outcomeUnknown: true, error: `${result.error} (and ${fallback.error})` };
+      }
+    }
+  }
 
   if (!result.ok) {
     const errMsg = result.error ?? "Send failed";
@@ -341,6 +418,12 @@ export async function runProviderSend(
     return { ok: false, error: errMsg };
   }
 
+  // Resend delivered a real email — if the fallback issue is open, the outage
+  // is over and the board should say so (no-op when it was never open).
+  if (channel === "email" && !result.simulated && result.provider !== "smtp-fallback") {
+    await resolveOperationalIssue(opsSb, "resend-fallback-active");
+  }
+
   const { data: finalised, error: finaliseError } = await sb.rpc("finalize_communication_send", {
     p_id: communicationId,
     p_claim_token: claimToken,
@@ -349,14 +432,15 @@ export async function runProviderSend(
   });
   if (finaliseError || !finalised) {
     // Provider accepted the send. Do not invite a retry; surface the missing
-    // audit/counter finalisation as a critical operational issue instead.
+    // audit/counter finalisation as a critical operational issue instead —
+    // naming WHICH transport accepted it, so the human checks the right one.
     await reportOperationalIssue(opsSb, {
       key: `communication:${communicationId}`,
       severity: "critical",
       source: "communications",
       event: "comm.finalize.failed",
       message: "Provider accepted a communication but database finalisation failed.",
-      context: { communicationId, channel, error: finaliseError?.message },
+      context: { communicationId, channel, provider: result.provider ?? "resend", error: finaliseError?.message },
     });
     return { ok: true };
   }

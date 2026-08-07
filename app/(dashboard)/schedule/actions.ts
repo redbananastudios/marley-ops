@@ -198,6 +198,8 @@ export async function createAppointment(input: CreateAppointmentInput) {
                   ADDRESS: confirm.address ?? "To be confirmed",
                 },
               },
+              // Rendered fallback for the oversize guard + SMTP outage transport.
+              bodyHtml: surveyConfirmEmailHtml(confirm),
             }
           : { bodyHtml: surveyConfirmEmailHtml(confirm) }),
         leadId: lead.id,
