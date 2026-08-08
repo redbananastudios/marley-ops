@@ -397,13 +397,33 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
       // attempts terminal so we don't burn a full retry cycle (and re-log skipped
       // rows) every pass on them.
       const prevAttempts = decision.contentChanged || !row ? 0 : row.attempts;
-      await admin
+      const { error: stampError } = await admin
         .from("crew_job_sheets")
         .update({
           attempts: noContact ? MAX_ATTEMPTS : prevAttempts + 1,
           ...(anyOk ? { delivered_hash: currentHash, delivered_at: now.toISOString() } : {}),
         })
         .eq("id", claimed.id);
+      // Losing this stamp after a successful send is expensive: the sheet reads
+      // as still-undelivered, so the next 5-minute tick wins the retry CAS and
+      // re-sends the whole thing — email AND a billable SMS — up to MAX_ATTEMPTS
+      // times, at 19:30, to a crew member who already has their day. Surface it
+      // rather than discarding the error.
+      if (stampError && anyOk) {
+        logs.push({
+          channel: "email",
+          status: "failed",
+          recipient: day.crew.email ?? day.crew.phone ?? null,
+          provider: null,
+          error: `Day sheet sent but its delivery stamp failed (${stampError.message}) — it may re-send on the next run.`,
+        });
+        summary.failures.push({
+          staff: day.crew.fullName,
+          date: workDate,
+          channel: "stamp",
+          error: `Sheet delivered but its delivery stamp failed (${stampError.message}) — it may re-send on the next run.`,
+        });
+      }
     }
   }
 
