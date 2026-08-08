@@ -23,6 +23,7 @@ import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issue
 import { runProviderSend, sendOpsAlert, type ProviderRequest } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { log } from "@/lib/log";
+import { isPermanentProviderError } from "@/lib/comms/permanent-failure";
 
 type Sb = SupabaseClient<Database>;
 
@@ -67,6 +68,7 @@ interface RetryRow {
   provider_request: ProviderRequest | null;
   content_hash: string | null;
   updated_at: string;
+  provider_error: string | null;
 }
 
 export interface CommsRetrySummary extends Record<string, unknown> {
@@ -90,7 +92,7 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
   const { data, error } = await sb
     .from("communications")
     .select(
-      "id, channel, to_address, subject, lead_id, client_id, claim_token, attempt_count, provider_payload_hash, provider_request, content_hash, updated_at",
+      "id, channel, to_address, subject, lead_id, client_id, claim_token, attempt_count, provider_payload_hash, provider_request, content_hash, updated_at, provider_error",
     )
     .eq("status", "failed")
     .not("provider_request", "is", null)
@@ -123,6 +125,42 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
 
   for (const row of rows) {
     if (!row.provider_request || !row.provider_payload_hash) continue;
+
+    // A permanently-rejected payload cannot succeed on a re-drive — it is the
+    // same bytes and the same verdict every time. Escalate on the FIRST such
+    // failure instead of burning the whole attempt ladder (MMR034 2026-08-05:
+    // eight re-drives over two days against a template variable that exceeded
+    // Resend's length cap, while the customer had no confirmation and no
+    // invoice). Capping attempts here also drops the row out of this sweep.
+    if (isPermanentProviderError(row.provider_error)) {
+      escalated++;
+      await sb
+        .from("communications")
+        .update({ attempt_count: COMMS_RETRY_MAX_ATTEMPTS } as never)
+        .eq("id", row.id)
+        .eq("status", "failed");
+      await reportOperationalIssue(sb, {
+        key: `communication:${row.id}`,
+        severity: "critical",
+        source: "comms-retry",
+        event: "comm.retry.permanent_rejection",
+        message: "A customer message was permanently rejected by the provider — re-send it from the lead page (retrying cannot fix it).",
+        context: {
+          communicationId: row.id,
+          channel: row.channel,
+          to: row.to_address,
+          subject: row.subject,
+          providerError: row.provider_error,
+        },
+      });
+      log.warn("comms.retry.permanent_rejection", {
+        commId: row.id,
+        to: row.to_address,
+        error: row.provider_error,
+      });
+      continue;
+    }
+
     if (!commsRetryDue(row, nowMs)) { waiting++; continue; }
 
     const newToken = randomUUID();
