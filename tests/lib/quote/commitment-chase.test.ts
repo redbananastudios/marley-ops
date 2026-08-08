@@ -22,9 +22,44 @@ const base: CommitmentSweepInput = {
   commitmentInvoiceAmount: 500,
   commitmentPaidAt: null,
   commitmentChaseT10At: null,
+  dateConfirmNudgeAt: null,
   dateReleasableAt: null,
   chasePaused: false,
 };
+
+describe("dueCommitmentActions — the two T-10 one-shots are independent", () => {
+  // One shared stamp used to gate BOTH the internal "confirm the date" call
+  // task and the customer's commitment reminder. The internal one fires first
+  // by construction (an unconfirmed date at T-10 is exactly what precedes
+  // confirmation), so it consumed the stamp and the customer — now invoiced 25%
+  // — never received a word about it.
+  const unconfirmed: CommitmentSweepInput = { ...base, dateConfirmedAt: null };
+
+  it("nudges the office when the date is not confirmed inside 10 days", () => {
+    expect(dueCommitmentActions(unconfirmed, NOW)).toEqual(["confirm_date_call"]);
+  });
+
+  it("nudges only once", () => {
+    expect(dueCommitmentActions({ ...unconfirmed, dateConfirmNudgeAt: "2026-07-31T10:00:00Z" }, NOW)).toEqual([]);
+  });
+
+  it("a spent confirm-date nudge does NOT silence the customer commitment reminder", () => {
+    // The regression: nudge already sent, customer then confirms their date and
+    // is invoiced. They must still be told the 25% is due.
+    const confirmedAfterNudge: CommitmentSweepInput = {
+      ...base,
+      dateConfirmNudgeAt: "2026-07-31T10:00:00Z",
+      commitmentChaseT10At: null,
+    };
+    expect(dueCommitmentActions(confirmedAfterNudge, NOW)).toEqual(["chase"]);
+  });
+
+  it("and a spent customer reminder does not re-open the internal nudge", () => {
+    expect(
+      dueCommitmentActions({ ...unconfirmed, commitmentChaseT10At: "2026-07-31T10:00:00Z" }, NOW),
+    ).toEqual(["confirm_date_call"]);
+  });
+});
 
 describe("dueCommitmentActions — T-10 chase threshold", () => {
   it("chases at exactly 10 days out (inclusive)", () => {
@@ -131,10 +166,21 @@ describe("dueCommitmentActions — unconfirmed-date branch", () => {
     ]);
   });
 
-  it("one shot: the shared T-10 stamp suppresses a repeat task", () => {
+  it("one shot: its OWN stamp suppresses a repeat task", () => {
+    expect(
+      dueCommitmentActions({ ...unconfirmed, dateConfirmNudgeAt: "2026-08-01T09:00:00Z" }, NOW),
+    ).toEqual([]);
+  });
+
+  it("the customer-reminder stamp is not its stamp — an unconfirmed date still nudges", () => {
+    // This assertion is INVERTED from the original, deliberately. The two
+    // one-shots used to share commitment_chase_t10_at, so either could silence
+    // the other; the damaging direction was the internal nudge suppressing the
+    // customer's 25%-due reminder entirely. They are independent now, and an
+    // unconfirmed date near the move always deserves the call.
     expect(
       dueCommitmentActions({ ...unconfirmed, commitmentChaseT10At: "2026-08-01T09:00:00Z" }, NOW),
-    ).toEqual([]);
+    ).toEqual(["confirm_date_call"]);
   });
 });
 

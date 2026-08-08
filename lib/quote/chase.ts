@@ -348,7 +348,14 @@ export interface CommitmentSweepInput {
   /** Frozen at raise (25% × gross − deposit at that moment). */
   commitmentInvoiceAmount: number | null;
   commitmentPaidAt: string | null;
+  /** One-shot marker for the CUSTOMER commitment reminder email. */
   commitmentChaseT10At: string | null;
+  /** One-shot marker for the INTERNAL "confirm the move date" call task.
+   *  Separate from commitmentChaseT10At: sharing one stamp meant whichever
+   *  fired first silenced the other, and in practice the internal nudge always
+   *  won — so a customer who confirmed their date and was invoiced 25% never
+   *  got the reminder about it. */
+  dateConfirmNudgeAt: string | null;
   dateReleasableAt: string | null;
   chasePaused: boolean;
 }
@@ -384,11 +391,11 @@ export function dueCommitmentActions(
   // chase email after the move date reads as tone-deaf automation.
   if (days === null || days < 0) return [];
 
-  // Date not confirmed → nothing is invoiced yet. At T-10 a human calls to
-  // get the confirmation (one shot — commitment_chase_t10_at covers both
-  // T-10 variants); no customer email either way.
+  // Date not confirmed → nothing is invoiced yet. At T-10 a human calls to get
+  // the confirmation; no customer email either way. Its own one-shot stamp, so
+  // raising it never consumes the customer commitment reminder's.
   if (!input.dateConfirmedAt) {
-    return days <= CONFIRM_CALL_DAYS_BEFORE && !input.commitmentChaseT10At && !input.chasePaused
+    return days <= CONFIRM_CALL_DAYS_BEFORE && !input.dateConfirmNudgeAt && !input.chasePaused
       ? ["confirm_date_call"]
       : [];
   }

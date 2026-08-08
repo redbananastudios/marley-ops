@@ -653,7 +653,7 @@ export async function GET(req: Request) {
   const { data: commitmentQuotes, error: commitmentQueryError } = await sb
     .from("quotes")
     .select(
-      "id, lead_id, quote_ref, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
+      "id, lead_id, quote_ref, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
@@ -713,6 +713,7 @@ export async function GET(req: Request) {
               quote.commitment_invoice_amount == null ? null : Number(quote.commitment_invoice_amount),
             commitmentPaidAt: quote.commitment_paid_at,
             commitmentChaseT10At: quote.commitment_chase_t10_at,
+            dateConfirmNudgeAt: quote.date_confirm_nudge_at,
             dateReleasableAt: quote.date_releasable_at,
             chasePaused: lead.chase_paused,
           },
@@ -774,12 +775,27 @@ export async function GET(req: Request) {
           return !!won?.length;
         };
 
+        /** Single-winner stamp for the INTERNAL confirm-date nudge. Its own
+         *  column so raising it never consumes the customer commitment
+         *  reminder's one-shot (they are different messages to different
+         *  people). Same CAS discipline as stampT10. */
+        const stampConfirmNudge = async (): Promise<boolean> => {
+          const { data: won, error: stampError } = await sb
+            .from("quotes")
+            .update({ date_confirm_nudge_at: now.toISOString() } as never)
+            .eq("id", quote.id)
+            .is("date_confirm_nudge_at", null)
+            .select("id");
+          if (stampError) throw new Error(`confirm-date nudge stamp failed: ${stampError.message}`);
+          return !!won?.length;
+        };
+
         if (actions.includes("confirm_date_call")) {
           const taskOk = await ensureCommitmentCallTask(
             `Their move (${quote.moving_date}) is under 10 days away but the move date has not been confirmed yet — call to confirm the move date (${quote.quote_ref}).`,
             "confirm_date",
           );
-          if (taskOk && (await stampT10())) {
+          if (taskOk && (await stampConfirmNudge())) {
             await sb.from("activities").insert({
               lead_id: lead.id,
               client_id: lead.client_id,

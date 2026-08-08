@@ -1671,6 +1671,24 @@ export async function confirmMoveDate(
   // skipped markDepositPaid (a carried deposit on a re-quote).
   await ensureRemovalAppointment(sb, quote);
 
+  // The T-10 "call them, the date isn't confirmed" task is answered by this
+  // confirmation. Nothing closed it — markCommitmentPaid only closes the
+  // commitment-chase variant, and when 25% ≤ the deposit no commitment invoice
+  // is raised at all, so that never runs and the card was permanent: still
+  // telling the office to ring about a date the customer confirmed themselves,
+  // through the move and forever after.
+  const { error: nudgeCloseError } = await sb
+    .from("follow_ups")
+    .update({ status: "done", outcome: "reached" })
+    .eq("lead_id", quote.lead_id)
+    .eq("reason", "custom")
+    .eq("source", "commitment_chase")
+    .eq("metadata->>kind", "confirm_date")
+    .eq("status", "open");
+  if (nudgeCloseError) {
+    log.warn("date_confirm.nudge_close_failed", { quoteId: quote.id, error: nudgeCloseError.message });
+  }
+
   // Raise the commitment invoice (fail-soft — it self-heals via /q + cron).
   const refreshed = (await ensureCommitmentInvoice(sb, quote.id)) ?? quote;
   const settings = await getBusinessSettings(sb);
