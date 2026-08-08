@@ -1038,6 +1038,9 @@ export type Database = {
           provider_error: string | null
           provider_id: string | null
           provider_outcome_unknown: boolean
+          smtp_fallback_attempted_at: string | null
+          bounced_at: string | null
+          bounce_kind: string | null
           provider_payload_hash: string | null
           provider_started_at: string | null
           quote_id: string | null
@@ -1071,6 +1074,9 @@ export type Database = {
           provider_error?: string | null
           provider_id?: string | null
           provider_outcome_unknown?: boolean
+          smtp_fallback_attempted_at?: string | null
+          bounced_at?: string | null
+          bounce_kind?: string | null
           provider_payload_hash?: string | null
           provider_started_at?: string | null
           quote_id?: string | null
@@ -1104,6 +1110,9 @@ export type Database = {
           provider_error?: string | null
           provider_id?: string | null
           provider_outcome_unknown?: boolean
+          smtp_fallback_attempted_at?: string | null
+          bounced_at?: string | null
+          bounce_kind?: string | null
           provider_payload_hash?: string | null
           provider_started_at?: string | null
           quote_id?: string | null
@@ -2383,6 +2392,8 @@ export type Database = {
           property_size: string | null
           quote_chase_at: string | null
           quote_chase_step: number
+          email_invalid_at: string | null
+          email_invalid_reason: string | null
           referral_commission: number | null
           referrer_answer: string | null
           review_requested_at: string | null
@@ -2451,6 +2462,8 @@ export type Database = {
           property_size?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
+          email_invalid_at?: string | null
+          email_invalid_reason?: string | null
           referral_commission?: number | null
           referrer_answer?: string | null
           review_requested_at?: string | null
@@ -2519,6 +2532,8 @@ export type Database = {
           property_size?: string | null
           quote_chase_at?: string | null
           quote_chase_step?: number
+          email_invalid_at?: string | null
+          email_invalid_reason?: string | null
           referral_commission?: number | null
           referrer_answer?: string | null
           review_requested_at?: string | null

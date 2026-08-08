@@ -5,6 +5,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { classifyBounce, suppressesAddress } from "@/lib/comms/bounce";
 import { htmlToText, splitReply } from "@/lib/comms/extract-reply";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
@@ -17,8 +18,19 @@ export const dynamic = "force-dynamic";
 type Sb = SupabaseClient<Database>;
 type InboundEvent = {
   type?: string;
-  data?: { email_id?: string; id?: string; from?: string; to?: string[]; subject?: string };
+  data?: {
+    email_id?: string;
+    id?: string;
+    from?: string;
+    to?: string[];
+    subject?: string;
+    /** Delivery-failure events carry the classification here. */
+    bounce?: { type?: string; subType?: string; message?: string };
+  };
 };
+
+/** Delivery-failure events we act on (everything else is still ignored). */
+const BOUNCE_EVENTS = new Set(["email.bounced", "email.complained", "email.failed"]);
 
 function verifySvix(payload: string, headers: Headers, secret: string): boolean {
   const id = headers.get("svix-id");
@@ -143,6 +155,124 @@ function requireDb(error: { message: string } | null, step: string): void {
   if (error) throw new Error(`${step}: ${error.message}`);
 }
 
+/**
+ * A message we sent came back undeliverable (or the recipient marked it spam).
+ *
+ * Resend accepts a send to a mistyped address with a 200, so without this the
+ * whole ladder — quote email, three chases, both deposit reminders — is recorded
+ * as delivered while every one bounces, and at day 30 the chase cron marks the
+ * lead declined/'no_response': a false loss reason for someone who never
+ * received anything. Recording the bounce stops the silence three ways: the send
+ * carries its real outcome, the lead's address is flagged, and chasing is paused
+ * (which also keeps the lead out of the cron's lapse query, so the false loss
+ * can no longer happen) with a call task naming what to do about it.
+ *
+ * A SOFT bounce (full mailbox, temporary defer) is recorded but does NOT
+ * invalidate the address — those recover on their own and suppressing them would
+ * lose real customers.
+ */
+async function processBounce(
+  sb: Sb,
+  eventType: string,
+  data: NonNullable<InboundEvent["data"]>,
+): Promise<{ matched: boolean }> {
+  const providerId = data.email_id ?? data.id ?? null;
+  const kind = classifyBounce(eventType, data.bounce?.type);
+  const detail = data.bounce?.message ?? data.bounce?.subType ?? eventType;
+
+  if (!providerId) {
+    log.warn("webhook.resend.bounce_no_provider_id", { eventType });
+    return { matched: false };
+  }
+
+  const { data: comm, error: commError } = await sb
+    .from("communications")
+    .select("id, lead_id, client_id, to_address, subject")
+    .eq("provider_id", providerId)
+    .limit(1)
+    .maybeSingle();
+  if (commError) {
+    log.error("webhook.resend.bounce_lookup_failed", { providerId, error: commError.message });
+    throw new Error(`bounce lookup failed: ${commError.message}`);
+  }
+  if (!comm) {
+    // Nothing to attach it to (an alert or digest, or a row predating this).
+    log.info("webhook.resend.bounce_unmatched", { providerId, eventType });
+    return { matched: false };
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error: stampError } = await sb
+    .from("communications")
+    .update({ bounced_at: nowIso, bounce_kind: kind } as never)
+    .eq("id", comm.id);
+  if (stampError) log.warn("webhook.resend.bounce_stamp_failed", { commId: comm.id, error: stampError.message });
+
+  // Transient failures clear themselves — record and stop there.
+  if (!suppressesAddress(kind)) {
+    log.info("webhook.resend.soft_bounce", { commId: comm.id, to: comm.to_address });
+    return { matched: true };
+  }
+
+  if (!comm.lead_id) return { matched: true };
+
+  const reason = kind === "complaint"
+    ? "The recipient marked our email as spam."
+    : `Email to ${comm.to_address} hard-bounced (${detail}).`;
+  const { error: leadError } = await sb
+    .from("leads")
+    .update({ email_invalid_at: nowIso, email_invalid_reason: reason.slice(0, 300), chase_paused: true } as never)
+    .eq("id", comm.lead_id);
+  if (leadError) log.warn("webhook.resend.bounce_lead_flag_failed", { leadId: comm.lead_id, error: leadError.message });
+
+  // One open call task per lead — the office cannot email their way out of this.
+  const { data: openTask } = await sb
+    .from("follow_ups")
+    .select("id")
+    .eq("lead_id", comm.lead_id)
+    .eq("reason", "custom")
+    .eq("source", "email_bounced")
+    .eq("status", "open")
+    .limit(1)
+    .maybeSingle();
+  const notes = kind === "complaint"
+    ? `${comm.to_address} marked our email as spam — stop emailing them and call instead if the job is still live.`
+    : `Email to ${comm.to_address} bounced, so automatic reminders can't reach them — call to confirm the right address. (${detail})`;
+  if (!openTask) {
+    const { data: lead } = await sb.from("leads").select("estimator_id").eq("id", comm.lead_id).maybeSingle();
+    await sb.from("follow_ups").insert({
+      lead_id: comm.lead_id,
+      client_id: comm.client_id,
+      reason: "custom",
+      status: "open",
+      due_at: nowIso,
+      assigned_to: lead?.estimator_id ?? null,
+      source: "email_bounced",
+      notes,
+    } as never);
+  } else {
+    await sb.from("follow_ups").update({ notes, due_at: nowIso }).eq("id", openTask.id);
+  }
+
+  await sb.from("activities").insert({
+    lead_id: comm.lead_id,
+    client_id: comm.client_id,
+    actor_id: null,
+    type: "note",
+    summary: kind === "complaint"
+      ? `Recipient marked our email as spam (${comm.subject ?? "email"}) — chasing paused`
+      : `Email to ${comm.to_address} bounced — chasing paused, call task raised`,
+    meta: { communication_id: comm.id, bounce_kind: kind, auto: true },
+  });
+
+  await sendOpsAlert(`Email undeliverable — ${comm.to_address}`, [
+    `<strong>${esc(comm.to_address)}</strong> ${kind === "complaint" ? "marked our email as spam" : "bounced"}: ${esc(detail)}.`,
+    `Chasing is paused for that lead and a call task is in Follow-ups. Their automatic reminders will not reach them until the address is corrected.`,
+  ], "system").catch(() => {});
+
+  return { matched: true };
+}
+
 async function processInbound(
   sb: Sb,
   eventId: string,
@@ -150,6 +280,9 @@ async function processInbound(
   event: InboundEvent,
 ): Promise<{ matched: boolean }> {
   const data = event.data!;
+  if (event.type && BOUNCE_EVENTS.has(event.type)) {
+    return processBounce(sb, event.type, data);
+  }
   const token = (data.to ?? []).map(tokenFromReplyAddress).find(Boolean) ?? null;
   const from = data.from ?? "unknown sender";
   const subject = data.subject ?? "(no subject)";
@@ -314,7 +447,11 @@ export async function POST(req: Request) {
     log.warn("webhook.resend.payload_invalid");
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
-  if (event.type !== "email.received" || !event.data) return NextResponse.json({ ok: true });
+  const eventType = event.type;
+  const isBounce = !!eventType && BOUNCE_EVENTS.has(eventType);
+  if (!eventType || (eventType !== "email.received" && !isBounce) || !event.data) {
+    return NextResponse.json({ ok: true });
+  }
 
   const eventId = req.headers.get("svix-id")!;
   const payloadHash = createHash("sha256").update(payload).digest("hex");
@@ -322,7 +459,7 @@ export async function POST(req: Request) {
   const { data: claimRows, error: claimError } = await sb.rpc("claim_webhook_event", {
     p_provider: "resend",
     p_event_id: eventId,
-    p_event_type: event.type,
+    p_event_type: eventType,
     p_payload_hash: payloadHash,
     p_lease_seconds: 300,
   });
