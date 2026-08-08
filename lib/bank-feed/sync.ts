@@ -90,6 +90,11 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
       .eq("status", "accepted")
       .order("id")
       .range(f, t),
+    // strict: this set defines what an incoming payment is ALLOWED to match
+    // against. Failing soft would hand the matcher half a ledger, and real
+    // customer money would sit 'unmatched' for a human who has no way of
+    // knowing the matcher was working from a partial view.
+    { strict: true },
   );
 
   // Balance-paid lookup: only deposit-paid quotes can yield a balance item,

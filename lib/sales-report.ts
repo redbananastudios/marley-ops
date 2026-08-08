@@ -7,7 +7,7 @@
  *
  * The four revenue lenses:
  *  - generated  = value of booked jobs MOVING in the period
- *  - paid       = money actually received in the period (deposits + balances)
+ *  - paid       = money actually received in the period (deposits + commitments + balances)
  *  - projected  = value of quotes WON in the period
  *  - potential  = value of all quotes SENT in the period (one per lead)
  */
@@ -26,6 +26,10 @@ export interface SalesQuote {
   moving_date: string | null;
   deposit_amount: number | null;
   deposit_paid_at: string | null;
+  /** Payments Policy v2 made the commitment (25% of gross, less the deposit) a
+   *  real THIRD payment. /payments counts it; this report did not. */
+  commitment_invoice_amount?: number | null;
+  commitment_paid_at?: string | null;
   /** Stamped when a booking is cancelled. The quote deliberately STAYS
    *  status='accepted' (the unwind only stamps this), so every "is this won"
    *  test must read it or refunded jobs count as revenue. */
@@ -150,6 +154,15 @@ export function buildSalesReport(
   // the now-superseded old row (supersedeSiblingQuotes), so one real deposit lives
   // on two rows. Counting only live rows credits the carried deposit exactly once.
   for (const q of live) {
+    // The commitment is a real payment that lands between deposit and balance.
+    // Omitting it made "Money paid" under-report every confirmed job by 25%
+    // minus the deposit until the balance arrived, so this card and /payments
+    // could never reconcile — while the card's own caption promised "money
+    // actually received in the period".
+    if (inRange(ukDayOf(q.commitment_paid_at ?? null)) && q.commitment_invoice_amount) {
+      paidTotal += Number(q.commitment_invoice_amount);
+      paidCount++;
+    }
     if (inRange(ukDayOf(q.deposit_paid_at)) && q.deposit_amount) {
       paidTotal += Number(q.deposit_amount);
       paidCount++;

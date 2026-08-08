@@ -36,23 +36,38 @@ export async function GET(req: Request) {
   const run = await runCron("fleet-reminders", async () => {
     const admin = createAdminClient();
 
-    const { data: settings } = await admin
+    // Both reads THROW rather than fail open. A failed settings read used to be
+    // indistinguishable from "the feature is switched off", and a failed vehicle
+    // read from "the fleet is empty" — either way the job reported a healthy
+    // {due: 0} every morning while MOT / tax / insurance reminders stopped
+    // entirely. The business end of that is an untaxed or uninsured van on a
+    // job, so the failure mode has to be "stop loudly", not "conclude nothing
+    // is due".
+    const { data: settings, error: settingsError } = await admin
       .from("business_settings")
       .select("fleet_reminders_enabled, fleet_alert_recipients")
       .eq("id", true)
       .maybeSingle();
+    if (settingsError) throw new Error(`fleet-reminders: settings read failed — ${settingsError.message}`);
     if (!settings?.fleet_reminders_enabled) return { skipped: "disabled" as const, due: 0 };
     const recipients = (settings.fleet_alert_recipients ?? []).filter((e): e is string => !!e);
 
-    const { data: vehicles } = await admin
+    const { data: vehicles, error: vehiclesError } = await admin
       .from("vehicles")
       .select("id, name, tax_due, mot_due, insurance_renewal, service_due, end_of_term")
       .eq("is_active", true);
+    if (vehiclesError) throw new Error(`fleet-reminders: vehicle read failed — ${vehiclesError.message}`);
     // Page the whole ledger — it grows one row per (vehicle, expiry, due_date,
     // threshold) forever, so an unbounded select would hit PostgREST's 1000-row
     // cap and silently drop "already sent" rows, re-sending old reminders.
+    // strict: a PARTIAL ledger is worse than none here. fetchAllRows fails soft
+    // by default, so a mid-page error would silently drop "already sent" rows —
+    // exactly the ones this ledger exists to remember — and the job would
+    // re-email MOT/tax/insurance reminders that already went out, then re-log
+    // them as freshly fired. Throwing keeps the run honest.
     const logRows = await fetchAllRows((f, t) =>
       admin.from("vehicle_reminder_log").select("vehicle_id, expiry_type, due_date, threshold").order("id").range(f, t),
+      { strict: true },
     );
 
     const fleet: FleetVehicle[] = (vehicles ?? []).map((v) => ({

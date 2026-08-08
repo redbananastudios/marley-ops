@@ -200,7 +200,7 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
       sb
         .from("quotes")
         .select(
-          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at, booking_cancelled_at",
+          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at",
         )
         .order("id")
         .range(f, t),

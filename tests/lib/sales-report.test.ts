@@ -71,6 +71,55 @@ describe("quoteSentDay / dedupePerLead", () => {
   });
 });
 
+describe("paid lens — the commitment is a real payment", () => {
+  it("counts a commitment paid in the period alongside the deposit", () => {
+    // Payments Policy v2 made the commitment (25% of gross, less the deposit) a
+    // third payment. /payments counted it; this report did not, so every
+    // confirmed job under-reported until the balance landed and the two revenue
+    // surfaces could never reconcile.
+    const report = buildSalesReport(
+      [
+        quote({
+          id: "q1",
+          lead_id: "l1",
+          status: "accepted",
+          deposit_amount: 100,
+          deposit_paid_at: "2026-07-05T10:00:00+01:00",
+          commitment_invoice_amount: 400,
+          commitment_paid_at: "2026-07-12T10:00:00+01:00",
+        }),
+      ],
+      [],
+      [],
+      "2026-07-01",
+      "2026-07-31",
+    );
+    expect(report.paid.total).toBe(500);
+    expect(report.paid.count).toBe(2);
+  });
+
+  it("ignores a commitment paid outside the window", () => {
+    const report = buildSalesReport(
+      [
+        quote({
+          id: "q1",
+          lead_id: "l1",
+          status: "accepted",
+          deposit_amount: 100,
+          deposit_paid_at: "2026-07-05T10:00:00+01:00",
+          commitment_invoice_amount: 400,
+          commitment_paid_at: "2026-08-02T10:00:00+01:00",
+        }),
+      ],
+      [],
+      [],
+      "2026-07-01",
+      "2026-07-31",
+    );
+    expect(report.paid.total).toBe(100);
+  });
+});
+
 describe("buildSalesReport", () => {
   it("the four revenue lenses measure different things", () => {
     const quotes = [

@@ -18,6 +18,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
+import { log } from "@/lib/log";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
@@ -583,6 +584,21 @@ export async function refundCardPayment(
   const quote = await fetchQuoteById(sb, row.quote_id);
   const label = `£${(amount / 100).toFixed(2)}`;
   if (row.lead_id) {
+    // The double-payment task asked "decide which payment to refund". Issuing
+    // the refund IS that decision, and nothing closed it — neither this module
+    // nor app/actions/refunds.ts touched follow_ups — so the card that sent the
+    // operator here stayed open on the board forever, still asking.
+    const { error: taskError } = await sb
+      .from("follow_ups")
+      .update({ status: "done", outcome: "reached" })
+      .eq("lead_id", row.lead_id)
+      .eq("reason", "custom")
+      .eq("source", "card_payment")
+      .eq("status", "open");
+    if (taskError) {
+      log.warn("card.refund.double_payment_task_close_failed", { cardPaymentId: row.id, error: taskError.message });
+    }
+
     await sb.from("activities").insert({
       lead_id: row.lead_id,
       client_id: row.client_id,
