@@ -376,6 +376,27 @@ async function supersedeSiblingQuotes(
   return result;
 }
 
+/**
+ * Guard for adopting an ORPHAN Zoho invoice found by reference.
+ *
+ * Adoption exists for crash recovery: we created the invoice in Zoho, died
+ * before writing the id back, and on the next pass find it again. But the same
+ * lookup also finds an invoice a HUMAN raised under that reference — and Connor
+ * works in Zoho directly. Adopting that verbatim silently binds our record to a
+ * different number: the panel records what it computed while the customer gets
+ * the other figure on the PDF, and whichever they pay leaves one system wrong.
+ *
+ * findInvoiceByReference returns the document total precisely so adopters can
+ * check (its own comment says "never adopt a mismatch"); the storage biller does
+ * this via classifyPendingClaim, and the three quote-money adopters did not.
+ * Missing total = adopt (older Zoho payloads omit it; refusing would strand a
+ * genuine crash-recovery orphan).
+ */
+export function adoptedInvoiceMatches(zohoTotal: number | undefined, expected: number): boolean {
+  if (typeof zohoTotal !== "number" || Number.isNaN(zohoTotal)) return true;
+  return Math.abs(zohoTotal - expected) <= 0.005;
+}
+
 /* ------------------------------------------------------------- accept */
 
 /**
@@ -996,6 +1017,22 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
   try {
     // Crash-recovery: adopt an orphan created on a previous attempt.
     let inv = await findInvoiceByReference(ref);
+    if (inv && !adoptedInvoiceMatches(inv.total, deposit)) {
+      // An invoice under this reference that bills a DIFFERENT figure was not
+      // created by our crashed run — it is Connor's, raised by hand in Zoho.
+      // Adopting it binds our record to his number while the customer holds his
+      // PDF, so whichever they pay leaves one system wrong. Release and alert.
+      await sb
+        .from("quotes")
+        .update({ zoho_deposit_invoice_id: null } as never)
+        .eq("id", quoteId)
+        .eq("zoho_deposit_invoice_id", "pending");
+      await sendOpsAlert(`Deposit invoice NOT adopted — figure mismatch (${quote.quote_ref})`, [
+        `An invoice already exists in Zoho under reference <strong>${ref}</strong> for £${(inv.total ?? 0).toFixed(2)}, but ops computed £${deposit.toFixed(2)}.`,
+        `It was NOT adopted. Reconcile ${inv.invoiceNumber} in Zoho (void it, or correct the figure), then retry.`,
+      ], "money").catch(() => {});
+      return quote;
+    }
     let contactId = quote.zoho_contact_id;
     if (!inv) {
       if (!isRealZohoId(contactId)) {
@@ -1297,6 +1334,22 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
   try {
     // Crash-recovery: adopt an orphan created on a previous attempt.
     let inv = await findInvoiceByReference(ref);
+    if (inv && !adoptedInvoiceMatches(inv.total, amount)) {
+      // An invoice under this reference that bills a DIFFERENT figure was not
+      // created by our crashed run — it is Connor's, raised by hand in Zoho.
+      // Adopting it binds our record to his number while the customer holds his
+      // PDF, so whichever they pay leaves one system wrong. Release and alert.
+      await sb
+        .from("quotes")
+        .update({ zoho_commitment_invoice_id: null } as never)
+        .eq("id", quoteId)
+        .eq("zoho_commitment_invoice_id", "pending");
+      await sendOpsAlert(`Commitment invoice NOT adopted — figure mismatch (${quote.quote_ref})`, [
+        `An invoice already exists in Zoho under reference <strong>${ref}</strong> for £${(inv.total ?? 0).toFixed(2)}, but ops computed £${amount.toFixed(2)}.`,
+        `It was NOT adopted. Reconcile ${inv.invoiceNumber} in Zoho (void it, or correct the figure), then retry.`,
+      ], "money").catch(() => {});
+      return quote;
+    }
     let contactId = quote.zoho_contact_id;
     if (!inv) {
       if (!isRealZohoId(contactId)) {
@@ -1933,6 +1986,22 @@ export async function createBalanceInvoiceFlow(
   const ref = balanceReference(quote.quote_ref);
   try {
     let inv = await findInvoiceByReference(ref); // crash-recovery orphan adoption
+    if (inv && !adoptedInvoiceMatches(inv.total, amount)) {
+      // An invoice under this reference that bills a DIFFERENT figure was not
+      // created by our crashed run — it is Connor's, raised by hand in Zoho.
+      // Adopting it binds our record to his number while the customer holds his
+      // PDF, so whichever they pay leaves one system wrong. Release and alert.
+      await sb
+        .from("quotes")
+        .update({ zoho_balance_invoice_id: null } as never)
+        .eq("id", quoteId)
+        .eq("zoho_balance_invoice_id", "pending");
+      await sendOpsAlert(`Final invoice NOT adopted — figure mismatch (${quote.quote_ref})`, [
+        `An invoice already exists in Zoho under reference <strong>${ref}</strong> for £${(inv.total ?? 0).toFixed(2)}, but ops computed £${amount.toFixed(2)}.`,
+        `It was NOT adopted. Reconcile ${inv.invoiceNumber} in Zoho (void it, or correct the figure), then retry.`,
+      ], "money").catch(() => {});
+      return { ok: false, error: `An invoice for ${ref} already exists in Zoho at a different figure — reconcile it there first.` };
+    }
     let contactId = quote.zoho_contact_id;
     if (!inv) {
       if (!isRealZohoId(contactId)) {

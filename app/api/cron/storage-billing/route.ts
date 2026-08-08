@@ -5,7 +5,11 @@ import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { getInvoiceStatus } from "@/lib/zoho";
-import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
+import {
+  raiseDueStorageInvoices,
+  repairPendingStorageClaims,
+  resendUnemailedStorageInvoices,
+} from "@/lib/storage/raise-storage-invoices";
 
 /**
  * Storage billing (daily Vercel cron, ~08:00 UK). The raise loop lives in the
@@ -38,6 +42,13 @@ export async function GET(req: Request) {
 
     const summary = await raiseDueStorageInvoices(admin, { todayIso: today });
 
+    // Retry any invoice raised on an earlier run whose customer email never
+    // went out. This path has no dispatchComm behind it (there is no lead or
+    // quote to hang a communications row on), so this sweep IS its retry layer —
+    // without it a single Resend blip at the billing hour leaves a customer
+    // billed in Zoho with nothing in their inbox, permanently.
+    const resend = await resendUnemailedStorageInvoices(admin, { todayIso: today });
+
     // A ledger read failed — NOTHING was raised (raising on partial data
     // double-bills). Alert the money desk and mark the run failed so the
     // watchdog and /automations cannot show a false green.
@@ -48,6 +59,7 @@ export async function GET(req: Request) {
           `The ${today} run stopped before raising anything: ${summary.fatal}`,
           "No invoices were raised on partial data; the next run retries automatically.",
           ...repair.alerts,
+          ...resend.alerts,
         ],
         "money",
       );
@@ -63,13 +75,15 @@ export async function GET(req: Request) {
         errors: summary.errors,
         billingFailures: summary.billingFailures,
         repairAlerts: repair.alerts,
+        resentInvoiceEmails: resend.resent,
+        resendAlerts: resend.alerts,
       };
     }
 
     // A billing failure that isn't surfaced becomes a permanent under-bill. One
     // consolidated money alert (not one per period) so a full Zoho outage doesn't
     // flood the accounts desk. Repair-sweep alerts merge in here.
-    const failures = [...repair.alerts, ...summary.billingFailures];
+    const failures = [...repair.alerts, ...resend.alerts, ...summary.billingFailures];
     if (failures.length) {
       await sendOpsAlert(
         "Storage billing could not raise some invoices",
@@ -162,9 +176,11 @@ export async function GET(req: Request) {
       emailed: summary.emailed,
       statusUpdated,
       stranded: strandedCount,
+      resentInvoiceEmails: resend.resent,
       errors: summary.errors,
       billingFailures: summary.billingFailures,
       repairAlerts: repair.alerts,
+      resendAlerts: resend.alerts,
     };
   });
   return NextResponse.json(

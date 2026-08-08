@@ -659,3 +659,95 @@ export async function repairPendingStorageClaims(
   }
   return result;
 }
+
+/**
+ * Re-send storage invoices that were raised but whose email never went out.
+ *
+ * The invoice is created in Zoho FIRST and emailed second, and the email is
+ * deliberately fail-soft (the invoice stands either way). But nothing ever
+ * re-attempted it: `repairPendingStorageClaims` only looks at claims still
+ * `status='pending'`, so a fully-raised invoice with `emailed_at is null` stayed
+ * that way permanently. A single Resend blip at the billing hour therefore left
+ * customers legally invoiced in Zoho with no invoice in their inbox — and next
+ * month they receive a second bill plus a chase for one they never saw.
+ *
+ * Unlike customer quote mail this path does not go through dispatchComm (there
+ * is no lead or quote to hang a communications row on), so this sweep IS its
+ * retry layer. The `emailed_at is null` guard inside emailStorageInvoice makes a
+ * double-send impossible even if two runs overlap.
+ */
+export async function resendUnemailedStorageInvoices(
+  admin: SupabaseClient,
+  opts: { todayIso: string; letId?: string },
+): Promise<{ resent: number; alerts: string[] }> {
+  const result = { resent: 0, alerts: [] as string[] };
+  // Leave the main raise loop a window to do its own emailing before we treat a
+  // row as missed.
+  const cutoffIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+  let query = admin
+    .from("storage_invoices")
+    .select(
+      "id, let_id, client_id, period_start, period_end, amount, kind, handling_amount, zoho_invoice_id, zoho_invoice_number, zoho_invoice_url, created_at",
+    )
+    .eq("status", "sent")
+    .is("emailed_at", null)
+    .not("zoho_invoice_number", "is", null)
+    .lt("created_at", cutoffIso)
+    .order("created_at", { ascending: true })
+    .limit(50);
+  if (opts.letId) query = query.eq("let_id", opts.letId);
+  const { data: rows, error } = await query;
+  if (error) {
+    result.alerts.push(`Un-emailed storage invoice sweep could not read its rows: ${error.message}`);
+    return result;
+  }
+  if (!rows?.length) return result;
+
+  const letIds = [...new Set(rows.map((r) => r.let_id))];
+  const clientIds = [...new Set(rows.map((r) => r.client_id).filter((id): id is string => !!id))];
+  const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
+    admin.from("storage_lets").select("id, unit_id").in("id", letIds),
+    admin.from("storage_units").select("id, code, unit_type, site_id"),
+    admin.from("storage_sites").select("id, name"),
+    admin.from("clients").select("id, display_name, email").in("id", clientIds),
+  ]);
+  const letById = new Map((letsRes.data ?? []).map((l) => [l.id, l]));
+  const unitById = new Map((unitsRes.data ?? []).map((u) => [u.id, u]));
+  const siteById = new Map((sitesRes.data ?? []).map((s) => [s.id, s.name as string]));
+  const clientById = new Map((clientsRes.data ?? []).map((c) => [c.id, c]));
+
+  for (const row of rows) {
+    const client = clientById.get(row.client_id ?? "");
+    if (!client?.email) {
+      // No address to send to — surface once rather than sweeping it forever.
+      result.alerts.push(
+        `Storage invoice ${row.zoho_invoice_number} has no customer email on file — send it by hand from Zoho.`,
+      );
+      continue;
+    }
+    const let_ = letById.get(row.let_id);
+    const kind = row.kind as DueInvoice["kind"];
+    const usage = Number(row.amount) - Number(row.handling_amount ?? 0);
+    const days = kind === "final" && usage <= 0 ? 0 : daysInclusive(row.period_start, row.period_end);
+    const unit = unitById.get(let_?.unit_id ?? "");
+    const sent = await emailStorageInvoice(admin, {
+      claimId: row.id,
+      clientEmail: client.email,
+      clientName: client.display_name,
+      unitLabel: buildUnitLabel(unit, siteById),
+      periodLabel: periodLabelFor({ kind, period_start: row.period_start, period_end: row.period_end, days }),
+      amount: Number(row.amount),
+      kind,
+      invoiceId: row.zoho_invoice_id as string,
+      invoiceNumber: row.zoho_invoice_number as string,
+      invoiceUrl: row.zoho_invoice_url as string | null,
+    });
+    if (sent.ok) result.resent++;
+    else {
+      result.alerts.push(
+        `Storage invoice ${row.zoho_invoice_number} still could not be emailed to ${client.email} (${sent.error}) — the customer has been billed but has no copy.`,
+      );
+    }
+  }
+  return result;
+}
