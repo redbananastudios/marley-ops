@@ -41,7 +41,7 @@ export async function getPushFlags(sb: Sb): Promise<PushFlags> {
   const { data } = await sb
     .from("business_settings")
     .select(
-      "push_enabled, push_new_enquiry_enabled, push_payment_event_enabled, push_crew_job_enabled, push_fleet_expiry_enabled",
+      "push_enabled, push_new_enquiry_enabled, push_payment_event_enabled, push_crew_job_enabled, push_fleet_expiry_enabled, push_survey_assigned_enabled",
     )
     .eq("id", true)
     .maybeSingle();
@@ -52,6 +52,7 @@ export async function getPushFlags(sb: Sb): Promise<PushFlags> {
       payment_event: data?.push_payment_event_enabled !== false,
       crew_job: data?.push_crew_job_enabled !== false,
       fleet_expiry: data?.push_fleet_expiry_enabled !== false,
+      survey_assigned: data?.push_survey_assigned_enabled !== false,
     },
   };
 }

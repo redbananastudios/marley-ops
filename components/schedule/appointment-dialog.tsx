@@ -16,6 +16,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, Trash2, Phone, Mail, User, Home, ArrowRight, StickyNote } from "lucide-react";
 import { toast } from "sonner";
+import { reportSurveySend, duplicateWarning } from "@/lib/comms/survey-send-report";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -324,6 +325,11 @@ export function AppointmentDialog({
   // Packing day (removals only): crew-only visit, usually the day before.
   const [packOn, setPackOn] = useState(false);
   const [packDate, setPackDate] = useState<string>("");
+  // Surveys only: whether the customer is written to at all (Peter 2026-08-08).
+  // Defaults ON — the customer normally should be told — but it is on screen
+  // before you press the button, so sending is a visible choice rather than a
+  // side effect you find out about afterwards.
+  const [notifyCustomer, setNotifyCustomer] = useState(true);
 
   // (Re)seed the form whenever the dialog opens or its target changes.
   useEffect(() => {
@@ -337,6 +343,7 @@ export function AppointmentDialog({
       setAllDay(false);
       setPackOn(!!edit.packDate);
       setPackDate(edit.packDate ?? "");
+      setNotifyCustomer(true);
     } else {
       const s = presetStart ?? toLocalInput(roundUpTo15(new Date()));
       setLeadId(presetLeadId ?? NO_LEAD);
@@ -357,6 +364,7 @@ export function AppointmentDialog({
       setAllDay(!!presetAllDay);
       setPackOn(false);
       setPackDate("");
+      setNotifyCustomer(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edit?.id]);
@@ -375,6 +383,10 @@ export function AppointmentDialog({
 
   const estimatorName = (id: string) =>
     id === NO_EST ? null : estimators.find((e) => e.id === id)?.full_name ?? null;
+
+  // The customer behind the current selection — drives the send-confirmation
+  // block, which names the exact address and number being written to.
+  const selectedLead = leadId === NO_LEAD ? null : leads.find((l) => l.id === leadId) ?? null;
 
   // A removal's estimator is the survey's — inherited, never chosen here.
   function inheritSurveyEstimator(leadIdVal: string) {
@@ -426,23 +438,47 @@ export function AppointmentDialog({
       if (isEdit && edit) {
         // Persist the editable metadata. Title/location/status are managed elsewhere
         // (system title, lead address, view-modal actions) — never patched here.
+        // Notes are sent ONLY when they actually changed: the server treats a
+        // supplied empty string as "clear it", so an unchanged (or never-loaded)
+        // field must not be part of the patch at all. Every schedule surface used
+        // to seed this blank, which turned an unrelated edit into a silent wipe.
+        // TIMING FIRST, then the metadata. Order matters when the time and the
+        // estimator change in the same save: doing it the other way round told
+        // the incoming estimator the OLD time (their "you've got a survey"
+        // email is built from the row as it stands), and only corrected it with
+        // a second "it moved" email. This way each person is written to once,
+        // with the time that will actually happen.
+        //
+        // A booked removal is excluded: its date only moves via ChangeDateDialog
+        // so the 7-day money policy applies (the inputs are read-only for it,
+        // this guard is belt-and-braces).
+        if (!lockTiming && (startsAt !== edit.startsAt || endsAt !== edit.endsAt)) {
+          const r = await rescheduleAppointment(edit.id, startsAt, endsAt, { notifyCustomer });
+          if (!r.ok) {
+            toast.error(r.error || "Could not update the time.");
+            return;
+          }
+          if (apptType === "survey" && "comms" in r && r.comms) {
+            const rep = reportSurveySend(r.comms);
+            if (rep.sent) toast.success(`New time sent to the customer by ${rep.sent}.`);
+            if (rep.duplicate) toast.warning(duplicateWarning(rep.duplicate));
+            if (rep.failed) toast.error(`Could not tell the customer by ${rep.failed} — call them.`);
+          }
+        }
+        // Persist the editable metadata. Title/location/status are managed elsewhere
+        // (system title, lead address, view-modal actions) — never patched here.
+        // Notes are sent ONLY when they actually changed: the server treats a
+        // supplied empty string as "clear it", so an unchanged (or never-loaded)
+        // field must not be part of the patch at all. Every schedule surface used
+        // to seed this blank, which turned an unrelated edit into a silent wipe.
+        const notesChanged = notes !== (edit.notes ?? "");
         const meta = await updateAppointment(edit.id, {
-          notes,
+          ...(notesChanged ? { notes } : {}),
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
         });
         if (!meta.ok) {
           toast.error(meta.error || "Could not save appointment.");
           return;
-        }
-        // If timing changed, route it through the reschedule action — except a
-        // booked removal, whose date only moves via ChangeDateDialog (the
-        // inputs are read-only for it, this guard is belt-and-braces).
-        if (!lockTiming && (startsAt !== edit.startsAt || endsAt !== edit.endsAt)) {
-          const r = await rescheduleAppointment(edit.id, startsAt, endsAt);
-          if (!r.ok) {
-            toast.error(r.error || "Could not update the time.");
-            return;
-          }
         }
         // Packing day add/move/remove — only when it actually changed.
         if (apptType === "removal" && edit.leadId) {
@@ -470,6 +506,7 @@ export function AppointmentDialog({
           notes: notes.trim() || undefined,
           allDay,
           packDate: apptType === "removal" && packOn && packDate ? packDate : null,
+          notifyCustomer,
         });
         if (!res.ok) {
           toast.error(res.error || "Could not create appointment.");
@@ -478,13 +515,20 @@ export function AppointmentDialog({
         if ("packWarning" in res && res.packWarning) {
           toast.error(`Removal booked, but the packing day failed: ${res.packWarning}`);
         }
+        if ("surveyWarning" in res && res.surveyWarning) {
+          toast.error(`Survey booked, but its record failed: ${res.surveyWarning}. Photos may have nowhere to attach.`);
+        }
         if (apptType === "survey" && "comms" in res && res.comms) {
-          const { email, sms } = res.comms;
-          const sent = [email === "sent" ? "email" : null, sms === "sent" ? "SMS" : null].filter(Boolean);
-          const failed = [email === "failed" ? "email" : null, sms === "failed" ? "SMS" : null].filter(Boolean);
-          if (sent.length) toast.success(`Survey booked — confirmation ${sent.join(" + ")} sent to the customer.`);
+          const rep = reportSurveySend(res.comms);
+          if (rep.duplicate) toast.warning(duplicateWarning(rep.duplicate, "confirmation"));
+          if (rep.sent) toast.success(`Survey booked — confirmation sent to the customer by ${rep.sent}.`);
+          else if (!notifyCustomer) toast.success("Survey booked. Nothing sent to the customer.");
+          // No email and no phone on the lead: say so rather than letting a bare
+          // "Survey booked." read as "the customer has been told".
+          else if ("noContact" in res && res.noContact)
+            toast.warning("Survey booked, but this customer has no email or phone on file — nothing could be sent.");
           else toast.success("Survey booked.");
-          if (failed.length) toast.error(`Confirmation ${failed.join(" + ")} failed — send it from the lead's Comms tab.`);
+          if (rep.failed) toast.error(`Confirmation by ${rep.failed} failed — send it from the lead's Comms tab.`);
         } else {
           toast.success(apptType === "survey" ? "Survey booked." : "Removal scheduled.");
         }
@@ -685,6 +729,37 @@ export function AppointmentDialog({
               placeholder="Anything the crew needs to know"
             />
           </div>
+
+          {/* Whether we write to the customer at all. Shown for surveys because
+              they are the only booking type that mails the customer straight
+              from this dialog. Naming the exact recipients means the decision is
+              made with the address in view, not after the fact. */}
+          {apptType === "survey" && (selectedLead?.email || selectedLead?.phone) ? (
+            <div className="rounded-md border border-border bg-muted/30 p-3">
+              <label className="flex cursor-pointer items-start gap-2.5 text-sm font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={notifyCustomer}
+                  onChange={(e) => setNotifyCustomer(e.target.checked)}
+                  className="mt-0.5 size-4 accent-[#C03838]"
+                />
+                <span>
+                  {/* Deliberately scoped to the TIME: changing the estimator
+                      notifies both estimators but sends the customer nothing,
+                      so this must not imply otherwise. */}
+                  {isEdit ? "Tell the customer if the time changes" : "Send the customer their confirmation"}
+                  <span className="mt-0.5 block text-xs font-normal text-mist-400">
+                    {[selectedLead.email, selectedLead.phone].filter(Boolean).join(" · ")}
+                  </span>
+                </span>
+              </label>
+              {!notifyCustomer ? (
+                <p className="mt-2 text-xs text-mist-500">
+                  Nothing will be sent. {isEdit ? "They will keep the old time." : "They won't know about the visit."}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">

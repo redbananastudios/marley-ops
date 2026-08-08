@@ -73,7 +73,31 @@ export default async function QuoteDetailPage({
   const estimatorName =
     (user?.user_metadata?.full_name as string | undefined) ?? user?.email ?? null;
 
-  const initialValues = normalizeQuoteValues(quote.state_blob);
+  const blobValues = normalizeQuoteValues(quote.state_blob);
+  // `quotes.moving_date` is the authoritative move date: rescheduleAppointment
+  // and the Change-date flow both write the COLUMN and never touch state_blob.
+  // The builder edits the blob and autosaves it back over the column, so
+  // opening a rescheduled quote and changing anything at all silently reverted
+  // the confirmed date — leaving the diary and the money layer disagreeing with
+  // no error. Seed the form from the column so what you see, and what you save
+  // back, is the real date.
+  // `moving_date` is a text column and legacy rows imported from Neon carry
+  // whatever was in the old system, so only a real yyyy-mm-dd is safe to hand
+  // to <input type="date"> — anything else renders as an empty field, which
+  // reads as "no date" and autosaves back as null.
+  const authoritativeMoveDate =
+    typeof quote.moving_date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(quote.moving_date)
+      ? quote.moving_date
+      : null;
+  const initialValues =
+    authoritativeMoveDate && authoritativeMoveDate !== blobValues.job.moveDate
+      ? {
+          ...blobValues,
+          // A date that came off the diary or the change-date flow is confirmed,
+          // never an estimate — otherwise the quote view labels it "(estimated)".
+          job: { ...blobValues.job, moveDate: authoritativeMoveDate, moveDateEstimated: false },
+        }
+      : blobValues;
   const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
   const emailedCount = quote.email_send_count ?? 0;
 

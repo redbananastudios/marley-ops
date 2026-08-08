@@ -27,7 +27,7 @@ export default async function JobBoardPage({
     fetchAllRows((f, t) =>
       supabase
         .from("appointments")
-        .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id")
+        .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id, notes")
         .neq("status", "cancelled")
         .order("id")
         .range(f, t),

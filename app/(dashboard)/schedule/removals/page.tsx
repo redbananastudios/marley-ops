@@ -27,7 +27,7 @@ export default async function RemovalsSchedulePage({
     fetchAllRows((from, to) =>
       sb
         .from("appointments")
-        .select("id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id")
+        .select("id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id,notes")
         .order("starts_at", { ascending: true })
         .order("id", { ascending: true })
         .range(from, to),
@@ -42,7 +42,13 @@ export default async function RemovalsSchedulePage({
         .range(from, to),
       { strict: true },
     ),
-    sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
+    // Estimator picker: office roles only (see the surveys page for why).
+    sb
+      .from("profiles")
+      .select("id,full_name")
+      .eq("active", true)
+      .in("role", ["estimator", "admin"])
+      .order("full_name", { ascending: true }),
   ]);
 
   const { baseLocation } = await getBusinessSettings(sb);

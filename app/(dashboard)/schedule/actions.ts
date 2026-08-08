@@ -16,7 +16,17 @@ import {
   surveyConfirmEmailText,
   surveyConfirmSms,
   surveyConfirmSubject,
+  surveyRescheduleEmailHtml,
+  surveyRescheduleEmailText,
+  surveyRescheduleSms,
+  surveyRescheduleSubject,
+  surveyCancelledEmailHtml,
+  surveyCancelledEmailText,
+  surveyCancelledSms,
+  surveyCancelledSubject,
 } from "@/lib/comms/survey-email";
+import { notifyEstimatorOfSurvey, ukSlotLabel } from "@/lib/schedule/notify-estimator";
+import type { SendState, SurveySendOutcome } from "@/lib/comms/survey-send-report";
 import { UK_TZ } from "@/lib/uk-time";
 
 async function ctx() {
@@ -47,15 +57,155 @@ export interface CreateAppointmentInput {
   /** Removal only: also put a crew-only packing day on the diary (yyyy-mm-dd,
    *  usually the day before the move). Created 09:00–16:00 UK on that day. */
   packDate?: string | null;
+  /**
+   * Send the customer their survey confirmation (Peter, 2026-08-08 — "on any
+   * email that's going to be sent for a survey, we should confirm with the user
+   * if they want to send it"). The dialog always passes this explicitly from a
+   * visible tick box; it defaults to true so any other caller keeps the
+   * long-standing behaviour rather than silently going quiet.
+   */
+  notifyCustomer?: boolean;
 }
 
-export type ConfirmSendState = "sent" | "failed" | "skipped";
+// Re-exported so existing callers keep working; the canonical union (which now
+// distinguishes a duplicate-suppressed send from a real one) lives with the
+// formatter the UI uses to describe it.
+export type ConfirmSendState = SendState;
+
+export type SurveyCommsResult = SurveySendOutcome;
+
+type LeadForNotice = {
+  id: string;
+  client_id: string | null;
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+  from_address: string | null;
+  from_postcode: string | null;
+};
+
+/**
+ * The customer's survey confirmation — the booked version and the moved
+ * version, which differ only in copy. Shared so a reschedule can never drift
+ * out of step with a booking (before 2026-08-08 a reschedule sent nothing at
+ * all, leaving the customer holding an email for a time we no longer intended
+ * to turn up).
+ *
+ * Fail-soft: a comms hiccup never unbooks or unmoves the visit. Both channels
+ * go through sendCommunication so they are duplicate-guarded and land on the
+ * lead's Comms tab.
+ */
+async function sendSurveyCustomerNotice(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  opts: {
+    kind: "booked" | "moved" | "cancelled";
+    lead: LeadForNotice;
+    estimatorId: string | null;
+    startsAt: string;
+    /** Explicit visit address, else derived from the lead's pickup address. */
+    location?: string | null;
+    /** The slot being replaced — only used by the moved copy. */
+    previousStartsAt?: string | null;
+  },
+): Promise<SurveyCommsResult> {
+  const comms: SurveyCommsResult = { email: "skipped", sms: "skipped" };
+  const { lead, kind } = opts;
+  const starts = new Date(opts.startsAt);
+  const estimator = opts.estimatorId
+    ? (await sb.from("profiles").select("full_name, email, active").eq("id", opts.estimatorId).maybeSingle()).data
+    : null;
+  const confirm = {
+    customerName: lead.name,
+    dateLabel: starts.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
+    timeLabel: starts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ }),
+    estimatorName: estimator?.full_name ?? null,
+    address: opts.location || lead.from_address || lead.from_postcode || null,
+    previousLabel: ukSlotLabel(opts.previousStartsAt) ?? null,
+  };
+
+  const copy = {
+    booked: {
+      subject: surveyConfirmSubject,
+      html: surveyConfirmEmailHtml,
+      text: surveyConfirmEmailText,
+      sms: surveyConfirmSms,
+      templateId: process.env.RESEND_TEMPLATE_SURVEY_CONFIRMATION,
+    },
+    moved: {
+      subject: surveyRescheduleSubject,
+      html: surveyRescheduleEmailHtml,
+      text: surveyRescheduleEmailText,
+      sms: surveyRescheduleSms,
+      templateId: process.env.RESEND_TEMPLATE_SURVEY_RESCHEDULED,
+    },
+    cancelled: {
+      subject: surveyCancelledSubject,
+      html: surveyCancelledEmailHtml,
+      text: surveyCancelledEmailText,
+      sms: surveyCancelledSms,
+      templateId: process.env.RESEND_TEMPLATE_SURVEY_CANCELLED,
+    },
+  }[kind];
+
+  if (lead.email) {
+    // When the Resend template is published (env holds its alias/id), send via the
+    // template so the design is editable in the Resend dashboard without a deploy.
+    // Otherwise fall back to the in-repo HTML.
+    const r = await sendCommunication({
+      channel: "email",
+      // From the SURVEYING estimator (who the customer will actually meet) —
+      // at booking time the lead often has no explicit owner yet, so the
+      // generic owner injection would miss.
+      from: estimator?.active ? ownerFrom(estimator.full_name, estimator.email) : undefined,
+      to: lead.email,
+      subject: copy.subject(confirm),
+      bodyText: copy.text(confirm),
+      ...(copy.templateId
+        ? {
+            template: {
+              id: copy.templateId,
+              variables: {
+                FIRST_NAME: (lead.name || "").trim().split(/\s+/)[0] || "there",
+                DATE_LABEL: confirm.dateLabel,
+                TIME_LABEL: confirm.timeLabel,
+                ESTIMATOR: confirm.estimatorName ?? "One of our team",
+                ADDRESS: confirm.address ?? "To be confirmed",
+                ...(kind === "moved" ? { PREVIOUS: confirm.previousLabel ?? "an earlier time" } : {}),
+              },
+            },
+            // Rendered fallback for the oversize guard + SMTP outage transport.
+            bodyHtml: copy.html(confirm),
+          }
+        : { bodyHtml: copy.html(confirm) }),
+      leadId: lead.id,
+      clientId: lead.client_id ?? undefined,
+    }).catch(() => ({ ok: false as const, error: "send crashed" }));
+    comms.email = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "duplicate" : "failed";
+  }
+
+  if (lead.phone) {
+    const r = await sendCommunication({
+      channel: "sms",
+      to: lead.phone,
+      bodyText: copy.sms(confirm),
+      leadId: lead.id,
+      clientId: lead.client_id ?? undefined,
+    }).catch(() => ({ ok: false as const, error: "send crashed" }));
+    comms.sms = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "duplicate" : "failed";
+  }
+
+  return comms;
+}
 
 export async function createAppointment(input: CreateAppointmentInput) {
   const { sb, userId } = await ctx();
-  // Who actually does this visit — chosen in the dialog, defaults to the creator.
-  // This is what attributes visits to Connor vs Luke for pay + win stats.
-  const estimatorId = input.estimatorId ?? userId;
+  // Who actually does this visit — chosen in the dialog, defaults to the creator
+  // ONLY when the caller didn't express a view. This is what attributes visits
+  // to Connor vs Luke for pay + win stats. `?? userId` used to swallow an
+  // explicit "Unassigned" (the dialog sends null for it), so picking Unassigned
+  // silently billed the visit to whoever clicked Book and told the customer
+  // that person was coming. The edit path already honoured null.
+  const estimatorId = input.estimatorId !== undefined ? input.estimatorId : userId;
 
   // Booked against a bare client: open (or reuse) their enquiry first — every
   // booking hangs off a lead so the funnel/chase/quote layers all work.
@@ -85,15 +235,44 @@ export async function createAppointment(input: CreateAppointmentInput) {
     lead = data;
   }
 
-  // For a survey, create the linked survey record so capture has somewhere to land.
+  // For a survey, attach the linked survey record so capture has somewhere to
+  // land. REUSE the lead's existing scheduled survey rather than inserting
+  // blindly: every consumer (photo uploads, the quote builder's hydrate, the
+  // lead page, the crew job sheet, the daily crew sheets) reads only the LATEST
+  // surveys row for a lead, so a second row silently shadows the first — and
+  // takes its access + large-item photos out of the crew's job sheet with it.
+  // That happened whenever photos were uploaded before the survey was booked,
+  // or a survey was cancelled and re-booked.
   let surveyId: string | null = null;
+  let surveyWarning: string | null = null;
   if (input.apptType === "survey" && lead) {
-    const { data: survey } = await sb
+    const { data: existing } = await sb
       .from("surveys")
-      .insert({ lead_id: lead.id, client_id: lead.client_id, estimator_id: estimatorId, status: "scheduled" })
-      .select("id")
-      .single();
-    surveyId = survey?.id ?? null;
+      .select("id, status")
+      .eq("lead_id", lead.id)
+      .neq("status", "completed")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    // A COMPLETED survey is history: a genuine second visit gets its own row
+    // rather than resetting the first one back to scheduled and overwriting
+    // what was recorded on it.
+    if (existing) {
+      surveyId = existing.id;
+      // Re-point it at whoever is actually attending this booking.
+      await sb.from("surveys").update({ estimator_id: estimatorId, status: "scheduled" }).eq("id", existing.id);
+    } else {
+      const { data: survey, error: surveyError } = await sb
+        .from("surveys")
+        .insert({ lead_id: lead.id, client_id: lead.client_id, estimator_id: estimatorId, status: "scheduled" })
+        .select("id")
+        .single();
+      surveyId = survey?.id ?? null;
+      // Previously discarded: a failed insert produced an appointment with no
+      // survey record and a clean "Survey booked." toast, so photos taken on
+      // the visit had nowhere to attach. Surface it like the pack-day warning.
+      if (surveyError) surveyWarning = surveyError.message;
+    }
   }
 
   const { data: appt, error } = await sb
@@ -156,71 +335,119 @@ export async function createAppointment(input: CreateAppointmentInput) {
     revalidatePath("/leads");
   }
 
-  // Customer confirmation (survey only): SMS + branded email, fail-soft — a comms
-  // hiccup never unbooks the survey. Both go through sendCommunication so they are
-  // duplicate-guarded and land on the lead's Comms tab.
-  const comms: { email: ConfirmSendState; sms: ConfirmSendState } = { email: "skipped", sms: "skipped" };
+  // Customer confirmation (survey only) — now gated on an explicit choice made
+  // in the dialog. `notifyCustomer === false` means the office deliberately
+  // chose not to write to this customer; anything else keeps the old default.
+  let comms: SurveyCommsResult = { email: "skipped", sms: "skipped" };
+  let noContact = false;
   if (input.apptType === "survey" && lead) {
-    const starts = new Date(input.startsAt);
-    const estimator = estimatorId
-      ? (await sb.from("profiles").select("full_name, email, active").eq("id", estimatorId).maybeSingle()).data
-      : null;
-    const confirm = {
-      customerName: lead.name,
-      dateLabel: starts.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
-      timeLabel: starts.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ }),
-      estimatorName: estimator?.full_name ?? null,
-      address: input.location || lead.from_address || lead.from_postcode || null,
-    };
-    if (lead.email) {
-      // When the Resend template is published (env holds its alias/id), send via the
-      // template so the design is editable in the Resend dashboard without a deploy.
-      // Otherwise fall back to the in-repo HTML.
-      const templateId = process.env.RESEND_TEMPLATE_SURVEY_CONFIRMATION;
-      const r = await sendCommunication({
-        channel: "email",
-        // From the SURVEYING estimator (who the customer will actually meet) —
-        // at booking time the lead often has no explicit owner yet, so the
-        // generic owner injection would miss.
-        from: estimator?.active ? ownerFrom(estimator.full_name, estimator.email) : undefined,
-        to: lead.email,
-        subject: surveyConfirmSubject(confirm),
-        bodyText: surveyConfirmEmailText(confirm),
-        ...(templateId
-          ? {
-              template: {
-                id: templateId,
-                variables: {
-                  FIRST_NAME: (lead.name || "").trim().split(/\s+/)[0] || "there",
-                  DATE_LABEL: confirm.dateLabel,
-                  TIME_LABEL: confirm.timeLabel,
-                  ESTIMATOR: confirm.estimatorName ?? "One of our team",
-                  ADDRESS: confirm.address ?? "To be confirmed",
-                },
-              },
-              // Rendered fallback for the oversize guard + SMTP outage transport.
-              bodyHtml: surveyConfirmEmailHtml(confirm),
-            }
-          : { bodyHtml: surveyConfirmEmailHtml(confirm) }),
-        leadId: lead.id,
-        clientId: lead.client_id ?? undefined,
-      }).catch(() => ({ ok: false as const, error: "send crashed" }));
-      comms.email = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "sent" : "failed";
-    }
-    if (lead.phone) {
-      const r = await sendCommunication({
-        channel: "sms",
-        to: lead.phone,
-        bodyText: surveyConfirmSms(confirm),
-        leadId: lead.id,
-        clientId: lead.client_id ?? undefined,
-      }).catch(() => ({ ok: false as const, error: "send crashed" }));
-      comms.sms = "ok" in r && r.ok ? "sent" : "duplicate" in r ? "sent" : "failed";
+    // No email AND no phone means nothing can be sent — report that honestly
+    // rather than letting the UI show a bare "Survey booked" that reads as
+    // "the customer has been told".
+    const willNotify = input.notifyCustomer !== false;
+    noContact = willNotify && !lead.email && !lead.phone;
+
+    // The customer notice and the estimator notice touch nothing in common, so
+    // they run together — booking a survey otherwise held the server action
+    // open through two email sends, an SMS, a push fan-out and their reads.
+    const [customerComms] = await Promise.all([
+      willNotify
+        ? sendSurveyCustomerNotice(sb, {
+            kind: "booked",
+            lead,
+            estimatorId,
+            startsAt: input.startsAt,
+            location: input.location,
+          })
+        : Promise.resolve<SurveyCommsResult>({ email: "skipped", sms: "skipped" }),
+      // The estimator's own heads-up — push + email, best-effort, never blocks.
+      estimatorId
+        ? notifyEstimatorOfSurvey({
+            appointmentId: appt.id,
+            estimatorUserId: estimatorId,
+            kind: "booked",
+            actorUserId: userId,
+            startsAt: input.startsAt,
+            leadId: lead.id,
+            customerName: lead.name,
+            customerPhone: lead.phone,
+            address: input.location || lead.from_address || lead.from_postcode || null,
+            notes: input.notes ?? null,
+          })
+        : Promise.resolve(null),
+    ]);
+    comms = customerComms;
+
+    // A failed confirmation used to be a toast on a dialog that then closed.
+    // Every other customer email in the system raises an ops alert when it
+    // fails; this one now does too, so it survives the click.
+    if (comms.email === "failed" || comms.sms === "failed") {
+      const failed = [comms.email === "failed" ? "email" : null, comms.sms === "failed" ? "SMS" : null]
+        .filter(Boolean)
+        .join(" + ");
+      await sendOpsAlert(`Survey confirmation ${failed} failed — ${lead.name ?? lead.id}`, [
+        `A survey was booked for ${ukSlotLabel(input.startsAt) ?? input.startsAt} but the confirmation ${failed} did not send.`,
+        `Send it from the lead's Comms tab, or call them.`,
+      ], "system");
     }
   }
 
   revalidateSchedule();
-  return { ok: true as const, id: appt.id, comms, packWarning };
+  return { ok: true as const, id: appt.id, comms, packWarning, surveyWarning, noContact };
+}
+
+/**
+ * Should a diary-level cancel/delete of this REMOVAL be refused?
+ *
+ * The diary paths only cascade the pack day. They do NOT email the customer,
+ * void the Zoho invoices, pause the chase engine, stamp
+ * `quotes.booking_cancelled_at` or open a refund-queue row — and
+ * `booking_cancelled_at` is the marker every money surface reads, so a booking
+ * killed here kept receiving commitment and balance chases while its held
+ * deposit had nothing queued to refund. `deleteAppointment` is worse again: it
+ * hard-deletes the row, so there is not even a cancelled record left behind.
+ *
+ * Two deliberate narrowings, so the refusal can never become a dead end:
+ *  - Only when a DEPOSIT has actually been paid. That is exactly the condition
+ *    under which /bookings buckets the job out of `awaiting` and renders the
+ *    Cancel control (lib/bookings/queue.ts) — refusing without an available
+ *    alternative would leave a pencilled-in booking uncancellable anywhere.
+ *  - Only for the EARLIEST live removal on the lead, which is the one /bookings
+ *    surfaces. A duplicate row from a mis-book must stay removable here, or the
+ *    recommended path would void invoices and apologise for a job still running.
+ *
+ * Returns the message to show, or null to allow.
+ */
+async function paidBookingBlocksDiaryRemoval(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  appointmentId: string,
+  leadId: string | null,
+): Promise<string | null> {
+  if (!leadId) return null;
+  const { data: paidQuote } = await sb
+    .from("quotes")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("status", "accepted")
+    .is("booking_cancelled_at", null)
+    .not("deposit_paid_at", "is", null)
+    .limit(1)
+    .maybeSingle();
+  if (!paidQuote) return null;
+
+  const { data: primary } = await sb
+    .from("appointments")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("appt_type", "removal")
+    .neq("status", "cancelled")
+    .order("starts_at", { ascending: true })
+    .order("id")
+    .limit(1)
+    .maybeSingle();
+  if (primary && primary.id !== appointmentId) return null;
+
+  return "This booking has money against it. Cancel it from Bookings so the customer is told, the invoices are voided and any refund is queued.";
 }
 
 /* ------------------------------------------------------------- pack days */
@@ -342,10 +569,30 @@ export async function setPackDayAction(
   return { ok: true };
 }
 
-export async function rescheduleAppointment(id: string, startsAt: string, endsAt: string) {
+export async function rescheduleAppointment(
+  id: string,
+  startsAt: string,
+  endsAt: string,
+  opts?: {
+    /**
+     * Tell the customer their survey has moved. Defaults to true — before
+     * 2026-08-08 a reschedule sent NOTHING, so the customer kept an email for
+     * a time we no longer intended to turn up (Peter: "Reschedule: doesn't
+     * resend an email"). Removals are unaffected either way: their customer
+     * email is owned by changeBookingDateAction, which calls this function.
+     */
+    notifyCustomer?: boolean;
+  },
+) {
   const { sb, userId } = await ctx();
-  // Capture the old slot BEFORE the update so a day-change can re-arm reminders.
-  const { data: before } = await sb.from("appointments").select("starts_at").eq("id", id).maybeSingle();
+  // Capture the old slot AND the routing fields BEFORE the update — the old
+  // start is needed to re-arm reminders and to tell the customer what moved,
+  // and appt_type/lead_id/estimator_id do not change during a reschedule.
+  const { data: before } = await sb
+    .from("appointments")
+    .select("starts_at, appt_type, lead_id, estimator_id, location, notes, status")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await sb.from("appointments").update({ starts_at: startsAt, ends_at: endsAt }).eq("id", id);
   if (error) return { ok: false as const, error: error.message };
 
@@ -363,11 +610,7 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
   // Moving a REMOVAL moves the money dates with it: the accepted quote's move
   // date, the lead's balance-due date, and the open balance chase — otherwise
   // the "day before move" reminder stays pinned to the old date.
-  const { data: appt } = await sb
-    .from("appointments")
-    .select("appt_type, lead_id")
-    .eq("id", id)
-    .maybeSingle();
+  const appt = before;
   if (appt?.appt_type === "removal" && appt.lead_id) {
     // yyyy-mm-dd of the new slot as a UK wall-clock day (en-CA = ISO format).
     const newMoveDate = new Date(startsAt).toLocaleDateString("en-CA", { timeZone: UK_TZ });
@@ -467,15 +710,88 @@ export async function rescheduleAppointment(id: string, startsAt: string, endsAt
     }
   }
 
+  // A moved SURVEY now tells the two people who need to know. Removals are
+  // excluded on purpose: changeBookingDateAction owns their customer email and
+  // calls this function, so sending here would double-mail them.
+  // Only an actual change of START is news. A resize (drag the bottom edge to
+  // make the visit longer) leaves the start alone, and without this the
+  // customer got "Your survey has moved" naming the time it was already at,
+  // plus a billable SMS.
+  // Compared as instants, not strings: Postgres returns "+00:00" where the
+  // client sends "Z", so a raw string compare would call every resize a move.
+  const startMoved = (() => {
+    const was = before?.starts_at ? Date.parse(before.starts_at) : NaN;
+    const now = Date.parse(startsAt);
+    if (!Number.isFinite(was) || !Number.isFinite(now)) return true; // unsure → tell them
+    return was !== now;
+  })();
+
+  let comms: SurveyCommsResult = { email: "skipped", sms: "skipped" };
+  if (appt?.appt_type === "survey" && appt.lead_id && appt.status !== "cancelled" && startMoved) {
+    const { data: lead } = await sb
+      .from("leads")
+      .select("id, client_id, name, phone, email, from_address, from_postcode")
+      .eq("id", appt.lead_id)
+      .maybeSingle();
+    if (lead) {
+      if (opts?.notifyCustomer !== false) {
+        comms = await sendSurveyCustomerNotice(sb, {
+          kind: "moved",
+          lead,
+          estimatorId: appt.estimator_id ?? null,
+          startsAt,
+          location: appt.location,
+          previousStartsAt: before?.starts_at ?? null,
+        });
+      }
+      if (appt.estimator_id) {
+        await notifyEstimatorOfSurvey({
+          appointmentId: id,
+          estimatorUserId: appt.estimator_id,
+          kind: "moved",
+          actorUserId: userId,
+          startsAt,
+          previousStartsAt: before?.starts_at ?? null,
+          leadId: lead.id,
+          customerName: lead.name,
+          customerPhone: lead.phone,
+          address: appt.location || lead.from_address || lead.from_postcode || null,
+          notes: appt.notes ?? null,
+        });
+      }
+    }
+  }
+
   revalidateSchedule();
-  return { ok: true as const };
+  return { ok: true as const, comms };
 }
 
 export async function updateAppointment(
   id: string,
   patch: { title?: string; location?: string; notes?: string; status?: string; estimatorId?: string | null },
+  opts?: {
+    /** Tell the customer their survey is cancelled. Same explicit gate as the
+     *  booking and reschedule paths. */
+    notifyCustomer?: boolean;
+  },
 ) {
-  const { sb } = await ctx();
+  const { sb, userId } = await ctx();
+  // Snapshot the estimator BEFORE the write so a reassignment can tell both the
+  // person losing the visit and the person gaining it. Until 2026-08-08 this
+  // silently re-pointed who turns up at a customer's door and told nobody —
+  // not the old estimator, not the new one, and not the customer, whose
+  // confirmation email names the estimator by first name.
+  const { data: prior } = await sb
+    .from("appointments")
+    .select("appt_type, lead_id, estimator_id, starts_at, location, notes, status, survey_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (patch.status === "cancelled" && prior?.appt_type === "removal") {
+    const blocked = await paidBookingBlocksDiaryRemoval(sb, id, prior.lead_id);
+    if (blocked) return { ok: false as const, error: blocked };
+  }
+
   const { error } = await sb
     .from("appointments")
     .update({
@@ -488,23 +804,134 @@ export async function updateAppointment(
     .eq("id", id);
   if (error) return { ok: false as const, error: error.message };
 
+  // Estimator changed on a live survey → tell both sides. The survey row's own
+  // estimator_id is re-pointed with it (it was written once at booking and then
+  // left to rot, so pay/attribution reads could disagree with the diary).
+  const estimatorChanged =
+    patch.estimatorId !== undefined && prior?.estimator_id !== patch.estimatorId;
+  if (estimatorChanged && prior?.appt_type === "survey") {
+    if (prior.survey_id) {
+      await sb.from("surveys").update({ estimator_id: patch.estimatorId }).eq("id", prior.survey_id);
+    }
+    const { data: lead } = prior.lead_id
+      ? await sb
+          .from("leads")
+          .select("id, name, phone, from_address, from_postcode")
+          .eq("id", prior.lead_id)
+          .maybeSingle()
+      : { data: null };
+    const shared = {
+      appointmentId: id,
+      actorUserId: userId,
+      startsAt: prior.starts_at,
+      leadId: prior.lead_id ?? null,
+      customerName: lead?.name ?? null,
+      customerPhone: lead?.phone ?? null,
+      address: prior.location || lead?.from_address || lead?.from_postcode || null,
+      notes: prior.notes ?? null,
+    };
+    if (prior.estimator_id) {
+      await notifyEstimatorOfSurvey({ ...shared, estimatorUserId: prior.estimator_id, kind: "removed" });
+    }
+    if (patch.estimatorId) {
+      await notifyEstimatorOfSurvey({ ...shared, estimatorUserId: patch.estimatorId, kind: "booked" });
+    }
+  }
+
   // Cancelling a REMOVAL cancels its packing day too — an appointment-level
   // cancel (view-modal action) bypasses cancelBookingAction's lead-wide sweep,
   // and a surviving pack would keep consuming crew, render on the board and
   // still send the crew to a cancelled customer.
-  if (patch.status === "cancelled") {
-    const { data: cancelled } = await sb
-      .from("appointments")
-      .select("appt_type, lead_id")
-      .eq("id", id)
-      .maybeSingle();
-    if (cancelled?.appt_type === "removal" && cancelled.lead_id) {
+  let cancelComms: SurveyCommsResult = { email: "skipped", sms: "skipped" };
+  if (patch.status === "cancelled" && prior) {
+    if (prior.appt_type === "removal" && prior.lead_id) {
       await sb
         .from("appointments")
         .update({ status: "cancelled" as never })
-        .eq("lead_id", cancelled.lead_id)
+        .eq("lead_id", prior.lead_id)
         .eq("appt_type", "pack" as never)
         .eq("status", "scheduled");
+    }
+
+    // A cancelled SURVEY has to reach the customer — they are holding an email
+    // and a text saying someone is coming to their house on a named day, and
+    // until now nothing ever retracted it. Worst case of the whole set: they
+    // take a morning off for a visit that was called off days earlier.
+    if (prior.appt_type === "survey" && prior.lead_id) {
+      const { data: lead } = await sb
+        .from("leads")
+        .select("id, client_id, status, name, phone, email, from_address, from_postcode")
+        .eq("id", prior.lead_id)
+        .maybeSingle();
+      if (lead) {
+        if (opts?.notifyCustomer !== false) {
+          cancelComms = await sendSurveyCustomerNotice(sb, {
+            kind: "cancelled",
+            lead,
+            estimatorId: prior.estimator_id ?? null,
+            startsAt: prior.starts_at,
+            location: prior.location,
+          });
+        }
+        if (prior.estimator_id) {
+          await notifyEstimatorOfSurvey({
+            appointmentId: id,
+            estimatorUserId: prior.estimator_id,
+            kind: "cancelled",
+            actorUserId: userId,
+            startsAt: prior.starts_at,
+            leadId: lead.id,
+            customerName: lead.name,
+            customerPhone: lead.phone,
+            address: prior.location || lead.from_address || lead.from_postcode || null,
+            notes: prior.notes ?? null,
+          });
+        }
+        // The forward move (website_enquiry → survey_booked) had no inverse, so
+        // a cancelled survey left the lead parked in the Board's Survey column
+        // and counted in the "surveys due" preset forever, with no date on the
+        // card. Undo it only in the exact shape the forward move created: still
+        // survey_booked, no other live survey, no quote yet.
+        if (lead.status === "survey_booked") {
+          const [{ data: otherSurvey }, { data: anyQuote }] = await Promise.all([
+            sb
+              .from("appointments")
+              .select("id")
+              .eq("lead_id", lead.id)
+              .eq("appt_type", "survey")
+              .eq("status", "scheduled")
+              .limit(1)
+              .maybeSingle(),
+            // Drafts don't count: an abandoned draft would pin the lead at
+            // survey_booked with no survey — the exact state this undoes.
+            sb.from("quotes").select("id").eq("lead_id", lead.id).neq("status", "draft").limit(1).maybeSingle(),
+          ]);
+          if (!otherSurvey && !anyQuote) {
+            await sb.from("leads").update({ status: "website_enquiry" as never }).eq("id", lead.id);
+          }
+        }
+        // The survey record must not stay "scheduled" once the visit is off —
+        // but survey rows are now shared (appointments.survey_id has no unique
+        // index and reuse makes 1:N normal), so only mark it cancelled when no
+        // OTHER live survey appointment still points at it. Otherwise the lead
+        // page would read "Survey record: cancelled" over a booking that is
+        // still going ahead.
+        if (prior.survey_id) {
+          const { data: stillLive } = await sb
+            .from("appointments")
+            .select("id")
+            .eq("survey_id", prior.survey_id)
+            .eq("status", "scheduled")
+            .neq("id", id)
+            .limit(1)
+            .maybeSingle();
+          if (!stillLive) {
+            await sb.from("surveys").update({ status: "cancelled" }).eq("id", prior.survey_id);
+          }
+        }
+        revalidatePath(`/leads/${lead.id}`);
+        revalidatePath("/leads");
+      }
     }
   }
 
@@ -517,6 +944,14 @@ export async function updateAppointment(
       .eq("id", id)
       .maybeSingle();
     if (appt?.appt_type === "survey" && appt.lead_id) {
+      // Stamp the survey record itself. Nothing wrote this before, so every
+      // lead that had ever had a survey rendered "Survey record: scheduled"
+      // forever on the lead page — and the "a completed survey is history"
+      // guard in createAppointment had nothing to match on, so a genuine
+      // second visit still reused (and inherited the photos of) the first.
+      if (prior?.survey_id) {
+        await sb.from("surveys").update({ status: "completed" }).eq("id", prior.survey_id);
+      }
       const [{ data: existingQuote }, { data: openFu }] = await Promise.all([
         sb.from("quotes").select("id").eq("lead_id", appt.lead_id).limit(1).maybeSingle(),
         sb
@@ -529,14 +964,13 @@ export async function updateAppointment(
           .maybeSingle(),
       ]);
       if (!existingQuote && !openFu) {
-        const { data: { user } } = await sb.auth.getUser();
         await sb.from("follow_ups").insert({
           lead_id: appt.lead_id,
           client_id: appt.client_id,
           reason: "quote_followup",
           due_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
           assigned_to: appt.estimator_id,
-          created_by: user?.id ?? null,
+          created_by: userId,
           source: "survey_completed",
           notes: "Survey completed — build and send the quote.",
         } as never);
@@ -546,7 +980,7 @@ export async function updateAppointment(
   }
 
   revalidateSchedule();
-  return { ok: true as const };
+  return { ok: true as const, comms: cancelComms };
 }
 
 export async function deleteAppointment(id: string) {
@@ -558,6 +992,16 @@ export async function deleteAppointment(id: string) {
     .select("appt_type, lead_id")
     .eq("id", id)
     .maybeSingle();
+
+  // Delete is strictly WORSE than cancel — it destroys the row rather than
+  // marking it — so it gets the same money guard. Without this, refusing at
+  // Cancel just pushed the office one click across to Edit → Delete and the
+  // booking vanished with no email, no void, no refund queue and no history.
+  if (target?.appt_type === "removal") {
+    const blocked = await paidBookingBlocksDiaryRemoval(sb, id, target.lead_id);
+    if (blocked) return { ok: false as const, error: blocked };
+  }
+
   const { error } = await sb.from("appointments").delete().eq("id", id);
   if (error) {
     // FK RESTRICT (migration 0026): a signed-off job's completion record must

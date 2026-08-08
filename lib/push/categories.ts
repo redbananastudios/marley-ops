@@ -55,6 +55,22 @@ export const PUSH_CATEGORIES = {
     urgency: "high" as const,
     suppressWhenFocused: false,
   },
+  survey_assigned: {
+    id: "survey_assigned" as const,
+    label: "Your surveys",
+    description: "A survey visit is booked onto you, moved, or handed to someone else.",
+    /** Targeted at the SPECIFIC estimator (the sender only ever passes
+     *  recipientUserIds for this category), never broadcast to the office.
+     *  Admin is in the audience because Connor surveys jobs himself. */
+    audience: ["estimator", "admin"] as const,
+    defaultEnabled: true,
+    /** A day's shelf life — an evening booking for tomorrow morning must still
+     *  be waiting when the phone wakes up. */
+    ttlSeconds: 24 * 3600,
+    /** You are expected to turn up at someone's house — same urgency as a job. */
+    urgency: "high" as const,
+    suppressWhenFocused: false,
+  },
   fleet_expiry: {
     id: "fleet_expiry" as const,
     label: "Fleet reminders",
@@ -266,6 +282,51 @@ export function crewJobPush(opts: {
     // A removed crew member no longer passes the job page's assignment gate —
     // send them to their list instead.
     url: opts.kind === "assigned" ? `/my-jobs/${opts.appointmentId}` : "/my-jobs",
+  };
+}
+
+/** The estimator's own survey ping. Lock-screen safe: first name only, never
+ *  the customer's address or phone (both live in the email + the panel). */
+export function surveyAssignedPush(opts: {
+  kind: "booked" | "moved" | "removed" | "cancelled";
+  appointmentId: string;
+  customerName: string | null;
+  startsAt: string | null;
+  leadId: string | null;
+}): PushEvent {
+  const day = ukJobDayLabel(opts.startsAt);
+  const who = firstNameOnly(opts.customerName, "A customer");
+  const onDay = day ? ` on ${day}` : "";
+  let body: string;
+  let title: string;
+  switch (opts.kind) {
+    case "cancelled":
+      title = "Survey cancelled";
+      body = `${who}'s survey${onDay} is cancelled. Don't travel.`;
+      break;
+    case "removed":
+      title = "Survey reassigned";
+      body = `${who}'s survey${onDay} has gone to someone else.`;
+      break;
+    case "moved":
+      title = "Survey moved";
+      body = day ? `${who}'s survey has moved to ${day}.` : `${who}'s survey has a new time.`;
+      break;
+    default:
+      title = "New survey for you";
+      body = `You're surveying ${who}${onDay}.`;
+  }
+  return {
+    category: "survey_assigned",
+    // One tag per (appointment, estimator-facing event stream): a move, a
+    // hand-off or a cancellation REPLACES the earlier "you're surveying X"
+    // still sitting on the phone, so a stale time can never outlive the change.
+    eventKey: `survey-assigned-${opts.appointmentId}`,
+    title,
+    body,
+    // Reassigned or cancelled: the estimator no longer owns the visit, so the
+    // lead page's context is the wrong landing — send them to their diary.
+    url: opts.kind === "removed" || opts.kind === "cancelled" || !opts.leadId ? "/schedule/surveys" : `/leads/${opts.leadId}`,
   };
 }
 

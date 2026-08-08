@@ -31,7 +31,7 @@ export default async function SurveysSchedulePage({
       sb
         .from("appointments")
         .select(
-          "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id",
+          "id,title,starts_at,ends_at,all_day,appt_type,status,location,lead_id,estimator_id,notes",
         )
         .eq("appt_type", "survey")
         .order("starts_at", { ascending: true })
@@ -48,7 +48,16 @@ export default async function SurveysSchedulePage({
         .order("id")
         .range(f, t),
     ),
-    sb.from("profiles").select("id,full_name").eq("active", true).order("full_name", { ascending: true }),
+    // Only people who can actually DO a survey. The list used to include crew:
+    // assigning one meant they never saw the visit (/my-jobs is driven by crew
+    // assignments, not estimator_id), could never bill it, and the customer had
+    // already been emailed their name as the person coming.
+    sb
+      .from("profiles")
+      .select("id,full_name")
+      .eq("active", true)
+      .in("role", ["estimator", "admin"])
+      .order("full_name", { ascending: true }),
   ]);
 
   const { baseLocation } = await getBusinessSettings(sb);

@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Phone, MessageCircle, MessageSquare, Pencil, FileText, Ban, Loader2, Clock, CalendarClock, MapPin } from "lucide-react";
 import { toast } from "sonner";
+import { reportSurveySend, duplicateWarning } from "@/lib/comms/survey-send-report";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -144,16 +145,21 @@ export function AppointmentViewDialog({
   const wa = waNumber(lead?.phone);
   const route = routes[routeMode];
 
-  async function setStatus(status: "completed" | "cancelled", doneMsg: string) {
+  async function setStatus(status: "completed" | "cancelled", doneMsg: string, notifyCustomer?: boolean) {
     if (!target) return;
     setBusy(true);
     try {
-      const r = await updateAppointment(target.id, { status });
+      const r = await updateAppointment(target.id, { status }, { notifyCustomer });
       if (!r.ok) {
         toast.error(r.error || "Could not update.");
         return;
       }
-      toast.success(doneMsg);
+      const rep = "comms" in r && r.comms ? reportSurveySend(r.comms) : null;
+      toast.success(rep?.sent ? `${doneMsg} Customer told by ${rep.sent}.` : doneMsg);
+      if (rep?.duplicate) toast.warning(duplicateWarning(rep.duplicate));
+      if (rep?.failed) {
+        toast.error(`Could not tell the customer by ${rep.failed} — call them so they don't wait in.`);
+      }
       onOpenChange(false);
       router.refresh();
     } finally {
@@ -164,7 +170,16 @@ export function AppointmentViewDialog({
   async function onCancelAppointment() {
     if (!target) return;
     if (!confirm("Cancel this appointment? It will be removed from the diary (the lead keeps its history).")) return;
-    await setStatus("cancelled", "Appointment cancelled and removed from the diary.");
+    // A cancelled survey is the one the customer MUST hear about — they are
+    // holding a confirmation saying someone is coming to their house. Ask
+    // rather than assume, same rule as the booking and reschedule dialogs.
+    let notifyCustomer: boolean | undefined;
+    if (target.apptType === "survey" && (lead?.email || lead?.phone)) {
+      notifyCustomer = confirm(
+        `Let ${lead?.name || "the customer"} know the visit is cancelled, so they don't wait in?\n\nOK sends it. Cancel keeps it silent.`,
+      );
+    }
+    await setStatus("cancelled", "Appointment cancelled and removed from the diary.", notifyCustomer);
   }
 
   /** The estimator quotes from the visit — providing the quote IS attending it. */

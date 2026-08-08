@@ -80,6 +80,9 @@ export interface AvailAppt {
   status: string | null;
   location: string | null;
   estimator_id: string | null;
+  /** Carried so the edit dialog seeds the real text instead of blank — a blank
+   *  seed here silently wiped the notes on save (this is the busiest surface). */
+  notes: string | null;
 }
 
 export interface SoftDemandItem {
@@ -340,7 +343,7 @@ export function ScheduleAllocationView(props: {
       status: a.status,
       title: a.title,
       location: a.location,
-      notes: null, // not loaded into this payload; edit overwrites only if changed
+      notes: a.notes ?? null,
       startsAt: a.starts_at,
       endsAt: a.ends_at ?? a.starts_at,
       packDate,

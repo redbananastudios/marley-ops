@@ -46,7 +46,7 @@ export default async function SchedulePage({
       fetchAllRows((f, t) =>
         supabase
           .from("appointments")
-          .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id, estimator_id")
+          .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id, estimator_id, notes")
           .neq("status", "cancelled")
           .order("id")
           .range(f, t),
@@ -90,7 +90,13 @@ export default async function SchedulePage({
           .order("lead_id")
           .range(f, t),
       ),
-      supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name"),
+      // Estimator picker: office roles only (see the surveys page for why).
+      supabase
+        .from("profiles")
+        .select("id, full_name")
+        .eq("active", true)
+        .in("role", ["estimator", "admin"])
+        .order("full_name"),
     ]);
 
   const { baseLocation } = await getBusinessSettings(supabase);
@@ -237,6 +243,7 @@ export default async function SchedulePage({
       status: raw?.status ?? null,
       location: raw?.location ?? null,
       estimator_id: raw?.estimator_id ?? null,
+      notes: raw?.notes ?? null,
     };
   });
 

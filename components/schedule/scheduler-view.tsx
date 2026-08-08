@@ -61,6 +61,10 @@ export interface SchedulerEvent {
   location: string | null;
   lead_id: string | null;
   estimator_id: string | null;
+  /** Carried through so the edit dialog can seed the real text. It used to be
+   *  absent from every schedule page's select, so the dialog seeded blank and
+   *  saving wiped whatever was typed at booking time. */
+  notes?: string | null;
 }
 
 const CHARCOAL = "#1A1A1A";
@@ -143,6 +147,8 @@ export function SchedulerView({
   // (single date-change path — inside the 7-day window it snapshots held money
   // into the refund queue). This carries a dropped slot into that dialog.
   const [reschedPresetSlot, setReschedPresetSlot] = useState<{ startsAt: string; endsAt: string } | null>(null);
+  /** Time-grid drag: the dropped slot is exact, so it seeds the dialog verbatim. */
+  const [reschedPresetExact, setReschedPresetExact] = useState<Date | null>(null);
   const [presetStart, setPresetStart] = useState<string | undefined>();
   const [presetEnd, setPresetEnd] = useState<string | undefined>();
   const [presetAllDay, setPresetAllDay] = useState<boolean | undefined>();
@@ -196,6 +202,7 @@ export function SchedulerView({
             status: e.status,
             location: e.location,
             title: e.title,
+            notes: e.notes ?? null,
           },
         };
       }),
@@ -269,6 +276,7 @@ export function SchedulerView({
       status: string | null;
       location: string | null;
       title: string | null;
+      notes: string | null;
     };
     setViewTarget({
       id: arg.event.id,
@@ -278,7 +286,7 @@ export function SchedulerView({
       status: ep.status ?? null,
       title: ep.title ?? arg.event.title,
       location: ep.location ?? null,
-      notes: null, // not loaded into the calendar payload; edit overwrites only if changed
+      notes: ep.notes ?? null,
       startsAt: arg.event.start ? arg.event.start.toISOString() : "",
       endsAt: arg.event.end ? arg.event.end.toISOString() : "",
     });
@@ -302,6 +310,7 @@ export function SchedulerView({
           status: string | null;
           location: string | null;
           title: string | null;
+          notes: string | null;
         };
         const original = events.find((e) => e.id === ev.id);
         const originalStart = original?.starts_at ?? ev.start.toISOString();
@@ -314,11 +323,12 @@ export function SchedulerView({
           status: ep.status ?? null,
           title: ep.title ?? ev.title,
           location: ep.location ?? null,
-          notes: null,
+          notes: ep.notes ?? null,
           startsAt: originalStart,
           endsAt: originalEnd,
         });
         setReschedPresetDate(ev.start);
+        setReschedPresetExact(null);
         if (ep.apptType === "removal" && ep.leadId) {
           // Pre-fill the policy dialog with the dropped DAY at the original
           // time of day (month drops carry no meaningful time).
@@ -351,7 +361,7 @@ export function SchedulerView({
         // Policy v2): revert the drag and open the policy dialog pre-filled
         // with the dropped slot — inside the 7-day window it needs the warning
         // + tick and a refund-queue snapshot, which a confirm() cannot carry.
-        const ep = ev.extendedProps as { apptType: ApptType; leadId: string | null; estimatorId: string | null; status: string | null; location: string | null; title: string | null };
+        const ep = ev.extendedProps as { apptType: ApptType; leadId: string | null; estimatorId: string | null; status: string | null; location: string | null; title: string | null; notes: string | null };
         if (ep.apptType === "removal" && ep.leadId) {
           const original = events.find((e) => e.id === ev.id);
           setReschedTarget({
@@ -362,12 +372,44 @@ export function SchedulerView({
             status: ep.status ?? null,
             title: ep.title ?? ev.title,
             location: ep.location ?? null,
-            notes: null,
+            notes: ep.notes ?? null,
             startsAt: original?.starts_at ?? ev.start.toISOString(),
             endsAt: original?.ends_at ?? ev.end.toISOString(),
           });
           setReschedPresetDate(null);
+          setReschedPresetExact(null);
           setReschedPresetSlot({ startsAt: ev.start.toISOString(), endsAt: ev.end.toISOString() });
+          arg.revert();
+          setReschedOpen(true);
+          return;
+        }
+      }
+      // A SURVEY with a customer behind it writes to that customer when it
+      // moves, so it must go through the dialog with the visible send tick box
+      // rather than a bare confirm() — dragging used to fire a real email and a
+      // billable SMS with nothing on screen saying so, and a resize (which
+      // leaves the start alone) told them their survey had "moved" to the time
+      // it was already at. Lead-less entries and packs contact nobody, so they
+      // keep the quick drag.
+      {
+        const ep = ev.extendedProps as { apptType: ApptType; leadId: string | null; estimatorId: string | null; status: string | null; location: string | null; title: string | null; notes: string | null };
+        if (ep.apptType === "survey" && ep.leadId) {
+          const original = events.find((e) => e.id === ev.id);
+          setReschedTarget({
+            id: ev.id,
+            apptType: ep.apptType,
+            leadId: ep.leadId,
+            estimatorId: ep.estimatorId ?? null,
+            status: ep.status ?? null,
+            title: ep.title ?? ev.title,
+            location: ep.location ?? null,
+            notes: ep.notes ?? null,
+            startsAt: original?.starts_at ?? ev.start.toISOString(),
+            endsAt: original?.ends_at ?? ev.end.toISOString(),
+          });
+          setReschedPresetDate(null);
+          setReschedPresetSlot(null);
+          setReschedPresetExact(ev.start);
           arg.revert();
           setReschedOpen(true);
           return;
@@ -381,6 +423,9 @@ export function SchedulerView({
         ev.id,
         ev.start.toISOString(),
         ev.end.toISOString(),
+        // Nothing to send on this path by construction (no lead), but say so
+        // explicitly so a future lead-bearing type can't silently start mailing.
+        { notifyCustomer: false },
       );
       if (!r.ok) {
         toast.error(r.error || "Could not reschedule.");
@@ -495,6 +540,7 @@ export function SchedulerView({
           setReschedTarget(viewTarget);
           setReschedPresetDate(null);
           setReschedPresetSlot(null);
+          setReschedPresetExact(null);
           setReschedOpen(true);
         }}
       />
@@ -522,6 +568,11 @@ export function SchedulerView({
           estimatorName={reschedTarget?.estimatorId ? estimatorById.get(reschedTarget.estimatorId) ?? null : null}
           events={events}
           presetDate={reschedPresetDate}
+          presetExact={reschedPresetExact}
+          customerContact={(() => {
+            const l = reschedTarget?.leadId ? leads.find((x) => x.id === reschedTarget.leadId) : null;
+            return l ? [l.email, l.phone].filter(Boolean).join(" · ") || null : null;
+          })()}
         />
       )}
 

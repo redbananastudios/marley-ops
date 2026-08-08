@@ -617,6 +617,7 @@ export type Database = {
           push_fleet_expiry_enabled: boolean
           push_new_enquiry_enabled: boolean
           push_payment_event_enabled: boolean
+          push_survey_assigned_enabled: boolean
           self_billing_enabled: boolean
           staff_onboard_enabled: boolean
           staff_onboard_token: string | null
@@ -664,6 +665,7 @@ export type Database = {
           push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
+          push_survey_assigned_enabled?: boolean
           self_billing_enabled?: boolean
           staff_onboard_enabled?: boolean
           staff_onboard_token?: string | null
@@ -711,6 +713,7 @@ export type Database = {
           push_fleet_expiry_enabled?: boolean
           push_new_enquiry_enabled?: boolean
           push_payment_event_enabled?: boolean
+          push_survey_assigned_enabled?: boolean
           self_billing_enabled?: boolean
           staff_onboard_enabled?: boolean
           staff_onboard_token?: string | null
