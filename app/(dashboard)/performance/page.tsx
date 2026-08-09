@@ -6,6 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
+import { attendedSurveys, NOT_CANCELLED } from "@/lib/schedule/attended";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, marginPct, marginRevenue, boxesFromItems, commissionCost } from "@/lib/margin";
 import { lossReasonLabel } from "@/lib/quote/chase";
@@ -217,15 +218,21 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
     fetchAllRows((f, t) =>
       sb
         .from("appointments")
-        .select("lead_id, starts_at")
+        .select("lead_id, starts_at, ends_at, status")
         .eq("appt_type", "survey")
-        .eq("status", "completed")
+        .neq("status", NOT_CANCELLED)
         .order("id")
         .range(f, t),
     ),
   ]);
 
-  const report = buildSalesReport(quotes as SalesQuote[], leads as SalesLead[], surveys, from, to);
+  // A visit counts as attended if it is still on the schedule and its slot has
+  // passed (Peter, 2026-08-09). `status='completed'` used to be the filter, but
+  // nothing sets that except one button in the diary modal, so surveys quoted by
+  // any other route were missing from every figure on this page.
+  const attended = attendedSurveys(surveys as { lead_id: string | null; starts_at: string; ends_at: string | null; status: string | null }[]);
+
+  const report = buildSalesReport(quotes as SalesQuote[], leads as SalesLead[], attended, from, to);
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -258,9 +265,9 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
     await Promise.all([
       sb
         .from("appointments")
-        .select("id, starts_at, estimator_id, lead_id")
+        .select("id, starts_at, ends_at, status, estimator_id, lead_id")
         .eq("appt_type", "survey")
-        .eq("status", "completed")
+        .neq("status", NOT_CANCELLED)
         .gte("starts_at", monthStart.toISOString())
         .lt("starts_at", monthEnd.toISOString()),
       sb.from("profiles").select("id, full_name"),
@@ -311,7 +318,10 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       wonLeadIds.add(q.lead_id);
     }
   }
-  const visits: EstimatorVisit[] = (appts ?? [])
+  // Same rule as the Sales tab: on the schedule and the slot has passed. The
+  // month window above is coarse (it still includes visits later this month
+  // that have not happened yet), so the predicate does the past-check.
+  const visits: EstimatorVisit[] = attendedSurveys(appts ?? [])
     .filter((a) => a.estimator_id)
     .map((a) => ({
       apptId: a.id,
