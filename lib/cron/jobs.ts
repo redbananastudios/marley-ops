@@ -2,12 +2,21 @@
  * The automation registry — the single source of truth for what scheduled jobs
  * exist, on what cadence, and how fresh a run should be before we call it
  * "overdue". Keep the `slug` in step with the string passed to runCron() in each
- * route and with the `path` in vercel.json. The /automations page reads this to
- * show every automation, its schedule, and its health.
+ * route. The /automations page reads this to show every automation, its
+ * schedule, and its health.
  *
- * Times are UTC (Vercel Cron runs in UTC). `maxAgeMins` = if the newest
- * successful run is older than this, flag the job as overdue (a cheap "is this
- * automation actually firing?" signal for production monitoring).
+ * This registry is NOT the scheduler — the real one is /etc/cron.d/marley-ops on
+ * the OVH box, firing cron-hit.sh (docs/ovh-deployment.md). Keep the two in step
+ * by hand; this table only drives the dashboard.
+ *
+ * Schedules are UTC, because that box runs on UTC. Where a job must land at a
+ * fixed UK wall-clock time it fires on BOTH candidate UTC hours and decides
+ * inside the app which one is really that hour in London — see the chase engine
+ * (lib/comms/send-window.ts) and crew sheets (lib/crew-sheet/dispatch.ts). A
+ * single fixed UTC hour would drift by one hour across BST.
+ *
+ * `maxAgeMins` = if the newest successful run is older than this, flag the job
+ * as overdue (a cheap "is this automation actually firing?" signal).
  */
 export interface CronJobMeta {
   slug: string;
@@ -59,9 +68,10 @@ export const CRON_JOBS: CronJobMeta[] = [
   {
     slug: "chase",
     label: "Chase engine",
-    schedule: "0 9 * * *",
-    cadence: "Daily · 09:00 UTC",
-    description: "Sends quote + deposit reminders, raises call tasks, and settles finished jobs.",
+    schedule: "0 8,9 * * *",
+    cadence: "Daily · customer emails at 09:00 UK",
+    description:
+      "Sends quote + deposit reminders, raises call tasks, and settles finished jobs. Fires on both UTC hours; only the one that is 09:00 in London sends anything to a customer.",
     maxAgeMins: 26 * 60,
     endpoint: "/api/cron/chase",
   },

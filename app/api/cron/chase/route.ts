@@ -31,6 +31,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
+import { isCustomerSendHour, sendWindowReason } from "@/lib/comms/send-window";
 import {
   planFollowUpClosures,
   type OpenFollowUp,
@@ -191,6 +192,7 @@ export async function GET(req: Request) {
     datesAtRisk: 0,
     retiredLostQuotes: 0,
     closedStaleFollowUps: 0,
+    skippedOutsideWindow: 0,
     errors: 0,
   };
 
@@ -320,6 +322,21 @@ export async function GET(req: Request) {
       surveyEstimator.set(a.lead_id, a.estimator_id);
     }
   }
+  // Chases and nudges only go out during the 09:00 UK hour, every day. The
+  // crontab fires this route at BOTH 08:00 and 09:00 UTC and exactly one of them
+  // is 09:00 in London all year — see lib/comms/send-window.ts. Everything else
+  // in this route (the reconcile pass, retiring lost quotes, the post-move alarm,
+  // the internal T-7 flag and the confirm-date nudge) runs on every invocation:
+  // it is all internal and idempotent, and holding it back would just delay the
+  // office's own dashboard by an hour.
+  //
+  // The review request at the end of the post-move sweep is deliberately NOT
+  // gated: it is sent in the same breath as auto-completing the lead, and the
+  // sweep never revisits a completed lead, so gating it would drop it entirely.
+  // Both cron hours are a civil UK morning, so there is nothing to fix.
+  const sendsAllowed = isCustomerSendHour(now);
+  if (!sendsAllowed) log.info("cron.chase.sends_held", { reason: sendWindowReason(now) });
+
   // Leads whose survey has not happened yet — the quote ladder waits for them.
   const pendingSurvey = pendingSurveyLeadIds(surveyAppts ?? [], now);
   const lastVisitAt = latestAttendedSurveyAt(surveyAppts ?? [], now);
@@ -449,6 +466,13 @@ export async function GET(req: Request) {
         }
 
         const step = dueChaseStep(chaseFrom, lead.quote_chase_step, QUOTE_CHASE_DAYS, now);
+        if (step && !sendsAllowed) {
+          // Skip the send AND the stamp, so the ladder stays exactly where it is
+          // and this step goes out on the in-window run instead. dueChaseStep
+          // measures elapsed time, so it is still due when we come back.
+          summary.skippedOutsideWindow++;
+          continue;
+        }
         if (!step) continue;
         // Phone-only lead: no email to chase — raise the call task instead of
         // silently skipping them forever.
@@ -526,6 +550,10 @@ export async function GET(req: Request) {
       }
 
       const step = dueChaseStep(quote.accepted_at, lead.deposit_chase_step, DEPOSIT_CHASE_DAYS, now);
+      if (step && !sendsAllowed) {
+        summary.skippedOutsideWindow++;
+        continue;
+      }
       if (step && !lead.email) {
         await handToHuman(lead, quote, "no_email", "deposit");
         continue;
@@ -886,7 +914,10 @@ export async function GET(req: Request) {
           }
         }
 
-        if (actions.includes("chase")) {
+        // The T-10 chase is one-shot, CAS-stamped after delivery, so skipping it
+        // out of hours simply defers it to the in-window run — it cannot be lost.
+        if (actions.includes("chase") && !sendsAllowed) summary.skippedOutsideWindow++;
+        if (actions.includes("chase") && sendsAllowed) {
           let delivered = false;
           if (lead.email) {
             const email = composeCommitmentChaseEmail({
