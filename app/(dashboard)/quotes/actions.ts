@@ -46,6 +46,27 @@ async function nextQuoteRef(
   return data;
 }
 
+/**
+ * The quote this lead is already working to, if any — the newest live one
+ * (superseded and rejected rows are history; a draft is unfinished work worth
+ * resuming). Used by the diary's survey actions: the estimator sometimes quotes
+ * before attending (Peter, 2026-08-10), so "Create Quote" would otherwise open a
+ * blank builder and throw away pricing already done, or send a second quote to a
+ * customer holding the first.
+ */
+export async function liveQuoteForLead(leadId: string) {
+  const { sb } = await ctx();
+  const { data } = await sb
+    .from("quotes")
+    .select("id, quote_ref, status")
+    .eq("lead_id", leadId)
+    .in("status", ["draft", "sent", "accepted"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data ? { id: data.id, quoteRef: data.quote_ref, status: data.status } : null;
+}
+
 /** Create a draft quote (optionally pre-filled from a lead) so it exists in the panel immediately. */
 export async function createDraftQuote(opts: { leadId?: string } = {}) {
   const { sb } = await ctx();

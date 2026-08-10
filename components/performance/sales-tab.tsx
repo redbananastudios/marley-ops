@@ -153,10 +153,10 @@ export function SalesTab({
           definition="Projected revenue divided by quotes won in this period."
         />
         <KpiCard
-          label="Same-day quoting"
+          label="Quoted by visit day"
           value={r.sameDay.pct != null ? `${r.sameDay.pct}%` : "—"}
           sub={r.sameDay.of ? `${r.sameDay.same} of ${r.sameDay.of}` : undefined}
-          definition="Surveyed jobs quoted the same day as the survey — speed wins work."
+          definition="Surveyed jobs quoted on or before the day of the visit — speed wins work."
         />
       </div>
 

@@ -178,6 +178,22 @@ describe("buildSalesReport", () => {
     expect(r.conversionPct).toBe(33);
   });
 
+  it("counts a quote sent BEFORE the visit — that customer waited least of all", () => {
+    // Luke sometimes prices a job on the phone and the visit only confirms it
+    // (Peter, 2026-08-10). Scoring that as a miss punished the fastest path.
+    const quotes = [quote({ id: "s1", lead_id: "l1", email_sent_at: "2026-07-06T17:00:00+01:00" })];
+    const surveys = [{ lead_id: "l1", starts_at: "2026-07-08T10:00:00+01:00" }];
+    const r = buildSalesReport(quotes, [lead({ id: "l1" })], surveys, FROM, TO);
+    expect(r.sameDay).toEqual({ same: 1, of: 1, pct: 100 });
+  });
+
+  it("still counts a quote sent AFTER the visit as a miss", () => {
+    const quotes = [quote({ id: "s1", lead_id: "l1", email_sent_at: "2026-07-10T09:00:00+01:00" })];
+    const surveys = [{ lead_id: "l1", starts_at: "2026-07-08T10:00:00+01:00" }];
+    const r = buildSalesReport(quotes, [lead({ id: "l1" })], surveys, FROM, TO);
+    expect(r.sameDay).toEqual({ same: 0, of: 1, pct: 0 });
+  });
+
   it("same-day quoting compares survey day to quote-sent day", () => {
     const quotes = [
       quote({ id: "s1", lead_id: "l1", email_sent_at: "2026-07-08T17:00:00+01:00" }),

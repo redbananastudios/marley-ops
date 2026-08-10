@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { CommsDialog } from "@/components/comms/comms-dialog";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 import { updateAppointment } from "@/app/(dashboard)/schedule/actions";
+import { liveQuoteForLead } from "@/app/(dashboard)/quotes/actions";
 import { LeadContextPanels, type EditTarget, type LeadOption } from "./appointment-dialog";
 
 function waNumber(phone: string | null | undefined): string | null {
@@ -187,6 +188,16 @@ export function AppointmentViewDialog({
     if (!target || !lead) return;
     setBusy(true);
     try {
+      // The quote may already exist: some jobs are priced over the phone and the
+      // visit only confirms it (Peter, 2026-08-10). Opening a blank builder there
+      // discards the pricing already done and risks a second quote reaching a
+      // customer who is holding the first, so offer the existing one first.
+      const existing = await liveQuoteForLead(lead.id);
+      const openExisting =
+        existing != null &&
+        confirm(
+          `${lead.name || "This customer"} already has quote ${existing.quoteRef}.\n\nOK opens it to update. Cancel starts a new quote instead.`,
+        );
       if (target.status === "scheduled") {
         const r = await updateAppointment(target.id, { status: "completed" });
         if (!r.ok) {
@@ -195,7 +206,7 @@ export function AppointmentViewDialog({
         }
       }
       onOpenChange(false);
-      router.push(`/quotes/new?leadId=${lead.id}`);
+      router.push(openExisting && existing ? `/quotes/${existing.id}` : `/quotes/new?leadId=${lead.id}`);
     } finally {
       setBusy(false);
     }

@@ -30,6 +30,7 @@ import { requestedDeposit } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
 import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
+import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
 
 /**
  * The chase engine (daily Vercel cron, ~10:00 UK). Two cadences:
@@ -249,13 +250,14 @@ export async function GET(req: Request) {
   // owned by whoever is assigned its booked survey — the SAME rule as the
   // "My day" cockpit and the leads "Mine" preset (lib/leads/ownership.ts),
   // so the chase voice matches who the customer actually met.
+  // Unassigned surveys are fetched too (the owner map skips them below) because
+  // the pending-visit gate cares that a visit is coming, not who is going.
   const { data: surveyAppts } = await sb
     .from("appointments")
-    .select("lead_id, estimator_id, appt_type, status")
+    .select("lead_id, estimator_id, appt_type, status, starts_at")
     .in("lead_id", leads.map((l) => l.id))
     .eq("appt_type", "survey")
     .neq("status", "cancelled")
-    .not("estimator_id", "is", null)
     .order("starts_at", { ascending: true });
   const surveyEstimator = new Map<string, string>();
   for (const a of surveyAppts ?? []) {
@@ -263,6 +265,14 @@ export async function GET(req: Request) {
       surveyEstimator.set(a.lead_id, a.estimator_id);
     }
   }
+  // Leads whose survey has not happened yet — the quote ladder waits for them.
+  const pendingSurvey = pendingSurveyLeadIds(surveyAppts ?? [], now);
+  const lastVisitAt = latestAttendedSurveyAt(surveyAppts ?? [], now);
+  /** Chase from the later of the quote email and the last visit — see the helper. */
+  const ladderStart = (leadId: string, sentAt: string): string => {
+    const visit = lastVisitAt.get(leadId);
+    return visit && visit > sentAt ? visit : sentAt;
+  };
   const leadOwner = (lead: LeadRow) =>
     ownerFor(ownerEstimatorId(lead.estimator_id, surveyEstimator.get(lead.id)));
 
@@ -322,6 +332,20 @@ export async function GET(req: Request) {
         const quote = pickQuote(allQuotes, lead.id, "sent");
         if (!quote?.email_sent_at) continue; // never actually emailed — nothing to chase
 
+        // A visit is still to come — say nothing until it has. Covers the lapse
+        // too: auto-marking someone lost while a surveyor is booked to knock on
+        // their door is worse than the chase itself.
+        if (pendingSurvey.has(lead.id)) continue;
+
+        // The CADENCE runs from this, not the raw send: a quote written a week
+        // before the visit would otherwise be "day 7 old" the moment the visit
+        // ends and fire its whole backlog over the next three mornings.
+        // The 30-day LAPSE below deliberately stays on the send — that date is
+        // printed on the customer's quote as "Valid Until" and expires their
+        // accept link (acceptExpiresAt), so chasing past it would push a button
+        // that no longer works.
+        const chaseFrom = ladderStart(lead.id, quote.email_sent_at);
+
         // 30-day lapse = quote expiry → lost ("no_response"), chasing over.
         if (isQuoteLapsed(quote.email_sent_at, now)) {
           // Guard on the status-change winning: if the customer accepted between
@@ -369,7 +393,7 @@ export async function GET(req: Request) {
           continue;
         }
 
-        const step = dueChaseStep(quote.email_sent_at, lead.quote_chase_step, QUOTE_CHASE_DAYS, now);
+        const step = dueChaseStep(chaseFrom, lead.quote_chase_step, QUOTE_CHASE_DAYS, now);
         if (!step) continue;
         // Phone-only lead: no email to chase — raise the call task instead of
         // silently skipping them forever.

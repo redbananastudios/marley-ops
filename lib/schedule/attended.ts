@@ -49,6 +49,54 @@ export function attendedSurveys<T extends AttendableAppointment>(rows: readonly 
 }
 
 /**
+ * Leads with a survey still to come — the other half of the same question.
+ * The estimator sometimes quotes BEFORE attending (Peter, 2026-08-10), and the
+ * quote chase ladder is armed by the send, so without this a customer gets
+ * "anything you'd like changed?" on day 2 and a deposit request on day 5, both
+ * before anyone has seen the house and while the price can still move.
+ *
+ * A visit in progress still counts as pending (it ends, not starts, the wait).
+ * A row with no usable date does NOT count: erring toward silence would mute a
+ * lead's follow-ups permanently on one bad timestamp, which is the worse failure.
+ */
+export function pendingSurveyLeadIds(
+  rows: readonly (AttendableAppointment & { lead_id?: string | null })[],
+  now: Date = new Date(),
+): Set<string> {
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!r.lead_id || r.status === "cancelled") continue;
+    if (!Number.isFinite(Date.parse(r.ends_at ?? r.starts_at ?? ""))) continue;
+    if (!isAttendedSurvey(r, now)) out.add(r.lead_id);
+  }
+  return out;
+}
+
+/**
+ * When we were last at each lead's door — the newest attended visit.
+ *
+ * The quote chase ladder is timed from the quote email, which is right until the
+ * quote comes FIRST. Then a quote sent well before the visit is already "day 12
+ * old" the moment the visit ends, so the ladder fires its whole backlog over the
+ * next three mornings and the 30-day lapse can mark the customer lost the day
+ * after we stood in their hallway. Running the clock from the later of the two
+ * fixes both: a visit is the most meaningful contact there is, so nothing is
+ * stale while it is still fresh.
+ */
+export function latestAttendedSurveyAt(
+  rows: readonly (AttendableAppointment & { lead_id?: string | null })[],
+  now: Date = new Date(),
+): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rows) {
+    if (!r.lead_id || !r.starts_at || !isAttendedSurvey(r, now)) continue;
+    const cur = out.get(r.lead_id);
+    if (!cur || r.starts_at > cur) out.set(r.lead_id, r.starts_at);
+  }
+  return out;
+}
+
+/**
  * The coarse SQL-side pre-filter that pairs with the predicate above: everything
  * still on the schedule. The past-check stays in JS because `ends_at` is
  * nullable and PostgREST cannot express the coalesce cleanly.

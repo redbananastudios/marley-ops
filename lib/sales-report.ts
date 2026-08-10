@@ -200,7 +200,12 @@ export function buildSalesReport(
 
   const avgJobValue = projected.count ? Math.round(projected.total / projected.count) : null;
 
-  /* same-day quoting: surveyed in range AND quoted → % quoted the SAME UK day */
+  /* quoted-by-visit-day: surveyed in range AND quoted → % who had their number
+     by the end of the survey day. "On or before", not "on": the estimator
+     sometimes quotes BEFORE attending (Peter, 2026-08-10), and a customer
+     holding a price before we arrive waited less than one quoted that evening,
+     not more. Superseding keeps this honest — if the visit changes the price,
+     the old row leaves `live` and the re-quote's later send day is what counts. */
   const sentDaysByLead = new Map<string, string[]>();
   for (const q of live) {
     const d = quoteSentDay(q);
@@ -213,11 +218,11 @@ export function buildSalesReport(
   let sameDayOf = 0;
   for (const s of surveys) {
     const day = ukDayOf(s.starts_at);
-    if (!s.lead_id || !inRange(day)) continue;
+    if (!s.lead_id || day == null || !inRange(day)) continue;
     const sent = sentDaysByLead.get(s.lead_id);
     if (!sent?.length) continue;
     sameDayOf++;
-    if (sent.some((d) => d === day)) sameDaySame++;
+    if (sent.some((d) => d <= day)) sameDaySame++;
   }
   const sameDay = {
     same: sameDaySame,
