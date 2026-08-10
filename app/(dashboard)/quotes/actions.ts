@@ -20,6 +20,7 @@ import { recommendVans } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { quoteRefKind } from "@/lib/quote/ref";
+import { planSupersede, refList, type SiblingQuote } from "@/lib/quote/supersede";
 
 async function ctx() {
   const sb = await createClient();
@@ -322,6 +323,22 @@ export async function deleteQuote(id: string) {
         "This accepted quote has money against it (a paid deposit or a raised invoice) — it can't be deleted. Cancel the booking and handle any refund first.",
     };
   }
+  // card_payments and refund_queue reference the quote with ON DELETE RESTRICT —
+  // correctly, that is real money. Check them here so the office reads a sentence
+  // instead of a raw constraint name from Postgres (Peter, 2026-08-10 hit exactly
+  // that on the communications FK, since fixed in 0092 to SET NULL: the email
+  // reached the customer and its record outlives the quote).
+  const [{ count: cardCount }, { count: refundCount }] = await Promise.all([
+    sb.from("card_payments").select("id", { count: "exact", head: true }).eq("quote_id", id),
+    sb.from("refund_queue").select("id", { count: "exact", head: true }).eq("quote_id", id),
+  ]);
+  if ((cardCount ?? 0) > 0 || (refundCount ?? 0) > 0) {
+    return {
+      ok: false as const,
+      error:
+        "This quote has a card payment or refund recorded against it, so it can't be deleted. Reject it instead — that retires it without losing the money trail.",
+    };
+  }
   const { error } = await sb.from("quotes").delete().eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/quotes");
@@ -341,7 +358,8 @@ export async function setQuoteStatus(id: string, status: string) {
   }
 
   const { sb, userId } = await ctx();
-  const { data: q } = await sb.from("quotes").select("lead_id, client_id, status").eq("id", id).single();
+  const { data: q } = await sb.from("quotes").select("lead_id, client_id, status, quote_ref").eq("id", id).single();
+  const newRef = q?.quote_ref ?? null;
   if (q?.status === "accepted") {
     return { ok: false as const, error: "This quote is accepted — reject or supersede it so the booking and invoices unwind properly." };
   }
@@ -407,6 +425,45 @@ export async function setQuoteStatus(id: string, status: string) {
       });
       revalidatePath(`/leads/${q.lead_id}`);
       revalidatePath("/leads");
+    }
+
+    // Retire the quote this one replaces. Superseding used to happen only on
+    // ACCEPT, so a revision left the original live: two prices in the customer's
+    // inbox, two rows in Awaiting reply and open pipeline, and a chase ladder
+    // that could follow up on the number we had just corrected.
+    // Best-effort by design — the email has already reached the customer at this
+    // point, so a failure here must report, never unsend.
+    const { data: siblings } = await sb
+      .from("quotes")
+      .select("id, quote_ref, status, deposit_paid_at, zoho_deposit_invoice_id, zoho_balance_invoice_id, zoho_commitment_invoice_id")
+      .eq("lead_id", q.lead_id)
+      .neq("id", id);
+    const plan = planSupersede((siblings ?? []) as SiblingQuote[], id);
+    for (const old of plan.supersede) {
+      const { error: supError } = await sb
+        .from("quotes")
+        .update({ status: "superseded" } as never)
+        .eq("id", old.id)
+        .eq("status", "sent"); // CAS: don't retire one the customer accepted mid-send
+      if (supError) continue;
+      await sb.from("activities").insert({
+        lead_id: q.lead_id,
+        client_id: q.client_id,
+        actor_id: userId,
+        type: "note",
+        summary: `Quote ${old.quote_ref ?? "(no ref)"} superseded by ${newRef ?? "the new quote"}`,
+        meta: { superseded_quote_id: old.id, by_quote_id: id },
+      });
+    }
+    if (plan.supersede.length || plan.blocked.length) revalidatePath("/quotes");
+    if (plan.blocked.length) {
+      // Money is attached, so retiring it silently could strand an invoice or a
+      // taken payment. Say so plainly rather than leaving a live duplicate the
+      // office never hears about.
+      return {
+        ok: true as const,
+        warning: `Sent. ${refList(plan.blocked)} is still live and has money against it — reject or refund it so the customer isn't holding two quotes.`,
+      };
     }
   }
 

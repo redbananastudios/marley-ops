@@ -164,16 +164,24 @@ export function SendQuoteDialog({
       }
 
       // A re-send never changes status (an accepted quote must stay accepted);
-      // a first send moves the quote to "sent".
-      if (!resend) await setQuoteStatus(quoteId, "sent");
-      // A re-send is a quiet confirmation; a first send is the moment the chase
-      // engine takes over, so say so — the estimator's steered away from the
-      // wizard by onSent, and this is the reassurance that follow-up is handled.
-      toast.success(
-        resend
-          ? `Quote re-sent to ${email.trim()}.`
-          : "Quote sent — chase emails run automatically until they reply.",
-      );
+      // a first send moves the quote to "sent" AND retires the quote it replaces.
+      const status = resend ? null : await setQuoteStatus(quoteId, "sent");
+      // Sending a revision normally retires the earlier quote silently — that's
+      // the point. It only speaks up when it couldn't, because a live duplicate
+      // the office doesn't know about is how a customer ends up holding two prices.
+      const warning = status && "warning" in status ? status.warning : null;
+      if (warning) {
+        toast.warning(warning, { duration: 12000 });
+      } else {
+        // A re-send is a quiet confirmation; a first send is the moment the chase
+        // engine takes over, so say so — the estimator's steered away from the
+        // wizard by onSent, and this is the reassurance that follow-up is handled.
+        toast.success(
+          resend
+            ? `Quote re-sent to ${email.trim()}.`
+            : "Quote sent — chase emails run automatically until they reply.",
+        );
+      }
       onSent?.();
       onOpenChange(false);
     } catch (err) {
