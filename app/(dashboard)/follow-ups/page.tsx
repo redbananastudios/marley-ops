@@ -96,6 +96,7 @@ export default async function FollowUpsPage() {
       leadId: f.lead_id,
       reason: f.reason,
       source: f.source ?? null,
+      kind: (meta as { kind?: string }).kind ?? null,
       dueAt: f.due_at,
       attempts: f.attempt_count ?? 0,
       lastAttemptAt: f.last_attempt_at,

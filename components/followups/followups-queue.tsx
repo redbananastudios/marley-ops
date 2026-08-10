@@ -20,6 +20,7 @@ import {
   Clock,
   AlarmClock,
   ExternalLink,
+  ReceiptText,
   Loader2,
   TriangleAlert,
 } from "lucide-react";
@@ -43,6 +44,7 @@ import {
   completeFollowUpAction,
   snoozeFollowUpAction,
   cancelFollowUpAction,
+  recordCreditNoteAction,
   type FollowUpOutcome,
 } from "@/app/(dashboard)/follow-ups/actions";
 
@@ -52,6 +54,8 @@ export interface FollowUpRow {
   reason: string;
   /** Free-text discriminator — decides the chip for reason='custom' rows. */
   source: string | null;
+  /** metadata.kind, where one source carries more than one kind of job. */
+  kind: string | null;
   dueAt: string;
   attempts: number;
   lastAttemptAt: string | null;
@@ -178,6 +182,10 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
   const [outcomeOpen, setOutcomeOpen] = useState(false);
   const meta = followUpLabel(r.reason, r.source);
   const overdue = new Date(r.dueAt).getTime() < startOfToday();
+  // A credit-note task can only be finished by recording the Zoho number, which
+  // also fills card_payments.zoho_credit_note_number — a bare "Done" would close
+  // the card and leave the books and the app disagreeing.
+  const isCreditNote = r.reason === "custom" && r.source === "card_payment" && r.kind === "credit_note";
   const template = templateForReason(r.reason, {
     firstName: r.name,
     quoteRef: r.quoteRef,
@@ -316,6 +324,22 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* A credit note is finished by recording its number, not by ticking. */}
+        {isCreditNote ? (
+          <button
+            type="button"
+            disabled={pending}
+            title="Record the Zoho credit note number"
+            onClick={() => {
+              const ref = prompt("Zoho credit note number for this refund:")?.trim();
+              if (ref) run(() => recordCreditNoteAction(r.id, ref), `Credit note ${ref} recorded.`);
+            }}
+            className={cn(iconBtn, "text-success")}
+          >
+            <ReceiptText className="size-4" strokeWidth={1.75} />
+          </button>
+        ) : null}
 
         {/* Done with outcome — same primitive, same reason. */}
         {outcomeOpen ? (

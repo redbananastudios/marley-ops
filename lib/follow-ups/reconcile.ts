@@ -26,11 +26,14 @@ export interface OpenFollowUp {
   quote_id: string | null;
   reason: string | null;
   source: string | null;
+  metadata?: { kind?: string } | null;
 }
 
 export interface LeadState {
   id: string;
   status: string | null;
+  /** Set by a bounce, cleared when the address is corrected. */
+  email_invalid_at?: string | null;
 }
 
 export interface QuoteState {
@@ -46,9 +49,16 @@ export interface Closure {
   why: string;
 }
 
+/** A bounce task — the one shape of `custom`/`card_payment`-adjacent work that
+ *  resolves purely from lead state. */
+const isBounce = (f: OpenFollowUp) => f.reason === "custom" && f.source === "email_bounced";
+
 /** Only these can be auto-closed — see the note above about balance/deposit. */
 function isCloseable(f: OpenFollowUp): boolean {
-  return f.reason === "quote_followup" || (f.reason === "custom" && f.source === "inbound_reply");
+  return (
+    f.reason === "quote_followup" ||
+    (f.reason === "custom" && (f.source === "inbound_reply" || f.source === "email_bounced"))
+  );
 }
 
 export function planFollowUpClosures(
@@ -56,7 +66,7 @@ export function planFollowUpClosures(
   leads: readonly LeadState[],
   quotes: readonly QuoteState[],
 ): Closure[] {
-  const leadStatus = new Map(leads.map((l) => [l.id, l.status]));
+  const leadById = new Map(leads.map((l) => [l.id, l]));
   const quoteById = new Map(quotes.map((q) => [q.id, q]));
   const sentByLead = new Set(
     quotes.filter((q) => q.lead_id && q.email_sent_at).map((q) => q.lead_id as string),
@@ -65,8 +75,19 @@ export function planFollowUpClosures(
   const out: Closure[] = [];
   for (const f of followUps) {
     if (!isCloseable(f) || !f.lead_id) continue;
+    const lead = leadById.get(f.lead_id);
+    const status = lead?.status ?? null;
 
-    const status = leadStatus.get(f.lead_id) ?? null;
+    // A bounce is answered by the address being fixed, which clears the flag.
+    // Checked BEFORE the settled-lead rule: a bounce on a confirmed booking is
+    // still a real problem — that customer can't be reached about their move.
+    if (isBounce(f)) {
+      if (lead && !lead.email_invalid_at) {
+        out.push({ id: f.id, why: "the email address has been corrected" });
+      }
+      continue;
+    }
+
     if (status && (SETTLED_LEAD_STATUSES as readonly string[]).includes(status)) {
       out.push({ id: f.id, why: `lead is ${status} — nothing left to chase` });
       continue;

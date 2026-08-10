@@ -19,13 +19,17 @@ test.describe("Office — Follow-ups queue", () => {
     await expect(page.getByRole("heading", { name: "Follow-ups", exact: true })).toBeVisible();
 
     const trigger = page.getByRole("button", { name: "Snooze" }).first();
+    await expect(trigger).toBeVisible({ timeout: 15_000 });
+    // Measure BEFORE opening: the menu is modal, so Radix marks the rest of the
+    // page aria-hidden while it is open and the trigger stops resolving by role.
+    const triggerBox = await trigger.boundingBox();
+
     const menuItem = page.getByRole("menuitem", { name: "In a fortnight" });
     await expect(async () => {
-      if (await trigger.isVisible().catch(() => false)) await trigger.click();
+      if (!(await menuItem.isVisible().catch(() => false))) await trigger.click();
       await expect(menuItem).toBeVisible({ timeout: 1000 });
     }).toPass({ timeout: 15_000 });
 
-    const triggerBox = await trigger.boundingBox();
     const menuBox = await page.getByRole("menu").first().boundingBox();
     expect(triggerBox).not.toBeNull();
     expect(menuBox).not.toBeNull();

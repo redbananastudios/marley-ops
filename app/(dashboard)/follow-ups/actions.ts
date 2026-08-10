@@ -175,6 +175,64 @@ export async function snoozeFollowUpAction(id: string, dueAt: string) {
   return { ok: true as const };
 }
 
+/**
+ * Close a "raise a Zoho credit note by hand" task by recording the number.
+ *
+ * That task only exists because the automated VAT reversal failed, so
+ * `card_payments.zoho_credit_note_id` never filled and nothing could ever close
+ * it — it sat on the board forever. A bare tick would close the task and leave
+ * the column empty, so the app and the books would still disagree. Recording the
+ * number does both jobs at once.
+ */
+export async function recordCreditNoteAction(id: string, creditNoteNumber: string) {
+  const ref = creditNoteNumber.trim();
+  if (!ref) return { ok: false as const, error: "Enter the Zoho credit note number" };
+  const { sb, userId } = await ctx();
+
+  const { data: fu } = await sb
+    .from("follow_ups")
+    .select("id, lead_id, client_id, quote_id, reason, source, metadata, status")
+    .eq("id", id)
+    .maybeSingle();
+  if (!fu) return { ok: false as const, error: "That follow-up no longer exists" };
+  const kind = (fu.metadata as { kind?: string } | null)?.kind;
+  if (fu.reason !== "custom" || fu.source !== "card_payment" || kind !== "credit_note") {
+    return { ok: false as const, error: "That isn't a credit-note task" };
+  }
+
+  // Write it back to the card payment so the refund record carries the note —
+  // best-effort: the task closing is what the office is waiting on, and a quote
+  // can legitimately have no card payment (a bank-transfer refund).
+  if (fu.quote_id) {
+    const { error: cpError } = await sb
+      .from("card_payments")
+      .update({ zoho_credit_note_number: ref })
+      .eq("quote_id", fu.quote_id)
+      .is("zoho_credit_note_number", null);
+    if (cpError) {
+      return { ok: false as const, error: `Could not record it against the payment: ${cpError.message}` };
+    }
+  }
+
+  const { error } = await sb
+    .from("follow_ups")
+    .update({ status: "done", outcome: "reached" })
+    .eq("id", id)
+    .eq("status", "open"); // CAS — don't reopen one someone already closed
+  if (error) return { ok: false as const, error: error.message };
+
+  await sb.from("activities").insert({
+    lead_id: fu.lead_id,
+    client_id: fu.client_id,
+    actor_id: userId,
+    type: "note",
+    summary: `Zoho credit note ${ref} recorded — VAT reversal closed`,
+    meta: { follow_up_id: id, credit_note_number: ref },
+  });
+  refresh(fu.lead_id);
+  return { ok: true as const };
+}
+
 export async function cancelFollowUpAction(id: string) {
   const { sb } = await ctx();
   const { data: fu, error } = await sb

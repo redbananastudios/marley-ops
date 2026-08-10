@@ -351,6 +351,12 @@ async function raiseDoublePaymentAlert(sb: Sb, row: CardPaymentRow): Promise<voi
       reason: "custom",
       due_at: new Date().toISOString(),
       source: "card_payment",
+      // Two very different jobs share (custom, card_payment): this refund
+      // DECISION, and the "raise a Zoho credit note by hand" reminder from
+      // refund-vat.ts. Without a discriminator the refund closer below shut both,
+      // retiring an accounting job nobody had done. kind mirrors the pattern the
+      // commitment_chase tasks already use.
+      metadata: { kind: "double_payment" },
       notes: `Deposit for ${ref} was paid twice — once by card (£${(row.amount_pence / 100).toFixed(2)}, refundable in the lead's Payments card) and once another way. Decide which payment to refund.`,
     } as never);
   }
@@ -588,13 +594,18 @@ export async function refundCardPayment(
     // the refund IS that decision, and nothing closed it — neither this module
     // nor app/actions/refunds.ts touched follow_ups — so the card that sent the
     // operator here stayed open on the board forever, still asking.
+    // Scoped to the double-payment task only. The credit-note reminder shares
+    // this reason+source but is raised LATER in this same refund (the VAT
+    // reversal runs after), so an unscoped close would either miss it or, worse,
+    // retire an accounting job the moment it was created.
     const { error: taskError } = await sb
       .from("follow_ups")
       .update({ status: "done", outcome: "reached" })
       .eq("lead_id", row.lead_id)
       .eq("reason", "custom")
       .eq("source", "card_payment")
-      .eq("status", "open");
+      .eq("status", "open")
+      .neq("metadata->>kind", "credit_note");
     if (taskError) {
       log.warn("card.refund.double_payment_task_close_failed", { cardPaymentId: row.id, error: taskError.message });
     }

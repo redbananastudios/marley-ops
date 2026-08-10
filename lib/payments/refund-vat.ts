@@ -148,6 +148,10 @@ async function raiseCreditNoteReminder(
           reason: "custom",
           due_at: new Date().toISOString(),
           source: "card_payment",
+          // Distinguishes this accounting job from the refund-decision task that
+          // shares (custom, card_payment) — see card-payments.ts. Also the key
+          // the "Record credit note" action closes on.
+          metadata: { kind: "credit_note" },
           notes: content.followUpNotes,
         } as never);
       } catch {
@@ -296,6 +300,9 @@ export async function reverseDepositVatInZoho(
           reason: "custom",
           due_at: new Date().toISOString(),
           source: "card_payment",
+          // Same accounting family as the reminder above, not the refund
+          // decision — so the refund closer must not sweep it away.
+          metadata: { kind: "credit_note", credit_note_number: createdCn.creditNoteNumber },
           notes: `Refund VAT reversal DONE (Zoho credit note ${createdCn.creditNoteNumber}, ${money(input.amountPence)}, ${displayRef}) but the accounts@ verify email FAILED to send — verify the credit note + refund in Zoho by hand.`,
         } as never);
       } catch {

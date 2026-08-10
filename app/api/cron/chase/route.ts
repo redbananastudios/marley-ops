@@ -229,13 +229,13 @@ export async function GET(req: Request) {
   {
     const { data: openFus } = await sb
       .from("follow_ups")
-      .select("id, lead_id, quote_id, reason, source, client_id")
+      .select("id, lead_id, quote_id, reason, source, client_id, metadata")
       .eq("status", "open")
       .limit(500);
     const fuLeadIds = [...new Set((openFus ?? []).map((f) => f.lead_id).filter(Boolean))] as string[];
     if (fuLeadIds.length) {
       const [{ data: fuLeads }, { data: fuQuotes }] = await Promise.all([
-        sb.from("leads").select("id, status").in("id", fuLeadIds),
+        sb.from("leads").select("id, status, email_invalid_at").in("id", fuLeadIds),
         sb.from("quotes").select("id, lead_id, status, email_sent_at").in("lead_id", fuLeadIds),
       ]);
       const closures = planFollowUpClosures(

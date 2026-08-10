@@ -219,17 +219,30 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
   const v = parsed.data;
   const { sb, userId } = await actor();
 
-  const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).single();
+  const { data: lead } = await sb
+    .from("leads")
+    .select("client_id, email, email_invalid_at")
+    .eq("id", leadId)
+    .single();
 
   const estimate =
     v.estimate_given === "" || v.estimate_given == null ? null : Number(v.estimate_given);
+
+  // A bounce marks the lead email_invalid_at + chase_paused and opens a "this
+  // address doesn't work" task. Nothing ever undid any of it — so correcting the
+  // address left the customer permanently un-chaseable AND the task on the board
+  // forever (Peter, 2026-08-10). Fixing the address IS the resolution.
+  const newEmail = v.email || null;
+  const emailChanged = (lead?.email ?? null) !== newEmail && !!newEmail;
+  const clearingBounce = emailChanged && !!lead?.email_invalid_at;
 
   const { error } = await sb
     .from("leads")
     .update({
       name: v.name,
       phone: v.phone || null,
-      email: v.email || null,
+      email: newEmail,
+      ...(clearingBounce ? { email_invalid_at: null, chase_paused: false } : {}),
       from_postcode: v.from_postcode || null,
       to_postcode: v.to_postcode || null,
       from_address: v.from_address || null,
@@ -269,6 +282,25 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
           : cErr.message,
       };
     }
+  }
+
+  if (clearingBounce) {
+    await sb
+      .from("follow_ups")
+      .update({ status: "cancelled", outcome: "reached" })
+      .eq("lead_id", leadId)
+      .eq("reason", "custom")
+      .eq("source", "email_bounced")
+      .eq("status", "open");
+    await sb.from("activities").insert({
+      client_id: lead?.client_id ?? null,
+      lead_id: leadId,
+      actor_id: userId,
+      type: "note",
+      summary: "Email address corrected — bounce cleared and follow-ups resumed",
+      meta: { previous_email: lead?.email ?? null, auto: true },
+    });
+    revalidatePath("/follow-ups");
   }
 
   await sb.from("activities").insert({
