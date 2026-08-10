@@ -31,6 +31,12 @@ import { getBusinessSettings } from "@/lib/settings";
 import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
+import {
+  planFollowUpClosures,
+  type OpenFollowUp,
+  type LeadState,
+  type QuoteState,
+} from "@/lib/follow-ups/reconcile";
 
 /**
  * The chase engine (daily Vercel cron, ~10:00 UK). Two cadences:
@@ -184,6 +190,7 @@ export async function GET(req: Request) {
     commitmentCallTasks: 0,
     datesAtRisk: 0,
     retiredLostQuotes: 0,
+    closedStaleFollowUps: 0,
     errors: 0,
   };
 
@@ -212,6 +219,54 @@ export async function GET(req: Request) {
         .eq("id", q.id)
         .in("status", ["draft", "sent"]);
       if (!error) summary.retiredLostQuotes++;
+    }
+  }
+
+  // Close follow-up tasks whose work is already done. Runs BEFORE the chase
+  // queries below and over ALL open tasks, not just chaseable leads — the worst
+  // offenders sit on leads that have already been won, which the quoted/
+  // provisional scoping would never look at.
+  {
+    const { data: openFus } = await sb
+      .from("follow_ups")
+      .select("id, lead_id, quote_id, reason, source, client_id")
+      .eq("status", "open")
+      .limit(500);
+    const fuLeadIds = [...new Set((openFus ?? []).map((f) => f.lead_id).filter(Boolean))] as string[];
+    if (fuLeadIds.length) {
+      const [{ data: fuLeads }, { data: fuQuotes }] = await Promise.all([
+        sb.from("leads").select("id, status").in("id", fuLeadIds),
+        sb.from("quotes").select("id, lead_id, status, email_sent_at").in("lead_id", fuLeadIds),
+      ]);
+      const closures = planFollowUpClosures(
+        (openFus ?? []) as OpenFollowUp[],
+        (fuLeads ?? []) as LeadState[],
+        (fuQuotes ?? []) as QuoteState[],
+      );
+      const fuById = new Map((openFus ?? []).map((f) => [f.id, f]));
+      for (const c of closures) {
+        const { data: closed } = await sb
+          .from("follow_ups")
+          .update({ status: "cancelled", outcome: "cancelled" })
+          .eq("id", c.id)
+          .eq("status", "open") // CAS: a human completing it mid-run wins
+          .select("id");
+        if (!closed?.length) continue;
+        const fu = fuById.get(c.id);
+        // Leave a trail — a task that silently vanishes is as confusing as one
+        // that never closes, and the office needs to see WHY it went.
+        if (fu?.lead_id) {
+          await sb.from("activities").insert({
+            lead_id: fu.lead_id,
+            client_id: fu.client_id,
+            actor_id: null,
+            type: "note",
+            summary: `Follow-up closed automatically — ${c.why}`,
+            meta: { follow_up_id: c.id, auto: true, source: fu.source },
+          });
+        }
+        summary.closedStaleFollowUps++;
+      }
     }
   }
 
