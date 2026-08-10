@@ -28,13 +28,16 @@ import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-} from "@/components/ui/select";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { CommsDialog } from "@/components/comms/comms-dialog";
 import { templateForReason } from "@/lib/comms/templates";
+import { followUpLabel } from "@/lib/follow-ups/labels";
+import { SNOOZE_OPTIONS, snoozeUntil } from "@/lib/follow-ups/snooze";
 import {
   logNoReplyAction,
   completeFollowUpAction,
@@ -47,6 +50,8 @@ export interface FollowUpRow {
   id: string;
   leadId: string;
   reason: string;
+  /** Free-text discriminator — decides the chip for reason='custom' rows. */
+  source: string | null;
   dueAt: string;
   attempts: number;
   lastAttemptAt: string | null;
@@ -61,14 +66,6 @@ export interface FollowUpRow {
   quoteRef: string | null;
   amount: number | null;
 }
-
-const REASON_META: Record<string, { label: string; cls: string; rank: number }> = {
-  no_answer: { label: "No answer", cls: "bg-danger-bg text-danger", rank: 0 },
-  deposit: { label: "Deposit", cls: "bg-warn-bg text-warn", rank: 1 },
-  balance: { label: "Balance", cls: "bg-warn-bg text-warn", rank: 2 },
-  quote_followup: { label: "Quote follow-up", cls: "bg-[#eff6ff] text-[#2563eb]", rank: 3 },
-  custom: { label: "Follow-up", cls: "bg-muted text-mist-500", rank: 4 },
-};
 
 const OUTCOMES: { value: FollowUpOutcome; label: string }[] = [
   { value: "reached", label: "Reached them" },
@@ -108,17 +105,12 @@ function fmtDate(d: string | null): string {
   return Number.isNaN(t.getTime()) ? "—" : t.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-function plusDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  d.setHours(9, 0, 0, 0);
-  return d.toISOString();
-}
-
 export function FollowUpsQueue({ rows }: { rows: FollowUpRow[] }) {
   const groups = useMemo(() => {
     const cmp = (a: FollowUpRow, b: FollowUpRow) => {
-      const r = (REASON_META[a.reason]?.rank ?? 9) - (REASON_META[b.reason]?.rank ?? 9);
+      // Rank by what the card actually SAYS it is, so a bounced address sorts
+      // with the urgent work rather than with the generic customs.
+      const r = followUpLabel(a.reason, a.source).rank - followUpLabel(b.reason, b.source).rank;
       if (r !== 0) return r;
       const d = new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime();
       if (d !== 0) return d;
@@ -184,7 +176,7 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [outcomeOpen, setOutcomeOpen] = useState(false);
-  const meta = REASON_META[r.reason] ?? REASON_META.custom;
+  const meta = followUpLabel(r.reason, r.source);
   const overdue = new Date(r.dueAt).getTime() < startOfToday();
   const template = templateForReason(r.reason, {
     firstName: r.name,
@@ -292,50 +284,62 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
           No reply
         </button>
 
-        {/* Snooze */}
-        <Select
-          onValueChange={(v) => {
-            if (v === "cancel") {
-              if (confirm("Cancel this follow-up?")) run(() => cancelFollowUpAction(r.id), "Cancelled.");
-              return;
-            }
-            run(() => snoozeFollowUpAction(r.id, plusDays(Number(v))), "Snoozed.");
-          }}
-          value=""
-        >
-          <SelectTrigger className="h-9 w-9 justify-center border-0 bg-transparent p-0 shadow-none hover:bg-muted [&>svg:last-child]:hidden" aria-label="Snooze">
-            <AlarmClock className="size-4 text-mist-400" strokeWidth={1.75} />
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectItem value="1">Tomorrow</SelectItem>
-            <SelectItem value="3">In 3 days</SelectItem>
-            <SelectItem value="7">In a week</SelectItem>
-            <SelectItem value="cancel">Cancel follow-up</SelectItem>
-          </SelectContent>
-        </Select>
-
-        {/* Done with outcome */}
-        {outcomeOpen ? (
-          <Select
-            open
-            onOpenChange={(o) => !o && setOutcomeOpen(false)}
-            onValueChange={(v) => {
-              setOutcomeOpen(false);
-              run(() => completeFollowUpAction(r.id, v as FollowUpOutcome), "Done.");
-            }}
-            value=""
+        {/* Snooze. DropdownMenu, not Select: these are action menus with no
+            persisted value, and a Select bound to value="" never resolves a
+            selected item, so Radix's item-aligned positioning silently skips its
+            offset maths and the panel lands at the top-left of the viewport. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            aria-label="Snooze"
+            disabled={pending}
+            className="focus-ring inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50"
           >
-            <SelectTrigger className="h-9 w-9 justify-center border-0 bg-transparent p-0 shadow-none [&>svg:last-child]:hidden" aria-label="Outcome">
+            <AlarmClock className="size-4 text-mist-400" strokeWidth={1.75} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            {SNOOZE_OPTIONS.map((o) => (
+              <DropdownMenuItem
+                key={o.value}
+                onSelect={() => run(() => snoozeFollowUpAction(r.id, snoozeUntil(o.value)), "Snoozed.")}
+              >
+                {o.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => {
+                if (confirm("Cancel this follow-up?")) run(() => cancelFollowUpAction(r.id), "Cancelled.");
+              }}
+            >
+              Cancel follow-up
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Done with outcome — same primitive, same reason. */}
+        {outcomeOpen ? (
+          <DropdownMenu open onOpenChange={(o) => !o && setOutcomeOpen(false)}>
+            <DropdownMenuTrigger
+              aria-label="Outcome"
+              className="focus-ring inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted"
+            >
               <Check className="size-4 text-success" strokeWidth={2} />
-            </SelectTrigger>
-            <SelectContent align="end">
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
               {OUTCOMES.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
+                <DropdownMenuItem
+                  key={o.value}
+                  onSelect={() => {
+                    setOutcomeOpen(false);
+                    run(() => completeFollowUpAction(r.id, o.value), "Done.");
+                  }}
+                >
                   {o.label}
-                </SelectItem>
+                </DropdownMenuItem>
               ))}
-            </SelectContent>
-          </Select>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : (
           <button type="button" onClick={() => setOutcomeOpen(true)} disabled={pending} title="Done" aria-label="Done" className={cn(iconBtn, "text-success")}>
             <Check className="size-4" strokeWidth={2} />

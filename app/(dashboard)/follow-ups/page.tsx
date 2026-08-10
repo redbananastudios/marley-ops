@@ -53,7 +53,7 @@ export default async function FollowUpsPage() {
   const [{ data: fus }, { data: profiles }] = await Promise.all([
     sb
       .from("follow_ups")
-      .select("id, lead_id, quote_id, reason, status, due_at, assigned_to, attempt_count, last_attempt_at, notes, metadata, created_at")
+      .select("id, lead_id, quote_id, reason, source, status, due_at, assigned_to, attempt_count, last_attempt_at, notes, metadata, created_at")
       .eq("status", "open")
       .order("due_at", { ascending: true }),
     sb.from("profiles").select("id, full_name"),
@@ -95,6 +95,7 @@ export default async function FollowUpsPage() {
       id: f.id,
       leadId: f.lead_id,
       reason: f.reason,
+      source: f.source ?? null,
       dueAt: f.due_at,
       attempts: f.attempt_count ?? 0,
       lastAttemptAt: f.last_attempt_at,

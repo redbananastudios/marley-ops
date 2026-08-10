@@ -14,7 +14,15 @@ import { AlarmClock, Check, Clock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { followUpLabel } from "@/lib/follow-ups/labels";
+import { SNOOZE_OPTIONS, snoozeUntil } from "@/lib/follow-ups/snooze";
 import {
   cancelFollowUpAction,
   completeFollowUpAction,
@@ -25,19 +33,13 @@ import {
 export interface LeadFollowUp {
   id: string;
   reason: string;
+  /** Free-text discriminator — decides the label for reason='custom' rows. */
+  source: string | null;
   dueAt: string;
   attempts: number;
   assignedName: string | null;
   notes: string | null;
 }
-
-const REASON_LABEL: Record<string, string> = {
-  no_answer: "No answer",
-  deposit: "Deposit",
-  balance: "Balance",
-  quote_followup: "Quote follow-up",
-  custom: "Follow-up",
-};
 
 const OUTCOMES: { value: FollowUpOutcome; label: string }[] = [
   { value: "reached", label: "Reached them" },
@@ -57,13 +59,6 @@ function endOfToday(): number {
   d.setHours(23, 59, 59, 999);
   return d.getTime();
 }
-function plusDays(days: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  d.setHours(9, 0, 0, 0);
-  return d.toISOString();
-}
-
 function dueMeta(dueAt: string): { label: string; tone: "danger" | "warn" | "muted" } {
   const t = new Date(dueAt).getTime();
   if (Number.isNaN(t)) return { label: "—", tone: "muted" };
@@ -120,7 +115,7 @@ function Row({ r }: { r: LeadFollowUp }) {
     <li className="flex items-center justify-between gap-3 px-5 py-3">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-          <span className="text-sm font-medium text-foreground">{REASON_LABEL[r.reason] ?? "Follow-up"}</span>
+          <span className="text-sm font-medium text-foreground">{followUpLabel(r.reason, r.source).label}</span>
           <span
             className={cn(
               "inline-flex items-center gap-1 text-xs font-medium",
@@ -143,56 +138,62 @@ function Row({ r }: { r: LeadFollowUp }) {
       <div className="flex shrink-0 items-center gap-0.5">
         {pending ? <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} /> : null}
 
-        {/* Snooze — same options as the /follow-ups queue */}
-        <Select
-          value=""
-          onValueChange={(v) => {
-            if (v === "cancel") {
-              if (confirm("Cancel this follow-up?")) run(() => cancelFollowUpAction(r.id), "Cancelled.");
-              return;
-            }
-            run(() => snoozeFollowUpAction(r.id, plusDays(Number(v))), "Snoozed.");
-          }}
-        >
-          <SelectTrigger
-            className="h-9 w-9 justify-center border-0 bg-transparent p-0 shadow-none hover:bg-muted [&>svg:last-child]:hidden"
+        {/* Snooze — same shared options as the /follow-ups queue. DropdownMenu,
+            not Select: a Select bound to value="" never resolves a selected item,
+            so Radix skips its positioning maths and the panel opens at the top-
+            left of the viewport instead of under the button. */}
+        <DropdownMenu>
+          <DropdownMenuTrigger
             aria-label="Snooze"
+            disabled={pending}
+            className="focus-ring inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted disabled:opacity-50"
           >
             <AlarmClock className="size-4 text-mist-400" strokeWidth={1.75} />
-          </SelectTrigger>
-          <SelectContent align="end">
-            <SelectItem value="1">Tomorrow</SelectItem>
-            <SelectItem value="3">In 3 days</SelectItem>
-            <SelectItem value="7">In a week</SelectItem>
-            <SelectItem value="cancel">Cancel follow-up</SelectItem>
-          </SelectContent>
-        </Select>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            {SNOOZE_OPTIONS.map((o) => (
+              <DropdownMenuItem
+                key={o.value}
+                onSelect={() => run(() => snoozeFollowUpAction(r.id, snoozeUntil(o.value)), "Snoozed.")}
+              >
+                {o.label}
+              </DropdownMenuItem>
+            ))}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              variant="destructive"
+              onSelect={() => {
+                if (confirm("Cancel this follow-up?")) run(() => cancelFollowUpAction(r.id), "Cancelled.");
+              }}
+            >
+              Cancel follow-up
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         {/* Done with outcome — same server action + outcomes as the queue */}
         {outcomeOpen ? (
-          <Select
-            open
-            onOpenChange={(o) => !o && setOutcomeOpen(false)}
-            value=""
-            onValueChange={(v) => {
-              setOutcomeOpen(false);
-              run(() => completeFollowUpAction(r.id, v as FollowUpOutcome), "Done.");
-            }}
-          >
-            <SelectTrigger
-              className="h-9 w-9 justify-center border-0 bg-transparent p-0 shadow-none [&>svg:last-child]:hidden"
+          <DropdownMenu open onOpenChange={(o) => !o && setOutcomeOpen(false)}>
+            <DropdownMenuTrigger
               aria-label="Outcome"
+              className="focus-ring inline-flex size-9 shrink-0 items-center justify-center rounded-md hover:bg-muted"
             >
               <Check className="size-4 text-success" strokeWidth={2} />
-            </SelectTrigger>
-            <SelectContent align="end">
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
               {OUTCOMES.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
+                <DropdownMenuItem
+                  key={o.value}
+                  onSelect={() => {
+                    setOutcomeOpen(false);
+                    run(() => completeFollowUpAction(r.id, o.value), "Done.");
+                  }}
+                >
                   {o.label}
-                </SelectItem>
+                </DropdownMenuItem>
               ))}
-            </SelectContent>
-          </Select>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : (
           <button
             type="button"

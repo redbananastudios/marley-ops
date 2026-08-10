@@ -176,13 +176,14 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // resolves off the active-profiles map already loaded (cheap; null if not there).
   const { data: followUpRows } = await supabase
     .from("follow_ups")
-    .select("id, reason, due_at, attempt_count, assigned_to, notes")
+    .select("id, reason, source, due_at, attempt_count, assigned_to, notes")
     .eq("lead_id", id)
     .eq("status", "open")
     .order("due_at", { ascending: true });
   const leadFollowUps = (followUpRows ?? []).map((f) => ({
     id: f.id,
     reason: f.reason,
+    source: f.source ?? null,
     dueAt: f.due_at,
     attempts: f.attempt_count ?? 0,
     assignedName: f.assigned_to ? (profileName.get(f.assigned_to) ?? null) : null,
