@@ -1,0 +1,47 @@
+{
+  "generated_by": "scripts/build-legal.mjs",
+  "documents": {
+    "customer-terms": {
+      "title": "Terms & Conditions",
+      "current": "customer-terms-v2-2026-08-11",
+      "versions": [
+        {
+          "id": "customer-terms-v1-2026-06-16",
+          "version": 1,
+          "path": "legal/customer-terms/v1-2026-06-16.md",
+          "sha256": "9156ef0525126ec0ce18df173e4175f25518418aa83be180c60523de846c4c01",
+          "effective_from": "2026-06-16",
+          "effective_to": "2026-08-11",
+          "summary": "Deposit £100, fully refundable more than 48 hours before the move. Predates Payments Policy v2.",
+          "legal_review": "pending"
+        },
+        {
+          "id": "customer-terms-v2-2026-08-11",
+          "version": 2,
+          "path": "legal/customer-terms/v2-2026-08-11.md",
+          "sha256": "16cac389350a13ae977a1211d3b6ee121e6a3929da3a1ccecfe75609fd92ce17",
+          "effective_from": "2026-08-11",
+          "effective_to": null,
+          "summary": "Aligns the published terms with the deposit-commitment ladder the system actually enforces: deposit refundable until you confirm your date, then a 25% commitment due 7 days before the move, and the re-booking rule on cancellation. Adds electronic-signature, VAT, communications and data clauses. Storage moves to its own agreement.",
+          "legal_review": "pending"
+        }
+      ]
+    },
+    "storage-terms": {
+      "title": "Storage Agreement Terms",
+      "current": "storage-terms-v1-2026-08-11",
+      "versions": [
+        {
+          "id": "storage-terms-v1-2026-08-11",
+          "version": 1,
+          "path": "legal/storage-terms/v1-2026-08-11.md",
+          "sha256": "3daa8ae5cee07702daf0c317fb6b6abde2dbc19f9d89d5fb160ed6828981df40",
+          "effective_from": "2026-08-11",
+          "effective_to": null,
+          "summary": "First published storage terms. Covers container and crate lets, billing, access, price changes, prohibited items, insurance, and the unpaid-charges procedure that the storage acknowledgment refers to.",
+          "legal_review": "pending"
+        }
+      ]
+    }
+  }
+}

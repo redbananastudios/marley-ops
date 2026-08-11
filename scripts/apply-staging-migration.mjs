@@ -1,71 +1,73 @@
 /**
- * Apply one migration to the STAGING Supabase project, in a transaction, with
- * the target table's shape printed before and after.
+ * Apply a migration to the STAGING Supabase project, per docs/ovh-deployment.md:
+ * session pooler, node `pg`, wrapped in a transaction, rolled back on any error.
  *
- * Staging first, then prod, and always BEFORE the deploy that needs the column
- * (docs/ovh-deployment.md). Rolls back on any error rather than leaving a
- * half-applied schema.
+ * The runbook described this connection in prose and every migration re-derived
+ * it by hand. Doing that with psql through an ssh hop mangles the password
+ * (it contains a `!`), which reads as "password authentication failed" and sends
+ * you looking for the wrong problem. So it lives in a script.
  *
- *   node scripts/apply-staging-migration.mjs supabase/migrations/00NN_x.sql [table]
+ *   node scripts/apply-staging-migration.mjs supabase/migrations/0093_x.sql
+ *   node scripts/apply-staging-migration.mjs <file> --verify "select …"
+ *
+ * Reads MARLEY_STAGING_SUPABASE_DB_PASSWORD from the environment, or falls back
+ * to the canonical credentials file. Never hardcode it.
  */
-import { readFileSync } from "node:fs";
-import pg from "pg";
 
-const [, , file, table = "business_settings"] = process.argv;
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { Client } = require("pg");
+
+const file = process.argv[2];
 if (!file) {
-  console.error("usage: node scripts/apply-staging-migration.mjs <migration.sql> [table]");
+  console.error("usage: node scripts/apply-staging-migration.mjs <migration.sql> [--verify \"sql\"]");
   process.exit(1);
 }
+const verifyIdx = process.argv.indexOf("--verify");
+const verifySql = verifyIdx > 0 ? process.argv[verifyIdx + 1] : null;
 
-const password = process.env.MARLEY_STAGING_SUPABASE_DB_PASSWORD;
-if (!password) {
-  console.error("MARLEY_STAGING_SUPABASE_DB_PASSWORD is not set — source credentials.env first.");
-  process.exit(1);
+async function password() {
+  if (process.env.MARLEY_STAGING_SUPABASE_DB_PASSWORD) {
+    return process.env.MARLEY_STAGING_SUPABASE_DB_PASSWORD;
+  }
+  const creds = await readFile("F:/My Drive/workspace/credentials.env", "utf8");
+  const line = creds.split(/\r?\n/).find((l) => l.startsWith("MARLEY_STAGING_SUPABASE_DB_PASSWORD="));
+  if (!line) throw new Error("MARLEY_STAGING_SUPABASE_DB_PASSWORD not found in credentials.env");
+  return line.slice(line.indexOf("=") + 1).replace(/^"|"$/g, "").trim();
 }
 
-const sql = readFileSync(file, "utf8");
-const client = new pg.Client({
+const sql = await readFile(file, "utf8");
+const client = new Client({
   host: "aws-0-eu-west-1.pooler.supabase.com",
   port: 5432,
   user: "postgres.nrghwyfakrgobcczuuca",
   database: "postgres",
-  password,
+  password: await password(),
   ssl: { rejectUnauthorized: false },
+  connectionTimeoutMillis: 30_000,
 });
 
-const columns = async () => {
-  const { rows } = await client.query(
-    `select column_name, data_type, is_nullable, column_default
-       from information_schema.columns
-      where table_name = $1
-      order by ordinal_position`,
-    [table],
-  );
-  return rows;
-};
-
 await client.connect();
-try {
-  const before = await columns();
-  console.log(`BEFORE: ${table} has ${before.length} columns`);
+console.log(`connected to staging — applying ${file}`);
 
+try {
   await client.query("begin");
   await client.query(sql);
   await client.query("commit");
-
-  const after = await columns();
-  console.log(`AFTER:  ${table} has ${after.length} columns`);
-  const beforeNames = new Set(before.map((c) => c.column_name));
-  const added = after.filter((c) => !beforeNames.has(c.column_name));
-  for (const c of added) {
-    console.log(`  + ${c.column_name} ${c.data_type} nullable=${c.is_nullable} default=${c.column_default}`);
-  }
-  if (added.length === 0) console.log("  (no new columns — already applied?)");
-  console.log("APPLIED OK");
-} catch (err) {
+  console.log("applied + committed");
+} catch (error) {
   await client.query("rollback").catch(() => {});
-  console.error("FAILED, rolled back:", err.message);
-  process.exitCode = 1;
-} finally {
+  console.error("ROLLED BACK:", error.message);
   await client.end();
+  process.exit(1);
 }
+
+if (verifySql) {
+  const { rows } = await client.query(verifySql);
+  console.log("verify:");
+  console.table(rows);
+}
+
+await client.end();

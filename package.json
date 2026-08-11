@@ -11,12 +11,14 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node scripts/build-legal.mjs --check && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
     "e2e:seed": "node scripts/seed-e2e.mjs",
-    "e2e:review": "node e2e/review.mjs"
+    "e2e:review": "node e2e/review.mjs",
+    "legal:build": "node scripts/build-legal.mjs",
+    "legal:check": "node scripts/build-legal.mjs --check"
   },
   "dependencies": {
     "@ai-sdk/google": "4.0.12",

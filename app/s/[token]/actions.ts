@@ -11,8 +11,8 @@ import {
   normalizeCrateStorageAcks,
   normalizeStorageAcks,
   STORAGE_ACKS,
-  TERMS_VERSION,
 } from "@/lib/signatures";
+import { termsSnapshot } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
@@ -69,7 +69,7 @@ export async function signStorageAgreementRemoteAction(
     channel: "remote",
     acknowledgments: isCrate ? normalizeCrateStorageAcks(acks) : normalizeStorageAcks(acks),
     ack_labels: ackLabels,
-    terms_version: TERMS_VERSION,
+    ...termsSnapshot("storage-terms"),
     ip,
     user_agent: h.get("user-agent"),
   } as never);

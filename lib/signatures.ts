@@ -49,9 +49,22 @@ export function signatureActionLabel(kind: string): string {
   return "Signed";
 }
 
-/** Bump when the published T&Cs change. GENERIC terms at launch — legal
- *  review before full go-live is tracked in ClickUp 869e35z42. */
-export const TERMS_VERSION = "generic-v1-2026-07-10";
+/**
+ * `TERMS_VERSION` was here. It is gone deliberately.
+ *
+ * It was a hand-maintained string (`generic-v1-2026-07-10`) stamped onto every
+ * signature, and it named a document that did not exist: the terms it pointed
+ * at were dated 16 June 2026 and lived as hardcoded JSX on the website, edited
+ * in place. So the system could name a version it could not produce.
+ *
+ * The published documents now live in `legal/` and are the source of both the
+ * version id and the text. Use:
+ *   termsSnapshot("customer-terms") — the bundle every signature must store
+ *   currentVersion(doc) / publicUrlFor(doc) — from @/lib/legal/documents
+ *
+ * Do not reintroduce a constant here. A version identifier that is maintained
+ * separately from the document it names will drift again.
+ */
 
 export const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
 

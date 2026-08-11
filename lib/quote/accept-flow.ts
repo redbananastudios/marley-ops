@@ -37,8 +37,8 @@ import {
   isValidSignatureDataUri,
   normalizeAcks,
   normalizeDateConfirmAcks,
-  TERMS_VERSION,
 } from "@/lib/signatures";
+import { termsSnapshot } from "@/lib/legal/documents";
 import {
   buildDepositReceivedEmailHtml,
   buildBalanceInvoiceEmailHtml,
@@ -532,7 +532,7 @@ export async function acceptQuoteOnline(
     method: "typed",
     channel: "remote",
     acknowledgments: normalizeAcks(opts?.acks),
-    terms_version: TERMS_VERSION,
+    ...termsSnapshot("customer-terms"),
     ip,
     user_agent: opts?.userAgent ?? null,
   } as never);
@@ -1671,7 +1671,7 @@ export async function confirmMoveDate(
       method: input.method,
       channel: input.channel,
       acknowledgments: normalizeDateConfirmAcks(input.acks),
-      terms_version: TERMS_VERSION,
+      ...termsSnapshot("customer-terms"),
       ip: input.ip ?? null,
       user_agent: input.userAgent ?? null,
       collected_by: input.collectedBy ?? null,

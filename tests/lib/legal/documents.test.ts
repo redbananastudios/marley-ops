@@ -1,0 +1,170 @@
+import { createHash } from "node:crypto";
+import { describe, expect, it } from "vitest";
+import { LEGAL_VERSIONS } from "@/lib/legal/generated";
+import {
+  currentVersion,
+  publicUrlFor,
+  snapshotOf,
+  termsSnapshot,
+  versionById,
+  versionEffectiveOn,
+  versionsOf,
+} from "@/lib/legal/documents";
+
+/**
+ * These guard the property the whole system rests on: that we can say, for any
+ * signature, exactly what the customer was served — and prove the text has not
+ * changed since. `terms_version` used to be a hand-maintained string reading
+ * `generic-v1-2026-07-10` while the document it named was dated 16 June 2026.
+ */
+
+describe("published legal documents", () => {
+  it("every recorded hash actually matches its body", () => {
+    // The tamper check. If a published file is edited in place, this fails.
+    for (const v of LEGAL_VERSIONS) {
+      expect(createHash("sha256").update(v.body, "utf8").digest("hex"), `${v.id} body hash`).toBe(v.sha256);
+    }
+  });
+
+  it("has exactly one current version per document, and it is the newest", () => {
+    for (const doc of ["customer-terms", "storage-terms"] as const) {
+      const versions = versionsOf(doc);
+      expect(versions.length, `${doc} has versions`).toBeGreaterThan(0);
+      const current = versions.filter((v) => v.effective_to === null);
+      expect(current, `${doc} current`).toHaveLength(1);
+      expect(current[0].version).toBe(Math.max(...versions.map((v) => v.version)));
+      expect(currentVersion(doc).id).toBe(current[0].id);
+    }
+  });
+
+  it("covers the timeline with no gap and no overlap", () => {
+    // A gap is a day where we cannot answer "which terms were live?" — the
+    // exact question a dispute asks.
+    for (const doc of ["customer-terms", "storage-terms"] as const) {
+      const versions = versionsOf(doc);
+      versions.forEach((v, i) => {
+        if (i === 0) return;
+        expect(versions[i - 1].effective_to, `${v.id} follows without a gap`).toBe(v.effective_from);
+      });
+    }
+  });
+
+  it("carries the acknowledgment WORDING, not just the keys", () => {
+    // signatures.acknowledgments stores {inventory: true} — keys only. Without
+    // the labels travelling with the version, rewording an ack silently
+    // rewrites what every historical signature appears to have agreed to.
+    const snap = termsSnapshot("customer-terms");
+    expect(Object.keys(snap.acknowledgment_labels).sort()).toEqual(
+      ["inventory", "no_hazardous", "owner_packed"].sort(),
+    );
+    expect(snap.acknowledgment_labels.owner_packed).toContain("pack myself");
+  });
+
+  it("termsSnapshot returns a self-sufficient evidence bundle", () => {
+    const snap = termsSnapshot("customer-terms");
+    expect(snap.terms_version).toBe(currentVersion("customer-terms").id);
+    expect(snap.terms_sha256).toHaveLength(64);
+    expect(createHash("sha256").update(snap.terms_snapshot, "utf8").digest("hex")).toBe(snap.terms_sha256);
+    expect(snap.terms_snapshot.length).toBeGreaterThan(500);
+  });
+});
+
+describe("versionEffectiveOn — mapping a historical signature to its terms", () => {
+  it("resolves the 13 existing signatures to customer-terms v1", () => {
+    // Every signature on prod was taken between 31 Jul and 10 Aug 2026, while
+    // the 16 June text was live and unchanged (site commit 8d01497).
+    for (const day of ["2026-07-31", "2026-08-03", "2026-08-05", "2026-08-06", "2026-08-10"]) {
+      expect(versionEffectiveOn("customer-terms", day)?.version, day).toBe(1);
+    }
+  });
+
+  it("switches to v2 on its effective date, not before", () => {
+    expect(versionEffectiveOn("customer-terms", "2026-08-10")?.version).toBe(1);
+    expect(versionEffectiveOn("customer-terms", "2026-08-11")?.version).toBe(2);
+    expect(versionEffectiveOn("customer-terms", "2027-01-01")?.version).toBe(2);
+  });
+
+  it("returns null before anything was published", () => {
+    expect(versionEffectiveOn("customer-terms", "2026-01-01")).toBeNull();
+    expect(versionEffectiveOn("storage-terms", "2026-08-10")).toBeNull();
+  });
+});
+
+describe("versionById", () => {
+  it("finds a published version and refuses an unknown one", () => {
+    expect(versionById("customer-terms-v1-2026-06-16")?.version).toBe(1);
+    // The legacy constant. It must NOT resolve — pretending it maps to a real
+    // document is how the original bug read as working.
+    expect(versionById("generic-v1-2026-07-10")).toBeNull();
+    expect(versionById(null)).toBeNull();
+  });
+});
+
+describe("the corrected terms actually say what the system enforces", () => {
+  // The reason v2 exists. If someone edits these clauses back out, this fails.
+  const v2 = currentVersion("customer-terms").body.toLowerCase();
+
+  it("states the 25% commitment and the 7-day window", () => {
+    expect(v2).toContain("25%");
+    expect(v2).toContain("7 days before your move");
+  });
+
+  it("ties retention to the day being re-booked, and never says penalty", () => {
+    expect(v2).toContain("re-book");
+    // Hard copy rule from the payments policy: held money is never a penalty.
+    expect(v2).not.toContain("penalty");
+  });
+
+  it("no longer promises a full refund up to 48 hours before the move", () => {
+    // The v1 clause that contradicted the app.
+    expect(v2).not.toContain("48 hours");
+    expect(currentVersion("customer-terms").body).not.toContain("fully refundable if you cancel");
+  });
+
+  it("keeps the deposit refundable UNTIL the date is confirmed", () => {
+    expect(v2).toContain("until you confirm your move date, your deposit is fully refundable");
+  });
+
+  it("carries no em-dash, per the house copy rule", () => {
+    for (const v of LEGAL_VERSIONS.filter((x) => x.version > 1)) {
+      expect(v.body, `${v.id} em-dash`).not.toMatch(/—/);
+    }
+  });
+});
+
+describe("storage terms", () => {
+  const storage = currentVersion("storage-terms").body.toLowerCase();
+
+  it("finally puts a document behind the lien acknowledgment", () => {
+    // Customers were ticking "may dispose of or sell stored items" with nothing
+    // published behind it. The procedure now has to be stated.
+    expect(storage).toContain("60 days");
+    expect(storage).toContain("written notice");
+    expect(storage).toContain("3 further months");
+    expect(storage).toContain("surplus is returned");
+  });
+
+  it("does not claim stored goods are insured by us", () => {
+    // Cover for goods in storage is unconfirmed with the insurer, so the terms
+    // must not imply it.
+    expect(storage).toContain("arrange your own insurance");
+    expect(storage).toContain("not while they are in storage");
+  });
+});
+
+describe("publicUrlFor", () => {
+  it("points each document at its own page", () => {
+    expect(publicUrlFor("customer-terms")).toContain("/terms-conditions/");
+    expect(publicUrlFor("storage-terms")).toContain("/storage-terms/");
+  });
+});
+
+describe("snapshotOf", () => {
+  it("can rebuild the bundle for a superseded version (the backfill path)", () => {
+    const v1 = versionById("customer-terms-v1-2026-06-16")!;
+    const snap = snapshotOf(v1);
+    expect(snap.terms_version).toBe(v1.id);
+    expect(snap.terms_snapshot).toContain("fully refundable if you cancel more than 48 hours");
+    expect(createHash("sha256").update(snap.terms_snapshot, "utf8").digest("hex")).toBe(snap.terms_sha256);
+  });
+});

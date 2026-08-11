@@ -27,7 +27,8 @@ import {
   completionEmailVariables,
   type CompletionEmailInput,
 } from "@/lib/comms/completion-email";
-import { allAcksConfirmed, isValidSignatureDataUri, JOB_DOCS_BUCKET, normalizeAcks, TERMS_VERSION } from "@/lib/signatures";
+import { allAcksConfirmed, isValidSignatureDataUri, JOB_DOCS_BUCKET, normalizeAcks } from "@/lib/signatures";
+import { termsSnapshot } from "@/lib/legal/documents";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
 import { claimRef } from "@/lib/claims";
@@ -73,7 +74,7 @@ export async function signContractInPersonAction(
     method: "drawn",
     channel: "in_person",
     acknowledgments: normalizeAcks(input.acks),
-    terms_version: TERMS_VERSION,
+    ...termsSnapshot("customer-terms"),
     collected_by: prof.id,
   } as never);
   if (error) {

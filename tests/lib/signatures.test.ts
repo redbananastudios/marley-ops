@@ -7,8 +7,8 @@ import {
   normalizeAcks,
   signatureActionLabel,
   signatureKindLabel,
-  TERMS_VERSION,
 } from "@/lib/signatures";
+import * as signaturesModule from "@/lib/signatures";
 import { buildCompletionCertDocDef, type CompletionCertData } from "@/lib/completion-cert-docdef";
 
 const ALL_TICKED = { inventory: true, owner_packed: true, no_hazardous: true };
@@ -30,8 +30,10 @@ describe("contract acknowledgments", () => {
     expect(n.owner_packed).toBe(false);
   });
 
-  it("terms version names the generic launch terms", () => {
-    expect(TERMS_VERSION).toContain("generic");
+  it("no TERMS_VERSION constant survives here", () => {
+    // It named a document that did not exist. Versions now come from
+    // legal/ via lib/legal/documents (see tests/lib/legal/documents.test.ts).
+    expect(Object.keys(signaturesModule)).not.toContain("TERMS_VERSION");
   });
 });
 

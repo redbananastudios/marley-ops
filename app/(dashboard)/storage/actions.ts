@@ -16,8 +16,8 @@ import {
   normalizeCrateStorageAcks,
   normalizeStorageAcks,
   STORAGE_ACKS,
-  TERMS_VERSION,
 } from "@/lib/signatures";
+import { termsSnapshot } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
 
@@ -689,7 +689,7 @@ export async function signStorageAgreementAction(
     channel: "in_person",
     acknowledgments: isCrate ? normalizeCrateStorageAcks(input.acks) : normalizeStorageAcks(input.acks),
     ack_labels: ackLabels,
-    terms_version: TERMS_VERSION,
+    ...termsSnapshot("storage-terms"),
     collected_by: userId,
   } as never);
   if (error) {
