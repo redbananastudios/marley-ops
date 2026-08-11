@@ -2,7 +2,12 @@ import Link from "next/link";
 import { FileDown, FileText, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
-import { JOB_DOCS_BUCKET } from "@/lib/signatures";
+import {
+  JOB_DOCS_BUCKET,
+  isSignatureKind,
+  signatureActionLabel,
+  type SignatureKind,
+} from "@/lib/signatures";
 import { PageHeader } from "@/components/page-header";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -42,9 +47,15 @@ const fmtDay = (d: string | null): string =>
       })
     : "—";
 
+/** Signature kinds plus the completion certificate (a different table), plus an
+ *  honest bucket for a signature row whose kind this page doesn't know. Keying
+ *  KIND_META off this union is what makes a future fourth signature kind a
+ *  BUILD failure rather than a silently mislabelled contract. */
+type DocKind = SignatureKind | "completion" | "other";
+
 type DocRow = {
   key: string;
-  kind: "contract" | "storage" | "completion";
+  kind: DocKind;
   signedAt: string;
   customer: string;
   clientId: string | null;
@@ -145,14 +156,14 @@ export default async function DocumentsPage({
       const qr = s.quote_id ? quoteById.get(s.quote_id) : null;
       return {
         key: `s-${s.id}`,
-        kind: (s.kind === "storage" ? "storage" : "contract") as DocRow["kind"],
+        kind: isSignatureKind(s.kind) ? s.kind : "other",
         signedAt: s.signed_at,
         customer: qr?.customer_name || (s.lead_id ? leadName.get(s.lead_id) : null) || s.signer_name,
         clientId: s.client_id,
         leadId: s.lead_id,
         quoteId: s.quote_id,
         quoteRef: qr?.quote_ref ?? null,
-        detail: `Signed ${s.channel === "in_person" ? "in person" : "online"} by ${s.signer_name}`,
+        detail: `${signatureActionLabel(s.kind)} ${s.channel === "in_person" ? "in person" : "online"} by ${s.signer_name}`,
         exceptions: null,
         certificateUrl: null,
       };
@@ -185,15 +196,25 @@ export default async function DocumentsPage({
     );
 
   // Unsigned tab: accepted quotes with no contract signature, soonest move first.
-  const signedQuoteIds = new Set((sigs ?? []).map((s) => s.quote_id).filter(Boolean));
+  // The `kind` filter is load-bearing: a date confirmation also carries the
+  // quote_id, so counting every signature kind here marked a quote as "signed"
+  // the moment the customer confirmed their date — dropping it off this list
+  // and off the dashboard tile, so the crew would never be told to collect the
+  // contract on arrival. Latent until today only because every date confirmation
+  // so far happened to follow a signed contract.
+  const signedQuoteIds = new Set(
+    (sigs ?? []).filter((s) => s.kind === "contract").map((s) => s.quote_id).filter(Boolean),
+  );
   const unsigned = (acceptedQuotes ?? [])
     .filter((aq) => !signedQuoteIds.has(aq.id))
     .filter((aq) => !q || (aq.customer_name ?? "").toLowerCase().includes(q) || aq.quote_ref.toLowerCase().includes(q));
 
-  const KIND_META: Record<DocRow["kind"], { label: string; cls: string }> = {
+  const KIND_META: Record<DocKind, { label: string; cls: string }> = {
     contract: { label: "Contract", cls: "border border-mm-red/45 bg-card text-mm-red-deep" },
+    date_confirm: { label: "Date confirmation", cls: "bg-info-bg text-info" },
     storage: { label: "Storage agreement", cls: "bg-muted text-mist-500" },
     completion: { label: "Completion certificate", cls: "bg-success-bg text-success" },
+    other: { label: "Signed document", cls: "bg-muted text-mist-500" },
   };
 
   const tabLink = (t: string) => `/documents?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(t !== "all" ? { tab: t } : {}) })}`;
@@ -311,7 +332,7 @@ export default async function DocumentsPage({
               hint={
                 q
                   ? "Try a different search, or clear it."
-                  : "Signed contracts and completion certificates appear here as they're collected."
+                  : "Signed contracts, date confirmations and completion certificates appear here as they're collected."
               }
             />
           ) : (

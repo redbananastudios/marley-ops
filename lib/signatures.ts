@@ -7,6 +7,48 @@
  * evidence pack: who/what-version/when/how, kept in the signatures table.
  */
 
+/**
+ * The kinds a `signatures` row can hold. Keep in step with the
+ * signatures_kind_check constraint AND with everything that renders a
+ * signature, because the failure mode there is silent rather than loud.
+ *
+ * /documents used to decide its label with `kind === 'storage' ? 'storage' :
+ * 'contract'`, so when date_confirm arrived with Payments Policy v2 every date
+ * confirmation was filed on the evidence register as a signed CONTRACT. Peter
+ * reported them as duplicate contracts (2026-08-11) — three customers appeared
+ * to have signed twice minutes apart, and one of the pairs had two different
+ * spellings of the signer's name, which made it look like a double-submit bug
+ * rather than two genuinely different documents.
+ *
+ * Consumers should key a `Record<SignatureKind, …>` off this type so a fourth
+ * kind fails the BUILD instead of quietly inheriting the wrong label, and fall
+ * back through signatureKindLabel() for a row whose kind is unknown at runtime.
+ */
+export type SignatureKind = "contract" | "storage" | "date_confirm";
+
+const SIGNATURE_KIND_LABEL: Record<SignatureKind, string> = {
+  contract: "Contract",
+  storage: "Storage agreement",
+  date_confirm: "Date confirmation",
+};
+
+export function isSignatureKind(kind: string): kind is SignatureKind {
+  return Object.prototype.hasOwnProperty.call(SIGNATURE_KIND_LABEL, kind);
+}
+
+/** Never guesses: an unrecognised kind is "Signed document", not a wrong name. */
+export function signatureKindLabel(kind: string): string {
+  return isSignatureKind(kind) ? SIGNATURE_KIND_LABEL[kind] : "Signed document";
+}
+
+/** What the customer actually DID, for the register's one-line detail. Reads
+ *  as "<action> online by Jane Smith" / "<action> in person by Jane Smith". */
+export function signatureActionLabel(kind: string): string {
+  if (kind === "date_confirm") return "Move date confirmed";
+  if (kind === "storage") return "Storage agreement signed";
+  return "Signed";
+}
+
 /** Bump when the published T&Cs change. GENERIC terms at launch — legal
  *  review before full go-live is tracked in ClickUp 869e35z42. */
 export const TERMS_VERSION = "generic-v1-2026-07-10";

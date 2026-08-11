@@ -4,7 +4,7 @@ import { ChevronLeft, FileDown, FileText, Phone, MessageCircle } from "lucide-re
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { createMediaStore } from "@/lib/storage/media-store";
-import { JOB_DOCS_BUCKET } from "@/lib/signatures";
+import { JOB_DOCS_BUCKET, signatureActionLabel, signatureKindLabel } from "@/lib/signatures";
 import { Card } from "@/components/ui/card";
 import { BookSurveyButton } from "@/components/clients/book-survey-button";
 import { ClientEditControls } from "@/components/clients/edit-client-dialog";
@@ -267,11 +267,11 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
             {(sigDocs ?? []).map((s) => (
               <li key={s.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                 <span className="shrink-0 rounded-pill border border-mm-red/45 bg-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
-                  {s.kind === "storage" ? "Storage agreement" : "Contract"}
+                  {signatureKindLabel(s.kind)}
                 </span>
                 <div className="min-w-0 flex-1 text-sm">
                   <span className="font-medium text-foreground">
-                    Signed {s.channel === "in_person" ? "in person" : "online"} by {s.signer_name}
+                    {signatureActionLabel(s.kind)} {s.channel === "in_person" ? "in person" : "online"} by {s.signer_name}
                   </span>
                   <span className="text-mist-400">
                     {" "}

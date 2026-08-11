@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   allAcksConfirmed,
   CONTRACT_ACKS,
+  isSignatureKind,
   isValidSignatureDataUri,
   normalizeAcks,
+  signatureActionLabel,
+  signatureKindLabel,
   TERMS_VERSION,
 } from "@/lib/signatures";
 import { buildCompletionCertDocDef, type CompletionCertData } from "@/lib/completion-cert-docdef";
@@ -110,5 +113,39 @@ describe("completion certificate doc-def", () => {
     expect(s).not.toContain("£");
     expect(s.toLowerCase()).not.toContain("deposit");
     expect(s.toLowerCase()).not.toContain("balance");
+  });
+});
+
+describe("signature kind labels", () => {
+  // Peter, 2026-08-11: three customers appeared on /documents to have signed
+  // TWO contracts minutes apart. They had not. Each pair was one contract and
+  // one date confirmation, and the register decided its label with
+  // `kind === 'storage' ? 'storage' : 'contract'` — so every kind added after
+  // that line was written inherited the word "Contract". On an evidence
+  // register that is not a cosmetic bug: it is the wrong document produced to
+  // an insurer or a dispute.
+  it("names every kind for what it actually is", () => {
+    expect(signatureKindLabel("contract")).toBe("Contract");
+    expect(signatureKindLabel("storage")).toBe("Storage agreement");
+    expect(signatureKindLabel("date_confirm")).toBe("Date confirmation");
+  });
+
+  it("never guesses at an unknown kind — the whole point of the bug", () => {
+    // A fourth kind must read as a generic document, NOT inherit "Contract".
+    for (const unknown of ["completion", "waiver", "", "CONTRACT"]) {
+      expect(signatureKindLabel(unknown)).toBe("Signed document");
+      expect(isSignatureKind(unknown)).toBe(false);
+    }
+    // ...and must not pick up anything off Object.prototype either.
+    expect(isSignatureKind("toString")).toBe(false);
+    expect(isSignatureKind("constructor")).toBe(false);
+  });
+
+  it("describes what the customer DID, so the detail line reads correctly", () => {
+    expect(signatureActionLabel("contract")).toBe("Signed");
+    expect(signatureActionLabel("date_confirm")).toBe("Move date confirmed");
+    expect(signatureActionLabel("storage")).toBe("Storage agreement signed");
+    // "Signed online by Jane" is a safe sentence for anything unrecognised.
+    expect(signatureActionLabel("waiver")).toBe("Signed");
   });
 });
