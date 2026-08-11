@@ -49,7 +49,9 @@ The fixed price, emailed on the spot at the survey OR sent directly for small/re
 ## Note (Peter): a quote may be sent **directly without a survey** for small-item moves or jobs further away — quote-email must serve both (handled via QUOTE_INTRO).
 
 ## Emails 4-6/13 — chase-quote-1/2/3 — ✅ CONFIRMED
-Personal, friendly-**professional**, signed by the lead owner `{{OWNER_NAME}}` (NOT team, NOT Connor). Vars add OWNER_NAME. £100/`{{DEPOSIT_AMOUNT}}` secures date + crew. Urgency line ("dates fill, month-end/Fridays first") is honest — keep. chase-3 feedback ask reworded to "any feedback on your decision would genuinely help us improve" (was "tell us what swung it"). chase-1 subject → "Your removal quote — any questions, {name}?" (more professional). All get standard footer.
+Personal, friendly-**professional**, signed by the lead owner `{{OWNER_NAME}}` (NOT team, NOT Connor). Vars add OWNER_NAME. Urgency line ("dates fill, month-end/Fridays first") is honest — keep. chase-1 subject → "Your removal quote — any questions, {name}?" (more professional). All get standard footer.
+
+**chase-1/2 name the deposit (`{{DEPOSIT_AMOUNT}}` secures date + crew). chase-3 names NO money at all** (Peter, 2026-08-11, after a £420 figure went out on a final chase to a customer we had never managed to reach: _"if we are trying to make contact i dont think we should be putting numbers on this email. it should be a more warmer friendlier but professional email."_). chase-3 is the last automated touch before a human call task, so it exists to re-open a conversation, not to sell: subject "Still here if you need anything, {name}" (the expiry moved into the body — a deadline headline was the wrong opening), soft "View your quote →" CTA instead of "Accept your quote online →", and an easy way out ("not going ahead" / feedback ask, wording unchanged). A vitest case asserts chase-3 carries no `£` and no "deposit" at any deposit amount, so this cannot regress. Copy lives in TWO places that must move together: `lib/quote/chase.ts` `quoteChaseEmail` step 3 (the text + fallback) and the `chase-quote-3` entry in `scripts/create-resend-templates.mjs` (what customers actually see — re-push with `--only chase-quote-3`).
 
 ## Email 7/13 — deposit-received — ✅ CONFIRMED
 Open "Hi {name}, / Thank you for booking with Marley Moves." We've received your {AMOUNT} deposit for {MOVE_DATE_LABEL} — date + crew secured. BALANCE_LINE (app-set): "remaining balance of £X due 24 hours before your move, unless we've agreed otherwise." Reassurance KEPT but NOT promising a day-before call: "If we need anything beforehand we'll be in touch — otherwise rest assured we'll see you on the day." Tell us if you want boxes. Call **the team**. Footer.
@@ -109,3 +111,21 @@ Source of truth = `scripts/create-resend-templates.mjs` (idempotent PATCH-by-nam
 2. Review-platform selection logic (Checkatrade/Trustpilot/Google by lead source) — app-side.
 3. Chase `text` fallbacks in chase.ts still say "Peter" (internal preview/dup-hash only; templates are what send) — align when convenient.
 4. Full-journey live test through the ops flow (survey→quote→deposit→balance→completion→review) once Peter's happy with the look.
+
+---
+
+# Deliverability — 2026-08-11 (the silent-suppression incident)
+
+**What happened.** From 9 Jul (when the webhook was created) to 11 Aug, the Resend webhook was subscribed to **`email.received` only**. `processBounce` in `app/api/webhooks/resend-inbound/route.ts` was written, tested and deployed, and never fired once — no bounce event was ever sent to it. Three addresses hard-bounced; Resend added each to its account **suppression list**; every later send to them was accepted with a **200 and an id**, then silently dropped. Our `communications` rows all said `sent`, `bounced_at` null. From inside the app it was indistinguishable from a world where nothing ever bounces.
+
+Cost: Kat (MMR018) got 4 undeliverable emails and the ladder ran to its end; **Mela Noble (MMR039) is a CONFIRMED move** whose address died on the quote email, so she would have received no confirmation, no crew details and no balance reminder before move day.
+
+**Why the SMTP fallback did not help, and must not.** `shouldSmtpFallback` fires only on 401/403/429/outcome-unknown — genuine Resend outage classes. A suppressed send is a **success** as far as the API is concerned, so there is no failure to fall back from. Nor should there be: the address is dead, so IONOS would bounce it too, and hammering a known-bad address from our own mailbox damages the sending reputation of every other email we send. Resend's suppression list is protecting us. The correct response to an undeliverable address is to **stop emailing and phone the customer** — which is what the bounce path does.
+
+**Fixes.**
+1. Webhook PATCHed to `["email.received","email.bounced","email.complained","email.failed"]`. Same webhook id, so `RESEND_INBOUND_WEBHOOK_SECRET` is unchanged.
+2. **Daily suppression reconcile** (`lib/comms/suppressions.ts`, run at the top of `cron/chase`): pulls Resend's suppression list and flags any live lead sitting on a suppressed address. A delivery-failure signal arriving over exactly one push channel has no failure detection — when it stops arriving it looks like good news. So we also PULL the truth once a day. Counter: `suppressedLeadsFlagged`.
+3. Flagging extracted to `lib/comms/invalid-email.ts` so the webhook and the reconcile treat a dead address identically. It CAS-claims `email_invalid_at`, so a daily re-run refreshes the call task without re-alerting the office.
+4. Backfilled prod: both leads flagged + chases paused + call tasks raised, 6 sends re-stamped `bounced`.
+
+**Recovery path for the office:** correct the address on the lead. `updateLeadDetailsAction` clears `email_invalid_at` + `chase_paused` and closes the bounce task, and the new address is not on Resend's suppression list, so sending resumes by itself.

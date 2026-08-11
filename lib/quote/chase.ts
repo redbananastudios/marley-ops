@@ -178,18 +178,29 @@ ${owner}`,
       variables: vars(c),
     };
   }
+  // The final chase is deliberately the ONE email in the ladder with no money
+  // in it. By this point we have written three times and heard nothing back, so
+  // a third push on the deposit lands as pressure on someone who may simply
+  // have moved on, and it reads badly when we have never actually spoken to
+  // them (Peter, 2026-08-11: "if we are trying to make contact i dont think we
+  // should be putting numbers on this email"). What earns a reply here is
+  // warmth, brevity, and an easy way out. The expiry stays because it is
+  // genuinely useful to them and it is the honest reason for writing; it is
+  // framed as a fact, not a deadline.
   return {
-    subject: `Your quote is valid until ${c.expiryLabel}`,
+    subject: `Still here if you need anything, ${name}`,
     text: `Hi ${name},
 
-I hope the move plans are coming along. Just to let you know, quote ${c.quoteRef} remains valid until ${c.expiryLabel}. After that I'd need to take a fresh look at price and availability before we could confirm anything.
+It's ${owner} here, and this is the last reminder I'll send you, so I'll keep it brief.
 
-You can go ahead whether or not your date is confirmed. The ${dep} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure:
+Your quote ${c.quoteRef} is open until ${c.expiryLabel} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on 01747 637070. I'd be glad to help.
+
+Your quote is here whenever you want it:
 ${c.acceptUrl}
 
-If you no longer need the quote, reply with "not going ahead" and I won't follow up again. If you've chosen someone else, a one-line note about what made the difference would genuinely help us improve.
+And if you've made other arrangements, that's absolutely fine. Reply with "not going ahead" and I'll leave you in peace. If you have a moment, any feedback on your decision would genuinely help us improve.
 
-All the best with the move either way,
+All the best with the move,
 ${owner}`,
     from,
     variables: vars(c),

@@ -128,10 +128,28 @@ describe("chase copy (refreshed 2026-07-13)", () => {
   });
 
   it("final quote chase names the expiry and the ref; deposit chases name the ref", () => {
-    expect(quoteChaseEmail(3, ctx).subject).toContain("8 August");
+    // The expiry moved out of the subject and into the body when the final
+    // chase was warmed up (2026-08-11) — a deadline headline was the wrong
+    // opening for the one email that exists to re-open a conversation.
+    expect(quoteChaseEmail(3, ctx).text).toContain("8 August");
     expect(quoteChaseEmail(3, ctx).text).toContain("MM-T-9");
     expect(depositChaseEmail(1, ctx).subject).toContain("MM-T-9");
     expect(depositChaseEmail(1, ctx).text).toContain("Bank transfer reference: MM-T-9");
+  });
+
+  it("the FINAL quote chase asks for no money at all", () => {
+    // Peter, 2026-08-11: after three unanswered emails, quoting a deposit
+    // figure at someone we have never spoken to reads as pressure. This is the
+    // one email in the ladder that must stay money-free, whatever the deposit
+    // is set to, so assert on the absence of any figure rather than one string.
+    for (const amount of [undefined, "£100", "£420", "£300"]) {
+      const email = quoteChaseEmail(3, { ...ctx, depositAmount: amount });
+      expect(email.text).not.toMatch(/£/);
+      expect(email.subject).not.toMatch(/£/);
+      expect(email.text.toLowerCase()).not.toContain("deposit");
+    }
+    // ...while the earlier steps still name it, so the ask never goes missing.
+    expect(quoteChaseEmail(2, { ...ctx, depositAmount: "£420" }).text).toContain("£420 deposit");
   });
 
   it("fallback HTML escapes and links, then adds the TEAM signature (never a hardcoded individual)", () => {
@@ -200,7 +218,6 @@ describe("deposit amount in chase copy (found by /qa 2026-08-05)", () => {
     expect(depositChaseEmail(1, bumped).text).not.toContain("£100");
     expect(depositChaseEmail(2, bumped).text).toContain("£300 deposit");
     expect(quoteChaseEmail(2, bumped).text).toContain("£300 deposit");
-    expect(quoteChaseEmail(3, bumped).text).toContain("£300 deposit");
     expect(depositChaseEmail(1, bumped).variables.DEPOSIT_AMOUNT).toBe("£300");
   });
 

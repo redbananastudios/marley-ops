@@ -783,17 +783,23 @@ const TEMPLATES = [
   {
     name: "chase-quote-3",
     envVar: "RESEND_TEMPLATE_CHASE_QUOTE_3",
-    subject: "Your quote is valid until {{{EXPIRY_DATE}}}",
+    // The only chase with no money in it, and a soft CTA. See the reasoning in
+    // lib/quote/chase.ts quoteChaseEmail step 3 (Peter, 2026-08-11): after three
+    // unanswered emails, another deposit figure reads as pressure on someone we
+    // have never actually spoken to. Keep this template and that copy in step.
+    subject: "Still here if you need anything, {{{CUSTOMER_FIRST_NAME}}}",
     from: CHASE_FROM,
-    html: chaseHtml("Your quote is valid until {{{EXPIRY_DATE}}}.", {
+    html: chaseHtml("No rush at all. Your quote is open until {{{EXPIRY_DATE}}}.", {
       intro: [
-        "I hope the move plans are coming along. Just to let you know, your quote ({{{QUOTE_REF}}}) remains valid until {{{EXPIRY_DATE}}}. After that I'd need to take a fresh look at price and availability before we could confirm anything.",
-        "You can go ahead whether or not your date is confirmed. The {{{DEPOSIT_AMOUNT}}} deposit holds a provisional booking with a fully amendable date, so your price and your place stay secure. It's one click away:",
+        "It's {{{OWNER_NAME}}} here, and this is the last reminder I'll send you, so I'll keep it brief.",
+        "Your quote ({{{QUOTE_REF}}}) is open until {{{EXPIRY_DATE}}} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on 01747 637070. I'd be glad to help.",
       ],
-      cta: "Accept your quote online&nbsp;&rarr;",
+      cta: "View your quote&nbsp;&rarr;",
+      // No "all the best with the move" line here: the shell already signs off
+      // with "Best regards, {{{OWNER_NAME}}}", and two farewells in a row is
+      // exactly the padding that makes a short, warm note read like a mailshot.
       closing: [
-        "If you've decided to go elsewhere, that's no problem at all, and if you have a moment, any feedback on your decision would genuinely help us improve.",
-        "Either way, I wish you all the best with your move.",
+        "And if you've made other arrangements, that's absolutely fine. Reply with \"not going ahead\" and I'll leave you in peace. If you have a moment, any feedback on your decision would genuinely help us improve.",
       ],
     }),
     variables: CHASE_VARS,
