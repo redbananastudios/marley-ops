@@ -32,6 +32,12 @@ import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sen
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
 import { isCustomerSendHour, sendWindowReason } from "@/lib/comms/send-window";
+import { flagLeadEmailInvalid } from "@/lib/comms/invalid-email";
+import {
+  fetchResendSuppressions,
+  planSuppressionFlags,
+  type ReconcilableLead,
+} from "@/lib/comms/suppressions";
 import {
   planFollowUpClosures,
   type OpenFollowUp,
@@ -193,6 +199,7 @@ export async function GET(req: Request) {
     retiredLostQuotes: 0,
     closedStaleFollowUps: 0,
     skippedOutsideWindow: 0,
+    suppressedLeadsFlagged: 0,
     errors: 0,
   };
 
@@ -268,6 +275,42 @@ export async function GET(req: Request) {
           });
         }
         summary.closedStaleFollowUps++;
+      }
+    }
+  }
+
+  // Safety net: reconcile Resend's suppression list before deciding who to
+  // chase. An address on that list is one Resend will accept a send for (200,
+  // with an id) and then silently drop — so without this the ladder chases into
+  // a void and the lead eventually lapses to a false "lost — no response". The
+  // bounce webhook normally flags these within seconds; this catches whatever it
+  // missed, which between 9 Jul and 11 Aug 2026 was every single bounce (the
+  // webhook was subscribed to email.received only). Runs BEFORE the leads query
+  // so a lead flagged here drops out of it in the same run.
+  {
+    const suppressions = await fetchResendSuppressions();
+    if (suppressions?.length) {
+      const { data: candidates } = await sb
+        .from("leads")
+        .select("id, client_id, email, status, email_invalid_at")
+        .is("email_invalid_at", null)
+        .not("email", "is", null)
+        .limit(1000);
+      const flags = planSuppressionFlags(suppressions, (candidates ?? []) as ReconcilableLead[]);
+      for (const flag of flags) {
+        const flagged = await flagLeadEmailInvalid(sb, {
+          leadId: flag.leadId,
+          clientId: flag.clientId,
+          toAddress: flag.email,
+          kind: flag.kind,
+          detail: `on Resend's suppression list (${flag.origin})`,
+          at: flag.at,
+          discoveredBy: "suppression-reconcile",
+        });
+        if (flagged) {
+          summary.suppressedLeadsFlagged++;
+          log.warn("cron.chase.suppressed_lead_flagged", { leadId: flag.leadId, origin: flag.origin });
+        }
       }
     }
   }

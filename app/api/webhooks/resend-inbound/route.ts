@@ -6,6 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { emailPayloadHash, sendEmail } from "@/lib/comms/send";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { classifyBounce, suppressesAddress } from "@/lib/comms/bounce";
+import { flagLeadEmailInvalid } from "@/lib/comms/invalid-email";
 import { htmlToText, splitReply } from "@/lib/comms/extract-reply";
 import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
@@ -216,59 +217,19 @@ async function processBounce(
 
   if (!comm.lead_id) return { matched: true };
 
-  const reason = kind === "complaint"
-    ? "The recipient marked our email as spam."
-    : `Email to ${comm.to_address} hard-bounced (${detail}).`;
-  const { error: leadError } = await sb
-    .from("leads")
-    .update({ email_invalid_at: nowIso, email_invalid_reason: reason.slice(0, 300), chase_paused: true } as never)
-    .eq("id", comm.lead_id);
-  if (leadError) log.warn("webhook.resend.bounce_lead_flag_failed", { leadId: comm.lead_id, error: leadError.message });
-
-  // One open call task per lead — the office cannot email their way out of this.
-  const { data: openTask } = await sb
-    .from("follow_ups")
-    .select("id")
-    .eq("lead_id", comm.lead_id)
-    .eq("reason", "custom")
-    .eq("source", "email_bounced")
-    .eq("status", "open")
-    .limit(1)
-    .maybeSingle();
-  const notes = kind === "complaint"
-    ? `${comm.to_address} marked our email as spam — stop emailing them and call instead if the job is still live.`
-    : `Email to ${comm.to_address} bounced, so automatic reminders can't reach them — call to confirm the right address. (${detail})`;
-  if (!openTask) {
-    const { data: lead } = await sb.from("leads").select("estimator_id").eq("id", comm.lead_id).maybeSingle();
-    await sb.from("follow_ups").insert({
-      lead_id: comm.lead_id,
-      client_id: comm.client_id,
-      reason: "custom",
-      status: "open",
-      due_at: nowIso,
-      assigned_to: lead?.estimator_id ?? null,
-      source: "email_bounced",
-      notes,
-    } as never);
-  } else {
-    await sb.from("follow_ups").update({ notes, due_at: nowIso }).eq("id", openTask.id);
-  }
-
-  await sb.from("activities").insert({
-    lead_id: comm.lead_id,
-    client_id: comm.client_id,
-    actor_id: null,
-    type: "note",
-    summary: kind === "complaint"
-      ? `Recipient marked our email as spam (${comm.subject ?? "email"}) — chasing paused`
-      : `Email to ${comm.to_address} bounced — chasing paused, call task raised`,
-    meta: { communication_id: comm.id, bounce_kind: kind, auto: true },
+  // Flagging is shared with the daily suppression reconcile (lib/comms/
+  // suppressions.ts) so the two discovery paths can never drift into treating
+  // the same dead address differently.
+  await flagLeadEmailInvalid(sb, {
+    leadId: comm.lead_id,
+    clientId: comm.client_id,
+    toAddress: comm.to_address,
+    kind,
+    detail,
+    at: nowIso,
+    discoveredBy: "resend-webhook",
+    communicationId: comm.id,
   });
-
-  await sendOpsAlert(`Email undeliverable — ${comm.to_address}`, [
-    `<strong>${esc(comm.to_address)}</strong> ${kind === "complaint" ? "marked our email as spam" : "bounced"}: ${esc(detail)}.`,
-    `Chasing is paused for that lead and a call task is in Follow-ups. Their automatic reminders will not reach them until the address is corrected.`,
-  ], "system").catch(() => {});
 
   return { matched: true };
 }
