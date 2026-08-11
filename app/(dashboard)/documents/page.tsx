@@ -109,7 +109,7 @@ export default async function DocumentsPage({
   const [{ data: sigs }, { data: comps }, { data: acceptedQuotes }] = await Promise.all([
     sb
       .from("signatures")
-      .select("id, kind, quote_id, lead_id, client_id, signer_name, method, channel, signed_at")
+      .select("id, kind, quote_id, lead_id, client_id, signer_name, method, channel, signed_at, terms_sha256")
       .order("signed_at", { ascending: false })
       .limit(400),
     sb
@@ -175,6 +175,12 @@ export default async function DocumentsPage({
       return {
         key: `s-${s.id}`,
         kind,
+        // The signed document itself, when we captured the terms it was taken
+        // under. Rows predating that capture keep the link to their evidence
+        // panel rather than offering a PDF we cannot honestly produce. Keyed on
+        // the hash rather than the snapshot so the list query stays light — the
+        // text itself is multi-KB and this page reads up to 400 rows.
+        certificateUrl: s.terms_sha256 ? `/api/documents/contract/${s.id}` : null,
         viewHref: evidenceHrefFor(kind, s.quote_id, s.lead_id),
         signedAt: s.signed_at,
         customer: qr?.customer_name || (s.lead_id ? leadName.get(s.lead_id) : null) || s.signer_name,
@@ -184,7 +190,6 @@ export default async function DocumentsPage({
         quoteRef: qr?.quote_ref ?? null,
         detail: `${signatureActionLabel(s.kind)} ${s.channel === "in_person" ? "in person" : "online"} by ${s.signer_name}`,
         exceptions: null,
-        certificateUrl: null,
       };
     }),
     ...(comps ?? []).map(
@@ -402,11 +407,13 @@ export default async function DocumentsPage({
                       {r.exceptions ? "Exceptions noted" : "Nothing to report"}
                     </span>
                   ) : null}
-                  {/* Every row gets a way to see the document itself. Only
-                      completions have a generated PDF; for a signature the
-                      evidence is the panel on its quote/lead (signature image,
-                      ticked acknowledgments, terms version, timestamp), so the
-                      register links there rather than pretending a file exists. */}
+                  {/* Two different things, and a row can offer both. PDF is the
+                      document you hand to an insurer or a customer: for a
+                      signature it is generated from the terms captured at
+                      signing, for a completion it is the stored certificate.
+                      View opens the same evidence in context, which is where
+                      the office works from. A signature taken before terms
+                      capture has no honest PDF, so it keeps View only. */}
                   {r.certificateUrl ? (
                     <a
                       href={r.certificateUrl}
@@ -417,7 +424,8 @@ export default async function DocumentsPage({
                       <FileDown className="size-3.5" strokeWidth={1.75} />
                       PDF
                     </a>
-                  ) : r.viewHref ? (
+                  ) : null}
+                  {r.viewHref ? (
                     <Link
                       href={r.viewHref}
                       className="focus-ring inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted"

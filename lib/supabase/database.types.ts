@@ -3211,6 +3211,9 @@ export type Database = {
           signer_name: string
           storage_let_id: string | null
           terms_version: string | null
+          terms_sha256: string | null
+          terms_snapshot: string | null
+          acknowledgment_labels: Json | null
           user_agent: string | null
         }
         Insert: {
@@ -3231,6 +3234,9 @@ export type Database = {
           signer_name: string
           storage_let_id?: string | null
           terms_version?: string | null
+          terms_sha256?: string | null
+          terms_snapshot?: string | null
+          acknowledgment_labels?: Json | null
           user_agent?: string | null
         }
         Update: {
@@ -3251,6 +3257,9 @@ export type Database = {
           signer_name?: string
           storage_let_id?: string | null
           terms_version?: string | null
+          terms_sha256?: string | null
+          terms_snapshot?: string | null
+          acknowledgment_labels?: Json | null
           user_agent?: string | null
         }
         Relationships: [
