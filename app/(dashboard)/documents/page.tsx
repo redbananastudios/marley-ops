@@ -2,12 +2,12 @@ import Link from "next/link";
 import { FileDown, FileText, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
+import { JOB_DOCS_BUCKET, signatureActionLabel } from "@/lib/signatures";
 import {
-  JOB_DOCS_BUCKET,
-  isSignatureKind,
-  signatureActionLabel,
-  type SignatureKind,
-} from "@/lib/signatures";
+  DocumentKindPill,
+  toDocumentKind,
+  type DocumentKind,
+} from "@/components/documents/document-kind-pill";
 import { PageHeader } from "@/components/page-header";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
@@ -47,15 +47,9 @@ const fmtDay = (d: string | null): string =>
       })
     : "—";
 
-/** Signature kinds plus the completion certificate (a different table), plus an
- *  honest bucket for a signature row whose kind this page doesn't know. Keying
- *  KIND_META off this union is what makes a future fourth signature kind a
- *  BUILD failure rather than a silently mislabelled contract. */
-type DocKind = SignatureKind | "completion" | "other";
-
 type DocRow = {
   key: string;
-  kind: DocKind;
+  kind: DocumentKind;
   signedAt: string;
   customer: string;
   clientId: string | null;
@@ -156,7 +150,7 @@ export default async function DocumentsPage({
       const qr = s.quote_id ? quoteById.get(s.quote_id) : null;
       return {
         key: `s-${s.id}`,
-        kind: isSignatureKind(s.kind) ? s.kind : "other",
+        kind: toDocumentKind(s.kind),
         signedAt: s.signed_at,
         customer: qr?.customer_name || (s.lead_id ? leadName.get(s.lead_id) : null) || s.signer_name,
         clientId: s.client_id,
@@ -208,14 +202,6 @@ export default async function DocumentsPage({
   const unsigned = (acceptedQuotes ?? [])
     .filter((aq) => !signedQuoteIds.has(aq.id))
     .filter((aq) => !q || (aq.customer_name ?? "").toLowerCase().includes(q) || aq.quote_ref.toLowerCase().includes(q));
-
-  const KIND_META: Record<DocKind, { label: string; cls: string }> = {
-    contract: { label: "Contract", cls: "border border-mm-red/45 bg-card text-mm-red-deep" },
-    date_confirm: { label: "Date confirmation", cls: "bg-info-bg text-info" },
-    storage: { label: "Storage agreement", cls: "bg-muted text-mist-500" },
-    completion: { label: "Completion certificate", cls: "bg-success-bg text-success" },
-    other: { label: "Signed document", cls: "bg-muted text-mist-500" },
-  };
 
   const tabLink = (t: string) => `/documents?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(t !== "all" ? { tab: t } : {}) })}`;
 
@@ -339,9 +325,7 @@ export default async function DocumentsPage({
             <ul className="divide-y">
               {rows.map((r) => (
                 <li key={r.key} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
-                  <span className={`shrink-0 rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide ${KIND_META[r.kind].cls}`}>
-                    {KIND_META[r.kind].label}
-                  </span>
+                  <DocumentKindPill kind={r.kind} />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">
                       {r.clientId ? (
