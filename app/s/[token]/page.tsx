@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import { crateStorageAcks, STORAGE_ACKS, TERMS_URL } from "@/lib/signatures";
+import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { publicUrlFor } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { StorageAgreementForm } from "./agreement-form";
 
@@ -109,9 +110,18 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
               )}
             </div>
             <p className="mt-4 text-xs leading-relaxed text-mist-400">
-              This agreement is with Marley Moves Ltd (Company No. 15914266) under our{" "}
-              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
-                terms &amp; conditions
+              {/* Storage customers were linked to the REMOVALS terms, which say
+                  nothing about storage rates, access, or the notice procedure
+                  behind the lien clause they are ticking. Now that storage terms
+                  are published, point at those. */}
+              This agreement is with MarleyMoves Ltd (Company No. 15914266) under our{" "}
+              <a
+                href={publicUrlFor("storage-terms")}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline underline-offset-2"
+              >
+                storage agreement terms
               </a>
               . Invoices are payable by bank transfer on receipt.
             </p>
