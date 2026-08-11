@@ -59,7 +59,30 @@ type DocRow = {
   detail: string;
   exceptions: string | null;
   certificateUrl: string | null;
+  /** Where the signed evidence for THIS row is actually rendered. There is no
+   *  stored PDF of a contract (only completion certificates are generated), so
+   *  "view" means the evidence panel — signature image, ticked acknowledgments,
+   *  terms version, timestamp — and the right page differs by kind: the
+   *  contract card lives on the quote, the date-confirmation status on the
+   *  lead. Without this the register showed a document existed but gave the
+   *  office nowhere obvious to go and look at it. */
+  viewHref: string | null;
 };
+
+/** The evidence page for a signature, by kind. Falls back rather than dropping
+ *  the link: a row with no quote is still worth opening on its lead. */
+function evidenceHrefFor(
+  kind: DocumentKind,
+  quoteId: string | null,
+  leadId: string | null,
+): string | null {
+  const quote = quoteId ? `/quotes/${quoteId}` : null;
+  const lead = leadId ? `/leads/${leadId}` : null;
+  if (kind === "storage") return "/storage";
+  // Only the lead page renders DateConfirmStatus; the quote page does not.
+  if (kind === "date_confirm") return lead ?? quote;
+  return quote ?? lead;
+}
 
 export default async function DocumentsPage({
   searchParams,
@@ -148,9 +171,11 @@ export default async function DocumentsPage({
   const rows: DocRow[] = [
     ...(sigs ?? []).map((s): DocRow => {
       const qr = s.quote_id ? quoteById.get(s.quote_id) : null;
+      const kind = toDocumentKind(s.kind);
       return {
         key: `s-${s.id}`,
-        kind: toDocumentKind(s.kind),
+        kind,
+        viewHref: evidenceHrefFor(kind, s.quote_id, s.lead_id),
         signedAt: s.signed_at,
         customer: qr?.customer_name || (s.lead_id ? leadName.get(s.lead_id) : null) || s.signer_name,
         clientId: s.client_id,
@@ -166,6 +191,9 @@ export default async function DocumentsPage({
       (c): DocRow => ({
         key: `c-${c.id}`,
         kind: "completion",
+        // Completions carry the real thing (a stored PDF), so the row's action
+        // is that download rather than a link to a panel.
+        viewHref: c.lead_id ? `/leads/${c.lead_id}` : null,
         signedAt: c.signed_at,
         customer: c.customer_name || (c.lead_id ? leadName.get(c.lead_id) : null) || "Customer",
         clientId: c.client_id,
@@ -349,7 +377,14 @@ export default async function DocumentsPage({
                       {r.leadId ? (
                         <>
                           {" · "}
-                          <Link href={`/leads/${r.leadId}`} className="focus-ring hover:underline">
+                          {/* Brand red + a standing underline: this sat in a
+                              grey metadata line and read as plain text, so the
+                              one route from a document back to its customer was
+                              invisible (Peter, 2026-08-11). */}
+                          <Link
+                            href={`/leads/${r.leadId}`}
+                            className="focus-ring font-medium text-mm-red underline decoration-mm-red/40 underline-offset-2 hover:decoration-mm-red"
+                          >
                             open enquiry
                           </Link>
                         </>
@@ -367,6 +402,11 @@ export default async function DocumentsPage({
                       {r.exceptions ? "Exceptions noted" : "Nothing to report"}
                     </span>
                   ) : null}
+                  {/* Every row gets a way to see the document itself. Only
+                      completions have a generated PDF; for a signature the
+                      evidence is the panel on its quote/lead (signature image,
+                      ticked acknowledgments, terms version, timestamp), so the
+                      register links there rather than pretending a file exists. */}
                   {r.certificateUrl ? (
                     <a
                       href={r.certificateUrl}
@@ -377,6 +417,14 @@ export default async function DocumentsPage({
                       <FileDown className="size-3.5" strokeWidth={1.75} />
                       PDF
                     </a>
+                  ) : r.viewHref ? (
+                    <Link
+                      href={r.viewHref}
+                      className="focus-ring inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-md border border-input bg-card px-2.5 text-xs font-medium text-foreground hover:bg-muted"
+                    >
+                      <FileText className="size-3.5" strokeWidth={1.75} />
+                      View
+                    </Link>
                   ) : null}
                 </li>
               ))}
