@@ -21,6 +21,7 @@ const quote = (over: Partial<BalanceInvoiceQuote> = {}): BalanceInvoiceQuote => 
 const lead = (over: Partial<BalanceInvoiceLead> = {}): BalanceInvoiceLead => ({
   status: "confirmed",
   balance_paid_at: null,
+  date_confirmed_at: "2026-08-01T10:00:00Z",
   ...over,
 });
 
@@ -56,6 +57,12 @@ describe("balanceInvoiceDue", () => {
     expect(balanceInvoiceDue(quote(), lead({ balance_paid_at: "2026-08-01T10:00:00Z" }), TODAY, T7)).toBe(false);
     expect(balanceInvoiceDue(quote(), lead({ status: "declined" }), TODAY, T7)).toBe(false);
     expect(balanceInvoiceDue(quote(), undefined, TODAY, T7)).toBe(false);
+  });
+
+  it("skips when the move date was never confirmed (office Mark-won leaves the stamp null)", () => {
+    // Marks Davis MMR019: status='confirmed' via the office button, but the
+    // customer never agreed 25 Aug — an invoice naming that date must wait.
+    expect(balanceInvoiceDue(quote(), lead({ date_confirmed_at: null }), TODAY, T7)).toBe(false);
   });
 
   it("skips non-accepted quotes and out-of-window moves", () => {

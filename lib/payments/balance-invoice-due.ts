@@ -24,6 +24,16 @@ export interface BalanceInvoiceQuote extends LegacyLockFields {
 export interface BalanceInvoiceLead {
   status: string;
   balance_paid_at: string | null;
+  /**
+   * The customer (or the office, verbally) has confirmed the move date.
+   * Office "Mark won" sets status='confirmed' WITHOUT stamping this — only the
+   * /q date-confirmation flow (or a deliberate office stamp) does. A final
+   * invoice names a move date, so it must never be raised against a date
+   * nobody confirmed (Marks Davis MMR019, 2026-08-13: panel said 25 Aug,
+   * office said the date was never agreed). Same rule the commitment ladder
+   * already applies: "date not confirmed → nothing is invoiced yet".
+   */
+  date_confirmed_at: string | null;
 }
 
 /** Move date sits between today and T+7 inclusive (UK day keys, YYYY-MM-DD). */
@@ -46,6 +56,9 @@ export function balanceInvoiceDue(
   if (legacyLocked(quote)) return false;
   if (!withinT7Window(quote.moving_date, todayDay, t7Day)) return false;
   if (!lead || lead.status !== "confirmed") return false;
+  // Unconfirmed date → the T-10 confirm-date call task owns this booking; the
+  // invoice waits for the stamp rather than billing a date that may be wrong.
+  if (!lead.date_confirmed_at) return false;
   // Settled jobs have nothing left to bill — skip rather than let the flow
   // discover it and log a daily "Nothing left to invoice" refusal.
   if (lead.balance_paid_at) return false;

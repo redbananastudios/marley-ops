@@ -1140,7 +1140,7 @@ export async function GET(req: Request) {
     if (balByLead.size > 0) {
       const { data: balLeads } = await sb
         .from("leads")
-        .select("id, status, balance_paid_at")
+        .select("id, status, balance_paid_at, date_confirmed_at")
         .in("id", [...balByLead.keys()]);
       const balLeadById = new Map((balLeads ?? []).map((l) => [l.id as string, l]));
 
