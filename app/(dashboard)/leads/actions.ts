@@ -142,6 +142,46 @@ export async function createLeadAndOpenAction(input: NewLeadInput) {
  * (the field the dashboard's median-response metric reads) and logs it. Idempotent:
  * a no-op once already stamped.
  */
+/**
+ * Legacy iMVE bookings only: record that the customer has been informed by
+ * phone (Luke's T-8/9 call) and lift the automated-email exclusion for this
+ * booking — or restore it. The state lives on the quote (standard_comms_at)
+ * because every exclusion site already holds the quote row (see lib/legacy.ts).
+ */
+export async function setStandardCommsAction(quoteId: string, enable: boolean) {
+  const { sb, userId } = await actor();
+  const { data: quote } = await sb
+    .from("quotes")
+    .select("id, quote_ref, lead_id, client_id, source, standard_comms_at")
+    .eq("id", quoteId)
+    .single();
+  if (!quote) return { ok: false as const, error: "Quote not found" };
+  if (quote.source !== "imve") {
+    return { ok: false as const, error: "Only legacy (iMVE) bookings carry the standard-comms switch." };
+  }
+  if (enable === !!quote.standard_comms_at) return { ok: true as const };
+
+  const { error } = await sb
+    .from("quotes")
+    .update({ standard_comms_at: enable ? new Date().toISOString() : null } as never)
+    .eq("id", quoteId);
+  if (error) return { ok: false as const, error: error.message };
+
+  await sb.from("activities").insert({
+    client_id: quote.client_id,
+    lead_id: quote.lead_id,
+    actor_id: userId,
+    type: "note",
+    summary: enable
+      ? `Standard comms enabled (${quote.quote_ref}) — customer informed by phone; automated emails now apply to this booking.`
+      : `Standard comms disabled (${quote.quote_ref}) — booking returned to legacy hands-off handling.`,
+  });
+
+  if (quote.lead_id) revalidatePath(`/leads/${quote.lead_id}`);
+  revalidatePath("/leads");
+  return { ok: true as const };
+}
+
 export async function markLeadContactedAction(leadId: string) {
   const { sb, userId } = await actor();
   const { data: cur } = await sb

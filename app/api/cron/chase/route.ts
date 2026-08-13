@@ -5,7 +5,7 @@ import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { sendReviewRequest } from "@/lib/comms/review-request";
-import { acceptUrlFor, ensureAcceptToken } from "@/lib/quote/accept-flow";
+import { acceptUrlFor, createBalanceInvoiceFlow, ensureAcceptToken } from "@/lib/quote/accept-flow";
 import {
   chaseTextToHtml,
   depositChaseEmail,
@@ -26,6 +26,8 @@ import {
   composeCommitmentChaseEmail,
 } from "@/lib/comms/commitment-chase-email";
 import { ukTimeAt } from "@/lib/uk-time";
+import { legacyLocked } from "@/lib/legacy";
+import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
 import { requestedDeposit } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
 import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
@@ -196,6 +198,7 @@ export async function GET(req: Request) {
     commitmentChases: 0,
     commitmentCallTasks: 0,
     datesAtRisk: 0,
+    balanceInvoicesRaised: 0,
     retiredLostQuotes: 0,
     closedStaleFollowUps: 0,
     skippedOutsideWindow: 0,
@@ -803,15 +806,10 @@ export async function GET(req: Request) {
   const { data: commitmentQuotes, error: commitmentQueryError } = await sb
     .from("quotes")
     .select(
-      "id, lead_id, quote_ref, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
+      "id, lead_id, quote_ref, source, standard_comms_at, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
-    // Legacy iMVE imports NEVER enter the ladder: those customers booked under
-    // the old system's terms (no 25%-by-T-7 promise), so a T-10 chase email or
-    // a T-7 "date at risk" flag would be chasing money they never owed. All
-    // their payment handling is manual (Peter, 2026-08-07).
-    .neq("source", "imve")
     // Cancelled bookings drop out of the ladder entirely: chase_paused
     // deliberately does NOT suppress the T-7 flag, so without this filter a
     // Marley-cancelled job would still stamp date_releasable_at, alert the
@@ -833,6 +831,11 @@ export async function GET(req: Request) {
   // siblings, but a stale duplicate must never double-chase a customer).
   const commitByLead = new Map<string, CommitmentQuoteRow>();
   for (const q of commitmentQuotes ?? []) {
+    // Legacy iMVE imports stay out of the ladder until the office has informed
+    // the customer by phone (standard_comms_at, Luke's T-8/9 call): they booked
+    // under the old system's terms, so a T-10 chase or T-7 "date at risk" flag
+    // would be chasing money they never owed (Peter, 2026-08-07 / 2026-08-13).
+    if (legacyLocked(q)) continue;
     const leadId = q.lead_id as string;
     const prev = commitByLead.get(leadId);
     const stamp = (row: CommitmentQuoteRow) => row.accepted_at ?? row.created_at ?? "";
@@ -1087,6 +1090,84 @@ export async function GET(req: Request) {
           quoteId: quote.id,
           ...errorContext(e),
         });
+      }
+    }
+  }
+
+  /* ---------------- T-7: raise the final balance invoice ----------------
+   * Final invoices were manual-only (the button on the payments card), which
+   * is how Brydee (MMR034) reached move day with hers never raised. From T-7
+   * the balance is due paperwork: raise + email it automatically via
+   * createBalanceInvoiceFlow (CAS-claimed, Zoho-orphan safe — a hand-raised
+   * invoice at a different figure refuses + alerts instead of double-billing).
+   * Gated on the 09:00 UK window because it emails the customer; a gated run
+   * loses nothing — zoho_balance_invoice_id stays null, so the next 09:00 run
+   * picks the same candidates up. Selection rules live in
+   * lib/payments/balance-invoice-due.ts (pure, tested). */
+  if (sendsAllowed) {
+    const t7Day = new Date(Date.parse(`${todayDay}T00:00:00Z`) + 7 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    const { data: balQuotes, error: balQueryError } = await sb
+      .from("quotes")
+      .select(
+        "id, quote_ref, lead_id, moving_date, source, standard_comms_at, zoho_balance_invoice_id, booking_cancelled_at, status, accepted_at, created_at",
+      )
+      .eq("status", "accepted")
+      .is("zoho_balance_invoice_id", null)
+      .is("booking_cancelled_at", null)
+      .gte("moving_date", todayDay)
+      .lte("moving_date", t7Day)
+      .not("lead_id", "is", null)
+      .limit(100);
+    if (balQueryError) {
+      // Same rule as the ladder: a failed query must not read as a quiet day.
+      summary.errors++;
+      log.error("cron.chase.balance_invoice_query_failed", { error: balQueryError.message });
+    }
+
+    type BalQuoteRow = NonNullable<typeof balQuotes>[number];
+    // Latest accepted quote per lead — same de-dupe as the ladder, so a stale
+    // duplicate can never invoice a customer twice.
+    const balByLead = new Map<string, BalQuoteRow>();
+    for (const q of balQuotes ?? []) {
+      const leadId = q.lead_id as string;
+      const prev = balByLead.get(leadId);
+      const stamp = (row: BalQuoteRow) => row.accepted_at ?? row.created_at ?? "";
+      if (!prev || stamp(q) > stamp(prev)) balByLead.set(leadId, q);
+    }
+
+    if (balByLead.size > 0) {
+      const { data: balLeads } = await sb
+        .from("leads")
+        .select("id, status, balance_paid_at")
+        .in("id", [...balByLead.keys()]);
+      const balLeadById = new Map((balLeads ?? []).map((l) => [l.id as string, l]));
+
+      for (const quote of balByLead.values()) {
+        const lead = balLeadById.get(quote.lead_id as string);
+        if (!balanceInvoiceDue(quote, lead, todayDay, t7Day)) continue;
+        try {
+          const res = await createBalanceInvoiceFlow(sb, quote.id as string, null);
+          if (res.ok) {
+            summary.balanceInvoicesRaised++;
+            log.info("cron.chase.balance_invoice_raised", { quoteRef: quote.quote_ref });
+          } else if (/nothing left to invoice/i.test(res.error ?? "")) {
+            // Payments already cover the price — benign, nothing to raise.
+          } else {
+            summary.errors++;
+            log.error("cron.chase.balance_invoice_failed", {
+              quoteRef: quote.quote_ref,
+              error: res.error,
+            });
+          }
+        } catch (e) {
+          summary.errors++;
+          log.error("cron.chase.balance_invoice_failed", {
+            quoteRef: quote.quote_ref,
+            ...errorContext(e),
+          });
+        }
       }
     }
   }

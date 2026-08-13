@@ -61,6 +61,7 @@ import {
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
 import { commitmentAmount, commitmentDueDate, requestedDeposit } from "@/lib/payments-policy";
+import { legacyLocked } from "@/lib/legacy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -95,13 +96,14 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
 
 export type AcceptQuoteRow = {
   id: string;
   quote_ref: string;
   status: string;
   source: string;
+  standard_comms_at: string | null;
   lead_id: string | null;
   client_id: string | null;
   estimator_id: string | null;
@@ -1297,8 +1299,11 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
   if (!quote || quote.status !== "accepted" || !quote.lead_id) return quote;
   // Legacy iMVE jobs were sold under the old system's terms — no 25% commitment
   // was ever part of their deal, so the panel must never invoice one. All their
-  // money moves are manual triggers (Attach dialog / mark-paid).
-  if (quote.source === "imve") return quote;
+  // money moves are manual triggers (Attach dialog / mark-paid). The office's
+  // standard-comms switch (after Luke's call) lifts this with the rest of the
+  // email gates — see lib/legacy.ts for why that still can't invoice one
+  // retroactively.
+  if (legacyLocked(quote)) return quote;
   // A cancelled booking never raises money paperwork (belt-and-braces beside
   // the confirmMoveDate guard — this self-heals from /q too).
   if (quote.booking_cancelled_at) return quote;
@@ -1594,8 +1599,10 @@ export async function confirmMoveDate(
   // Imported iMVE bookings arrive date-confirmed, so this normally answers
   // `already: true` upstream. If one ever reaches here un-confirmed, refuse:
   // the confirmation email quotes the 25% commitment terms these customers
-  // never agreed to, and the flow would try to invoice them for it.
-  if (quote.source === "imve") {
+  // never agreed to, and the flow would try to invoice them for it. Once the
+  // office has informed the customer by phone (standard_comms_at set), the
+  // flow opens up like any other booking.
+  if (legacyLocked(quote)) {
     return {
       ok: false,
       error: "This is a legacy iMVE booking — its date is managed manually, the online confirmation (and its commitment terms) doesn't apply.",

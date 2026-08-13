@@ -2850,6 +2850,7 @@ export type Database = {
           client_id: string | null
           collect_addr: string | null
           commitment_chase_t10_at: string | null
+          standard_comms_at: string | null
           date_confirm_nudge_at: string | null
           commitment_due_date: string | null
           commitment_invoice_amount: number | null
@@ -2921,6 +2922,7 @@ export type Database = {
           client_id?: string | null
           collect_addr?: string | null
           commitment_chase_t10_at?: string | null
+          standard_comms_at?: string | null
           date_confirm_nudge_at?: string | null
           commitment_due_date?: string | null
           commitment_invoice_amount?: number | null
@@ -2992,6 +2994,7 @@ export type Database = {
           client_id?: string | null
           collect_addr?: string | null
           commitment_chase_t10_at?: string | null
+          standard_comms_at?: string | null
           date_confirm_nudge_at?: string | null
           commitment_due_date?: string | null
           commitment_invoice_amount?: number | null

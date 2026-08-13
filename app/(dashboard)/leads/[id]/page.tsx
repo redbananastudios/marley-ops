@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
+import { LegacyCommsToggle } from "@/components/leads/legacy-comms-toggle";
 import { PipelineStepper } from "@/components/leads/pipeline-stepper";
 import { LeadFollowUpsCard } from "@/components/leads/lead-followups-card";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
@@ -156,11 +157,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { data: quotes } = await supabase
     .from("quotes")
     .select(
-      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at",
+      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at, source, standard_comms_at",
     )
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
+  // The comms switch lives on the booking's driving quote: latest accepted imve.
+  const legacyQuote =
+    lead.source_system === "imve"
+      ? (quoteRows.find((q) => q.source === "imve" && q.status === "accepted") ??
+        quoteRows.find((q) => q.source === "imve"))
+      : null;
 
   // The chase-engine driver: the latest SENT quote while "quoted", the latest
   // ACCEPTED quote while chasing the deposit ("provisional"). quoteRows is newest
@@ -356,6 +363,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 >
                   Legacy (iMVE)
                 </span>
+              ) : null}
+              {legacyQuote ? (
+                <LegacyCommsToggle
+                  quoteId={legacyQuote.id}
+                  enabledAt={legacyQuote.standard_comms_at ?? null}
+                />
               ) : null}
             </div>
           </div>
