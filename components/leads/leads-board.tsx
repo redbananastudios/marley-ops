@@ -241,8 +241,11 @@ export function LeadsBoard({
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return base
-      .filter((l) => matchesPreset(l, preset))
-      .filter((l) => (status ? l.status === status : true))
+      // A typed search looks across EVERYTHING — typing a name means "find this
+      // lead", not "find it within the active chip". Without this, the new
+      // Enquiry default preset silently hid quoted/confirmed leads from search.
+      .filter((l) => (term ? true : matchesPreset(l, preset)))
+      .filter((l) => (term || !status ? true : l.status === status))
       .filter((l) => {
         if (!term) return true;
         return [l.name, l.phone, l.email, l.from_postcode, l.to_postcode]
