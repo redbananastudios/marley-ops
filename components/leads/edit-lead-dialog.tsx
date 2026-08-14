@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
 import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
+import { MonthSelect } from "@/components/bookings/month-select";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
 import { PROPERTY_SIZES, type EditLeadInput } from "@/lib/leads/schema";
 
@@ -230,7 +231,12 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="ed-approx-month">Provisional month</Label>
-                <Input id="ed-approx-month" type="month" value={v.approx_month} onChange={set("approx_month")} />
+                <MonthSelect
+                  id="ed-approx-month"
+                  className="h-11"
+                  value={v.approx_month}
+                  onChange={(val) => setV((s) => ({ ...s, approx_month: val }))}
+                />
               </div>
             </div>
             <div className="grid gap-2">

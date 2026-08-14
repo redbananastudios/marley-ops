@@ -21,6 +21,7 @@ import {
 } from "@/components/places/address-fields";
 import { ClientCombobox, type ClientOption } from "@/components/clients/client-combobox";
 import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
+import { MonthSelect } from "@/components/bookings/month-select";
 import {
   Select,
   SelectContent,
@@ -361,7 +362,12 @@ export function AddLeadForm({
             <Input id="preferred_date" type="date" className={cn(INPUT_H, "bg-card")} {...register("preferred_date")} />
           </Field>
           <Field htmlFor="approx_month" label="Provisional month" error={errors.approx_month?.message}>
-            <Input id="approx_month" type="month" className={cn(INPUT_H, "bg-card")} {...register("approx_month")} />
+            <MonthSelect
+              id="approx_month"
+              className={cn(INPUT_H, "w-full bg-card")}
+              value={watch("approx_month") || ""}
+              onChange={(v) => setValue("approx_month", v, { shouldValidate: true })}
+            />
           </Field>
           <Field htmlFor="approx_window-early" label="Part of the month" error={errors.approx_window?.message}>
             <WindowTierPicker

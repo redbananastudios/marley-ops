@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
+import { MonthSelect } from "@/components/bookings/month-select";
 import { saveBookingDetailsAction } from "@/app/actions/booking-details";
 
 export interface BookingDetailsInitial {
@@ -139,15 +140,12 @@ export function BookingDetailsDialog({
           {/* When are they thinking? */}
           <div className="space-y-3">
             <p className="eyebrow">When are they thinking?</p>
-            <label className="block text-sm font-medium">
-              Target month
-              <input
-                type="month"
-                value={approxMonth}
-                onChange={(e) => setApproxMonth(e.target.value)}
-                className={fieldClass}
-              />
-            </label>
+            <div className="block text-sm font-medium">
+              <label htmlFor="bd-month">Target month</label>
+              <div className="mt-1">
+                <MonthSelect id="bd-month" className="w-full" value={approxMonth} onChange={setApproxMonth} />
+              </div>
+            </div>
             <div className="block text-sm font-medium">
               Part of the month
               <div className="mt-1">
