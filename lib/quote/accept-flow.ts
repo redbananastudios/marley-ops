@@ -1318,6 +1318,29 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
     .maybeSingle();
   if (!lead?.date_confirmed_at || lead.status === "declined") return quote;
 
+  // Once the FINAL BALANCE invoice exists, the whole remainder is already
+  // billed — the balance only deducts a commitment raised BEFORE it — so a
+  // commitment raised after it is always a double-bill. Priscilla Kong
+  // (MMR020, 2026-08-14): fully settled, then the /q self-heal raised
+  // INV-000243 for £573.80 on top of her paid balance invoice.
+  if (isRealZohoId(quote.zoho_balance_invoice_id)) return quote;
+
+  // The 25% is only invoiced when the CUSTOMER confirmed the date through the
+  // app — the moment they were shown and agreed the commitment terms, which
+  // always leaves a date_confirm signature. An office-verified stamp (phone
+  // confirmations recorded so the T-7 automation applies) has no signature and
+  // must never invent a payment ask nobody discussed: those bookings settle as
+  // deposit + T-7 final balance. Read the signatures table, not the lead's
+  // link column, so a failed link write can't change the answer.
+  const { data: confirmSig } = await sb
+    .from("signatures")
+    .select("id")
+    .eq("lead_id", quote.lead_id)
+    .eq("kind", "date_confirm")
+    .limit(1)
+    .maybeSingle();
+  if (!confirmSig) return quote;
+
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
