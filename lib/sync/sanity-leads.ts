@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { attachOrCreateClient } from "@/lib/leads/resolver";
+import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
 import { isImportedUnackedRow } from "@/lib/lead-alerts";
 import { applySyncFloor, resolveLeadFloor } from "@/lib/sync/sync-window";
 import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
@@ -194,11 +195,13 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         entry_channel: "web" as const,
         source_system: "website",
         sanity_id: doc._id,
-        name: doc.name ?? null,
+        // Website visitors type freely ("paul betty", "bh218nb") — normalise
+        // on ingest so the panel never shows the raw casing.
+        name: formatPersonNameOrNull(doc.name),
         phone: doc.phone ?? null,
         email: doc.email ?? null,
-        from_postcode: doc.fromPostcode ?? null,
-        to_postcode: doc.toPostcode ?? null,
+        from_postcode: formatUkPostcodeOrNull(doc.fromPostcode),
+        to_postcode: formatUkPostcodeOrNull(doc.toPostcode),
         property_size: doc.propertySize ?? null,
         preferred_date: toDateOrNull(doc.preferredDate),
         services: Array.isArray(doc.services) ? doc.services : [],

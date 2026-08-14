@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatPersonName, formatUkPostcode } from "./format";
 
 /** Lead entry channels selectable in the Add-lead form (web is sync-only, not here). */
 export const MANUAL_ENTRY_CHANNELS = [
@@ -34,15 +35,18 @@ export const PROPERTY_SIZES = [
 ] as const;
 
 export const newLeadSchema = z.object({
-  name: z.string().trim().min(1, "Name is required"),
+  // Names and postcodes are normalised at the schema so EVERY save path gets
+  // it ("Paul betty" → "Paul Betty", "bh218nb" → "BH21 8NB"). String→string
+  // transforms, so the resolver's input/output types stay identical.
+  name: z.string().trim().min(1, "Name is required").transform(formatPersonName),
   /** When set, attach the lead to this existing client instead of dedupe-on-contact. */
   client_id: z.string().uuid().optional().or(z.literal("")),
   phone: z.string().trim().optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
   entry_channel: z.enum(["phone_google", "phone_facebook", "phone_referral", "checkatrade", "manual", "referral"]),
   referrer_answer: z.string().trim().optional().or(z.literal("")),
-  from_postcode: z.string().trim().optional().or(z.literal("")),
-  to_postcode: z.string().trim().optional().or(z.literal("")),
+  from_postcode: z.string().trim().transform(formatUkPostcode).optional().or(z.literal("")),
+  to_postcode: z.string().trim().transform(formatUkPostcode).optional().or(z.literal("")),
   from_address: z.string().trim().optional().or(z.literal("")),
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
@@ -68,11 +72,12 @@ export type NewLeadInput = z.infer<typeof newLeadSchema>;
 
 /** Editable lead/customer detail fields (name + contact + move + the phone estimate). */
 export const editLeadSchema = z.object({
-  name: z.string().trim().min(1, "Name is required"),
+  // Same normalisation as newLeadSchema — see the comment there.
+  name: z.string().trim().min(1, "Name is required").transform(formatPersonName),
   phone: z.string().trim().optional().or(z.literal("")),
   email: z.string().trim().email("Enter a valid email").optional().or(z.literal("")),
-  from_postcode: z.string().trim().optional().or(z.literal("")),
-  to_postcode: z.string().trim().optional().or(z.literal("")),
+  from_postcode: z.string().trim().transform(formatUkPostcode).optional().or(z.literal("")),
+  to_postcode: z.string().trim().transform(formatUkPostcode).optional().or(z.literal("")),
   from_address: z.string().trim().optional().or(z.literal("")),
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),

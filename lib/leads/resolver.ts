@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { normalizeEmail, normalizePhone } from "./phone";
+import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "./format";
 
 type DB = SupabaseClient<Database>;
 type ClientRow = Database["public"]["Tables"]["clients"]["Row"];
@@ -77,11 +78,11 @@ export async function attachOrCreateClient(
   const { data, error } = await sb
     .from("clients")
     .insert({
-      display_name: input.name?.trim() || null,
+      display_name: formatPersonNameOrNull(input.name),
       email: normalizeEmail(input.email),
       phone_raw: input.phone?.trim() || null,
       phone_e164,
-      postcode_home: input.postcode?.trim() || null,
+      postcode_home: formatUkPostcodeOrNull(input.postcode),
     })
     .select("id")
     .single();

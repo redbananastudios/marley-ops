@@ -6,6 +6,7 @@ import { getSessionProfile } from "@/lib/auth";
 import { findExistingClient } from "@/lib/leads/resolver";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
+import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
 
 async function actor() {
   const sb = await createClient();
@@ -75,9 +76,11 @@ const clean = (s?: string) => {
  *  duplicate (we don't overwrite an existing client from the quick-add form). */
 export async function createClientAction(input: CreateClientInput) {
   const isCompany = !!input.isCompany;
+  // Company names stay as typed ("iSmash", "ABC Ltd"); person names are
+  // normalised ("paul betty" → "Paul Betty") like every other write path.
   const companyName = clean(input.companyName);
-  const firstName = clean(input.firstName);
-  const lastName = clean(input.lastName);
+  const firstName = formatPersonNameOrNull(input.firstName);
+  const lastName = formatPersonNameOrNull(input.lastName);
 
   // Resolved label: company name when a company, else "First Last".
   const personName = [firstName, lastName].filter(Boolean).join(" ").trim() || null;
@@ -116,7 +119,7 @@ export async function createClientAction(input: CreateClientInput) {
         address_line1: clean(addr.line1),
         town: clean(addr.town),
         county: clean(addr.county),
-        postcode_home: clean(addr.postcode),
+        postcode_home: formatUkPostcodeOrNull(addr.postcode),
         country: clean(addr.country) ?? "United Kingdom",
         notes: clean(input.notes),
       })
@@ -162,9 +165,10 @@ export async function updateClientAction(id: string, input: CreateClientInput) {
   if (!id) return { ok: false as const, error: "Missing client." };
 
   const isCompany = !!input.isCompany;
+  // Same normalisation as createClientAction — person names only.
   const companyName = clean(input.companyName);
-  const firstName = clean(input.firstName);
-  const lastName = clean(input.lastName);
+  const firstName = formatPersonNameOrNull(input.firstName);
+  const lastName = formatPersonNameOrNull(input.lastName);
 
   const personName = [firstName, lastName].filter(Boolean).join(" ").trim() || null;
   const displayName = (isCompany ? companyName : personName) ?? companyName ?? personName;
@@ -195,7 +199,7 @@ export async function updateClientAction(id: string, input: CreateClientInput) {
         address_line1: clean(addr.line1),
         town: clean(addr.town),
         county: clean(addr.county),
-        postcode_home: clean(addr.postcode),
+        postcode_home: formatUkPostcodeOrNull(addr.postcode),
         country: clean(addr.country) ?? "United Kingdom",
         notes: clean(input.notes),
       })
