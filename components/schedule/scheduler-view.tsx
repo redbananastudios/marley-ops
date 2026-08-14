@@ -22,6 +22,7 @@ import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
+import enGbLocale from "@fullcalendar/core/locales/en-gb";
 import type {
   DateSelectArg,
   EventClickArg,
@@ -473,6 +474,10 @@ export function SchedulerView({
         <FullCalendar
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+          // UK date formats everywhere (day headers were rendering the US
+          // default "Mon 8/17"; en-gb gives "Mon 17/08" and a "17 – 23 Aug"
+          // title). buttonText/eventTimeFormat below still override locale.
+          locale={enGbLocale}
           initialView={initialView}
           headerToolbar={{
             left: "prev,next today",
