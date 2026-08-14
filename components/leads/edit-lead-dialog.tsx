@@ -103,6 +103,12 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
       toast.success("Lead updated.");
       setOpen(false);
       router.refresh();
+    } catch {
+      // A THROWN action (vs a returned error) most often means the app was
+      // redeployed after this tab loaded — the stale bundle calls a server
+      // action id that no longer exists. Without this catch the save failed in
+      // total silence (Stephen Bull postcode edit, 2026-08-14).
+      toast.error("Could not save — the app may have just updated. Refresh the page and try again.");
     } finally {
       setBusy(false);
     }

@@ -77,11 +77,15 @@ export const editLeadSchema = z.object({
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
   preferred_date: z.string().trim().optional().or(z.literal("")),
+  // Literal "" FIRST — z.coerce.number() turns "" into 0, so with the number
+  // branch first an untouched empty money field silently stored 0 instead of
+  // null on every save ("Estimate given £0" on leads that never had one).
+  // Same trap + fix as storage/actions.ts optNum.
   estimate_given: z
-    .union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")])
+    .union([z.literal(""), z.coerce.number().nonnegative("Must be 0 or more")])
     .optional(),
   referral_commission: z
-    .union([z.coerce.number().nonnegative("Must be 0 or more"), z.literal("")])
+    .union([z.literal(""), z.coerce.number().nonnegative("Must be 0 or more")])
     .optional(),
   notes: z.string().trim().optional().or(z.literal("")),
 });
