@@ -475,9 +475,20 @@ export function SchedulerView({
           ref={calRef}
           plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
           // UK date formats everywhere (day headers were rendering the US
-          // default "Mon 8/17"; en-gb gives "Mon 17/08" and a "17 – 23 Aug"
+          // default "Mon 8/17"; en-gb also gives the "17 – 23 Aug 2026"
           // title). buttonText/eventTimeFormat below still override locale.
           locale={enGbLocale}
+          // Peter's preferred header: "Mon 17 Aug", not numeric "17/08".
+          // Scoped to the time-grid views — the month grid's columns are
+          // weekday names, not dates, so a global format would mislabel them.
+          views={{
+            timeGridWeek: {
+              dayHeaderFormat: { weekday: "short", day: "numeric", month: "short", omitCommas: true },
+            },
+            timeGridDay: {
+              dayHeaderFormat: { weekday: "long", day: "numeric", month: "short", omitCommas: true },
+            },
+          }}
           initialView={initialView}
           headerToolbar={{
             left: "prev,next today",
