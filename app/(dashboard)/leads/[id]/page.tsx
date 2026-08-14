@@ -23,6 +23,7 @@ import { CardPaymentsCard } from "@/components/leads/card-payments-card";
 import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
 import { CancelBookingButton } from "@/components/bookings/booking-policy-actions";
 import { moveDateLabel } from "@/lib/quote/payments";
+import { windowTierLabel } from "@/lib/bookings/booking-details";
 import {
   CompletionCard,
   ContractSignatureCard,
@@ -384,7 +385,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 from_address: lead.from_address ?? "",
                 to_address: lead.to_address ?? "",
                 property_size: lead.property_size ?? "",
+                to_property_size: lead.to_property_size ?? "",
                 preferred_date: dateInput(lead.preferred_date),
+                approx_month: bookingDetailsRow?.approx_month?.slice(0, 7) ?? "",
+                approx_window: bookingDetailsRow?.approx_window ?? "",
                 estimate_given: lead.estimate_given != null ? String(lead.estimate_given) : "",
                 referral_commission:
                   lead.referral_commission != null ? String(lead.referral_commission) : "",
@@ -488,10 +492,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                       : null
                   }
                 />
-                <Fact label="Property size" value={lead.property_size} />
+                <Fact label="Property size (from)" value={lead.property_size} />
+                <Fact label="Property size (to)" value={lead.to_property_size} />
                 <Fact label="Pickup address" value={lead.from_address} />
                 <Fact label="Destination address" value={lead.to_address} />
-                <Fact label="Preferred date" value={fmtDate(lead.preferred_date)} />
+                <Fact label="Confirmed date" value={fmtDate(lead.preferred_date)} />
+                <Fact
+                  label="Provisional window"
+                  value={windowTierLabel(
+                    bookingDetailsRow?.approx_window ?? null,
+                    bookingDetailsRow?.approx_month ?? null,
+                  )}
+                />
                 <Fact label="Services" value={services.length ? services.join(", ") : null} />
                 <div className="sm:col-span-2">
                   <Fact label="Notes" value={lead.notes} />

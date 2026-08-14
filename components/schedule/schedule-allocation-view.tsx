@@ -19,6 +19,7 @@ import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CalendarClock, CalendarRange, ChevronLeft, ChevronRight, Plus, SquarePen, TriangleAlert, Truck, UsersRound } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { cleanApproxWindow, windowTierLabel, WINDOW_TIER_LABELS } from "@/lib/bookings/booking-details";
 import { apptDays, apptWindow } from "@/lib/job-board";
 import { dayCapacityState, sumRequired, usableFleetForDay, type CapacityState } from "@/lib/schedule/capacity";
 import { type AvailabilityRow } from "@/lib/staff/availability";
@@ -431,8 +432,12 @@ export function ScheduleAllocationView(props: {
     });
   }, [monthCursor]);
 
-  // Soft demand grouped by month (approx_month, else provisional_date, else "No date yet").
+  // Soft demand grouped by month + window tier ("Beginning of September" /
+  // "Middle of September" / bare "September"; else provisional_date's month;
+  // else "No date yet"). Tier order inside a month: Beginning → Middle → End
+  // → month-only, so the panel reads chronologically top to bottom.
   const softGroups = useMemo(() => {
+    const tierRank: Record<string, number> = { early: 0, mid: 1, late: 2 };
     const groups = new Map<string, { label: string; sort: number; items: SoftDemandItem[] }>();
     for (const item of softDemand) {
       const rep = item.approx_month ?? item.provisional_date;
@@ -441,9 +446,11 @@ export function ScheduleAllocationView(props: {
       let sort: number;
       if (rep) {
         const d = new Date(`${rep}T00:00:00Z`);
-        key = `${d.getUTCFullYear()}-${d.getUTCMonth()}`;
-        label = d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
-        sort = d.getUTCFullYear() * 12 + d.getUTCMonth();
+        const tier = item.approx_month ? cleanApproxWindow(item.approx_window) : null;
+        const monthLabel = d.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+        key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${tier ?? "month"}`;
+        label = tier ? `${WINDOW_TIER_LABELS[tier]} of ${monthLabel}` : monthLabel;
+        sort = (d.getUTCFullYear() * 12 + d.getUTCMonth()) * 10 + (tier ? tierRank[tier] : 3);
       } else {
         key = "no-date";
         label = "No date yet";
@@ -869,7 +876,7 @@ export function ScheduleAllocationView(props: {
                             <p className="mt-0.5 text-[10px] text-warn/80">
                               {item.provisional_date
                                 ? `prov · ${fmt(item.provisional_date, { day: "numeric", month: "short" })}`
-                                : (item.approx_window ?? "this month")}
+                                : (windowTierLabel(item.approx_window, item.approx_month) ?? "this month")}
                             </p>
                           </div>
                           <span className="shrink-0 rounded-md border border-warn-border bg-card px-2 py-1 text-[10px] font-semibold text-warn">
@@ -939,9 +946,12 @@ export function ScheduleAllocationView(props: {
                                 <span className="shrink-0 rounded-pill border border-warn-border bg-warn-bg px-2 py-0.5 text-[10px] font-semibold text-warn">
                                   prov · {fmt(item.provisional_date, { day: "numeric", month: "short" })}
                                 </span>
-                              ) : item.approx_window ? (
+                              ) : !item.approx_month && cleanApproxWindow(item.approx_window) ? (
+                                // Tier without a month lands in "No date yet" — the chip is
+                                // the only place the tier shows. With a month, the group
+                                // header already says it.
                                 <span className="shrink-0 rounded-pill border border-border bg-card px-2 py-0.5 text-[10px] font-medium text-mist-500">
-                                  {item.approx_window}
+                                  {windowTierLabel(item.approx_window)}
                                 </span>
                               ) : null}
                               <button

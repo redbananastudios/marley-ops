@@ -6,6 +6,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
 import { balanceDue, moveDateLabel } from "@/lib/quote/payments";
 import { classifyBooking, daysBetweenUk, type BookingBucket } from "@/lib/bookings/queue";
+import { windowTierLabel } from "@/lib/bookings/booking-details";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
@@ -607,8 +608,9 @@ export default async function BookingsPage() {
         {provisional.map((r) => {
           const pencil = [
             r.provisionalDate ? `pencilled ${dateLabel(r.provisionalDate)}` : null,
-            !r.provisionalDate && r.approxMonth ? `thinking ${dateLabel(r.approxMonth)?.replace(/^\w+ \d+ /, "") ?? ""}`.trim() : null,
-            r.approxWindow ? `"${r.approxWindow}"` : null,
+            !r.provisionalDate && (r.approxMonth || r.approxWindow)
+              ? `thinking ${windowTierLabel(r.approxWindow, r.approxMonth) ?? ""}`.trim()
+              : null,
             r.propertyType === "homeowner" ? "homeowner — date will be fixed" : r.propertyType === "rented" ? "rented — flexible" : null,
           ]
             .filter(Boolean)

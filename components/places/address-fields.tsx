@@ -2,11 +2,14 @@
 
 /**
  * The one address block used everywhere (clients, leads, quotes) so addresses stay
- * conformant across the system. Separated fields — street / town / county / postcode /
- * country — with Google lookup on two fronts:
+ * conformant across the system. Separated fields — street / town / county / postcode —
+ * with Google lookup on two fronts:
  *   - Street Address autocompletes and, on select, autofills every field from Place Details.
  *   - Postcode autocompletes and, on select, fills town + county + postcode.
  * Both degrade to plain typing if Places is unavailable. Controlled: pass `value` + `onChange`.
+ *
+ * Country is NOT rendered (Peter, 2026-08-14) — Marley moves UK homes; the value is
+ * hard-coded "United Kingdom" in the AddressValue so every storage path keeps working.
  */
 
 import { useCallback, useState } from "react";
@@ -76,7 +79,7 @@ export function AddressFields({
         town: a.town || value.town,
         county: a.county || value.county,
         postcode: a.postcode || value.postcode, // only overwrite when Google returns one
-        country: a.country || value.country || "United Kingdom",
+        country: "United Kingdom",
       });
     },
     [onChange, value],
@@ -115,28 +118,16 @@ export function AddressFields({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="grid gap-2">
-          <Label htmlFor={`${idPrefix}-town`}>Town / City</Label>
-          <Input
-            id={`${idPrefix}-town`}
-            value={value.town}
-            onChange={(e) => set({ town: e.target.value })}
-            placeholder="Town or city"
-          />
-        </div>
-        <div className="grid gap-2">
-          <Label htmlFor={`${idPrefix}-postcode`}>Postcode</Label>
-          <PlacesInput
-            id={`${idPrefix}-postcode`}
-            kind="postcode"
-            value={value.postcode}
-            onValueChange={(v) => set({ postcode: v })}
-            onPick={onPostcodePick}
-            placeholder="Postcode"
-            inputMode="text"
-          />
-        </div>
+      {/* Town/City full width (Peter 2026-08-14: it needs the room), then County,
+          then Postcode on its OWN line below County — never squeezed beside town. */}
+      <div className="grid gap-2">
+        <Label htmlFor={`${idPrefix}-town`}>Town / City</Label>
+        <Input
+          id={`${idPrefix}-town`}
+          value={value.town}
+          onChange={(e) => set({ town: e.target.value })}
+          placeholder="Town or city"
+        />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
@@ -149,13 +140,19 @@ export function AddressFields({
             placeholder="County"
           />
         </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
         <div className="grid gap-2">
-          <Label htmlFor={`${idPrefix}-country`}>Country</Label>
-          <Input
-            id={`${idPrefix}-country`}
-            value={value.country}
-            onChange={(e) => set({ country: e.target.value })}
-            placeholder="Country"
+          <Label htmlFor={`${idPrefix}-postcode`}>Postcode</Label>
+          <PlacesInput
+            id={`${idPrefix}-postcode`}
+            kind="postcode"
+            value={value.postcode}
+            onValueChange={(v) => set({ postcode: v })}
+            onPick={onPostcodePick}
+            placeholder="Postcode"
+            inputMode="text"
           />
         </div>
       </div>

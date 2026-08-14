@@ -15,10 +15,51 @@ export type PropertyType = (typeof PROPERTY_TYPES)[number];
 
 export type Normalised = { ok: true; value: string | null } | { ok: false; error: string };
 
-/** Free-text window ("mid-August") — trimmed, capped at 120 chars, empty → null. */
-export function cleanApproxWindow(v: string | null | undefined): string | null {
-  const trimmed = (v ?? "").trim().slice(0, 120).trim();
-  return trimmed.length ? trimmed : null;
+/**
+ * The structured move-window tier (Peter, 2026-08-14): "Beginning / Middle /
+ * End" of the target month. Replaces the old free-text window — a customer who
+ * says "around the 21st" is `mid`; "the 5th" is `early`. Enforced by the DB
+ * check constraint from migration 0095.
+ */
+export const WINDOW_TIERS = ["early", "mid", "late"] as const;
+export type WindowTier = (typeof WINDOW_TIERS)[number];
+
+export const WINDOW_TIER_LABELS: Record<WindowTier, string> = {
+  early: "Beginning",
+  mid: "Middle",
+  late: "End",
+};
+
+/** Tier value from the UI — anything outside the vocabulary reads as unset. */
+export function cleanApproxWindow(v: string | null | undefined): WindowTier | null {
+  return v === "early" || v === "mid" || v === "late" ? v : null;
+}
+
+/**
+ * Human label for a tier + stored first-of-month date: "Beginning of September"
+ * ("… September 2027" when the month is outside `nowYear`). Tier without a
+ * month falls back to the bare tier word; month without a tier gives just the
+ * month name. Both null → null. `nowYear` is injectable so tests stay pure.
+ */
+export function windowTierLabel(
+  tier: string | null | undefined,
+  monthIso?: string | null,
+  nowYear?: number,
+): string | null {
+  const t = cleanApproxWindow(tier);
+  let month: string | null = null;
+  if (monthIso && /^\d{4}-\d{2}/.test(monthIso)) {
+    const d = new Date(`${monthIso.slice(0, 7)}-01T00:00:00Z`);
+    const refYear = nowYear ?? new Date().getUTCFullYear();
+    month = d.toLocaleDateString("en-GB", {
+      month: "long",
+      ...(d.getUTCFullYear() !== refYear ? { year: "numeric" } : {}),
+      timeZone: "UTC",
+    });
+  }
+  if (t && month) return `${WINDOW_TIER_LABELS[t]} of ${month}`;
+  if (t) return WINDOW_TIER_LABELS[t];
+  return month;
 }
 
 /**

@@ -40,4 +40,30 @@ describe("editLeadSchema", () => {
   it("accepts the postcode-only edit that motivated all of this", () => {
     expect(editLeadSchema.safeParse(base).success).toBe(true);
   });
+
+  it("normalises names and postcodes on parse (2026-08-14 formatting rules)", () => {
+    const v = editLeadSchema.parse({ ...base, name: "paul betty", from_postcode: "bh218nb" });
+    expect(v.name).toBe("Paul Betty");
+    expect(v.from_postcode).toBe("BH21 8NB");
+  });
+
+  it("accepts the provisional window fields and rejects junk tiers", () => {
+    const v = editLeadSchema.parse({
+      ...base,
+      to_property_size: "2 bedroom",
+      approx_month: "2026-09",
+      approx_window: "mid",
+    });
+    expect(v.to_property_size).toBe("2 bedroom");
+    expect(v.approx_month).toBe("2026-09");
+    expect(v.approx_window).toBe("mid");
+    expect(editLeadSchema.safeParse({ ...base, approx_window: "middle" }).success).toBe(false);
+  });
+
+  it("stale dialogs that omit the new fields leave them undefined (write-guarded)", () => {
+    const v = editLeadSchema.parse(base);
+    expect(v.to_property_size).toBeUndefined();
+    expect(v.approx_month).toBeUndefined();
+    expect(v.approx_window).toBeUndefined();
+  });
 });

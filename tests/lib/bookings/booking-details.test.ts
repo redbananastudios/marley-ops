@@ -4,20 +4,46 @@ import {
   normaliseApproxMonth,
   normaliseProvisionalDate,
   normalisePropertyType,
+  windowTierLabel,
 } from "@/lib/bookings/booking-details";
 
-describe("cleanApproxWindow", () => {
-  it("trims, keeps the customer's words, and treats empty as null", () => {
-    expect(cleanApproxWindow("  mid-August  ")).toBe("mid-August");
+describe("cleanApproxWindow (structured 3-tier window, migration 0095)", () => {
+  it("accepts only the tier vocabulary", () => {
+    expect(cleanApproxWindow("early")).toBe("early");
+    expect(cleanApproxWindow("mid")).toBe("mid");
+    expect(cleanApproxWindow("late")).toBe("late");
+  });
+
+  it("nulls anything else — including the old free text from a stale dialog", () => {
+    expect(cleanApproxWindow("mid-August")).toBeNull();
+    expect(cleanApproxWindow("EARLY")).toBeNull();
     expect(cleanApproxWindow("")).toBeNull();
-    expect(cleanApproxWindow("   ")).toBeNull();
     expect(cleanApproxWindow(null)).toBeNull();
     expect(cleanApproxWindow(undefined)).toBeNull();
   });
+});
 
-  it("caps the label at 120 characters", () => {
-    const long = "a".repeat(300);
-    expect(cleanApproxWindow(long)).toHaveLength(120);
+describe("windowTierLabel", () => {
+  it("combines tier + month in Peter's phrasing", () => {
+    expect(windowTierLabel("early", "2026-09-01", 2026)).toBe("Beginning of September");
+    expect(windowTierLabel("mid", "2026-09-01", 2026)).toBe("Middle of September");
+    expect(windowTierLabel("late", "2026-09-01", 2026)).toBe("End of September");
+  });
+
+  it("shows the year only when the month is outside the current year", () => {
+    expect(windowTierLabel("mid", "2027-01-01", 2026)).toBe("Middle of January 2027");
+  });
+
+  it("degrades gracefully with one side missing", () => {
+    expect(windowTierLabel("mid", null)).toBe("Middle");
+    expect(windowTierLabel(null, "2026-09-01", 2026)).toBe("September");
+    expect(windowTierLabel(null, null)).toBeNull();
+    // Old free-text values read as no tier at all.
+    expect(windowTierLabel("mid-August", "2026-09-01", 2026)).toBe("September");
+  });
+
+  it("accepts the month input's YYYY-MM form as well as the stored date", () => {
+    expect(windowTierLabel("early", "2026-09", 2026)).toBe("Beginning of September");
   });
 });
 

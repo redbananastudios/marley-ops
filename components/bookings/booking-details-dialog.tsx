@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
 import { saveBookingDetailsAction } from "@/app/actions/booking-details";
 
 export interface BookingDetailsInitial {
@@ -139,20 +140,6 @@ export function BookingDetailsDialog({
           <div className="space-y-3">
             <p className="eyebrow">When are they thinking?</p>
             <label className="block text-sm font-medium">
-              Approximate window
-              <input
-                type="text"
-                value={approxWindow}
-                onChange={(e) => setApproxWindow(e.target.value)}
-                placeholder="mid-August"
-                maxLength={120}
-                className={fieldClass}
-              />
-              <span className="mt-1 block text-xs font-normal text-mist-400">
-                A rough idea in the customer&apos;s words.
-              </span>
-            </label>
-            <label className="block text-sm font-medium">
               Target month
               <input
                 type="month"
@@ -161,6 +148,19 @@ export function BookingDetailsDialog({
                 className={fieldClass}
               />
             </label>
+            <div className="block text-sm font-medium">
+              Part of the month
+              <div className="mt-1">
+                <WindowTierPicker
+                  idPrefix="bd-window"
+                  value={approxWindow}
+                  onChange={(tier) => setApproxWindow(tier)}
+                />
+              </div>
+              <span className="mt-1 block text-xs font-normal text-mist-400">
+                &quot;Around the 21st&quot; is Middle; &quot;the 5th&quot; is Beginning.
+              </span>
+            </div>
             <label className="block text-sm font-medium">
               Provisional date
               <input

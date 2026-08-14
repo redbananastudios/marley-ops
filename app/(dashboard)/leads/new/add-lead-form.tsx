@@ -20,6 +20,7 @@ import {
   type AddressValue,
 } from "@/components/places/address-fields";
 import { ClientCombobox, type ClientOption } from "@/components/clients/client-combobox";
+import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
 import {
   Select,
   SelectContent,
@@ -109,7 +110,10 @@ export function AddLeadForm({
       from_postcode: "",
       to_postcode: "",
       property_size: "",
+      to_property_size: "",
       preferred_date: "",
+      approx_month: "",
+      approx_window: "",
       referral_commission: "",
       notes: "",
     },
@@ -292,40 +296,82 @@ export function AddLeadForm({
       </Field>
 
       {/* Full pickup + destination addresses — a postcode alone is enough to save,
-          but the street lookup autofills everything for a complete record. */}
+          but the street lookup autofills everything for a complete record. Each
+          end records its own property size (Peter, 2026-08-14). */}
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="rounded-lg border border-border bg-muted/30 p-4">
           <p className="mb-3 text-sm font-semibold text-foreground">Moving from</p>
           <AddressFields idPrefix="from" value={fromAddr} onChange={setFromAddr} />
+          <div className="mt-4">
+            <Field htmlFor="property_size" label="Property size" error={errors.property_size?.message}>
+              <Select
+                value={watch("property_size") || ""}
+                onValueChange={(val) => setValue("property_size", val, { shouldValidate: true })}
+              >
+                <SelectTrigger id="property_size" className={cn(INPUT_H, "w-full bg-card")}>
+                  <SelectValue placeholder="Select size" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROPERTY_SIZES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
         </section>
         <section className="rounded-lg border border-border bg-muted/30 p-4">
           <p className="mb-3 text-sm font-semibold text-foreground">Moving to</p>
           <AddressFields idPrefix="to" value={toAddr} onChange={setToAddr} />
+          <div className="mt-4">
+            <Field htmlFor="to_property_size" label="Property size" error={errors.to_property_size?.message}>
+              <Select
+                value={watch("to_property_size") || ""}
+                onValueChange={(val) => setValue("to_property_size", val, { shouldValidate: true })}
+              >
+                <SelectTrigger id="to_property_size" className={cn(INPUT_H, "w-full bg-card")}>
+                  <SelectValue placeholder="Select size" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROPERTY_SIZES.map((s) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
         </section>
       </div>
 
-      <div className="grid gap-5 sm:grid-cols-2">
-        <Field htmlFor="property_size" label="Property size" error={errors.property_size?.message}>
-          <Select
-            value={watch("property_size") || ""}
-            onValueChange={(val) => setValue("property_size", val, { shouldValidate: true })}
-          >
-            <SelectTrigger id="property_size" className={INPUT_H}>
-              <SelectValue placeholder="Select size" />
-            </SelectTrigger>
-            <SelectContent>
-              {PROPERTY_SIZES.map((s) => (
-                <SelectItem key={s} value={s}>
-                  {s}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field htmlFor="preferred_date" label="Preferred date" error={errors.preferred_date?.message}>
-          <Input id="preferred_date" type="date" className={INPUT_H} {...register("preferred_date")} />
-        </Field>
-      </div>
+      {/* Move date: a CONFIRMED date only when the customer has named a firm one
+          (it feeds the quote and the payment steps), otherwise the provisional
+          Beginning/Middle/End window for the schedule's demand picture. */}
+      <section className="rounded-lg border border-border bg-muted/30 p-4">
+        <p className="text-sm font-semibold text-foreground">Move date</p>
+        <p className="mt-1 mb-4 text-xs text-mist-400">
+          Only set a confirmed date when the customer has named a firm one — it flows into the
+          quote and the payment steps. Not certain yet? Capture the provisional window instead.
+        </p>
+        <div className="grid gap-5 sm:grid-cols-3">
+          <Field htmlFor="preferred_date" label="Confirmed date" error={errors.preferred_date?.message}>
+            <Input id="preferred_date" type="date" className={cn(INPUT_H, "bg-card")} {...register("preferred_date")} />
+          </Field>
+          <Field htmlFor="approx_month" label="Provisional month" error={errors.approx_month?.message}>
+            <Input id="approx_month" type="month" className={cn(INPUT_H, "bg-card")} {...register("approx_month")} />
+          </Field>
+          <Field htmlFor="approx_window-early" label="Part of the month" error={errors.approx_window?.message}>
+            <WindowTierPicker
+              idPrefix="approx_window"
+              value={watch("approx_window") || ""}
+              onChange={(tier) => setValue("approx_window", tier, { shouldValidate: true })}
+            />
+          </Field>
+        </div>
+      </section>
 
       <Field htmlFor="notes" label="Notes" error={errors.notes?.message}>
         <textarea

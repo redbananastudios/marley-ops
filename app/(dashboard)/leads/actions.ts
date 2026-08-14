@@ -21,6 +21,7 @@ import {
   type EditLeadInput,
   type NewLeadInput,
 } from "@/lib/leads/schema";
+import { cleanApproxWindow, normaliseApproxMonth } from "@/lib/bookings/booking-details";
 
 async function actor() {
   const sb = await createClient();
@@ -28,6 +29,39 @@ async function actor() {
     data: { user },
   } = await sb.auth.getUser();
   return { sb, userId: user?.id ?? null };
+}
+
+/**
+ * Write a lead's provisional window (Beginning/Middle/End of a target month)
+ * to booking_details — the side-table the Move Window drawer and /schedule's
+ * "Thinking about it" panel already read. Partial upsert: provisional_date and
+ * property_type are deliberately NOT in the payload so drawer-entered values
+ * survive a lead-form save. Fail-soft (returns rather than throws) — the lead
+ * write has already succeeded and must not be reported as failed.
+ */
+async function upsertLeadWindow(
+  sb: Awaited<ReturnType<typeof createClient>>,
+  leadId: string,
+  approxMonth: string | null | undefined,
+  approxWindow: string | null | undefined,
+): Promise<{ ok: boolean }> {
+  const month = normaliseApproxMonth(approxMonth ?? null);
+  const tier = cleanApproxWindow(approxWindow ?? null);
+  if (!month.ok) return { ok: false };
+  // Nothing to record and nothing to clear → don't create an empty row.
+  const { data: existing } = await sb
+    .from("booking_details")
+    .select("lead_id")
+    .eq("lead_id", leadId)
+    .maybeSingle();
+  if (!existing && month.value == null && tier == null) return { ok: true };
+  const { error } = await sb
+    .from("booking_details")
+    .upsert(
+      { lead_id: leadId, approx_month: month.value, approx_window: tier },
+      { onConflict: "lead_id" },
+    );
+  return { ok: !error };
 }
 
 /** Live dedupe check for the Add-lead form. Read-only. */
@@ -92,6 +126,7 @@ export async function createLeadAction(input: NewLeadInput) {
       from_address: v.from_address || null,
       to_address: v.to_address || null,
       property_size: v.property_size || null,
+      to_property_size: v.to_property_size || null,
       preferred_date: v.preferred_date || null,
       // 3rd-party referral fee for this lead — reports count it as a job cost.
       referral_commission:
@@ -104,6 +139,12 @@ export async function createLeadAction(input: NewLeadInput) {
     .single();
 
   if (error) return { ok: false as const, error: error.message };
+
+  // Provisional window (Beginning/Middle/End of month) lives on booking_details,
+  // never on the lead — the same side-table the Move Window drawer and the
+  // /schedule "Thinking about it" panel read. Fail-soft: a window write must
+  // not lose the lead that was just created.
+  await upsertLeadWindow(sb, lead.id, v.approx_month, v.approx_window);
 
   await sb.from("activities").insert({
     client_id: clientId,
@@ -288,6 +329,9 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
       from_address: v.from_address || null,
       to_address: v.to_address || null,
       property_size: v.property_size || null,
+      // Same stale-dialog guard as referral_commission: only write fields the
+      // client actually sent, so a pre-deploy tab can't wipe them.
+      ...(v.to_property_size !== undefined ? { to_property_size: v.to_property_size || null } : {}),
       preferred_date: v.preferred_date || null,
       estimate_given: estimate,
       // Only write the commission when the client actually SENT the field — a
@@ -300,6 +344,14 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
     })
     .eq("id", leadId);
   if (error) return { ok: false as const, error: error.message };
+
+  // Provisional window → booking_details (partial upsert; drawer-owned fields
+  // survive). Only when the dialog sent the fields, same stale-tab rule.
+  if (v.approx_month !== undefined || v.approx_window !== undefined) {
+    await upsertLeadWindow(sb, leadId, v.approx_month, v.approx_window);
+    revalidatePath("/schedule");
+    revalidatePath("/bookings");
+  }
 
   // Keep the linked client's core contact aligned with the correction.
   if (lead?.client_id) {

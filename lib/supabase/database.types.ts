@@ -2409,6 +2409,7 @@ export type Database = {
           submitted_at: string
           to_address: string | null
           to_postcode: string | null
+          to_property_size: string | null
           ttclid: string | null
           updated_at: string
           utm_campaign: string | null
@@ -2479,6 +2480,7 @@ export type Database = {
           submitted_at?: string
           to_address?: string | null
           to_postcode?: string | null
+          to_property_size?: string | null
           ttclid?: string | null
           updated_at?: string
           utm_campaign?: string | null
@@ -2549,6 +2551,7 @@ export type Database = {
           submitted_at?: string
           to_address?: string | null
           to_postcode?: string | null
+          to_property_size?: string | null
           ttclid?: string | null
           updated_at?: string
           utm_campaign?: string | null

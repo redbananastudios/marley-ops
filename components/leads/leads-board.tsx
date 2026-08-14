@@ -181,7 +181,12 @@ export function LeadsBoard({
   initialStatus?: string;
 }) {
   const [tab, setTab] = useState<"all" | "web">("all");
-  const [preset, setPreset] = useState<PresetKey>(initialStatus === "website_enquiry" ? "new" : "all");
+  // No URL status → default to the "Enquiry" preset (Peter, 2026-08-14): the
+  // page opens on what needs actioning, not the full history. An explicit
+  // ?status= link (dashboard cards, saved filters) still lands as before.
+  const [preset, setPreset] = useState<PresetKey>(
+    initialStatus && initialStatus !== "website_enquiry" ? "all" : "new",
+  );
   const [status, setStatus] = useState<string>(
     initialStatus && initialStatus !== "website_enquiry" ? initialStatus : "",
   );

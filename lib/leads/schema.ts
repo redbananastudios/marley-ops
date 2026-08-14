@@ -50,7 +50,14 @@ export const newLeadSchema = z.object({
   from_address: z.string().trim().optional().or(z.literal("")),
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
+  to_property_size: z.string().trim().optional().or(z.literal("")),
+  /** Confirmed date — only when the customer has NAMED a firm date; it feeds
+   *  the quote's moving date and, downstream, the 25% confirmation pipeline. */
   preferred_date: z.string().trim().optional().or(z.literal("")),
+  /** Provisional window when no firm date exists: target month ("YYYY-MM")
+   *  + Beginning/Middle/End tier. Stored on booking_details, never on leads. */
+  approx_month: z.string().trim().optional().or(z.literal("")),
+  approx_window: z.enum(["early", "mid", "late"]).optional().or(z.literal("")),
   /** 3rd-party referral fee owed for this lead (£) — counted as a cost of the
    *  job in profit/margin reports. A string here (not z.coerce) so the schema's
    *  input/output types stay identical for the react-hook-form resolver; the
@@ -81,7 +88,11 @@ export const editLeadSchema = z.object({
   from_address: z.string().trim().optional().or(z.literal("")),
   to_address: z.string().trim().optional().or(z.literal("")),
   property_size: z.string().trim().optional().or(z.literal("")),
+  to_property_size: z.string().trim().optional().or(z.literal("")),
   preferred_date: z.string().trim().optional().or(z.literal("")),
+  // Provisional window (see newLeadSchema) — booking_details, not leads columns.
+  approx_month: z.string().trim().optional().or(z.literal("")),
+  approx_window: z.enum(["early", "mid", "late"]).optional().or(z.literal("")),
   // Literal "" FIRST — z.coerce.number() turns "" into 0, so with the number
   // branch first an untouched empty money field silently stored 0 instead of
   // null on every save ("Estimate given £0" on leads that never had one).

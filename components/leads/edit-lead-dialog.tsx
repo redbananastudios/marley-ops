@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
+import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
 import { PROPERTY_SIZES, type EditLeadInput } from "@/lib/leads/schema";
 
@@ -43,7 +44,11 @@ export interface EditLeadValues {
   from_address: string;
   to_address: string;
   property_size: string;
+  to_property_size: string;
   preferred_date: string;
+  /** Provisional window ("YYYY-MM" + early/mid/late) — booking_details, not lead columns. */
+  approx_month: string;
+  approx_window: string;
   estimate_given: string;
   referral_commission: string;
   notes: string;
@@ -59,6 +64,39 @@ function seedAddress(line: string, postcode: string): AddressValue {
 /** The street part (line1 + town + county) stored back into the lead's *_address column. */
 function streetPart(a: AddressValue): string {
   return [a.line1, a.town, a.county].filter((s) => s && s.trim()).join(", ").trim();
+}
+
+/** Property-size dropdown — one per end of the move, same options both ends. */
+function SizeSelect({
+  id,
+  value,
+  onChange,
+}: {
+  id: string;
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  return (
+    <div className="grid gap-2">
+      <Label htmlFor={id}>Property size</Label>
+      <Select value={value || ""} onValueChange={onChange}>
+        <SelectTrigger id={id} className="h-11">
+          <SelectValue placeholder="Select size" />
+        </SelectTrigger>
+        <SelectContent>
+          {/* Preserve a pre-existing free-text value that isn't in the list. */}
+          {value && !PROPERTY_SIZES.includes(value as (typeof PROPERTY_SIZES)[number]) ? (
+            <SelectItem value={value}>{value}</SelectItem>
+          ) : null}
+          {PROPERTY_SIZES.map((s) => (
+            <SelectItem key={s} value={s}>
+              {s}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: EditLeadValues }) {
@@ -153,6 +191,11 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               Pickup
             </p>
             <AddressFields value={fromAddr} onChange={onFromChange} idPrefix="ed-from" />
+            <SizeSelect
+              id="ed-size"
+              value={v.property_size}
+              onChange={(val) => setV((s) => ({ ...s, property_size: val }))}
+            />
           </div>
 
           {/* Destination */}
@@ -162,39 +205,47 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
               Destination
             </p>
             <AddressFields value={toAddr} onChange={onToChange} idPrefix="ed-to" />
+            <SizeSelect
+              id="ed-to-size"
+              value={v.to_property_size}
+              onChange={(val) => setV((s) => ({ ...s, to_property_size: val }))}
+            />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
-            <div className="grid gap-2">
-              <Label htmlFor="ed-size">Property size</Label>
-              <Select
-                value={v.property_size || ""}
-                onValueChange={(val) => setV((s) => ({ ...s, property_size: val }))}
-              >
-                <SelectTrigger id="ed-size" className="h-11">
-                  <SelectValue placeholder="Select size" />
-                </SelectTrigger>
-                <SelectContent>
-                  {/* Preserve a pre-existing free-text value that isn't in the list. */}
-                  {v.property_size && !PROPERTY_SIZES.includes(v.property_size as (typeof PROPERTY_SIZES)[number]) ? (
-                    <SelectItem value={v.property_size}>{v.property_size}</SelectItem>
-                  ) : null}
-                  {PROPERTY_SIZES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {/* Move date — confirmed only when the customer has named a firm date;
+              otherwise the provisional Beginning/Middle/End window. */}
+          <div className="grid gap-3 border-t pt-4">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Move date</p>
+              <p className="mt-1 text-xs text-mist-400">
+                Confirmed = the customer has named a firm date (it flows into the quote and the
+                payment steps). Website enquiries arrive with the customer&apos;s own anticipated
+                date — check it on the first call or move it to a provisional window.
+              </p>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label htmlFor="ed-date">Confirmed date</Label>
+                <Input id="ed-date" type="date" value={v.preferred_date} onChange={set("preferred_date")} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ed-approx-month">Provisional month</Label>
+                <Input id="ed-approx-month" type="month" value={v.approx_month} onChange={set("approx_month")} />
+              </div>
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="ed-date">Preferred date</Label>
-              <Input id="ed-date" type="date" value={v.preferred_date} onChange={set("preferred_date")} />
+              <Label htmlFor="ed-window-early">Part of the month</Label>
+              <WindowTierPicker
+                idPrefix="ed-window"
+                value={v.approx_window}
+                onChange={(tier) => setV((s) => ({ ...s, approx_window: tier }))}
+              />
             </div>
-            <div className="grid gap-2">
-              <Label htmlFor="ed-est">Estimate given (£)</Label>
-              <Input id="ed-est" type="number" inputMode="decimal" min={0} value={v.estimate_given} onChange={set("estimate_given")} placeholder="e.g. 950" />
-            </div>
+          </div>
+
+          <div className="grid gap-2 border-t pt-4">
+            <Label htmlFor="ed-est">Estimate given (£)</Label>
+            <Input id="ed-est" type="number" inputMode="decimal" min={0} value={v.estimate_given} onChange={set("estimate_given")} placeholder="e.g. 950" />
           </div>
 
           <div className="grid gap-2">
