@@ -226,25 +226,29 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         .maybeSingle();
 
       if (existing) {
-        // Update only non-status fields — preserve any panel-driven status change.
-        const { error } = await admin
-          .from("leads")
-          .update({
-            ...baseFields,
-            // Repair historical rows imported by the pre-freshness sync — the
-            // created/submitted gap identifies an import (migration 0071's
-            // guard). A genuinely fresh lead has created_at ≈ submitted_at, so
-            // it stays unacknowledged FOREVER until a human acknowledges it —
-            // sitting unacked over a weekend must never machine-ack the alarm.
-            ...(existing.web_alert_ack_at === null &&
-            !isFreshAlert &&
-            isImportedUnackedRow(existing.created_at, alertSubmittedAt)
-              ? { web_alert_ack_at: syncNow.toISOString() }
-              : {}),
-          })
-          .eq("id", existing.id);
-        if (error) throw error;
-        updated += 1;
+        // An already-landed lead is NEVER re-written from the site payload. A
+        // Sanity quoteSubmission is immutable once submitted, so re-applying
+        // baseFields could only re-assert the original submission — which
+        // silently reverted every office correction (name, phone, email,
+        // postcodes, notes) on the next dashboard load: Stephen Bull's
+        // postcode fix was clobbered twice on 2026-08-14 and the Edit-Lead
+        // dialog looked broken. After landing, the panel is the system of
+        // record. The only touch an existing row gets is the one-shot alarm
+        // repair for historical imports (migration 0071's guard) — a
+        // genuinely fresh lead has created_at ≈ submitted_at and stays
+        // unacknowledged until a human acks it.
+        if (
+          existing.web_alert_ack_at === null &&
+          !isFreshAlert &&
+          isImportedUnackedRow(existing.created_at, alertSubmittedAt)
+        ) {
+          const { error } = await admin
+            .from("leads")
+            .update({ web_alert_ack_at: syncNow.toISOString() })
+            .eq("id", existing.id);
+          if (error) throw error;
+          updated += 1;
+        }
       } else {
         const { data: created, error } = await admin
           .from("leads")
