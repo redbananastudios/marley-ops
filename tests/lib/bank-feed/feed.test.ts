@@ -9,7 +9,14 @@ import {
   ukDateToIso,
   type BankTxRow,
 } from "@/lib/bank-feed/parse";
-import { matchTransaction, refsInText, type OpenItem } from "@/lib/bank-feed/match";
+import {
+  matchTransaction,
+  matchTransactionLedger,
+  reconcileSettled,
+  refsInText,
+  type OpenItem,
+  type SettledItem,
+} from "@/lib/bank-feed/match";
 
 /* ------------------------------------------------------------ parse */
 
@@ -391,5 +398,107 @@ describe("matchTransaction — commitment invoices (2026-08-06 MY SAFETY LTD £5
     expect(
       matchTransaction({ amount: 100, reference: null, description: null, counterparty: "E Dingley" }, pool),
     ).toBeNull();
+  });
+});
+
+/* ------------------------------------------------- settled reconcile */
+
+const settledItem = (over: Partial<SettledItem>): SettledItem => ({
+  quoteId: "q34",
+  quoteRef: "MMR034",
+  leadId: "l34",
+  customer: "Brydee Thomas",
+  amount: 450,
+  kind: "balance",
+  ...over,
+});
+
+describe("reconcileSettled — payment recorded before its bank row (2026-08-16 Brydee MMR034)", () => {
+  it("the live case: 'MMR034-BAL' £450 after the balance was recorded via Zoho → reconciled", () => {
+    // Balance marked paid 15 Aug via the Zoho poll; the 14 Aug transfer could
+    // never match the OPEN set and sat in Unmatched inbound forever.
+    expect(
+      reconcileSettled(
+        { amount: 450, reference: "MMR034-BAL", description: null, counterparty: "MY SAFETY LTD" },
+        [settledItem({})],
+      ),
+    ).toEqual({ type: "reconciled", kind: "balance", quoteId: "q34", quoteRef: "MMR034" });
+  });
+
+  it("reference + WRONG amount does not reconcile — that money is genuinely unexplained", () => {
+    expect(
+      reconcileSettled({ amount: 400, reference: "MMR034-BAL", description: null }, [settledItem({})]),
+    ).toBeNull();
+  });
+
+  it("amount alone never reconciles — no reference, no auto-explain, whatever the payer name", () => {
+    expect(
+      reconcileSettled(
+        { amount: 450, reference: "moving money", description: null, counterparty: "B THOMAS" },
+        [settledItem({})],
+      ),
+    ).toBeNull();
+  });
+
+  it("the suffix picks between same-amount settled items on one quote", () => {
+    const pool = [
+      settledItem({ kind: "deposit", amount: 100 }),
+      settledItem({ kind: "commitment", amount: 100 }),
+    ];
+    expect(reconcileSettled({ amount: 100, reference: "MMR034-COM", description: null }, pool)).toMatchObject({
+      kind: "commitment",
+    });
+    expect(reconcileSettled({ amount: 100, reference: "MMR034-DEP", description: null }, pool)).toMatchObject({
+      kind: "deposit",
+    });
+  });
+});
+
+describe("matchTransactionLedger — open items keep primacy, settled explains the leftovers", () => {
+  it("an open suggestion wins over a settled twin (real open money wants recording)", () => {
+    const result = matchTransactionLedger(
+      { amount: 100, reference: "MMR034", description: null },
+      [open({ quoteId: "q34", quoteRef: "MMR034", kind: "deposit", amount: 100 })],
+      [settledItem({ kind: "commitment", amount: 100 })],
+    );
+    expect(result).toMatchObject({ type: "suggestion", kind: "deposit" });
+  });
+
+  it("reconcile beats a MISMATCH: a late deposit row must not read as a part-payment of the balance", () => {
+    // Open balance £1,100; the £100 transfer is the deposit, recorded days ago.
+    const result = matchTransactionLedger(
+      { amount: 100, reference: "MMR034", description: null },
+      [open({ quoteId: "q34", quoteRef: "MMR034", kind: "balance", amount: 1100 })],
+      [settledItem({ kind: "deposit", amount: 100 })],
+    );
+    expect(result).toMatchObject({ type: "reconciled", kind: "deposit" });
+  });
+
+  it("an explicit suffix naming the SETTLED kind beats a same-amount suggestion for a DIFFERENT kind", () => {
+    // '-BAL' after the balance was recorded, while an open commitment happens
+    // to share the amount: suggesting the commitment would invite the office
+    // to one-tap-record the same £450 twice (the Kong double-bill shape).
+    const result = matchTransactionLedger(
+      { amount: 450, reference: "MMR034-BAL", description: null },
+      [open({ quoteId: "q34", quoteRef: "MMR034", kind: "commitment", amount: 450 })],
+      [settledItem({ kind: "balance", amount: 450 })],
+    );
+    expect(result).toMatchObject({ type: "reconciled", kind: "balance" });
+  });
+
+  it("nothing open, nothing settled → null (unmatched, human territory)", () => {
+    expect(
+      matchTransactionLedger({ amount: 450, reference: "MMR999", description: null }, [open({})], [
+        settledItem({}),
+      ]),
+    ).toBeNull();
+  });
+
+  it("storage references stay storage even with a settled twin", () => {
+    expect(
+      matchTransactionLedger({ amount: 25, reference: "MMS-1A2B3C4D", description: null }, [], [
+        settledItem({ amount: 25 }),
+      ]),
+    ).toEqual({ type: "storage" });
   });
 });

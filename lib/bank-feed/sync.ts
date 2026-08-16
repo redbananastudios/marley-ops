@@ -10,7 +10,12 @@ import {
   resolveBankFeedFloor,
   type BankTxRow,
 } from "@/lib/bank-feed/parse";
-import { matchTransaction, type OpenItem } from "@/lib/bank-feed/match";
+import {
+  matchTransactionLedger,
+  reconcileSettled,
+  type OpenItem,
+  type SettledItem,
+} from "@/lib/bank-feed/match";
 import { BANK_FEED_DIGEST_THRESHOLD, decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import { errorContext, log } from "@/lib/log";
@@ -78,9 +83,13 @@ async function fetchSheet() {
 /** Open deposits, commitment invoices + balances the matcher can suggest
  *  against — mirrors the Bookings page's definitions of "awaiting deposit"
  *  and "balance due"; commitment mirrors the chase engine's "invoiced, not
- *  paid". Exported for the /payments manual attach flow, which must validate
- *  against exactly the same open-item set the matcher uses. */
-export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
+ *  paid". `settled` is the mirror image — items already PAID on the books —
+ *  used only to reconcile transfers whose payment was recorded before the
+ *  bank row arrived (never to run the paid pipeline). One query pass serves
+ *  both so the two views can't disagree about a quote. */
+export async function loadLedgerItems(
+  sb: SupabaseClient,
+): Promise<{ open: OpenItem[]; settled: SettledItem[] }> {
   const quotes = await fetchAllRows((f, t) =>
     sb
       .from("quotes")
@@ -104,19 +113,24 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
   const leadIds = [
     ...new Set(quotes.filter((q) => q.deposit_paid_at && q.lead_id).map((q) => q.lead_id as string)),
   ];
-  const balancePaid = new Map<string, string | null>();
+  const leadBalance = new Map<string, { paidAt: string | null; amount: number | null }>();
   for (let i = 0; i < leadIds.length; i += 100) {
     const chunk = leadIds.slice(i, i + 100);
-    const { data, error } = await sb.from("leads").select("id, balance_paid_at").in("id", chunk);
+    const { data, error } = await sb
+      .from("leads")
+      .select("id, balance_paid_at, balance_amount")
+      .in("id", chunk);
     if (error) throw new Error(`bank-feed lead lookup failed: ${error.message}`);
-    for (const l of data ?? []) balancePaid.set(l.id as string, l.balance_paid_at as string | null);
+    for (const l of data ?? [])
+      leadBalance.set(l.id as string, {
+        paidAt: (l.balance_paid_at as string | null) ?? null,
+        amount: l.balance_amount == null ? null : Number(l.balance_amount),
+      });
   }
 
-  const items: OpenItem[] = [];
+  const open: OpenItem[] = [];
+  const settled: SettledItem[] = [];
   for (const q of quotes) {
-    // A cancelled booking must never suggest money actions — its unwind
-    // (refunds, reopen) owns that state, not the bank feed.
-    if (q.booking_cancelled_at) continue;
     const base = {
       quoteId: q.id as string,
       quoteRef: (q.quote_ref as string) ?? "",
@@ -124,32 +138,61 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
       customer: (q.customer_name as string | null) ?? null,
     };
     if (!base.quoteRef) continue;
-    if (!q.deposit_paid_at && Number(q.deposit_amount) > 0) {
-      items.push({ ...base, kind: "deposit", amount: Number(q.deposit_amount) });
+    // A cancelled booking must never suggest money actions — its unwind
+    // (refunds, reopen) owns that state, not the bank feed. Its already-
+    // RECORDED payments stay in the settled pool: that money really arrived,
+    // and its bank row must not read as unexplained.
+    const cancelled = Boolean(q.booking_cancelled_at);
+
+    // Invoices PARTITION the agreed price (computeBalanceCredits): once a
+    // commitment invoice is RAISED (paid or not), the balance is agreed −
+    // deposit − commitment. Without the carve-out the open set would offer
+    // commitment + gross balance simultaneously — more than is owed.
+    const lead = q.lead_id ? leadBalance.get(q.lead_id) : undefined;
+    const balanceAmount =
+      Number(q.balance_invoice_amount) ||
+      Math.max(
+        0,
+        Number(q.agreed_price ?? q.grand_total ?? 0) -
+          Number(q.deposit_amount ?? 0) -
+          Number(q.commitment_invoice_amount ?? 0),
+      );
+
+    if (q.deposit_paid_at && Number(q.deposit_amount) > 0) {
+      settled.push({ ...base, kind: "deposit", amount: Number(q.deposit_amount) });
+    } else if (!cancelled && !q.deposit_paid_at && Number(q.deposit_amount) > 0) {
+      open.push({ ...base, kind: "deposit", amount: Number(q.deposit_amount) });
     }
-    if (q.deposit_paid_at && q.lead_id && !balancePaid.get(q.lead_id)) {
-      // Invoices PARTITION the agreed price (computeBalanceCredits): once a
-      // commitment invoice is RAISED (paid or not), the balance is agreed −
-      // deposit − commitment. Without the carve-out the open set would offer
-      // commitment + gross balance simultaneously — more than is owed.
-      const balance =
-        Number(q.balance_invoice_amount) ||
-        Math.max(
-          0,
-          Number(q.agreed_price ?? q.grand_total ?? 0) -
-            Number(q.deposit_amount ?? 0) -
-            Number(q.commitment_invoice_amount ?? 0),
-        );
-      if (balance > 0) items.push({ ...base, kind: "balance", amount: balance });
+
+    if (q.deposit_paid_at && q.lead_id) {
+      if (lead?.paidAt) {
+        // markBalancePaid can settle the LEAD's own balance figure when one was
+        // set by hand — reconcile against that where present.
+        const amount = lead.amount ?? balanceAmount;
+        if (amount > 0) settled.push({ ...base, kind: "balance", amount });
+      } else if (!cancelled && balanceAmount > 0) {
+        open.push({ ...base, kind: "balance", amount: balanceAmount });
+      }
     }
-    // Commitment: invoiced (amount only ever set when the Zoho invoice landed)
-    // and not yet paid. Pushed AFTER deposit/balance so suffix-less same-amount
+
+    // Commitment: invoiced (amount only ever set when the Zoho invoice landed).
+    // Open items are pushed AFTER deposit/balance so suffix-less same-amount
     // ties keep today's deposit-first pick.
-    if (!q.commitment_paid_at && Number(q.commitment_invoice_amount) > 0) {
-      items.push({ ...base, kind: "commitment", amount: Number(q.commitment_invoice_amount) });
+    if (Number(q.commitment_invoice_amount) > 0) {
+      if (q.commitment_paid_at) {
+        settled.push({ ...base, kind: "commitment", amount: Number(q.commitment_invoice_amount) });
+      } else if (!cancelled) {
+        open.push({ ...base, kind: "commitment", amount: Number(q.commitment_invoice_amount) });
+      }
     }
   }
-  return items;
+  return { open, settled };
+}
+
+/** The open half only — the /payments manual attach flow validates against
+ *  exactly the same open-item set the matcher uses. */
+export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
+  return (await loadLedgerItems(sb)).open;
 }
 
 // Type alias (not interface) so it satisfies runCron's Record<string, unknown>.
@@ -162,6 +205,9 @@ export type BankFeedSyncSummary = {
   suggested: number;
   mismatched: number;
   unmatched: number;
+  /** Transfers tied to an already-recorded payment (paid via Zoho/manual
+   *  before their bank row was processed) — no paid pipeline, no page. */
+  reconciled?: number;
   /** Acquirer settlement payouts (Elavon/takepayments) kept out of the queues. */
   settlements?: number;
   /** Admin push notifications fired for transfers surfaced THIS pass. */
@@ -226,15 +272,16 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   const rows = applyBankFeedFloor(sheetRows, floor);
 
   // What we already hold, and which rows the office has settled — confirmed/
-  // dismissed rows are NEVER rewritten (their amount/reference are part of the
-  // audit trail of what was on screen at confirm time).
+  // dismissed/reconciled rows are NEVER rewritten (their amount/reference are
+  // part of the audit trail of what was on screen at settle time, and a
+  // reconcile was made on exactly that reference+amount).
   const existing = await fetchAllRows((f, t) =>
     sb.from("bank_transactions").select("transaction_id, status").order("id").range(f, t),
   );
   const known = new Set(existing.map((r) => r.transaction_id as string));
   const locked = new Set(
     existing
-      .filter((r) => r.status === "confirmed" || r.status === "dismissed")
+      .filter((r) => r.status === "confirmed" || r.status === "dismissed" || r.status === "reconciled")
       .map((r) => r.transaction_id as string),
   );
 
@@ -268,7 +315,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // recomputed each pass so a newly-raised invoice can claim an older unmatched
   // transfer — but confirmed/dismissed rows are never touched, and every write
   // below is status-guarded so a concurrent Confirm/Dismiss always wins.
-  const open = await loadOpenItems(sb);
+  const { open, settled } = await loadLedgerItems(sb);
   const pending = await fetchAllRows((f, t) =>
     sb
       .from("bank_transactions")
@@ -292,6 +339,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   let suggested = 0;
   let mismatched = 0;
   let unmatched = 0;
+  let reconciled = 0;
   // Transfers SURFACED this pass (fresh inbound money, or an old unmatched
   // transfer a newly-raised invoice just claimed) — these page the admins.
   const arrivals: BankFeedArrival[] = [];
@@ -323,21 +371,21 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     // item a fresh transfer is really for); an EXISTING suggestion stays
     // re-matchable so it keeps tracking its open item until confirmed.
     const freshTx = (row.tx_date as string) >= freshCutoff;
-    // A stale row already surfaced as unmatched stays exactly as the office
-    // sees it (incl. any mismatch pointer) — no re-match, no rewrite.
-    if (!freshTx && row.status === "unmatched") continue;
+    const txInput = {
+      amount: Number(row.amount),
+      reference: row.reference as string | null,
+      description: row.description as string | null,
+      counterparty: row.counterparty as string | null,
+    };
+    // Reconciling against a SETTLED item applies at any age — it consumes no
+    // open item and never pages, so the stale freeze doesn't apply to it. A
+    // stale unmatched row that still won't reconcile stays exactly as the
+    // office sees it (incl. any mismatch pointer) — no re-match, no rewrite.
     const m =
       freshTx || row.status === "suggested"
-        ? matchTransaction(
-            {
-              amount: Number(row.amount),
-              reference: row.reference as string | null,
-              description: row.description as string | null,
-              counterparty: row.counterparty as string | null,
-            },
-            remaining,
-          )
-        : null;
+        ? matchTransactionLedger(txInput, remaining, settled)
+        : reconcileSettled(txInput, settled);
+    if (!freshTx && row.status === "unmatched" && !m) continue;
     let next: {
       status: string;
       matched_quote_id: string | null;
@@ -348,6 +396,12 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       next = { status: "suggested", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: m.confidence };
       consume(m.quoteId, m.kind);
       suggested++;
+    } else if (m?.type === "reconciled") {
+      // The referenced payment is already on the books (recorded via Zoho or a
+      // manual mark-paid before this bank row was processed). Link the row so
+      // the money reads as explained — the paid pipeline must NOT run again.
+      next = { status: "reconciled", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: "reference" };
+      reconciled++;
     } else if (m?.type === "mismatch") {
       // Right quote, wrong amount — visible on /payments, never confirmable.
       next = { status: "unmatched", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: null };
@@ -436,6 +490,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     suggested,
     mismatched,
     unmatched,
+    reconciled,
     settlements,
     notified: events.length,
   };

@@ -62,6 +62,9 @@ function fmtDay(iso: string): string {
 const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
   suggested: { label: "Match found", cls: "bg-warn-bg text-warn" },
   confirmed: { label: "Recorded", cls: "bg-success-bg text-success" },
+  // Payment was already recorded via Zoho / a manual mark-paid before the bank
+  // row was processed — linked automatically, nothing to action.
+  reconciled: { label: "Matched to recorded payment", cls: "bg-success-bg text-success" },
   unmatched: { label: "Unmatched", cls: "bg-mist-100 text-mist-500" },
   dismissed: { label: "Dismissed", cls: "bg-mist-100 text-mist-400" },
 };

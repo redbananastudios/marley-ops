@@ -20,6 +20,14 @@
  *                surfaced on /payments as "record manually", never confirmable.
  *   storage    — MMS-… reference: recorded from the Storage page.
  *   null       — nothing recognisable.
+ *
+ * A second, later layer handles the payment that was recorded BEFORE its bank
+ * row was processed (Connor records it in Zoho → the poll marks it paid, or an
+ * office one-tap): the open set no longer contains it, so the transfer could
+ * never match and sat in "Unmatched inbound" forever (Brydee Thomas MMR034's
+ * £450 "MMR034-BAL", 2026-08-16). reconcileSettled/matchTransactionLedger tie
+ * such a transfer to its already-recorded item — reference + exact amount
+ * only, and the paid pipeline is never run off it.
  */
 
 export interface OpenItem {
@@ -45,6 +53,27 @@ export type MatchResult =
     }
   | { type: "mismatch"; kind: "deposit" | "commitment" | "balance"; quoteId: string; quoteRef: string }
   | { type: "storage" };
+
+/** A deposit/commitment/balance that is already PAID on the books — the
+ *  reconcile pool. Includes cancelled bookings (their recorded money is still
+ *  real money that arrived by bank). */
+export interface SettledItem {
+  quoteId: string;
+  quoteRef: string;
+  leadId: string | null;
+  customer: string | null;
+  amount: number;
+  kind: "deposit" | "commitment" | "balance";
+}
+
+export interface ReconciledMatch {
+  type: "reconciled";
+  kind: "deposit" | "commitment" | "balance";
+  quoteId: string;
+  quoteRef: string;
+}
+
+export type LedgerMatchResult = MatchResult | ReconciledMatch;
 
 /** Quote refs recognisable inside free-text bank references. */
 const REF_PATTERNS = [
@@ -170,4 +199,61 @@ export function matchTransaction(
     };
   }
   return null;
+}
+
+/** The Zoho invoice-reference suffix, when the transfer carries one —
+ *  "MMR034-BAL" is the customer paying the exact invoice we raised. */
+function suffixKind(hay: string): "deposit" | "commitment" | "balance" | null {
+  if (hay.includes("-DEP")) return "deposit";
+  if (hay.includes("-COM")) return "commitment";
+  if (hay.includes("-BAL")) return "balance";
+  return null;
+}
+
+/**
+ * Reconcile a transfer against ALREADY-RECORDED payments: quote ref in the
+ * text + the exact amount of a settled item. Deliberately stricter than the
+ * open matcher — no amount-only path, no name corroboration — because the
+ * outcome is automatic (no human tap): a wrong reconcile silently hides money,
+ * so only the unambiguous shape qualifies.
+ */
+export function reconcileSettled(
+  tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
+  settled: SettledItem[],
+): ReconciledMatch | null {
+  const refs = refsInText(tx.reference, tx.description);
+  if (!refs.length) return null;
+  const candidates = settled.filter(
+    (s) => refs.includes(s.quoteRef.toUpperCase()) && pennies(s.amount) === pennies(tx.amount),
+  );
+  if (!candidates.length) return null;
+  const hay = canonicalizeQuoteRefs(`${norm(tx.reference)} ${norm(tx.description)}`);
+  const wants = suffixKind(hay);
+  const pick = (wants && candidates.find((s) => s.kind === wants)) || candidates[0];
+  return { type: "reconciled", kind: pick.kind, quoteId: pick.quoteId, quoteRef: pick.quoteRef };
+}
+
+/**
+ * The full decision: open items first (real money wanting recording, human-
+ * confirmed), settled reconcile as the fallback for unmatched/mismatch shapes.
+ * One deliberate exception: when the transfer's OWN suffix names the settled
+ * kind ("MMR034-BAL" after the balance was recorded via Zoho) and the open
+ * suggestion is for a DIFFERENT kind that merely shares the amount, the
+ * transfer IS the already-recorded payment — reconciling wins, because the
+ * suggestion would invite the office to one-tap-record the same money twice.
+ */
+export function matchTransactionLedger(
+  tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
+  open: OpenItem[],
+  settled: SettledItem[],
+): LedgerMatchResult | null {
+  const m = matchTransaction(tx, open);
+  if (m && m.type === "storage") return m;
+  const s = reconcileSettled(tx, settled);
+  if (!s) return m;
+  if (!m || m.type === "mismatch") return s;
+  const hay = canonicalizeQuoteRefs(`${norm(tx.reference)} ${norm(tx.description)}`);
+  const wants = suffixKind(hay);
+  if (wants && s.kind === wants && m.kind !== wants) return s;
+  return m;
 }
