@@ -442,8 +442,10 @@ const quoteEmailHtml = shellHtml(
     <p style="font-size:11px;color:#9CA3AF;margin:0;">Prefer email? <a href="{{{REPLY_HREF}}}" style="color:#8A857E;">Reply to confirm</a> instead.</p>
   </td></tr>`,
     stepsRow([
-      { t: "Accept your quote", d: "About 30 seconds, and your date is reserved." },
-      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: "Card or bank transfer. This locks your booking in." },
+      // Policy v2 truth (Peter, 2026-08-16): the deposit secures the BOOKING;
+      // the date is only reserved at the separate confirm-your-date step (25%).
+      { t: "Accept your quote", d: "About 30 seconds, and your price is locked in." },
+      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: "Card or bank transfer. This secures your booking; confirming your date then locks it in." },
       { t: "Before &amp; on the day", d: "Balance due 24 hours before moving day, then we arrive on time and get you moved." },
     ]),
     sublineRow(
@@ -811,7 +813,7 @@ const TEMPLATES = [
     from: CHASE_FROM,
     html: chaseHtml("One last step to secure your booking.", {
       intro: [
-        "It's {{{OWNER_NAME}}} here. Great to have you booked in. The last step is your {{{DEPOSIT_AMOUNT}}} deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.",
+        "It's {{{OWNER_NAME}}} here. Great to have you booked in. The last step is your {{{DEPOSIT_AMOUNT}}} deposit, which makes everything official. Once it's in, we'll confirm your moving date with you to lock it in. If you're still waiting on completion, no problem, your booking is held with a fully amendable date. Either way, your price and your crew are secured.",
         "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",

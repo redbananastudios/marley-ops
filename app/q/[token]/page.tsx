@@ -454,8 +454,9 @@ export default async function AcceptPage({
 
           <p className="text-sm leading-relaxed text-mist-500">
             Thanks{quote.accepted_name ? `, ${quote.accepted_name.split(/\s+/)[0]}` : ""} — quote{" "}
-            <strong className="text-ink">{quote.quote_ref}</strong> is accepted. Your date is
-            reserved and locks in as soon as the deposit arrives.
+            <strong className="text-ink">{quote.quote_ref}</strong> is accepted. Your deposit
+            secures your booking; once it arrives, you can confirm your moving date right here to
+            lock it in.
           </p>
 
           {cardOk ? (

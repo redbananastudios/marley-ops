@@ -53,13 +53,13 @@ export function depositReminderTemplate(c: TemplateContext): MessageTemplate {
     subject: `Your deposit${ref ? ` (quote ${c.quoteRef})` : ""}`,
     email: `Hi ${name},
 
-Just a gentle reminder that the ${amt} deposit${ref}${when} is still outstanding. Once it's in, your date is locked and we're all set.
+Just a gentle reminder that the ${amt} deposit${ref}${when} is still outstanding. Once it's in, your booking is secured and confirming your date is the next quick step.
 
 If you've already sent it, please ignore this. Any questions, call 01747 637070.
 
 Thanks,
 Marley Moves`,
-    sms: `Hi ${name}, Marley Moves here. A quick reminder the ${amt} deposit${when} is still outstanding. Once paid your date is secured. Questions? 01747 637070.`,
+    sms: `Hi ${name}, Marley Moves here. A quick reminder the ${amt} deposit${when} is still outstanding. Once paid your booking is secured. Questions? 01747 637070.`,
   };
 }
 

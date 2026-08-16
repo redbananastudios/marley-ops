@@ -217,7 +217,7 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
       subject: `One last step to secure your booking (${c.quoteRef})`,
       text: `Hi ${name},
 
-It's ${owner} here. Great to have you booked in. The last step is your ${dep} deposit, which makes everything official. If your date is settled, it's locked in from the moment you pay. If you're still waiting on completion, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
+It's ${owner} here. Great to have you booked in. The last step is your ${dep} deposit, which makes everything official. Once it's in, we'll confirm your moving date with you to lock it in. If you're still waiting on completion, no problem, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
 
 You can pay by card or bank transfer from your quote page:
 ${c.acceptUrl}

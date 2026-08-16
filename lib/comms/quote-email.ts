@@ -276,7 +276,7 @@ export function buildQuoteEmailHtml(
         <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${meta.acceptUrl ? "Accept your quote" : "Reply to confirm"}</div>
         <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
           meta.acceptUrl
-            ? "Tap the button above (takes about 30 seconds) and your date is reserved."
+            ? "Tap the button above (takes about 30 seconds) and your price is locked in."
             : "Just hit reply and let us know you are happy with the price."
         }</div>
       </td>
@@ -285,8 +285,8 @@ export function buildQuoteEmailHtml(
         <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${depositLabel} deposit</div>
         <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
           meta.acceptUrl
-            ? "Pay by card or bank transfer straight after accepting. This locks the booking in."
-            : "Secures the date and the team. Bank details are on the attached PDF."
+            ? "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in."
+            : "Secures your booking and the team. Bank details are on the attached PDF."
         }</div>
       </td>
       <td style="width:33%;vertical-align:top;">
