@@ -5,6 +5,8 @@ import {
   buildReceivedDay,
   tallyReceived,
   ukRangeWindow,
+  type BankMatchIn,
+  type LeadIn,
   type QuoteIn,
   type RangePreset,
   type ReceivedItem,
@@ -190,6 +192,87 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     if (quote.lead_id && !quoteByLeadId.has(quote.lead_id)) quoteByLeadId.set(quote.lead_id, quote);
   }
 
+  // Arrival-day truth: confirmed/reconciled bank matches either arriving in
+  // this range (they emit items dated by the bank day) or belonging to a
+  // stamp-window quote (they suppress the late stamp item wherever the bank
+  // day falls). Without the feed configured the stamps stand alone, as before.
+  const bankMatches: BankMatchIn[] = [];
+  const bankQuoteById = new Map<string, QuoteIn>();
+  const bankLeadById = new Map<string, LeadIn>();
+  let unattributedPence = 0;
+  if (bankFeedConfigured()) {
+    const stampQuoteIds = [
+      ...new Set([
+        ...(depositQuotes ?? []).map((quote) => quote.id as string),
+        ...(commitmentQuotes ?? []).map((quote) => quote.id as string),
+        ...[...quoteByLeadId.values()].map((quote) => quote.id),
+      ]),
+    ];
+    const M_COLS = "matched_quote_id, match_kind, tx_date, tx_time";
+    const matchRows: { matched_quote_id: string | null; match_kind: string | null; tx_date: string; tx_time: string | null }[] = [];
+    const [inRangeRes, unattributedRes] = await Promise.all([
+      sb
+        .from("bank_transactions")
+        .select(M_COLS)
+        .in("status", ["confirmed", "reconciled"])
+        .in("match_kind", ["deposit", "commitment", "balance"])
+        .not("matched_quote_id", "is", null)
+        .gte("tx_date", window.startDay)
+        .lte("tx_date", window.endDay),
+      // The honesty line: inbound money in this range still sitting in the
+      // queues — the header can't claim to reconcile to the bank without it.
+      sb
+        .from("bank_transactions")
+        .select("amount")
+        .in("status", ["unmatched", "suggested"])
+        .gte("tx_date", window.startDay)
+        .lte("tx_date", window.endDay),
+    ]);
+    matchRows.push(...(inRangeRes.data ?? []));
+    unattributedPence = (unattributedRes.data ?? []).reduce(
+      (s, r) => s + Math.round(Number(r.amount) * 100),
+      0,
+    );
+    for (let i = 0; i < stampQuoteIds.length; i += 100) {
+      const { data } = await sb
+        .from("bank_transactions")
+        .select(M_COLS)
+        .in("status", ["confirmed", "reconciled"])
+        .in("match_kind", ["deposit", "commitment", "balance"])
+        .in("matched_quote_id", stampQuoteIds.slice(i, i + 100));
+      matchRows.push(...(data ?? []));
+    }
+    const seenQk = new Set<string>();
+    for (const r of matchRows) {
+      if (!r.matched_quote_id || !r.match_kind) continue;
+      const qk = `${r.matched_quote_id}:${r.match_kind}`;
+      if (seenQk.has(qk)) continue;
+      seenQk.add(qk);
+      bankMatches.push({
+        quoteId: r.matched_quote_id,
+        kind: r.match_kind as BankMatchIn["kind"],
+        txDate: r.tx_date,
+        txTime: r.tx_time,
+      });
+    }
+    const matchQuoteIds = [...new Set(bankMatches.map((m) => m.quoteId))];
+    if (matchQuoteIds.length) {
+      const { data: mq } = await sb
+        .from("quotes")
+        .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
+        .in("id", matchQuoteIds);
+      for (const quote of mq ?? []) bankQuoteById.set(quote.id as string, quote);
+      const mLeadIds = [...new Set((mq ?? []).map((quote) => quote.lead_id).filter(Boolean))] as string[];
+      if (mLeadIds.length) {
+        const { data: ml } = await sb
+          .from("leads")
+          .select("id, name, balance_paid_at, balance_amount, balance_paid_method")
+          .in("id", mLeadIds);
+        for (const l of ml ?? []) bankLeadById.set(l.id as string, l);
+      }
+    }
+  }
+
   const assembled = buildReceivedDay({
     window,
     cardRows: cardRows ?? [],
@@ -197,6 +280,9 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     commitmentQuotes: commitmentQuotes ?? [],
     balanceLeads: balanceLeads ?? [],
     quoteByLeadId,
+    bankMatches,
+    bankQuoteById,
+    bankLeadById,
   });
 
   const term = q.toLowerCase();
@@ -435,6 +521,13 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         />
         <Stat label="Cash" value={money(totals.methodPence.cash)} sub="marked paid in the panel" />
       </div>
+
+      {unattributedPence > 0 ? (
+        <p className="text-sm font-medium text-warn">
+          {money(unattributedPence)} more arrived in this range and isn&apos;t recorded yet — attribute or
+          clear it in the queues below.
+        </p>
+      ) : null}
 
       <Card className="p-0">
         <div className="flex items-center gap-2 border-b px-5 py-3.5">

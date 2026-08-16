@@ -1,20 +1,26 @@
 /**
  * "Payments received" day view — pure assembly so the maths is testable.
  *
- * Two sources today:
+ * Sources:
  *   card      takepayments attempts (card_payments) settled or refunded in the
  *             day — the gateway is money-truth for these.
  *   recorded  deposits/commitments/balances marked paid in the panel (BACS
  *             one-tap, cash, bank-feed confirm) — quotes.deposit_paid_at /
  *             quotes.commitment_paid_at / leads.balance_paid_at stamps.
  *
- * A third source arrives with the bank feed (Revolut/Monzo webhook): inbound
- * transfers matched by reference. It slots in as another ReceivedItem source —
- * the page already leaves the seam.
+ * DATE TRUTH (2026-08-16, Peter caught every day misreporting): a recorded
+ * stamp says when WE noticed the money (office tap, Zoho poll — often 1-2
+ * days late), not when it arrived. So a recorded payment whose (quote, kind)
+ * has a CONFIRMED/RECONCILED bank_transactions match is keyed by the bank
+ * row's tx_date — the day the money actually hit the account — and the stamp
+ * is only the fallback for payments with no bank row (cash, unmatched
+ * history). Cards already use the gateway's settled_at.
  *
  * Dedupe rule: a card-paid deposit ALSO stamps quotes.deposit_paid_at (same
  * instant, via markDepositPaid), so any quote with a card receipt in the window
  * is dropped from the recorded list — otherwise every card deposit counts twice.
+ * The bank-match suppression works the same way: a stamp item whose quote+kind
+ * has a bank match anywhere is dropped (its bank twin owns it, on the bank day).
  *
  * Test attempts (is_test) are listed — seeing the simulator charge appear here
  * proves the loop — but never counted in totals.
@@ -237,6 +243,17 @@ export interface LeadIn {
   balance_paid_method?: string | null;
 }
 
+/** A confirmed/reconciled bank_transactions match — the arrival-day truth for
+ *  a recorded (quote, kind) payment. */
+export interface BankMatchIn {
+  quoteId: string;
+  kind: "deposit" | "commitment" | "balance";
+  /** YYYY-MM-DD — the bank's own transaction day (UK). */
+  txDate: string;
+  /** HH:MM[:SS] UK wall clock, when the export carries it. */
+  txTime: string | null;
+}
+
 export interface ReceivedDay {
   items: ReceivedItem[];
   /** Net pence per bucket — refunds subtract; test rows never count. */
@@ -271,6 +288,16 @@ export function buildReceivedDay(input: {
   balanceLeads: LeadIn[];
   /** The lead's money quote (most recently accepted) for names/amounts. */
   quoteByLeadId: Map<string, QuoteIn>;
+  /** Confirmed/reconciled bank matches — BOTH those with tx_date in the window
+   *  (they emit items on the bank day) AND any match belonging to a quote in
+   *  the stamp inputs (they suppress the stamp item, wherever the bank day
+   *  falls). */
+  bankMatches?: BankMatchIn[];
+  /** Quote/lead data for every quote in bankMatches (a bank-day item's stamp
+   *  may sit outside the queried window, so the stamp inputs can't be relied
+   *  on to contain it). */
+  bankQuoteById?: Map<string, QuoteIn>;
+  bankLeadById?: Map<string, LeadIn>;
 }): ReceivedDay {
   const startMs = input.window.start.getTime();
   const endMs = input.window.end.getTime();
@@ -279,6 +306,9 @@ export function buildReceivedDay(input: {
     const t = new Date(iso).getTime();
     return t >= startMs && t < endMs;
   };
+
+  // Bank-matched (quote, kind) pairs are keyed by the bank day, not the stamp.
+  const bankMatched = new Set((input.bankMatches ?? []).map((m) => `${m.quoteId}:${m.kind}`));
 
   const items: ReceivedItem[] = [];
   // Quotes whose card receipt already counts in the window — their recorded
@@ -331,6 +361,7 @@ export function buildReceivedDay(input: {
 
   for (const q of input.depositQuotes) {
     if (!inWindow(q.deposit_paid_at) || cardCoveredQuoteIds.has(q.id)) continue;
+    if (bankMatched.has(`${q.id}:deposit`)) continue; // bank day owns it
     // £0 "deposits" are settled-by-definition markers (legacy iMVE imports where
     // the old terms took no deposit) — no money moved, so nothing was received.
     if (!Number(q.deposit_amount)) continue;
@@ -349,6 +380,7 @@ export function buildReceivedDay(input: {
 
   for (const q of input.commitmentQuotes ?? []) {
     if (!inWindow(q.commitment_paid_at ?? null)) continue;
+    if (bankMatched.has(`${q.id}:commitment`)) continue; // bank day owns it
     items.push({
       key: `commitment:${q.id}`,
       source: "recorded",
@@ -365,6 +397,7 @@ export function buildReceivedDay(input: {
   for (const lead of input.balanceLeads) {
     if (!inWindow(lead.balance_paid_at)) continue;
     const quote = input.quoteByLeadId.get(lead.id) ?? null;
+    if (quote && bankMatched.has(`${quote.id}:balance`)) continue; // bank day owns it
     const agreed = Number(quote?.agreed_price ?? quote?.grand_total ?? 0);
     const deposit = Number(quote?.deposit_amount ?? 0);
     // A RAISED commitment invoice is carved out of the balance (invoices
@@ -383,6 +416,48 @@ export function buildReceivedDay(input: {
       at: lead.balance_paid_at!,
       method: rail(lead.balance_paid_method),
     });
+  }
+
+  // Bank-matched payments, dated by the day the money actually arrived. A
+  // matched row is by construction a bank transfer; the paid stamp is required
+  // (a confirmed row implies the pipeline ran, but ghost items must be
+  // impossible), the item's amount comes from the same rules as the stamp
+  // path so the two can never disagree on figures — only on the day.
+  const emitted = new Set<string>();
+  for (const m of input.bankMatches ?? []) {
+    const qk = `${m.quoteId}:${m.kind}`;
+    if (emitted.has(qk)) continue;
+    emitted.add(qk);
+    const timeMatch = /^(\d{2}):(\d{2})/.exec(m.txTime ?? "");
+    const [y, mo, d] = m.txDate.split("-").map(Number);
+    const at = ukInstant(y, mo, d, timeMatch ? Number(timeMatch[1]) : 12, timeMatch ? Number(timeMatch[2]) : 0).toISOString();
+    if (!inWindow(at)) continue;
+    const quote = input.bankQuoteById?.get(m.quoteId);
+    if (!quote) continue;
+    const base = {
+      source: "recorded" as const,
+      customer: quote.customer_name || "Customer",
+      quoteRef: quote.quote_ref,
+      leadId: quote.lead_id,
+      method: "bank_transfer" as const,
+      at,
+    };
+    if (m.kind === "deposit" && quote.deposit_paid_at && Number(quote.deposit_amount)) {
+      items.push({ ...base, key: `bank-deposit:${quote.id}`, kind: "deposit", amountPence: poundsToPence(quote.deposit_amount) });
+    } else if (m.kind === "commitment" && quote.commitment_paid_at && Number(quote.commitment_invoice_amount)) {
+      items.push({ ...base, key: `bank-commitment:${quote.id}`, kind: "commitment", amountPence: poundsToPence(quote.commitment_invoice_amount) });
+    } else if (m.kind === "balance" && quote.lead_id) {
+      const lead = input.bankLeadById?.get(quote.lead_id);
+      if (!lead?.balance_paid_at) continue;
+      const agreed = Number(quote.agreed_price ?? quote.grand_total ?? 0);
+      const balance =
+        lead.balance_amount ??
+        quote.balance_invoice_amount ??
+        Math.max(0, agreed - Number(quote.deposit_amount ?? 0) - Number(quote.commitment_invoice_amount ?? 0));
+      if (Number(balance) > 0) {
+        items.push({ ...base, key: `bank-balance:${lead.id}`, kind: "balance", leadId: lead.id, amountPence: poundsToPence(Number(balance)) });
+      }
+    }
   }
 
   items.sort((a, b) => b.at.localeCompare(a.at));

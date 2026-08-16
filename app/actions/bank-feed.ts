@@ -8,7 +8,7 @@ import {
   markQuoteCommitmentPaidAction,
   markQuoteDepositPaidAction,
 } from "@/app/(dashboard)/bookings/actions";
-import { loadOpenItems } from "@/lib/bank-feed/sync";
+import { loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
 import type { OpenItem } from "@/lib/bank-feed/match";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { log } from "@/lib/log";
@@ -156,12 +156,18 @@ export interface AttachTarget {
   amount: number;
   /** Equals the transfer to the penny — only these are attachable. */
   amountMatches: boolean;
+  /** Payment already recorded on the books — attaching LINKS the transfer
+   *  (status reconciled, arrival-day truth for /payments) and never re-runs
+   *  the paid pipeline. */
+  settled: boolean;
 }
 
-/** Open items the office can attach a transfer to. Empty query → everything
- *  whose amount matches the transfer (the "what could this £50 be?" view);
- *  a query filters ALL open items by ref/customer so a near-miss still shows
- *  up, marked un-attachable with the amount it actually wants. */
+/** Open items the office can attach a transfer to, plus SETTLED items it can
+ *  link as "already recorded" (a transfer whose payment was recorded via
+ *  Zoho/manual before the bank row processed — Dingley's £1,100). Empty query
+ *  → everything whose amount matches the transfer (the "what could this £50
+ *  be?" view); a query filters ALL items by ref/customer so a near-miss still
+ *  shows up, marked un-attachable with the amount it actually wants. */
 export async function searchAttachTargetsAction(input: { txId: string; query: string }) {
   const userId = await officeActor();
   if (!userId) return { ok: false as const, error: "Office access required." };
@@ -175,32 +181,98 @@ export async function searchAttachTargetsAction(input: { txId: string; query: st
   if (txErr) return { ok: false as const, error: txErr.message };
   if (!tx) return { ok: false as const, error: "Transfer not found." };
 
-  const open = await loadOpenItems(admin);
+  const { open, settled } = await loadLedgerItems(admin);
   const q = input.query.trim().toUpperCase();
-  const matchesQuery = (o: OpenItem) =>
+  const matchesQuery = (o: Pick<OpenItem, "quoteRef" | "customer">) =>
     !q || o.quoteRef.toUpperCase().includes(q) || (o.customer ?? "").toUpperCase().includes(q);
   const txPennies = pennies(Number(tx.amount));
 
-  const targets: AttachTarget[] = open
-    .filter((o) => (q ? matchesQuery(o) : pennies(o.amount) === txPennies))
-    .map((o) => ({
-      quoteId: o.quoteId,
-      quoteRef: o.quoteRef,
-      customer: o.customer,
-      kind: o.kind,
-      amount: o.amount,
-      amountMatches: pennies(o.amount) === txPennies,
-    }))
-    .sort((a, b) =>
-      a.amountMatches === b.amountMatches
-        ? a.quoteRef.localeCompare(b.quoteRef)
-        : a.amountMatches
-          ? -1
-          : 1,
-    )
+  const toTarget = (o: OpenItem, isSettled: boolean): AttachTarget => ({
+    quoteId: o.quoteId,
+    quoteRef: o.quoteRef,
+    customer: o.customer,
+    kind: o.kind,
+    amount: o.amount,
+    amountMatches: pennies(o.amount) === txPennies,
+    settled: isSettled,
+  });
+
+  const targets: AttachTarget[] = [
+    ...open.filter((o) => (q ? matchesQuery(o) : pennies(o.amount) === txPennies)).map((o) => toTarget(o, false)),
+    // Settled items only ever link on an EXACT amount (a link binds "this
+    // transfer IS that payment" with no human-readable delta to reason about).
+    ...settled.filter((s) => pennies(s.amount) === txPennies && matchesQuery(s)).map((s) => toTarget(s, true)),
+  ]
+    .sort((a, b) => {
+      if (a.settled !== b.settled) return a.settled ? 1 : -1; // open money first
+      if (a.amountMatches !== b.amountMatches) return a.amountMatches ? -1 : 1;
+      return a.quoteRef.localeCompare(b.quoteRef);
+    })
     .slice(0, 15);
 
   return { ok: true as const, targets };
+}
+
+/** Office links a transfer to a payment that is ALREADY recorded (Zoho/manual
+ *  path beat the bank row). Sets status 'reconciled' — the paid pipeline must
+ *  NOT run again; the link gives /payments the arrival-day truth and takes the
+ *  row out of "Unmatched inbound" without losing what it was. */
+export async function linkRecordedBankTransactionAction(input: {
+  txId: string;
+  quoteId: string;
+  kind: PayKind;
+}) {
+  const userId = await officeActor();
+  if (!userId) return { ok: false as const, error: "Office access required." };
+  if (!PAY_KINDS.has(input.kind)) {
+    return { ok: false as const, error: "Storage payments are recorded from the Storage page." };
+  }
+
+  const admin = createAdminClient();
+  const { data: tx, error: txErr } = await admin
+    .from("bank_transactions")
+    .select("id, amount, status")
+    .eq("id", input.txId)
+    .maybeSingle();
+  if (txErr) return { ok: false as const, error: txErr.message };
+  if (!tx || (tx.status !== "unmatched" && tx.status !== "suggested")) {
+    return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
+  }
+
+  // Server-side re-verify: the named payment must be SETTLED at exactly this
+  // amount. (An open item here means the office picked the wrong row — the
+  // attach path records open money, this one only explains recorded money.)
+  const { settled } = await loadLedgerItems(admin);
+  const item = settled.find((s) => s.quoteId === input.quoteId && s.kind === input.kind);
+  if (!item) {
+    return { ok: false as const, error: "That payment isn't recorded on that quote — use Attach to record open money." };
+  }
+  if (pennies(item.amount) !== pennies(Number(tx.amount))) {
+    return {
+      ok: false as const,
+      error: `Amount differs — the recorded ${input.kind} on ${item.quoteRef} is £${item.amount.toFixed(2)}. If this transfer is part of it, clear it instead.`,
+    };
+  }
+
+  const { data: claimed, error: claimErr } = await admin
+    .from("bank_transactions")
+    .update({
+      status: "reconciled",
+      matched_quote_id: input.quoteId,
+      match_kind: input.kind,
+      match_confidence: "manual",
+    } as never)
+    .eq("id", input.txId)
+    .eq("status", tx.status)
+    .eq("amount", tx.amount)
+    .select("id");
+  if (claimErr) return { ok: false as const, error: claimErr.message };
+  if (!claimed?.length) {
+    return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
+  }
+
+  revalidatePath("/payments");
+  return { ok: true as const, quoteRef: item.quoteRef };
 }
 
 /** Office names the (quote, kind) for a transfer the matcher couldn't place.

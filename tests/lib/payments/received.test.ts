@@ -297,6 +297,83 @@ describe("buildReceivedDay", () => {
   });
 });
 
+/* --------------------------------------------------- bank arrival-day truth */
+
+describe("buildReceivedDay — bank matches key money by ARRIVAL day (2026-08-16, every day misreported)", () => {
+  // Window = UK day 15 Jul 2026 (BST: [14T23:00Z, 15T23:00Z)).
+  const win = ukDayWindow("2026-07-15");
+  const base = { window: win, cardRows: [], depositQuotes: [], balanceLeads: [], quoteByLeadId: new Map<string, QuoteIn>() };
+
+  it("a payment stamped DAYS LATE shows on the bank day, not the stamp day", () => {
+    // Money arrived 15 Jul; the Zoho poll stamped it 17 Jul. The 15 Jul view
+    // must show it (bank truth), sourced from bankQuoteById because the stamp
+    // window queries would never have fetched this quote.
+    const q = quote({ deposit_paid_at: "2026-07-17T02:24:00Z", deposit_paid_method: "bank_transfer" });
+    const day = buildReceivedDay({
+      ...base,
+      bankMatches: [{ quoteId: "q1", kind: "deposit", txDate: "2026-07-15", txTime: "10:30:00" }],
+      bankQuoteById: new Map([["q1", q]]),
+    });
+    expect(day.items).toHaveLength(1);
+    expect(day.items[0]).toMatchObject({ kind: "deposit", amountPence: 10000, method: "bank_transfer" });
+    expect(day.items[0].at).toBe("2026-07-15T09:30:00.000Z"); // 10:30 UK in BST
+  });
+
+  it("the stamped day does NOT also show it — the stamp item is suppressed by its bank match", () => {
+    // Same payment, viewed on the STAMP day (17 Jul): the stamp is in-window
+    // but the bank match (15 Jul) is not — the item belongs to the 15th only.
+    const win17 = ukDayWindow("2026-07-17");
+    const q = quote({ deposit_paid_at: "2026-07-17T02:24:00Z" });
+    const day = buildReceivedDay({
+      ...base,
+      window: win17,
+      depositQuotes: [q],
+      bankMatches: [{ quoteId: "q1", kind: "deposit", txDate: "2026-07-15", txTime: null }],
+      bankQuoteById: new Map([["q1", q]]),
+    });
+    expect(day.items).toHaveLength(0);
+  });
+
+  it("no bank match → the stamp stands (cash, unmatched history)", () => {
+    const q = quote({ deposit_paid_at: "2026-07-15T10:00:00Z", deposit_paid_method: "cash" });
+    const day = buildReceivedDay({ ...base, depositQuotes: [q] });
+    expect(day.items).toMatchObject([{ kind: "deposit", method: "cash" }]);
+  });
+
+  it("balance bank match takes the lead's amount and the lead must actually be settled", () => {
+    const q = quote({ lead_id: "l1", deposit_paid_at: "2026-07-01T10:00:00Z" });
+    const settled = lead({ balance_paid_at: "2026-07-16T09:00:00Z", balance_amount: 1100 });
+    const day = buildReceivedDay({
+      ...base,
+      bankMatches: [{ quoteId: "q1", kind: "balance", txDate: "2026-07-15", txTime: "08:01:00" }],
+      bankQuoteById: new Map([["q1", q]]),
+      bankLeadById: new Map([["l1", settled]]),
+    });
+    expect(day.items).toMatchObject([{ kind: "balance", amountPence: 110000, method: "bank_transfer" }]);
+    // Ghost guard: an (impossible) match whose lead has no paid stamp emits nothing.
+    const ghost = buildReceivedDay({
+      ...base,
+      bankMatches: [{ quoteId: "q1", kind: "balance", txDate: "2026-07-15", txTime: null }],
+      bankQuoteById: new Map([["q1", q]]),
+      bankLeadById: new Map([["l1", lead({ balance_paid_at: null })]]),
+    });
+    expect(ghost.items).toHaveLength(0);
+  });
+
+  it("a commitment match emits on its bank day with the invoice amount", () => {
+    const q = quote({
+      commitment_invoice_amount: 50,
+      commitment_paid_at: "2026-07-16T02:24:00Z",
+    });
+    const day = buildReceivedDay({
+      ...base,
+      bankMatches: [{ quoteId: "q1", kind: "commitment", txDate: "2026-07-15", txTime: null }],
+      bankQuoteById: new Map([["q1", q]]),
+    });
+    expect(day.items).toMatchObject([{ kind: "commitment", amountPence: 5000, method: "bank_transfer" }]);
+  });
+});
+
 /* ------------------------------------------------------------- ukRangeWindow */
 
 describe("ukRangeWindow (Mon–Sun weeks — Peter, 2026-08-16)", () => {

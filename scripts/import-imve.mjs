@@ -37,9 +37,11 @@
  *   agreed_price*    number (no £ sign needed; commas fine)
  *   deposit_amount   number, default 0
  *   deposit_paid     y/n — the deposit has been received
- *   deposit_paid_date YYYY-MM-DD or DD/MM/YYYY (optional; used when deposit_paid)
+ *   deposit_paid_date YYYY-MM-DD or DD/MM/YYYY — REQUIRED when deposit_paid=y
+ *                    and the deposit is > 0 (the ledger keys money by date)
  *   deposit_method   bank | card | cash (optional)
  *   balance_paid     y/n — the job is fully settled
+ *   balance_paid_date YYYY-MM-DD or DD/MM/YYYY — REQUIRED when balance_paid=y
  *   vehicle          transit | 1luton | 2luton | 3luton | 4luton | 5luton
  *                    (drives crew/van capacity on /schedule; blank = minimum crew)
  *   zoho_invoice_number  Connor's existing Zoho DRAFT for this job (display link only)
@@ -242,6 +244,7 @@ const jobs = rows.slice(1).map((r, idx) => {
     depositPaidDate: isoDate(col(r, "deposit_paid_date")),
     depositMethod: normMethod(col(r, "deposit_method")),
     balancePaid: yes(col(r, "balance_paid")),
+    balancePaidDate: isoDate(col(r, "balance_paid_date")),
     vehicle: col(r, "vehicle").toLowerCase() || null,
     zohoInvoiceNumber: col(r, "zoho_invoice_number") || null,
     notes: col(r, "notes") || null,
@@ -256,6 +259,16 @@ const jobs = rows.slice(1).map((r, idx) => {
     errors.push(`line ${line}: deposit_amount '${col(r, "deposit_amount")}' is not a number`);
   if (col(r, "deposit_paid_date") && !job.depositPaidDate)
     errors.push(`line ${line}: deposit_paid_date '${col(r, "deposit_paid_date")}' unreadable (use YYYY-MM-DD or DD/MM/YYYY)`);
+  if (col(r, "balance_paid_date") && !job.balancePaidDate)
+    errors.push(`line ${line}: balance_paid_date '${col(r, "balance_paid_date")}' unreadable (use YYYY-MM-DD or DD/MM/YYYY)`);
+  // HARD errors, not warnings (2026-08-16: batch-1 imported 15 deposits + 3
+  // balances stamped at import time, so /payments read weeks-old legacy money
+  // as "received on 13 Aug" — an 18-row prod data fix later). A paid stamp
+  // without its real date pollutes the received ledger the moment it lands.
+  if (yes(col(r, "deposit_paid")) && (money(col(r, "deposit_amount")) ?? 0) > 0 && !job.depositPaidDate)
+    errors.push(`line ${line}: deposit_paid=y needs deposit_paid_date — the ledger keys received money by date`);
+  if (yes(col(r, "balance_paid")) && !job.balancePaidDate)
+    errors.push(`line ${line}: balance_paid=y needs balance_paid_date — the ledger keys received money by date`);
   if (job.deposit != null && job.agreed != null && job.deposit > job.agreed)
     errors.push(`line ${line}: deposit_amount (£${job.deposit}) exceeds agreed_price (£${job.agreed})`);
   if (job.vehicle && !VEHICLES.has(job.vehicle))
@@ -347,9 +360,10 @@ for (const job of jobs) {
   if (!job.email && !job.phone) warnings.push("no email OR phone — client matching/contact impossible");
   if (ref !== job.imveRef) warnings.push(`quote_ref '${ref}' (raw iMVE ref kept in imve_ref)`);
   if (job.balancePaid && !job.depositPaid && job.deposit > 0)
-    warnings.push("balance_paid without deposit_paid — a settled job implies the deposit landed, importing both as paid");
-  if (job.depositPaid && !job.depositPaidDate)
-    warnings.push("deposit_paid without a date — receipt will show today's date");
+    warnings.push(
+      "balance_paid without deposit_paid — a settled job implies the deposit landed, importing both as paid" +
+        (job.depositPaidDate ? "" : " (deposit stamped from balance_paid_date)"),
+    );
   plan.push({ job, client, ref, depositSettled });
   console.log(
     `  ${client ? "MATCH" : "NEW  "} ${job.imveRef.padEnd(12)} ${job.name.padEnd(24)} ` +
@@ -409,15 +423,26 @@ for (const { job, client, ref, depositSettled } of plan) {
       submitted_at: now,
       // Settled-state truth lives on LEADS (post-move auto-complete, the money
       // queue and refunds all read leads.balance_paid_at) — without it a paid
-      // legacy job would false-alarm "Balance OVERDUE" after move day.
-      balance_paid_at: job.balancePaid ? now : null,
+      // legacy job would false-alarm "Balance OVERDUE" after move day. The
+      // historical date is REQUIRED by validation above (import-time stamps
+      // polluted the received ledger, 2026-08-16); midday keeps the UK day
+      // stable across DST.
+      balance_paid_at: job.balancePaid ? `${job.balancePaidDate}T12:00:00Z` : null,
     })
     .select("id")
     .single();
   if (lErr || !lead) die(`${job.imveRef}: lead insert failed — ${lErr?.message}`);
 
+  // Validation guarantees a date whenever real money is stamped: deposit_paid=y
+  // requires deposit_paid_date; a settled job falls back to balance_paid_date
+  // (the deposit landed no later than settlement). `now` remains only for the
+  // £0-deposit marker rows, which the received ledger skips by amount.
   const depositPaidAt = depositSettled
-    ? job.depositPaidDate ? `${job.depositPaidDate}T12:00:00Z` : now
+    ? job.depositPaidDate
+      ? `${job.depositPaidDate}T12:00:00Z`
+      : job.balancePaidDate
+        ? `${job.balancePaidDate}T12:00:00Z`
+        : now
     : null;
   const collect = [job.fromAddress, job.fromPostcode].filter(Boolean).join(", ") || null;
   const dest = [job.toAddress, job.toPostcode].filter(Boolean).join(", ") || null;

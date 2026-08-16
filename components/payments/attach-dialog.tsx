@@ -24,6 +24,7 @@ import {
 import { Input } from "@/components/ui/input";
 import {
   attachBankTransactionAction,
+  linkRecordedBankTransactionAction,
   searchAttachTargetsAction,
   type AttachTarget,
 } from "@/app/actions/bank-feed";
@@ -74,17 +75,21 @@ export function AttachDialog({
     setBusyId(`${target.quoteId}:${target.kind}`);
     start(async () => {
       try {
-        const res = await attachBankTransactionAction({
-          txId,
-          quoteId: target.quoteId,
-          kind: target.kind,
-        });
+        // Settled targets LINK (arrival-day truth, no pipeline); open targets
+        // RECORD through the normal paid pipeline.
+        const res = target.settled
+          ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind })
+          : await attachBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind });
         if (!res.ok) {
           toast.error(res.error ?? "Could not record the payment.");
           router.refresh();
           return;
         }
-        toast.success(`Recorded — ${target.quoteRef} ${target.kind} marked paid (bank transfer).`);
+        toast.success(
+          target.settled
+            ? `Linked — this transfer is ${target.quoteRef}'s ${target.kind}, already recorded.`
+            : `Recorded — ${target.quoteRef} ${target.kind} marked paid (bank transfer).`,
+        );
         setOpen(false);
         router.refresh();
       } catch (err) {
@@ -120,8 +125,9 @@ export function AttachDialog({
           <DialogTitle>Attach to a quote</DialogTitle>
           <DialogDescription>
             {gbp(amount)} from {counterparty ?? "unknown payer"}
-            {reference ? ` — “${reference}”` : ""}. Pick what it pays; the payment is recorded through
-            the normal pipeline (Zoho, chase closed, customer receipt).
+            {reference ? ` — “${reference}”` : ""}. Pick what it pays: open money is recorded through
+            the normal pipeline (Zoho, chase closed, customer receipt); an already-recorded payment is
+            linked so the ledger knows which day the money really arrived.
           </DialogDescription>
         </DialogHeader>
         <div className="relative">
@@ -162,7 +168,11 @@ export function AttachDialog({
                     </p>
                     <p className="text-xs text-mist-400">
                       {KIND_LABEL[t.kind]}
-                      {t.amountMatches ? " — tap to record" : ` — ${gbp(t.amount)} due, amount differs`}
+                      {t.settled
+                        ? " — already recorded, tap to link this transfer to it"
+                        : t.amountMatches
+                          ? " — tap to record"
+                          : ` — ${gbp(t.amount)} due, amount differs`}
                     </p>
                   </div>
                   {busy ? (
