@@ -1,6 +1,9 @@
 import Link from "next/link";
+import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { bankFeedConfigured } from "@/lib/bank-feed/sync";
 import { PageHeader } from "@/components/page-header";
+import { Card } from "@/components/ui/card";
 import { RefreshButton } from "@/components/payments/refresh-button";
 import { ReceivedTab, type ReceivedParams } from "./received-tab";
 import { DueTab } from "./due-tab";
@@ -18,6 +21,84 @@ import { UpcomingTab } from "./upcoming-tab";
 export const dynamic = "force-dynamic";
 
 type Tab = "received" | "due" | "upcoming";
+
+/**
+ * The "are we missing anything?" strip — counts that should read zero, on
+ * every tab. Missing money becomes something the page TELLS you, not
+ * something you hunt for: unmatched transfers, transfers a human must
+ * record, and card attempts stuck mid-flight.
+ */
+async function loadExceptions(sb: Awaited<ReturnType<typeof createClient>>): Promise<{
+  unmatched: number;
+  mismatches: number;
+  cardStuck: number;
+}> {
+  const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+  const bank = bankFeedConfigured();
+  const [unmatchedRes, mismatchRes, pendingRes, reviewRes] = await Promise.all([
+    bank
+      ? sb
+          .from("bank_transactions")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "unmatched")
+          .is("matched_quote_id", null)
+      : Promise.resolve({ count: 0 }),
+    bank
+      ? sb
+          .from("bank_transactions")
+          .select("id", { count: "exact", head: true })
+          .eq("status", "unmatched")
+          .not("matched_quote_id", "is", null)
+      : Promise.resolve({ count: 0 }),
+    // A pending card attempt older than the reconcile sweep's 10-minute net is
+    // a callback that never arrived; needs_review is an unconfirmed refund.
+    sb
+      .from("card_payments")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending")
+      .eq("is_test", false)
+      .lt("created_at", tenMinAgo),
+    sb.from("card_payments").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
+  ]);
+  return {
+    unmatched: unmatchedRes.count ?? 0,
+    mismatches: mismatchRes.count ?? 0,
+    cardStuck: (pendingRes.count ?? 0) + (reviewRes.count ?? 0),
+  };
+}
+
+function ExceptionsStrip({ ex }: { ex: { unmatched: number; mismatches: number; cardStuck: number } }) {
+  const clean = ex.unmatched === 0 && ex.mismatches === 0 && ex.cardStuck === 0;
+  if (clean) {
+    return (
+      <Card className="flex items-center gap-2.5 border-success/30 bg-success-bg/40 px-5 py-3">
+        <CheckCircle2 className="size-4 shrink-0 text-success" strokeWidth={2} />
+        <p className="text-sm font-medium text-success">
+          Nothing unexplained — every transfer is matched and no card payment is stuck.
+        </p>
+      </Card>
+    );
+  }
+  const parts: { count: number; label: string }[] = [
+    { count: ex.unmatched, label: "unmatched inbound" },
+    { count: ex.mismatches, label: "need a human" },
+    { count: ex.cardStuck, label: "card stuck" },
+  ];
+  return (
+    <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 border-warn/30 bg-warn-bg/40 px-5 py-3">
+      <AlertTriangle className="size-4 shrink-0 text-warn" strokeWidth={2} />
+      <p className="text-sm font-medium text-foreground">Money needing attention:</p>
+      {parts
+        .filter((p) => p.count > 0)
+        .map((p) => (
+          <Link key={p.label} href="/payments" className="text-sm font-semibold text-warn hover:underline">
+            {p.count} {p.label}
+          </Link>
+        ))}
+      <span className="ml-auto text-xs text-mist-400">queues live on the Received tab</span>
+    </Card>
+  );
+}
 
 export default async function PaymentsPage({
   searchParams,
@@ -49,11 +130,15 @@ export default async function PaymentsPage({
       : []),
   ];
 
+  const exceptions = await loadExceptions(sb);
+
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
       <PageHeader eyebrow="Finance" title="Payments">
         <RefreshButton />
       </PageHeader>
+
+      <ExceptionsStrip ex={exceptions} />
 
       {tabs.length > 1 ? (
         <div className="flex items-center gap-1 border-b">
