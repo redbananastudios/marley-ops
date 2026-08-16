@@ -64,6 +64,115 @@ export function ukDayWindow(dateParam?: string | null, now: Date = new Date()): 
   };
 }
 
+/* ------------------------------------------------------------------ ranges */
+
+export type RangePreset = "today" | "this-week" | "last-week" | "this-month" | "custom" | "all";
+
+export interface UkRangeWindow {
+  preset: RangePreset;
+  /** Inclusive UK calendar days. */
+  startDay: string;
+  endDay: string;
+  /** [start, end) instants — end is midnight after endDay. */
+  start: Date;
+  end: Date;
+  label: string;
+}
+
+const parseIsoDay = (s: string | null | undefined): { y: number; m: number; d: number } | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s ?? "");
+  if (!match) return null;
+  const [y, m, d] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  return isoDay(y, m, d) === `${match[1]}-${match[2]}-${match[3]}` ? { y, m, d } : null;
+};
+
+function rangeLabel(startDay: string, endDay: string): string {
+  const fmt = (iso: string, withMonth: boolean): string =>
+    new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-GB", {
+      day: "numeric",
+      ...(withMonth ? { month: "short" } : {}),
+      timeZone: "UTC",
+    });
+  if (startDay === endDay) return fmt(startDay, true);
+  const sameMonth = startDay.slice(0, 7) === endDay.slice(0, 7);
+  return `${fmt(startDay, !sameMonth)} – ${fmt(endDay, true)}`;
+}
+
+/** Weeks run Monday–Sunday (business week — Peter, 2026-08-16). */
+const mondayOffset = (y: number, m: number, d: number): number =>
+  (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+
+/**
+ * Resolve the Received view's ?range/?from/?to params. Defaults to the current
+ * Mon–Sun week. Custom ranges are validated (impossible dates / from>to fall
+ * back to the default) and capped at 400 days so a typo'd year can't turn one
+ * page load into a full-table scan.
+ */
+export function ukRangeWindow(
+  input?: { preset?: string | null; from?: string | null; to?: string | null },
+  now: Date = new Date(),
+): UkRangeWindow {
+  const today = ukParts(now);
+  const build = (
+    preset: RangePreset,
+    s: { y: number; m: number; d: number },
+    e: { y: number; m: number; d: number },
+  ): UkRangeWindow => {
+    const startDay = isoDay(s.y, s.m, s.d);
+    const endDay = isoDay(e.y, e.m, e.d);
+    return {
+      preset,
+      startDay,
+      endDay,
+      start: ukInstant(s.y, s.m, s.d),
+      end: ukInstant(e.y, e.m, e.d + 1),
+      label: rangeLabel(startDay, endDay),
+    };
+  };
+  const thisWeek = (): UkRangeWindow => {
+    const off = mondayOffset(today.year, today.month, today.day);
+    return build(
+      "this-week",
+      { y: today.year, m: today.month, d: today.day - off },
+      { y: today.year, m: today.month, d: today.day - off + 6 },
+    );
+  };
+
+  switch (input?.preset) {
+    case "today":
+      return build("today", { y: today.year, m: today.month, d: today.day }, { y: today.year, m: today.month, d: today.day });
+    case "last-week": {
+      const off = mondayOffset(today.year, today.month, today.day);
+      return build(
+        "last-week",
+        { y: today.year, m: today.month, d: today.day - off - 7 },
+        { y: today.year, m: today.month, d: today.day - off - 1 },
+      );
+    }
+    case "this-month":
+      return build(
+        "this-month",
+        { y: today.year, m: today.month, d: 1 },
+        { y: today.year, m: today.month + 1, d: 0 },
+      );
+    case "all":
+      // "Search everything" — floor comfortably before go-live (2026-07-30).
+      return build("all", { y: 2026, m: 1, d: 1 }, { y: today.year, m: today.month, d: today.day });
+    case "custom": {
+      const from = parseIsoDay(input?.from);
+      const to = parseIsoDay(input?.to);
+      if (from && to) {
+        const spanDays =
+          (Date.UTC(to.y, to.m - 1, to.d) - Date.UTC(from.y, from.m - 1, from.d)) / 86_400_000;
+        if (spanDays >= 0 && spanDays <= 400) return build("custom", from, to);
+      }
+      return thisWeek();
+    }
+    default:
+      return thisWeek();
+  }
+}
+
 /* ------------------------------------------------------------------- items */
 
 export interface ReceivedItem {
@@ -77,6 +186,9 @@ export interface ReceivedItem {
   amountPence: number;
   /** ISO instant the money event happened (sort key + display time). */
   at: string;
+  /** The rail the money arrived on. Card rows are always "card"; recorded
+   *  rows carry the paid-method stamp, null when it predates the stamps. */
+  method: "card" | "bank_transfer" | "cash" | null;
   /** card only — drives the status badge. */
   cardStatus?: string;
   cardMask?: string | null;
@@ -110,9 +222,11 @@ export interface QuoteIn {
   grand_total: number | null;
   deposit_amount: number | null;
   deposit_paid_at: string | null;
+  deposit_paid_method?: string | null;
   balance_invoice_amount: number | null;
   commitment_invoice_amount?: number | null;
   commitment_paid_at?: string | null;
+  commitment_paid_method?: string | null;
 }
 
 export interface LeadIn {
@@ -120,6 +234,7 @@ export interface LeadIn {
   name: string | null;
   balance_paid_at: string | null;
   balance_amount: number | null;
+  balance_paid_method?: string | null;
 }
 
 export interface ReceivedDay {
@@ -128,6 +243,9 @@ export interface ReceivedDay {
   cardPence: number;
   recordedPence: number;
   totalPence: number;
+  /** Net pence per rail — card includes refunds; unknown = recorded rows
+   *  whose method predates the paid-method stamps. */
+  methodPence: { card: number; bank: number; cash: number; unknown: number };
 }
 
 const poundsToPence = (n: number | null | undefined): number => Math.round(Number(n ?? 0) * 100);
@@ -167,6 +285,11 @@ export function buildReceivedDay(input: {
   // deposit stamp is the SAME money and must not double-count.
   const cardCoveredQuoteIds = new Set<string>();
 
+  // The paid-method stamps hold 'bank_transfer' | 'cash' | 'card' by
+  // construction; anything else (or a pre-stamp null) reads as unknown.
+  const rail = (m: string | null | undefined): ReceivedItem["method"] =>
+    m === "bank_transfer" || m === "cash" || m === "card" ? m : null;
+
   for (const row of input.cardRows) {
     if (!CARD_MONEY_STATUSES.has(row.status)) continue;
     const quote = input.quoteByLeadId.get(row.lead_id ?? "") ?? null;
@@ -175,6 +298,7 @@ export function buildReceivedDay(input: {
       customer: quote?.customer_name || "Customer",
       quoteRef: quote?.quote_ref ?? null,
       leadId: row.lead_id,
+      method: "card" as const,
       cardStatus: row.status,
       cardMask: row.card_number_mask,
       cardScheme: row.card_scheme,
@@ -219,6 +343,7 @@ export function buildReceivedDay(input: {
       leadId: q.lead_id,
       amountPence: poundsToPence(q.deposit_amount),
       at: q.deposit_paid_at!,
+      method: rail(q.deposit_paid_method),
     });
   }
 
@@ -233,6 +358,7 @@ export function buildReceivedDay(input: {
       leadId: q.lead_id,
       amountPence: poundsToPence(q.commitment_invoice_amount),
       at: q.commitment_paid_at!,
+      method: rail(q.commitment_paid_method),
     });
   }
 
@@ -255,17 +381,31 @@ export function buildReceivedDay(input: {
       leadId: lead.id,
       amountPence: poundsToPence(balance),
       at: lead.balance_paid_at!,
+      method: rail(lead.balance_paid_method),
     });
   }
 
   items.sort((a, b) => b.at.localeCompare(a.at));
+  return tallyReceived(items);
+}
 
+/** Net totals for a set of items — exported so a searched/filtered subset can
+ *  re-total with exactly the maths the full window uses. */
+export function tallyReceived(items: ReceivedItem[]): ReceivedDay {
   const cardPence = items
     .filter((i) => i.source === "card" && !i.isTest)
     .reduce((s, i) => s + i.amountPence, 0);
   const recordedPence = items
     .filter((i) => i.source === "recorded")
     .reduce((s, i) => s + i.amountPence, 0);
+  const methodPence = { card: cardPence, bank: 0, cash: 0, unknown: 0 };
+  for (const i of items) {
+    if (i.source !== "recorded") continue;
+    if (i.method === "bank_transfer") methodPence.bank += i.amountPence;
+    else if (i.method === "cash") methodPence.cash += i.amountPence;
+    else if (i.method === "card") methodPence.card += i.amountPence;
+    else methodPence.unknown += i.amountPence;
+  }
 
-  return { items, cardPence, recordedPence, totalPence: cardPence + recordedPence };
+  return { items, cardPence, recordedPence, totalPence: cardPence + recordedPence, methodPence };
 }

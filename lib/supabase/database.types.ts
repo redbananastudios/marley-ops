@@ -2355,6 +2355,7 @@ export type Database = {
           balance_amount: number | null
           balance_due_date: string | null
           balance_paid_at: string | null
+          balance_paid_method: string | null
           campaign: string | null
           chase_paused: boolean
           client_id: string
@@ -2426,6 +2427,7 @@ export type Database = {
           balance_amount?: number | null
           balance_due_date?: string | null
           balance_paid_at?: string | null
+          balance_paid_method?: string | null
           campaign?: string | null
           chase_paused?: boolean
           client_id: string
@@ -2497,6 +2499,7 @@ export type Database = {
           balance_amount?: number | null
           balance_due_date?: string | null
           balance_paid_at?: string | null
+          balance_paid_method?: string | null
           campaign?: string | null
           chase_paused?: boolean
           client_id?: string

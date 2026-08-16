@@ -2182,9 +2182,12 @@ export async function markBalancePaid(
   const now = new Date().toISOString();
 
   // Same rule as the deposit gate: a DB error is a failure, never "already".
+  // The method is stamped alongside so /payments can show the rail (Zoho-cron
+  // callers default to bank_transfer — Connor records BACS there; cash comes
+  // through the office one-tap which passes it explicitly).
   const { data: won, error: gateErr } = await sb
     .from("leads")
-    .update({ balance_paid_at: now } as never)
+    .update({ balance_paid_at: now, balance_paid_method: method } as never)
     .eq("id", quote.lead_id)
     .is("balance_paid_at", null)
     .select("id");
