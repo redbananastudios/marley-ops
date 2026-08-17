@@ -11,6 +11,7 @@ import {
   type BankTxRow,
 } from "@/lib/bank-feed/parse";
 import {
+  claimKey,
   matchTransactionLedger,
   reconcileSettled,
   type OpenItem,
@@ -149,7 +150,14 @@ export async function loadLedgerItems(
     // deposit − commitment. Without the carve-out the open set would offer
     // commitment + gross balance simultaneously — more than is owed.
     const lead = q.lead_id ? leadBalance.get(q.lead_id) : undefined;
+    // `leads.balance_amount` FIRST — when the office sets a balance by hand
+    // (accept-flow's manual path, which raises no Zoho invoice) that figure is
+    // what markBalancePaid books, what the receipt says and what the ledger
+    // displays. Validating an incoming transfer against a DIFFERENT number
+    // would let a £1,100 transfer confirm an item the pipeline records as
+    // £900, and the £200 difference would appear on no surface at all.
     const balanceAmount =
+      lead?.amount ||
       Number(q.balance_invoice_amount) ||
       Math.max(
         0,
@@ -202,6 +210,81 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
  * a method the office DID record (cash at the door) is never overwritten by an
  * inference, and best-effort — the link itself must not fail on this.
  */
+/**
+ * Repair pass for payments whose bank row was settled BEFORE the method was
+ * captured at all — every row confirmed/reconciled before `backfillPaidMethod`
+ * existed (and any the fill missed). Those rows are LOCKED, so the matching
+ * loop never revisits them and they would read "Method not recorded" forever
+ * even though a matched bank row is standing proof of how the money arrived.
+ * Fill-only and idempotent: once filled, this finds nothing.
+ */
+export async function healMissingPaidMethods(sb: SupabaseClient): Promise<number> {
+  const { data, error } = await sb
+    .from("bank_transactions")
+    .select("matched_quote_id, match_kind")
+    .in("status", ["confirmed", "reconciled"])
+    .in("match_kind", ["deposit", "commitment", "balance"])
+    .not("matched_quote_id", "is", null);
+  if (error) {
+    log.error("bank-feed.method-heal.read_failed", { error: error.message });
+    return 0;
+  }
+  const wanted = new Map<string, { quoteId: string; kind: "deposit" | "commitment" | "balance" }>();
+  for (const r of data ?? []) {
+    const quoteId = r.matched_quote_id as string;
+    const kind = r.match_kind as "deposit" | "commitment" | "balance";
+    wanted.set(claimKey(quoteId, kind), { quoteId, kind });
+  }
+  if (!wanted.size) return 0;
+
+  // Only the rows still missing a method need writing — read them first so the
+  // sweep is a no-op (not 12 writes a pass) once everything is filled.
+  const quoteIds = [...new Set([...wanted.values()].map((w) => w.quoteId))];
+  const byQuote = new Map<string, { lead_id: string | null; deposit: string | null; commitment: string | null }>();
+  const leadMethod = new Map<string, string | null>();
+  for (let i = 0; i < quoteIds.length; i += 100) {
+    const chunk = quoteIds.slice(i, i + 100);
+    const { data: qs, error: qErr } = await sb
+      .from("quotes")
+      .select("id, lead_id, deposit_paid_method, commitment_paid_method")
+      .in("id", chunk);
+    if (qErr) {
+      log.error("bank-feed.method-heal.quotes_failed", { error: qErr.message });
+      return 0;
+    }
+    for (const q of qs ?? [])
+      byQuote.set(q.id as string, {
+        lead_id: (q.lead_id as string | null) ?? null,
+        deposit: (q.deposit_paid_method as string | null) ?? null,
+        commitment: (q.commitment_paid_method as string | null) ?? null,
+      });
+  }
+  const leadIds = [...new Set([...byQuote.values()].map((q) => q.lead_id).filter(Boolean))] as string[];
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const { data: ls, error: lErr } = await sb
+      .from("leads")
+      .select("id, balance_paid_method")
+      .in("id", leadIds.slice(i, i + 100));
+    if (lErr) {
+      log.error("bank-feed.method-heal.leads_failed", { error: lErr.message });
+      return 0;
+    }
+    for (const l of ls ?? []) leadMethod.set(l.id as string, (l.balance_paid_method as string | null) ?? null);
+  }
+
+  let healed = 0;
+  for (const w of wanted.values()) {
+    const q = byQuote.get(w.quoteId);
+    if (!q) continue;
+    const current =
+      w.kind === "deposit" ? q.deposit : w.kind === "commitment" ? q.commitment : q.lead_id ? leadMethod.get(q.lead_id) ?? null : null;
+    if (current != null) continue;
+    await backfillPaidMethod(sb, { kind: w.kind, quoteId: w.quoteId, leadId: q.lead_id });
+    healed++;
+  }
+  return healed;
+}
+
 export async function backfillPaidMethod(
   sb: SupabaseClient,
   item: { kind: "deposit" | "commitment" | "balance"; quoteId: string; leadId: string | null },
@@ -231,6 +314,12 @@ export async function backfillPaidMethod(
 
 // Type alias (not interface) so it satisfies runCron's Record<string, unknown>.
 export type BankFeedSyncSummary = {
+  /** runCron treats `ok: false` as a FAILED run — set whenever the feed could
+   *  not actually read the bank, so "the integration is dead" can never be
+   *  reported as a healthy pass (it previously was: config dropped → every
+   *  dashboard green, no bank section on /payments, no alert). */
+  ok?: boolean;
+  error?: string;
   disabled?: boolean;
   rowsInSheet: number;
   /** Rows with a transaction id the parser could not safely ingest. */
@@ -242,6 +331,14 @@ export type BankFeedSyncSummary = {
   /** Transfers tied to an already-recorded payment (paid via Zoho/manual
    *  before their bank row was processed) — no paid pipeline, no page. */
   reconciled?: number;
+  /** Second transfers for a payment a bank row already explains — parked for a
+   *  human as likely duplicate payments rather than auto-explained away. */
+  duplicates?: number;
+  /** Locked rows whose paid-method was blank and is now filled from the match. */
+  methodsHealed?: number;
+  /** Row writes that errored this pass (each retries next tick; a persistently
+   *  non-zero value means a row is wedged and nobody would otherwise know). */
+  updateFailures?: number;
   /** Acquirer settlement payouts (Elavon/takepayments) kept out of the queues. */
   settlements?: number;
   /** Admin push notifications fired for transfers surfaced THIS pass. */
@@ -263,7 +360,13 @@ const SUGGESTION_FRESH_DAYS = 14;
 
 export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSummary> {
   if (!bankFeedConfigured()) {
+    // FAILED, not "disabled and fine". The credentials are set in prod, so
+    // reaching here means they were dropped or typo'd — the bank feed has
+    // stopped and /payments quietly renders with no bank section at all,
+    // which reads as a quiet day rather than a broken integration.
     return {
+      ok: false,
+      error: "bank feed is not configured (missing Google OAuth creds or sheet id)",
       disabled: true,
       rowsInSheet: 0,
       skippedRows: 0,
@@ -290,6 +393,8 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   if (!floor) {
     log.warn("bank-feed.floor_missing", { raw: process.env.BANK_FEED_SINCE ?? null });
     return {
+      ok: false,
+      error: "BANK_FEED_SINCE missing or unparseable — refusing to import",
       disabled: true,
       rowsInSheet: sheetRows.length,
       skippedRows: skipped,
@@ -309,14 +414,36 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // dismissed/reconciled rows are NEVER rewritten (their amount/reference are
   // part of the audit trail of what was on screen at settle time, and a
   // reconcile was made on exactly that reference+amount).
-  const existing = await fetchAllRows((f, t) =>
-    sb.from("bank_transactions").select("transaction_id, status").order("id").range(f, t),
+  const existing = await fetchAllRows(
+    (f, t) =>
+      sb
+        .from("bank_transactions")
+        .select("transaction_id, status, matched_quote_id, match_kind")
+        .order("id")
+        .range(f, t),
+    // strict: a PARTIAL read silently shrinks `locked`, and the upsert below
+    // would then rewrite a settled row's amount/reference/counterparty — the
+    // record of what was on screen when a human committed to it. It also
+    // shrinks `claimed`, which is what stops a duplicate payment being
+    // auto-explained. Both are audit-trail damage nobody would ever see.
+    { strict: true },
   );
   const known = new Set(existing.map((r) => r.transaction_id as string));
   const locked = new Set(
     existing
       .filter((r) => r.status === "confirmed" || r.status === "dismissed" || r.status === "reconciled")
       .map((r) => r.transaction_id as string),
+  );
+  // Settled payments a bank row ALREADY explains. A second transfer landing on
+  // one of these is a likely duplicate payment, not more evidence for the same
+  // money — it must surface for a human, never auto-reconcile.
+  const claimed = new Set(
+    existing
+      .filter(
+        (r) =>
+          (r.status === "confirmed" || r.status === "reconciled") && r.matched_quote_id && r.match_kind,
+      )
+      .map((r) => claimKey(r.matched_quote_id as string, r.match_kind as string)),
   );
 
   const cutoff = new Date(Date.now() - MUTABLE_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -374,6 +501,8 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   let mismatched = 0;
   let unmatched = 0;
   let reconciled = 0;
+  let duplicates = 0;
+  let updateFailures = 0;
   // Transfers SURFACED this pass (fresh inbound money, or an old unmatched
   // transfer a newly-raised invoice just claimed) — these page the admins.
   const arrivals: BankFeedArrival[] = [];
@@ -417,8 +546,8 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     // office sees it (incl. any mismatch pointer) — no re-match, no rewrite.
     const m =
       freshTx || row.status === "suggested"
-        ? matchTransactionLedger(txInput, remaining, settled)
-        : reconcileSettled(txInput, settled);
+        ? matchTransactionLedger(txInput, remaining, settled, claimed)
+        : reconcileSettled(txInput, settled, claimed);
     if (!freshTx && row.status === "unmatched" && !m) continue;
     let next: {
       status: string;
@@ -436,6 +565,17 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       // the money reads as explained — the paid pipeline must NOT run again.
       next = { status: "reconciled", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: "reference" };
       reconciled++;
+    } else if (m?.type === "duplicate") {
+      // A bank row already explains this payment, so THIS transfer is a second
+      // one — money we likely owe back. Park it in the "needs a human" queue
+      // marked as a duplicate; reconciling would hide a refund.
+      next = {
+        status: "unmatched",
+        matched_quote_id: m.quoteId,
+        match_kind: m.kind,
+        match_confidence: "duplicate",
+      };
+      duplicates++;
     } else if (m?.type === "mismatch") {
       // Right quote, wrong amount — visible on /payments, never confirmable.
       next = { status: "unmatched", matched_quote_id: m.quoteId, match_kind: m.kind, match_confidence: null };
@@ -456,7 +596,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       // Status guard: if the office confirmed/dismissed this row since our
       // snapshot, this update matches 0 rows and their action stands — and a
       // zero-row claim must never page (the row is no longer pending).
-      let claimed = false;
+      let claimedRow = false;
       try {
         const { data, error } = await sb
           .from("bank_transactions")
@@ -465,17 +605,21 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
           .in("status", ["info", "unmatched", "suggested"])
           .select("id");
         if (error) throw new Error(error.message);
-        claimed = (data ?? []).length > 0;
+        claimedRow = (data ?? []).length > 0;
       } catch (e) {
         // One failed write must not swallow the pushes for transfers already
         // transitioned this pass — the untouched row retries next tick.
         log.error("bank-feed.match-update.failed", { txId: row.id as string, ...errorContext(e) });
+        updateFailures++;
         continue;
       }
 
       // The reconcile proves this recorded payment arrived by bank — fill a
-      // missing method so the ledger stops saying "Method not recorded".
-      if (claimed && m?.type === "reconciled") {
+      // missing method so the ledger stops saying "Method not recorded" — and
+      // claim the item so a LATER transfer for the same payment is treated as
+      // the duplicate it probably is.
+      if (claimedRow && m?.type === "reconciled") {
+        claimed.add(claimKey(m.quoteId, m.kind));
         const item = settled.find((s) => s.quoteId === m.quoteId && s.kind === m.kind);
         if (item) await backfillPaidMethod(sb, item);
       }
@@ -486,7 +630,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
       // row, or stale first-sync history transitioning stays silent.
       const enteredSuggested = next.status === "suggested" && row.status !== "suggested";
       const freshUnmatched = next.status === "unmatched" && row.status === "info";
-      if (claimed && freshTx && (enteredSuggested || freshUnmatched)) {
+      if (claimedRow && freshTx && (enteredSuggested || freshUnmatched)) {
         const quoteId = m && m.type !== "storage" ? m.quoteId : null;
         const item = quoteId ? open.find((o) => o.quoteId === quoteId) : undefined;
         arrivals.push({
@@ -514,13 +658,32 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     totalPending = count ?? 0;
   }
   const events = decideBankFeedPushes(arrivals, totalPending);
+  let notified = 0;
   if (events.length > 0) {
-    const { data: admins } = await sb.from("profiles").select("id").eq("role", "admin").eq("active", true);
-    const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
-    for (const event of events) {
-      await sendPushForEvent(event, { recipientUserIds: adminIds });
+    // An arrival pages ONCE, on the state transition — there is no retry — so
+    // a swallowed error here loses the alert for that money permanently. Read
+    // the recipients strictly, and report what was actually DELIVERED: the old
+    // `notified: events.length` counted pushes decided, so the summary could
+    // read "notified: 3" while zero left the box.
+    const { data: admins, error: adminErr } = await sb
+      .from("profiles")
+      .select("id")
+      .eq("role", "admin")
+      .eq("active", true);
+    if (adminErr) {
+      log.error("bank-feed.push.recipients_failed", { error: adminErr.message });
+    } else {
+      const adminIds = (admins ?? []).map((a: { id: string }) => a.id);
+      for (const event of events) {
+        const res = await sendPushForEvent(event, { recipientUserIds: adminIds });
+        if (res.accepted > 0) notified++;
+      }
     }
   }
+
+  // Self-heal: fill any blank paid-method the matching loop could not reach
+  // (rows settled before the method was ever captured). Never fails the pass.
+  const methodsHealed = await healMissingPaidMethods(sb);
 
   return {
     // Full parsed-sheet count (pre-floor) — keeps the /automations metric
@@ -532,7 +695,10 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     mismatched,
     unmatched,
     reconciled,
+    duplicates,
     settlements,
-    notified: events.length,
+    methodsHealed,
+    updateFailures,
+    notified,
   };
 }

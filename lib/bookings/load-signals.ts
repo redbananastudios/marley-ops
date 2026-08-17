@@ -73,9 +73,17 @@ export async function loadBookingRows(
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, source, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
+        "id, quote_ref, source, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, booking_cancelled_at",
       )
       .eq("status", "accepted")
+      // A cancelled booking owes nothing and expects nothing — its unwind
+      // (void invoices, refund queue) owns the money from that point. Cancelling
+      // does NOT flip the lead's status, so without this the job keeps showing
+      // as money due and as expected income: a voided commitment invoice would
+      // appear in the 4-week forecast, and the balance of a job we are actively
+      // refunding would sit in the pencilled pipeline. Every other money
+      // surface (sales report, dashboard) already reads this marker.
+      .is("booking_cancelled_at", null)
       .not("lead_id", "is", null)
       .order("id")
       .range(f, t),

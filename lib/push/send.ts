@@ -38,13 +38,20 @@ export interface PushFlags {
 }
 
 export async function getPushFlags(sb: Sb): Promise<PushFlags> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("business_settings")
     .select(
       "push_enabled, push_new_enquiry_enabled, push_payment_event_enabled, push_crew_job_enabled, push_fleet_expiry_enabled, push_survey_assigned_enabled",
     )
     .eq("id", true)
     .maybeSingle();
+  // THROW, don't fail soft: `data?.push_enabled === true` turns a failed read
+  // into "push is switched off", which is indistinguishable from the office
+  // deliberately disabling it — so every notification stops and the surface
+  // that would say so is the one that broke. Same bug class as the fleet
+  // reminders that silently stopped sending (fixed c3652de); the caller
+  // (sendPushForEvent) catches and reports it as a send error.
+  if (error) throw new Error(`push flags read failed: ${error.message}`);
   return {
     enabled: data?.push_enabled === true,
     categories: {
@@ -139,7 +146,10 @@ export async function sendPushForEvent(
         if (opts.recipientUserIds.length === 0) return { ...none, skipped: "no_recipients" };
         profileQuery = profileQuery.in("id", opts.recipientUserIds);
       }
-      const { data: profiles } = await profileQuery;
+      // Same reasoning as getPushFlags: a failed recipients read would resolve
+      // to "nobody to notify" and the event would be dropped silently.
+      const { data: profiles, error: profileErr } = await profileQuery;
+      if (profileErr) throw new Error(`push recipients read failed: ${profileErr.message}`);
       const { data: prefRows } = await admin.from("push_preferences").select("user_id, categories");
       const prefs = new Map<string, Record<string, unknown>>(
         (prefRows ?? []).map((r: { user_id: string; categories: unknown }) => [

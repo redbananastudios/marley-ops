@@ -73,7 +73,26 @@ export interface ReconciledMatch {
   quoteRef: string;
 }
 
-export type LedgerMatchResult = MatchResult | ReconciledMatch;
+/**
+ * A SECOND transfer for a payment that is already recorded AND already has a
+ * bank row explaining it — i.e. the customer very likely paid twice. It must
+ * never reconcile: reconciling would file the money as "explained", hiding a
+ * refund we owe on every surface (it leaves the queues, leaves the exceptions
+ * strip, and the ledger de-dupes it away). The one-tap Confirm path already
+ * refuses this shape with "looks like a DUPLICATE"; the AUTOMATIC path had no
+ * such guard, which is worse — nobody is watching it.
+ */
+export interface DuplicateMatch {
+  type: "duplicate";
+  kind: "deposit" | "commitment" | "balance";
+  quoteId: string;
+  quoteRef: string;
+}
+
+export type LedgerMatchResult = MatchResult | ReconciledMatch | DuplicateMatch;
+
+/** Key for "this settled payment already has a bank row against it". */
+export const claimKey = (quoteId: string, kind: string): string => `${quoteId}:${kind}`;
 
 /** Quote refs recognisable inside free-text bank references. */
 const REF_PATTERNS = [
@@ -234,7 +253,9 @@ function suffixKind(hay: string): "deposit" | "commitment" | "balance" | null {
 export function reconcileSettled(
   tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
   settled: SettledItem[],
-): ReconciledMatch | null {
+  /** (quote,kind) pairs a bank row ALREADY explains — see DuplicateMatch. */
+  claimed?: ReadonlySet<string>,
+): ReconciledMatch | DuplicateMatch | null {
   const refs = refsInText(tx.reference, tx.description);
   if (!refs.length) return null;
   const candidates = settled.filter(
@@ -243,7 +264,14 @@ export function reconcileSettled(
   if (!candidates.length) return null;
   const hay = canonicalizeQuoteRefs(`${norm(tx.reference)} ${norm(tx.description)}`);
   const wants = suffixKind(hay);
-  const pick = (wants && candidates.find((s) => s.kind === wants)) || candidates[0];
+  // Prefer a candidate nothing has claimed yet: one quote can hold two settled
+  // items at the same amount, and only one of them may be the taken one.
+  const free = claimed ? candidates.filter((s) => !claimed.has(claimKey(s.quoteId, s.kind))) : candidates;
+  const pool = free.length ? free : candidates;
+  const pick = (wants && pool.find((s) => s.kind === wants)) || pool[0];
+  if (claimed?.has(claimKey(pick.quoteId, pick.kind))) {
+    return { type: "duplicate", kind: pick.kind, quoteId: pick.quoteId, quoteRef: pick.quoteRef };
+  }
   return { type: "reconciled", kind: pick.kind, quoteId: pick.quoteId, quoteRef: pick.quoteRef };
 }
 
@@ -288,10 +316,11 @@ export function matchTransactionLedger(
   tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
   open: OpenItem[],
   settled: SettledItem[],
+  claimed?: ReadonlySet<string>,
 ): LedgerMatchResult | null {
   const m = matchTransaction(tx, open);
   if (m && m.type === "storage") return m;
-  const s = reconcileSettled(tx, settled);
+  const s = reconcileSettled(tx, settled, claimed);
   if (!s) return m;
   if (!m || m.type === "mismatch") return s;
   const hay = canonicalizeQuoteRefs(`${norm(tx.reference)} ${norm(tx.description)}`);

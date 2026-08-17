@@ -2,7 +2,6 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { CRON_JOBS } from "@/lib/cron/jobs";
-import { bankFeedConfigured } from "@/lib/bank-feed/sync";
 import { sendSms } from "@/lib/comms/send";
 import {
   alertsAlreadySent,
@@ -80,16 +79,21 @@ export async function runHealthWatchdog(
 
   const alerts = findOverdueJobs(latestOk, now);
 
-  if (bankFeedConfigured()) {
-    const { data: newest } = await sb
-      .from("bank_transactions")
-      .select("created_at")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    const stale = feedStalenessAlert((newest?.created_at as string | null) ?? null, true, now);
-    if (stale) alerts.push(stale);
-  }
+  // Deliberately NOT gated on bankFeedConfigured(). Gating the alarm on the
+  // same config that feeds it means losing the credentials silences both the
+  // integration and the only thing that would tell us — the feed stops and
+  // every surface stays green. Once any bank row has ever landed, staleness is
+  // a real signal whatever the env now says; a never-configured install has no
+  // rows and so raises nothing.
+  const { data: newest } = await sb
+    .from("bank_transactions")
+    .select("created_at")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const everRan = Boolean(newest?.created_at);
+  const stale = feedStalenessAlert((newest?.created_at as string | null) ?? null, everRan, now);
+  if (stale) alerts.push(stale);
 
   const activeAlertKeys = new Set(alerts.map((alert) => alert.key));
   const { data: existingWatchdogIssues } = await sb

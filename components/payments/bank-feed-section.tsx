@@ -17,7 +17,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, Landmark, Link2, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Landmark, Link2, Loader2, Undo2, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import {
   confirmBankTransactionAction,
   dismissBankTransactionAction,
   linkRecordedBankTransactionAction,
+  unlinkBankTransactionAction,
 } from "@/app/actions/bank-feed";
 import { AttachDialog } from "@/components/payments/attach-dialog";
 
@@ -80,15 +81,34 @@ const STATUS_CHIP: Record<string, { label: string; cls: string }> = {
   dismissed: { label: "Dismissed", cls: "bg-mist-100 text-mist-400" },
 };
 
+/** Count badge that tells the truth when the list is capped: "12" when we hold
+ *  them all, "50 of 63" when we don't. A badge showing the cap made a truncated
+ *  queue look complete — on the page whose job is proving nothing is missed. */
+function CountBadge({ shown, total, tone }: { shown: number; total: number | null; tone: "warn" | "muted" }) {
+  const capped = total != null && total > shown;
+  const cls =
+    tone === "warn"
+      ? "bg-warn-bg text-warn"
+      : "bg-muted text-mist-500";
+  return (
+    <span className={`ml-auto inline-flex min-w-6 items-center justify-center rounded-pill px-2 py-0.5 text-xs font-bold tabular ${cls}`}>
+      {capped ? `${shown} of ${total}` : (total ?? shown)}
+    </span>
+  );
+}
+
 function DismissButton({
   txId,
   busyExternal,
   label,
+  /** Shown in the confirmation prompt so a mis-tap on four figures is caught. */
+  confirmWith,
 }: {
   txId: string;
   busyExternal?: boolean;
   /** When set, renders a text button (e.g. "Clear") instead of an icon-only one. */
   label?: string;
+  confirmWith?: { amount: number; counterparty: string | null };
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -97,6 +117,19 @@ function DismissButton({
     <button
       type="button"
       onClick={() => {
+        // Clearing is irreversible — a cleared row leaves every queue, drops
+        // out of the "not recorded yet" total and nothing brings it back. On a
+        // list where four-figure transfers sit one tap from "Clear", that is
+        // worth a sentence naming the money first.
+        if (
+          confirmWith &&
+          !window.confirm(
+            `Clear ${gbp(confirmWith.amount)} from ${confirmWith.counterparty ?? "unknown payer"}?\n\n` +
+              `Only do this if it is NOT a customer payment. It leaves the queue for good and stops counting as money still to explain.`,
+          )
+        ) {
+          return;
+        }
         setBusy(true);
         start(async () => {
           try {
@@ -114,6 +147,38 @@ function DismissButton({
     >
       {busy ? <Loader2 className="size-4 animate-spin" strokeWidth={1.75} /> : <X className="size-4" strokeWidth={1.75} />}
       {label ? <span className="font-medium">{label}</span> : null}
+    </button>
+  );
+}
+
+/** Undo a link — puts a reconciled row back in front of the office. */
+function UnlinkButton({ txId }: { txId: string }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [, start] = useTransition();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        setBusy(true);
+        start(async () => {
+          try {
+            const res = await unlinkBankTransactionAction(txId);
+            if (!res.ok) toast.error(res.error ?? "Could not unlink.");
+            else {
+              toast.success("Unlinked — the transfer is back in Unmatched inbound.");
+              router.refresh();
+            }
+          } finally {
+            setBusy(false);
+          }
+        });
+      }}
+      disabled={busy}
+      className="focus-ring inline-flex min-h-8 items-center gap-1 rounded-md border border-input bg-card px-2 text-xs font-medium text-mist-500 transition-colors hover:bg-muted disabled:opacity-60"
+    >
+      {busy ? <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} /> : <Undo2 className="size-3.5" strokeWidth={1.75} />}
+      Unlink
     </button>
   );
 }
@@ -201,6 +266,18 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
 }
 
 function MismatchRow({ tx }: { tx: BankFeedTx }) {
+  // A transfer for a payment that ALREADY has a bank row against it: the
+  // customer has most likely paid twice, so this is money we owe back rather
+  // than money to explain away. It is deliberately parked here instead of
+  // being auto-reconciled, which would have hidden it on every surface.
+  const duplicate = tx.matchConfidence === "duplicate";
+  const quoteLink = tx.leadId ? (
+    <Link href={`/leads/${tx.leadId}`} className="font-semibold hover:underline">
+      {tx.quoteRef}
+    </Link>
+  ) : (
+    <span className="font-semibold">{tx.quoteRef}</span>
+  );
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
@@ -209,23 +286,24 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
           {tx.counterparty ?? "—"}
           <span className="ml-2 text-xs font-normal text-mist-400">“{tx.reference ?? "no reference"}”</span>
         </p>
-        <p className="text-xs text-warn">
-          references{" "}
-          {tx.leadId ? (
-            <Link href={`/leads/${tx.leadId}`} className="font-semibold hover:underline">
-              {tx.quoteRef}
-            </Link>
-          ) : (
-            <span className="font-semibold">{tx.quoteRef}</span>
-          )}{" "}
-          but the open {tx.matchKind} is {tx.expectedAmount != null ? gbp(tx.expectedAmount) : "a different amount"} —
-          part-payment or duplicate. Record it manually via Bookings/Zoho, then dismiss — or attach it
-          if it actually pays a different quote.
-        </p>
+        {duplicate ? (
+          <p className="text-xs text-warn">
+            <span className="font-semibold">Possible double payment.</span> {quoteLink}&apos;s {tx.matchKind} is
+            already recorded and already has a transfer against it, so this looks like a second one. Check
+            the bank, then refund or credit the customer before clearing this row.
+          </p>
+        ) : (
+          <p className="text-xs text-warn">
+            references {quoteLink} but the open {tx.matchKind} is{" "}
+            {tx.expectedAmount != null ? gbp(tx.expectedAmount) : "a different amount"} — part-payment or
+            duplicate. Record it manually via Bookings/Zoho, then dismiss — or attach it if it actually
+            pays a different quote.
+          </p>
+        )}
       </div>
       <span className="tabular text-sm font-semibold text-warn">{gbp(tx.amount)}</span>
       <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
-      <DismissButton txId={tx.id} />
+      <DismissButton txId={tx.id} confirmWith={{ amount: tx.amount, counterparty: tx.counterparty }} />
     </div>
   );
 }
@@ -318,7 +396,12 @@ function UnmatchedRow({ tx }: { tx: BankFeedTx }) {
       {/* Always reachable: the hint is a guess, so the office must still be able
           to point the transfer somewhere else without clearing it first. */}
       <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
-      <DismissButton txId={tx.id} label="Clear" busyExternal={busy} />
+      <DismissButton
+        txId={tx.id}
+        label="Clear"
+        busyExternal={busy}
+        confirmWith={{ amount: tx.amount, counterparty: tx.counterparty }}
+      />
     </div>
   );
 }
@@ -330,6 +413,8 @@ export function BankFeedSection({
   unmatched,
   dayLabelText,
   lastSync,
+  totals,
+  readFailed,
 }: {
   suggested: BankFeedTx[];
   mismatches: BankFeedTx[];
@@ -339,9 +424,23 @@ export function BankFeedSection({
   dayLabelText: string;
   /** "3 min ago · ok" style line, or null if the cron has never run. */
   lastSync: string | null;
+  /** True queue sizes behind the capped lists. */
+  totals?: { suggested: number | null; mismatches: number | null; unmatched: number | null; feed: number | null };
+  /** A queue read failed — an empty list below may be a lie, so say so. */
+  readFailed?: boolean;
 }) {
   return (
     <>
+      {readFailed ? (
+        <Card className="flex items-center gap-2.5 border-warn/30 bg-warn-bg/40 px-5 py-3">
+          <AlertTriangle className="size-4 shrink-0 text-warn" strokeWidth={2} />
+          <p className="text-sm font-medium text-foreground">
+            Some bank queues couldn&apos;t be loaded — what&apos;s below may be incomplete. Reload before
+            treating this as up to date.
+          </p>
+        </Card>
+      ) : null}
+
       {suggested.length ? (
         <Card className="p-0">
           <div className="flex items-center gap-2 border-b px-5 py-3.5">
@@ -349,9 +448,7 @@ export function BankFeedSection({
             <h2 className="font-display text-lg font-semibold text-foreground">
               Bank transfers to confirm
             </h2>
-            <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-bold tabular text-warn">
-              {suggested.length}
-            </span>
+            <CountBadge shown={suggested.length} total={totals?.suggested ?? null} tone="warn" />
           </div>
           <div className="divide-y">
             {suggested.map((tx) => (
@@ -368,9 +465,7 @@ export function BankFeedSection({
             <h2 className="font-display text-lg font-semibold text-foreground">
               Transfers that need a human
             </h2>
-            <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-warn-bg px-2 py-0.5 text-xs font-bold tabular text-warn">
-              {mismatches.length}
-            </span>
+            <CountBadge shown={mismatches.length} total={totals?.mismatches ?? null} tone="warn" />
           </div>
           <div className="divide-y">
             {mismatches.map((tx) => (
@@ -387,9 +482,7 @@ export function BankFeedSection({
             <h2 className="font-display text-lg font-semibold text-foreground">
               Unmatched inbound
             </h2>
-            <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-bold tabular text-mist-500">
-              {unmatched.length}
-            </span>
+            <CountBadge shown={unmatched.length} total={totals?.unmatched ?? null} tone="muted" />
           </div>
           <p className="border-b px-5 py-2.5 text-xs text-mist-400">
             Inbound transfers across all dates that don&apos;t match an open deposit, commitment or balance.
@@ -412,9 +505,7 @@ export function BankFeedSection({
           <span className="text-xs text-mist-400">
             {lastSync ? `synced ${lastSync}` : "waiting for the first sync"}
           </span>
-          <span className="ml-auto inline-flex min-w-6 items-center justify-center rounded-pill bg-muted px-2 py-0.5 text-xs font-semibold tabular text-mist-500">
-            {dayRows.length}
-          </span>
+          <CountBadge shown={dayRows.length} total={totals?.feed ?? null} tone="muted" />
         </div>
         {dayRows.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-mist-400">
@@ -443,6 +534,10 @@ export function BankFeedSection({
                   <span className={`rounded-pill px-2.5 py-0.5 text-[11px] font-semibold ${chip.cls}`}>
                     {chip.label}
                   </span>
+                  {/* A linked row is otherwise locked — the sync never revisits
+                      it and no other action accepts it — so without this a
+                      mis-tapped link needed database surgery to undo. */}
+                  {tx.status === "reconciled" ? <UnlinkButton txId={tx.id} /> : null}
                   <span className="tabular text-sm font-semibold text-foreground">{gbp(tx.amount)}</span>
                 </div>
               );

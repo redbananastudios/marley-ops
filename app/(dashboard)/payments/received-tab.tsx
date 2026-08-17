@@ -13,6 +13,7 @@ import {
   type UkRangeWindow,
 } from "@/lib/payments/received";
 import { ukParts } from "@/lib/uk-time";
+import { errorContext, log } from "@/lib/log";
 import { Card } from "@/components/ui/card";
 import { bankFeedConfigured, loadLedgerItems } from "@/lib/bank-feed/sync";
 import { suggestSettledLink, type SettledItem } from "@/lib/bank-feed/match";
@@ -158,10 +159,22 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         .or(
           `and(settled_at.gte.${startIso},settled_at.lt.${endIso}),and(refunded_at.gte.${startIso},refunded_at.lt.${endIso})`,
         ),
-      sb.from("quotes").select(QUOTE_COLS).gte("deposit_paid_at", startIso).lt("deposit_paid_at", endIso),
+      // A re-quote CARRIES the paid deposit onto the new quote and leaves it on
+      // the old one (supersedeSiblingQuotes), so one £100 deposit exists on two
+      // rows and an unfiltered range query counts it twice. Retired quotes are
+      // excluded on every other money surface (sales-report, dashboard) — here
+      // too. `superseded` is the live shape; `draft`/`rejected` can't hold a
+      // real payment but cost nothing to exclude.
+      sb
+        .from("quotes")
+        .select(QUOTE_COLS)
+        .in("status", ["accepted", "sent"])
+        .gte("deposit_paid_at", startIso)
+        .lt("deposit_paid_at", endIso),
       sb
         .from("quotes")
         .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
+        .in("status", ["accepted", "sent"])
         .gte("commitment_paid_at", startIso)
         .lt("commitment_paid_at", endIso),
       sb
@@ -256,21 +269,29 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         txTime: r.tx_time,
       });
     }
+    // These lookups decide whether a bank-matched payment can be EMITTED, while
+    // its stamp twin is already suppressed on the strength of `bankMatches`.
+    // So a silent failure here doesn't degrade the page — it deletes real
+    // payments from the ledger and just shows a smaller total. Chunk the `.in()`
+    // (an unchunked one 414s once the list grows, exactly as the matcher's lead
+    // lookup already learned) and throw rather than under-report money.
     const matchQuoteIds = [...new Set(bankMatches.map((m) => m.quoteId))];
-    if (matchQuoteIds.length) {
-      const { data: mq } = await sb
+    for (let i = 0; i < matchQuoteIds.length; i += 100) {
+      const { data: mq, error: mqErr } = await sb
         .from("quotes")
         .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
-        .in("id", matchQuoteIds);
+        .in("id", matchQuoteIds.slice(i, i + 100));
+      if (mqErr) throw new Error(`payments: bank-matched quote lookup failed: ${mqErr.message}`);
       for (const quote of mq ?? []) bankQuoteById.set(quote.id as string, quote);
-      const mLeadIds = [...new Set((mq ?? []).map((quote) => quote.lead_id).filter(Boolean))] as string[];
-      if (mLeadIds.length) {
-        const { data: ml } = await sb
-          .from("leads")
-          .select("id, name, balance_paid_at, balance_amount, balance_paid_method")
-          .in("id", mLeadIds);
-        for (const l of ml ?? []) bankLeadById.set(l.id as string, l);
-      }
+    }
+    const mLeadIds = [...new Set([...bankQuoteById.values()].map((quote) => quote.lead_id).filter(Boolean))] as string[];
+    for (let i = 0; i < mLeadIds.length; i += 100) {
+      const { data: ml, error: mlErr } = await sb
+        .from("leads")
+        .select("id, name, balance_paid_at, balance_amount, balance_paid_method")
+        .in("id", mLeadIds.slice(i, i + 100));
+      if (mlErr) throw new Error(`payments: bank-matched lead lookup failed: ${mlErr.message}`);
+      for (const l of ml ?? []) bankLeadById.set(l.id as string, l);
     }
   }
 
@@ -328,14 +349,23 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     feedRows: BankFeedTx[];
     unmatched: BankFeedTx[];
     lastSync: string | null;
+    /** True totals behind each capped list — the badge must never render the
+     *  cap as if it were the whole queue. */
+    totals: { suggested: number | null; mismatches: number | null; unmatched: number | null; feed: number | null };
+    readFailed: boolean;
   } | null = null;
   if (bankFeedConfigured()) {
     const TX_COLS =
       "id, tx_date, tx_time, counterparty, amount, reference, description, status, match_kind, match_confidence, matched_quote_id";
-    const [sugRes, misRes, feedRes, unmatchedRes, syncRes] = await Promise.all([
+    // Every queue asks for an EXACT count alongside its page of rows: the badge
+    // used to render `rows.length`, i.e. the cap itself, so a truncated queue
+    // looked like a complete one — on the page whose whole job is telling Peter
+    // nothing is missed. Rows are newest-first, so it's the oldest (most
+    // forgotten) item that falls off.
+    const [sugRes, misRes, feedRes, settlementRes, unmatchedRes, syncRes] = await Promise.all([
       sb
         .from("bank_transactions")
-        .select(TX_COLS)
+        .select(TX_COLS, { count: "exact" })
         .eq("status", "suggested")
         .order("tx_date", { ascending: false })
         .limit(20),
@@ -343,21 +373,37 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
       // (part-payment / duplicate) — unmatched status but with a match_kind.
       sb
         .from("bank_transactions")
-        .select(TX_COLS)
+        .select(TX_COLS, { count: "exact" })
         .eq("status", "unmatched")
         .not("matched_quote_id", "is", null)
         .order("tx_date", { ascending: false })
         .limit(10),
       sb
         .from("bank_transactions")
-        .select(TX_COLS)
+        .select(TX_COLS, { count: "exact" })
         .gte("tx_date", window.startDay)
         .lte("tx_date", window.endDay)
         // Dismissed money is cleared and must disappear from the feed (it's
-        // already off the counts). info rows are fetched but filtered below to
-        // JUST acquirer settlements — the payout stays browsable with a "Card
-        // settlement" chip while outbound/pot noise stays hidden.
-        .neq("status", "dismissed")
+        // already off the counts). `info` rows — outbound spend, pot moves,
+        // wages — are noise here and are excluded IN THE QUERY: filtering them
+        // after a .limit() let 60 rows of noise consume the budget and push
+        // real inbound transfers off the day feed. Card settlements are also
+        // `info` and are fetched separately below, on their own budget, so
+        // neither can starve the other.
+        .not("status", "in", '("dismissed","info")')
+        .order("tx_date", { ascending: false })
+        .order("tx_time", { ascending: false })
+        .limit(60),
+      // Acquirer settlements (Elavon/takepayments paying out card takings).
+      // Fetched as raw `info` rows and classified in JS by isAcquirerSettlement,
+      // which stays the single authority on what a settlement is — encoding
+      // that rule a second time in SQL is exactly how two copies drift apart.
+      sb
+        .from("bank_transactions")
+        .select(TX_COLS)
+        .eq("status", "info")
+        .gte("tx_date", window.startDay)
+        .lte("tx_date", window.endDay)
         .order("tx_date", { ascending: false })
         .order("tx_time", { ascending: false })
         .limit(60),
@@ -366,7 +412,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
       // so this never overlaps the mismatch queue (those NAME a quote).
       sb
         .from("bank_transactions")
-        .select(TX_COLS)
+        .select(TX_COLS, { count: "exact" })
         .eq("status", "unmatched")
         .is("matched_quote_id", null)
         .order("tx_date", { ascending: false })
@@ -381,6 +427,18 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     const settlementRow = (r: { counterparty?: string | null; reference?: string | null }) =>
       isAcquirerSettlement({ counterparty: r.counterparty ?? null, reference: r.reference ?? null });
 
+    // Every bank read here decides what the office is told about money. A
+    // silent `?? []` turns any of them into "there's nothing to see", which on
+    // this page is a lie with consequences — so surface the failure instead.
+    const bankReadFailed = [sugRes, misRes, feedRes, settlementRes, unmatchedRes].some((r) => r.error);
+    if (bankReadFailed) {
+      log.error("payments.bank-queues.read_failed", {
+        errors: [sugRes, misRes, feedRes, settlementRes, unmatchedRes]
+          .map((r) => r.error?.message)
+          .filter(Boolean),
+      });
+    }
+
     // "Already recorded" hints for the unmatched queue: exact pennies + the
     // payer/reference name corroborating exactly ONE settled item (Dingley's
     // £1,100 "DINGLEY" while Emma Dingley's balance is on the books). Display
@@ -388,7 +446,17 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     const unmatchedRows = unmatchedRes.data ?? [];
     const hintByTxId = new Map<string, SettledItem>();
     if (unmatchedRows.length) {
-      const { settled } = await loadLedgerItems(sb);
+      // Fail SOFT. loadLedgerItems reads strictly (it throws rather than hand
+      // back half a ledger), which is right for the matcher — but here it only
+      // decorates rows with a "looks already recorded" hint. Losing the hint
+      // is a lost convenience; losing the money page is a lost money page.
+      const settled = await loadLedgerItems(sb).then(
+        (l) => l.settled,
+        (e) => {
+          log.error("payments.link-hints.failed", { ...errorContext(e) });
+          return [] as SettledItem[];
+        },
+      );
       for (const r of unmatchedRows) {
         const hint = suggestSettledLink(
           {
@@ -402,7 +470,13 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         if (hint) hintByTxId.set(r.id as string, hint);
       }
     }
-    const feedData = (feedRes.data ?? []).filter((r) => r.status !== "info" || settlementRow(r));
+    // Real activity for the range, plus the acquirer payouts from the separate
+    // `info` budget, re-sorted so the day feed still reads chronologically.
+    const settlements = (settlementRes.data ?? []).filter(settlementRow);
+    const feedData = [...(feedRes.data ?? []), ...settlements].sort((a, b) => {
+      const day = String(b.tx_date).localeCompare(String(a.tx_date));
+      return day !== 0 ? day : String(b.tx_time ?? "").localeCompare(String(a.tx_time ?? ""));
+    });
     const rows = [...(sugRes.data ?? []), ...(misRes.data ?? []), ...feedData];
     const qIds = [...new Set(rows.map((r) => r.matched_quote_id).filter(Boolean))] as string[];
     const { data: qRows } = qIds.length
@@ -473,6 +547,13 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         };
       }),
       lastSync,
+      totals: {
+        suggested: sugRes.count ?? null,
+        mismatches: misRes.count ?? null,
+        unmatched: unmatchedRes.count ?? null,
+        feed: feedRes.count ?? null,
+      },
+      readFailed: bankReadFailed,
     };
   }
 
@@ -626,6 +707,8 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
           unmatched={bank.unmatched}
           dayLabelText={window.preset === "today" ? "today" : `between ${window.label}`}
           lastSync={bank.lastSync}
+          totals={bank.totals}
+          readFailed={bank.readFailed}
         />
       ) : null}
     </>

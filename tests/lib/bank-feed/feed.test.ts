@@ -527,6 +527,52 @@ describe("suggestSettledLink — the unmatched queue stops pretending it can't s
   });
 });
 
+describe("duplicate payments must never be auto-explained away", () => {
+  const balance = settledItem({ kind: "balance", amount: 450 });
+  const claimKeyOf = (i: SettledItem) => `${i.quoteId}:${i.kind}`;
+
+  it("a SECOND transfer for a payment a bank row already explains is a duplicate, not a reconcile", () => {
+    // Customer pays the £450 balance twice. The first transfer is recorded and
+    // holds the claim; auto-reconciling the second would file money we owe
+    // back as "explained" — it would leave every queue and the ledger would
+    // de-dupe it away, so £900 arrived and the page would say all is well.
+    expect(
+      reconcileSettled({ amount: 450, reference: "MMR034-BAL", description: null }, [balance], new Set([claimKeyOf(balance)])),
+    ).toEqual({ type: "duplicate", kind: "balance", quoteId: "q34", quoteRef: "MMR034" });
+  });
+
+  it("the FIRST transfer still reconciles normally — the guard only bites on the second", () => {
+    expect(
+      reconcileSettled({ amount: 450, reference: "MMR034-BAL", description: null }, [balance], new Set()),
+    ).toMatchObject({ type: "reconciled" });
+  });
+
+  it("prefers an unclaimed item on the same quote over calling it a duplicate", () => {
+    // Two settled items at the same amount, one already explained: the second
+    // transfer belongs to the free one, not to a duplicate verdict.
+    const pool = [settledItem({ kind: "deposit", amount: 100 }), settledItem({ kind: "commitment", amount: 100 })];
+    expect(
+      reconcileSettled({ amount: 100, reference: "MMR034", description: null }, pool, new Set(["q34:deposit"])),
+    ).toMatchObject({ type: "reconciled", kind: "commitment" });
+  });
+
+  it("carries through matchTransactionLedger when there is no open money to prefer", () => {
+    expect(
+      matchTransactionLedger({ amount: 450, reference: "MMR034-BAL", description: null }, [], [balance], new Set([claimKeyOf(balance)])),
+    ).toMatchObject({ type: "duplicate" });
+  });
+
+  it("an OPEN item still wins over a duplicate verdict — real money wanting recording comes first", () => {
+    const result = matchTransactionLedger(
+      { amount: 450, reference: "MMR034", description: null },
+      [open({ quoteId: "q34", quoteRef: "MMR034", kind: "balance", amount: 450 })],
+      [settledItem({ kind: "deposit", amount: 450 })],
+      new Set(["q34:deposit"]),
+    );
+    expect(result).toMatchObject({ type: "suggestion", kind: "balance" });
+  });
+});
+
 describe("matchTransactionLedger — open items keep primacy, settled explains the leftovers", () => {
   it("an open suggestion wins over a settled twin (real open money wants recording)", () => {
     const result = matchTransactionLedger(

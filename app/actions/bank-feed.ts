@@ -254,6 +254,25 @@ export async function linkRecordedBankTransactionAction(input: {
     };
   }
 
+  // One recorded payment, one bank row. If another transfer already explains
+  // this payment then THIS one is a second payment for it — linking would file
+  // money we probably owe back as "explained" and it would leave every queue.
+  const { data: already, error: alreadyErr } = await admin
+    .from("bank_transactions")
+    .select("id")
+    .eq("matched_quote_id", input.quoteId)
+    .eq("match_kind", input.kind)
+    .in("status", ["confirmed", "reconciled"])
+    .neq("id", input.txId)
+    .limit(1);
+  if (alreadyErr) return { ok: false as const, error: alreadyErr.message };
+  if (already?.length) {
+    return {
+      ok: false as const,
+      error: `Another transfer is already matched to ${item.quoteRef}'s ${input.kind}, so this looks like a SECOND payment for it. Check the bank and refund or credit the customer before clearing this row.`,
+    };
+  }
+
   const { data: claimed, error: claimErr } = await admin
     .from("bank_transactions")
     .update({
@@ -378,6 +397,37 @@ export async function attachBankTransactionAction(input: {
   revalidatePath("/payments");
   revalidatePath("/bookings");
   return { ok: true as const, quoteRef: item.quoteRef };
+}
+
+/**
+ * Undo a LINK (status 'reconciled') — the row goes back to 'unmatched' for the
+ * matcher and the office to look at again. Reconciled rows are otherwise
+ * locked: the sync never rewrites them and no other action accepts them, so a
+ * mis-tapped link (or a wrong auto-reconcile) was database surgery to undo.
+ * Only ever touches the LINK, never the payment: nothing was recorded by
+ * reconciling, so nothing needs unrecording.
+ */
+export async function unlinkBankTransactionAction(txId: string) {
+  const userId = await officeActor();
+  if (!userId) return { ok: false as const, error: "Office access required." };
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("bank_transactions")
+    .update({
+      status: "unmatched",
+      matched_quote_id: null,
+      match_kind: null,
+      match_confidence: null,
+    } as never)
+    .eq("id", txId)
+    .eq("status", "reconciled")
+    .select("id");
+  if (error) return { ok: false as const, error: error.message };
+  if (!data?.length) {
+    return { ok: false as const, error: "This transfer is no longer linked — refresh and check it again." };
+  }
+  revalidatePath("/payments");
+  return { ok: true as const };
 }
 
 /** "Not a customer payment / already handled elsewhere" — keeps the row but

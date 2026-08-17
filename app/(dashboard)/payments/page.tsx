@@ -32,6 +32,9 @@ async function loadExceptions(sb: Awaited<ReturnType<typeof createClient>>): Pro
   unmatched: number;
   mismatches: number;
   cardStuck: number;
+  /** A read failed — the counts below are NOT trustworthy, so the strip must
+   *  say it doesn't know rather than render its green all-clear. */
+  unknown: boolean;
 }> {
   const tenMinAgo = new Date(Date.now() - 10 * 60_000).toISOString();
   const bank = bankFeedConfigured();
@@ -60,14 +63,36 @@ async function loadExceptions(sb: Awaited<ReturnType<typeof createClient>>): Pro
       .lt("created_at", tenMinAgo),
     sb.from("card_payments").select("id", { count: "exact", head: true }).eq("status", "needs_review"),
   ]);
+  // A failed count read used to resolve to 0 and the strip then announced
+  // "Nothing unexplained" — the one sentence on this page that must never be
+  // guessed. Track it instead and say so.
+  const unknown = [unmatchedRes, mismatchRes, pendingRes, reviewRes].some(
+    (r) => "error" in r && r.error,
+  );
   return {
     unmatched: unmatchedRes.count ?? 0,
     mismatches: mismatchRes.count ?? 0,
     cardStuck: (pendingRes.count ?? 0) + (reviewRes.count ?? 0),
+    unknown,
   };
 }
 
-function ExceptionsStrip({ ex }: { ex: { unmatched: number; mismatches: number; cardStuck: number } }) {
+function ExceptionsStrip({
+  ex,
+}: {
+  ex: { unmatched: number; mismatches: number; cardStuck: number; unknown: boolean };
+}) {
+  if (ex.unknown) {
+    return (
+      <Card className="flex items-center gap-2.5 border-warn/30 bg-warn-bg/40 px-5 py-3">
+        <AlertTriangle className="size-4 shrink-0 text-warn" strokeWidth={2} />
+        <p className="text-sm font-medium text-foreground">
+          Couldn&apos;t check for unexplained money just now — reload the page. Don&apos;t read this as
+          all-clear.
+        </p>
+      </Card>
+    );
+  }
   const clean = ex.unmatched === 0 && ex.mismatches === 0 && ex.cardStuck === 0;
   if (clean) {
     return (
@@ -107,6 +132,9 @@ export default async function PaymentsPage({
 }) {
   const params = await searchParams;
   const sb = await createClient();
+  // Started before the auth chain (it depends on neither) so the exceptions
+  // counts overlap it instead of adding a round trip to every page load.
+  const exceptionsPromise = loadExceptions(sb);
   const {
     data: { user },
   } = await sb.auth.getUser();
@@ -130,7 +158,7 @@ export default async function PaymentsPage({
       : []),
   ];
 
-  const exceptions = await loadExceptions(sb);
+  const exceptions = await exceptionsPromise;
 
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
