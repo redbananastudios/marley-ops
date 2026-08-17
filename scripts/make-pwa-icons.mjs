@@ -8,7 +8,7 @@ import sharp from "sharp";
 import { mkdirSync } from "fs";
 
 const SRC =
-  "O:/projects/red-banana/clients/marley/logos/Digital/Brandmark/Full-Colour/PNG File/Brandmark - Full-Colour - Large.png";
+  "O:/projects/red-banana/clients/marley/media/refs/brandmark-full-colour-large.png";
 const OUT = "O:/projects/red-banana/clients/marley/marley-ops-emails/public/icons";
 mkdirSync(OUT, { recursive: true });
 

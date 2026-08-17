@@ -93,6 +93,11 @@ Nightly i9 scheduled task (silent VBS-launcher per house rule):
    - Area → `08 Media Library/real/areas/<Town OUTCODE>/`
    - Job content → `08 Media Library/real/jobs/<Town OUTCODE>/` (town derived
      from the lead's move address; `unsorted/` fallback).
+   > **Path note (2026-08-17):** `real/jobs/` and `real/crew/` were flattened
+   > into a single flat `photos/` folder (`<subject>_<view>_<context>_<date>`,
+   > see `08 Media Library/README.md`). Target `photos/` with that convention
+   > when building this, and keep any per-town grouping in the filename
+   > (`job_loading_gillingham-...`) rather than re-creating subfolders.
 4. Per file: **strip EXIF**, descriptive filename
    (`removals-<town>-<shot>-<yyyymmdd>-<id6>.<ext>`), sidecar `.json`
    (caption, transcript, tag, consent state, needs_blur, source ids) so the

@@ -213,8 +213,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done
   stage 2 /claims register with status trail, resolution + amount, insurer evidence pack).
   Policy docs to make the deadlines real = A7.
 - ☐ Job content PUBLISHING phase (PRD §9): nightly sync of approved items to the
-  Drive hub (08 Media Library/real/jobs/approved) + the marketing agents' real-photo
-  class — next build conversation with Peter.
+  Drive hub (08 Media Library → now the flat `photos/` folder, `job_*` naming;
+  `real/jobs/` was retired 2026-08-17, see that library's README.md) + the
+  marketing agents' real-photo class — next build conversation with Peter.
 - ☐ Client merge UI (dedupe tombstones have no writer). (ClickUp 869e378hj)
 - ☐ Customer move-day confirmation comms (crew names + arrival window).
 

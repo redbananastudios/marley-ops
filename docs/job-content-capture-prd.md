@@ -180,6 +180,14 @@ Nightly i9 task reads `marketing_approved_at not null and synced_at is null`
 via PostgREST + signed URLs → files to Drive hub:
 `08 Media Library/real/jobs/approved/` (flat pool, `date_ref_tag_seq` names)
 + `real/jobs/<YYYY-MM>_<quote-ref>/` archive + `transcripts.md` (voice-note
+
+> **Path note (2026-08-17):** the library was reorganised — `real/jobs/`,
+> `real/crew/` and `real/van/` no longer exist; their photos were flattened into
+> one `photos/` folder named `<subject>_<view-or-action>_<context>_<date>` (see
+> `08 Media Library/README.md`). When this phase is built, the approved pool
+> should land in `photos/` under that convention (`job_*` / `crew_*`), with any
+> per-job archive under a new `real/jobs-archive/<YYYY-MM>_<quote-ref>/`.
+
 text + captions as copywriter context). `approved/` gets listed in
 brands/marley-moves/brand.md "Image reference assets" → the social agents'
 real-photo class and the GBP pipeline consume it with zero agent code changes.
