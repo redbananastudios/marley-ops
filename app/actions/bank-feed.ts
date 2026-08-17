@@ -8,7 +8,7 @@ import {
   markQuoteCommitmentPaidAction,
   markQuoteDepositPaidAction,
 } from "@/app/(dashboard)/bookings/actions";
-import { loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
+import { backfillPaidMethod, loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
 import type { OpenItem } from "@/lib/bank-feed/match";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { log } from "@/lib/log";
@@ -270,6 +270,10 @@ export async function linkRecordedBankTransactionAction(input: {
   if (!claimed?.length) {
     return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
   }
+
+  // The link proves the payment arrived by bank — fill a missing method so the
+  // received ledger stops saying "Method not recorded". Fill-only, best-effort.
+  await backfillPaidMethod(admin, item);
 
   revalidatePath("/payments");
   return { ok: true as const, quoteRef: item.quoteRef };

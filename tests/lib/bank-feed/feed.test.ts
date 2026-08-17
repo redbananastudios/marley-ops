@@ -14,6 +14,7 @@ import {
   matchTransactionLedger,
   reconcileSettled,
   refsInText,
+  suggestSettledLink,
   type OpenItem,
   type SettledItem,
 } from "@/lib/bank-feed/match";
@@ -451,6 +452,68 @@ describe("reconcileSettled — payment recorded before its bank row (2026-08-16 
     expect(reconcileSettled({ amount: 100, reference: "MMR034-DEP", description: null }, pool)).toMatchObject({
       kind: "deposit",
     });
+  });
+});
+
+describe("suggestSettledLink — the unmatched queue stops pretending it can't see the twin", () => {
+  const dingley = settledItem({
+    quoteId: "qD",
+    quoteRef: "IMV018",
+    leadId: "lD",
+    customer: "Emma Dingley",
+    amount: 1100,
+    kind: "balance",
+  });
+
+  it("the live case: 'DINGLEY' £1,100 against Emma Dingley's recorded £1,100 balance", () => {
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "DINGLEY", description: null, counterparty: "E Dingley" },
+        [dingley],
+      ),
+    ).toEqual(dingley);
+  });
+
+  it("the name can live in the REFERENCE alone — a bare 'DINGLEY' from a third-party payer still hints", () => {
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "DINGLEY", description: null, counterparty: "MY SAFETY LTD" },
+        [dingley],
+      ),
+    ).toEqual(dingley);
+  });
+
+  it("no name overlap → no hint, however neatly the amount lines up", () => {
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "invoice payment", description: null, counterparty: "J SMITH" },
+        [dingley],
+      ),
+    ).toBeNull();
+  });
+
+  it("two corroborating candidates stay ambiguous — a guess between them is worse than none", () => {
+    const twin = settledItem({ quoteId: "qD2", quoteRef: "IMV019", customer: "Emma Dingley", amount: 1100 });
+    expect(
+      suggestSettledLink({ amount: 1100, reference: "DINGLEY", description: null }, [dingley, twin]),
+    ).toBeNull();
+  });
+
+  it("a row that NAMES a quote is the auto path's business — never hinted here", () => {
+    // If it named MMR034 and didn't reconcile, the amounts genuinely differ:
+    // hinting a link at the wrong amount would invite a false reconcile.
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "MMR034 DINGLEY", description: null, counterparty: "E Dingley" },
+        [dingley],
+      ),
+    ).toBeNull();
+  });
+
+  it("the amount must be exact to the penny", () => {
+    expect(
+      suggestSettledLink({ amount: 1099.99, reference: "DINGLEY", description: null }, [dingley]),
+    ).toBeNull();
   });
 });
 

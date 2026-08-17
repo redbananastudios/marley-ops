@@ -195,6 +195,40 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
   return (await loadLedgerItems(sb)).open;
 }
 
+/**
+ * A reconcile (auto or office link) is PROOF the payment arrived by bank
+ * transfer — so a recorded payment whose method was never captured (Zoho-poll
+ * balances, imported history) stops reading "Method not recorded". Fill-only:
+ * a method the office DID record (cash at the door) is never overwritten by an
+ * inference, and best-effort — the link itself must not fail on this.
+ */
+export async function backfillPaidMethod(
+  sb: SupabaseClient,
+  item: { kind: "deposit" | "commitment" | "balance"; quoteId: string; leadId: string | null },
+): Promise<void> {
+  try {
+    if (item.kind === "balance") {
+      if (!item.leadId) return;
+      const { error } = await sb
+        .from("leads")
+        .update({ balance_paid_method: "bank_transfer" } as never)
+        .eq("id", item.leadId)
+        .is("balance_paid_method", null);
+      if (error) throw new Error(error.message);
+      return;
+    }
+    const col = item.kind === "deposit" ? "deposit_paid_method" : "commitment_paid_method";
+    const { error } = await sb
+      .from("quotes")
+      .update({ [col]: "bank_transfer" } as never)
+      .eq("id", item.quoteId)
+      .is(col, null);
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    log.error("bank-feed.method-backfill.failed", { quoteId: item.quoteId, kind: item.kind, ...errorContext(e) });
+  }
+}
+
 // Type alias (not interface) so it satisfies runCron's Record<string, unknown>.
 export type BankFeedSyncSummary = {
   disabled?: boolean;
@@ -437,6 +471,13 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
         // transitioned this pass — the untouched row retries next tick.
         log.error("bank-feed.match-update.failed", { txId: row.id as string, ...errorContext(e) });
         continue;
+      }
+
+      // The reconcile proves this recorded payment arrived by bank — fill a
+      // missing method so the ledger stops saying "Method not recorded".
+      if (claimed && m?.type === "reconciled") {
+        const item = settled.find((s) => s.quoteId === m.quoteId && s.kind === m.kind);
+        if (item) await backfillPaidMethod(sb, item);
       }
 
       // Push-worthy = a FRESH transfer ENTERING the queue: info→suggested/

@@ -17,13 +17,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, Landmark, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, Landmark, Link2, Loader2, X } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import {
   confirmBankTransactionAction,
   dismissBankTransactionAction,
+  linkRecordedBankTransactionAction,
 } from "@/app/actions/bank-feed";
 import { AttachDialog } from "@/components/payments/attach-dialog";
 
@@ -46,6 +47,16 @@ export interface BankFeedTx {
   /** Acquirer payout (Elavon/takepayments) — already recorded at card-payment
    * time, shown in the day feed for visibility but never actionable. */
   isSettlement: boolean;
+  /** This transfer looks like a payment ALREADY on the books (exact amount +
+   * payer/reference name matches the customer) — one tap links it (status
+   * reconciled, arrival-day truth); the paid pipeline never runs. */
+  settledHint?: {
+    quoteId: string;
+    quoteRef: string;
+    customer: string | null;
+    kind: "deposit" | "commitment" | "balance";
+    leadId: string | null;
+  } | null;
 }
 
 const gbp = (n: number): string =>
@@ -221,9 +232,42 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
 
 /** Plain unmatched inbound (all dates): money we couldn't tie to any open
  *  deposit/balance and that doesn't name a quote — old-system transfers,
- *  non-customer credits, or a payment still to be recorded by hand. Clearing
- *  dismisses the row (the sync preserves dismissed rows, so it stays gone). */
+ *  non-customer credits, or a payment still to be recorded by hand. When the
+ *  amount + payer name point at exactly one ALREADY-RECORDED payment, the row
+ *  says so and offers a one-tap Link (reconcile — no paid pipeline) instead of
+ *  pretending the money is a mystery. Clearing dismisses the row (the sync
+ *  preserves dismissed rows, so it stays gone). */
 function UnmatchedRow({ tx }: { tx: BankFeedTx }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [, start] = useTransition();
+  const hint = tx.settledHint ?? null;
+
+  function link() {
+    if (!hint) return;
+    setBusy(true);
+    start(async () => {
+      try {
+        const res = await linkRecordedBankTransactionAction({
+          txId: tx.id,
+          quoteId: hint.quoteId,
+          kind: hint.kind,
+        });
+        if (!res.ok) {
+          toast.error(res.error ?? "Could not link the transfer.");
+          router.refresh();
+          return;
+        }
+        toast.success(`Linked — this transfer is ${hint.quoteRef}'s ${hint.kind}, already recorded.`);
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not link the transfer.");
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
@@ -232,14 +276,49 @@ function UnmatchedRow({ tx }: { tx: BankFeedTx }) {
           {tx.counterparty ?? "—"}
           <span className="ml-2 text-xs font-normal text-mist-400">“{tx.reference ?? "no reference"}”</span>
         </p>
-        <p className="text-xs text-mist-400">
-          no matching open payment — attach it to the right quote if it&apos;s a customer payment,
-          otherwise clear it.
-        </p>
+        {hint ? (
+          <p className="text-xs text-mist-400">
+            looks like the <span className="font-semibold">{hint.kind}</span> for{" "}
+            {hint.leadId ? (
+              <Link href={`/leads/${hint.leadId}`} className="font-semibold text-foreground hover:underline">
+                {hint.quoteRef} · {hint.customer ?? "—"}
+              </Link>
+            ) : (
+              <span className="font-semibold">
+                {hint.quoteRef}
+                {hint.customer ? ` · ${hint.customer}` : ""}
+              </span>
+            )}
+            , which is already recorded (same amount, same name) — link it so the ledger knows the day
+            this money really arrived.
+          </p>
+        ) : (
+          <p className="text-xs text-mist-400">
+            no matching open payment — attach it to the right quote if it&apos;s a customer payment,
+            otherwise clear it.
+          </p>
+        )}
       </div>
       <span className="tabular text-sm font-semibold text-foreground">{gbp(tx.amount)}</span>
+      {hint ? (
+        <button
+          type="button"
+          onClick={link}
+          disabled={busy}
+          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-60"
+        >
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          ) : (
+            <Link2 className="size-4" strokeWidth={2} />
+          )}
+          Link — already recorded
+        </button>
+      ) : null}
+      {/* Always reachable: the hint is a guess, so the office must still be able
+          to point the transfer somewhere else without clearing it first. */}
       <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
-      <DismissButton txId={tx.id} label="Clear" />
+      <DismissButton txId={tx.id} label="Clear" busyExternal={busy} />
     </div>
   );
 }
@@ -314,8 +393,9 @@ export function BankFeedSection({
           </div>
           <p className="border-b px-5 py-2.5 text-xs text-mist-400">
             Inbound transfers across all dates that don&apos;t match an open deposit, commitment or balance.
-            Attach real customer payments to their quote to record them; clear anything that isn&apos;t a
-            customer payment to take it off this list.
+            Attach real customer payments to their quote to record them; where a row already matches a
+            payment on the books, link it so the ledger dates the money to the day it arrived; clear
+            anything that isn&apos;t a customer payment to take it off this list.
           </p>
           <div className="divide-y">
             {unmatched.map((tx) => (

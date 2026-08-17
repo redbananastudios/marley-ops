@@ -234,6 +234,34 @@ export function reconcileSettled(
 }
 
 /**
+ * The DISPLAY-layer sibling of reconcileSettled, for the transfer that carries
+ * no quote ref at all — "DINGLEY" £1,100 while Emma Dingley's £1,100 balance is
+ * already on the books. Auto-reconcile deliberately refuses these (reference +
+ * exact amount only, because its outcome is automatic); but leaving the row
+ * saying "no matching open payment — attach it" when the system can SEE the
+ * recorded twin is the queue lying to the office. So: exact pennies + the payer
+ * name (or reference text) corroborating exactly ONE settled item produces a
+ * HINT the UI renders as a one-tap "Link" — a human confirms, nothing is
+ * automatic, and ambiguity (two candidates, or none by name) yields nothing.
+ */
+export function suggestSettledLink(
+  tx: { amount: number; reference: string | null; description: string | null; counterparty?: string | null },
+  settled: SettledItem[],
+): SettledItem | null {
+  // A transfer that NAMES a quote is the auto path's territory — if it didn't
+  // reconcile there, the amounts genuinely differ and a hint would be wrong.
+  if (refsInText(tx.reference, tx.description).length) return null;
+  const exact = settled.filter((s) => pennies(s.amount) === pennies(tx.amount));
+  if (!exact.length) return null;
+  // Names can arrive in the counterparty OR the free-text reference ("E Dingley"
+  // / "DINGLEY") — corroborate against the whole haystack. Generic reference
+  // words can't collide: the overlap is with the CUSTOMER's name tokens.
+  const hay = `${tx.counterparty ?? ""} ${tx.reference ?? ""} ${tx.description ?? ""}`;
+  const corroborated = exact.filter((s) => namesCorroborate(hay, s.customer));
+  return corroborated.length === 1 ? corroborated[0] : null;
+}
+
+/**
  * The full decision: open items first (real money wanting recording, human-
  * confirmed), settled reconcile as the fallback for unmatched/mismatch shapes.
  * One deliberate exception: when the transfer's OWN suffix names the settled

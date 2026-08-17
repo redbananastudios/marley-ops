@@ -14,7 +14,8 @@ import {
 } from "@/lib/payments/received";
 import { ukParts } from "@/lib/uk-time";
 import { Card } from "@/components/ui/card";
-import { bankFeedConfigured } from "@/lib/bank-feed/sync";
+import { bankFeedConfigured, loadLedgerItems } from "@/lib/bank-feed/sync";
+import { suggestSettledLink, type SettledItem } from "@/lib/bank-feed/match";
 import { isAcquirerSettlement } from "@/lib/bank-feed/parse";
 import { BankFeedSection, type BankFeedTx } from "@/components/payments/bank-feed-section";
 import { dayHeading, money, timeOf, ukDayOf } from "./format";
@@ -330,7 +331,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
   } | null = null;
   if (bankFeedConfigured()) {
     const TX_COLS =
-      "id, tx_date, tx_time, counterparty, amount, reference, status, match_kind, match_confidence, matched_quote_id";
+      "id, tx_date, tx_time, counterparty, amount, reference, description, status, match_kind, match_confidence, matched_quote_id";
     const [sugRes, misRes, feedRes, unmatchedRes, syncRes] = await Promise.all([
       sb
         .from("bank_transactions")
@@ -379,6 +380,28 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     ]);
     const settlementRow = (r: { counterparty?: string | null; reference?: string | null }) =>
       isAcquirerSettlement({ counterparty: r.counterparty ?? null, reference: r.reference ?? null });
+
+    // "Already recorded" hints for the unmatched queue: exact pennies + the
+    // payer/reference name corroborating exactly ONE settled item (Dingley's
+    // £1,100 "DINGLEY" while Emma Dingley's balance is on the books). Display
+    // layer only — auto-reconcile stays reference-only; the office taps Link.
+    const unmatchedRows = unmatchedRes.data ?? [];
+    const hintByTxId = new Map<string, SettledItem>();
+    if (unmatchedRows.length) {
+      const { settled } = await loadLedgerItems(sb);
+      for (const r of unmatchedRows) {
+        const hint = suggestSettledLink(
+          {
+            amount: Number(r.amount),
+            reference: (r.reference as string | null) ?? null,
+            description: (r.description as string | null) ?? null,
+            counterparty: (r.counterparty as string | null) ?? null,
+          },
+          settled,
+        );
+        if (hint) hintByTxId.set(r.id as string, hint);
+      }
+    }
     const feedData = (feedRes.data ?? []).filter((r) => r.status !== "info" || settlementRow(r));
     const rows = [...(sugRes.data ?? []), ...(misRes.data ?? []), ...feedData];
     const qIds = [...new Set(rows.map((r) => r.matched_quote_id).filter(Boolean))] as string[];
@@ -434,7 +457,21 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
       suggested: (sugRes.data ?? []).map(toTx),
       mismatches: (misRes.data ?? []).map(toTx),
       feedRows: feedData.map(toTx),
-      unmatched: (unmatchedRes.data ?? []).map(toTx),
+      unmatched: unmatchedRows.map((r) => {
+        const hint = hintByTxId.get(r.id as string);
+        return {
+          ...toTx(r),
+          settledHint: hint
+            ? {
+                quoteId: hint.quoteId,
+                quoteRef: hint.quoteRef,
+                customer: hint.customer,
+                kind: hint.kind,
+                leadId: hint.leadId,
+              }
+            : null,
+        };
+      }),
       lastSync,
     };
   }
