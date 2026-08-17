@@ -515,6 +515,16 @@ describe("suggestSettledLink — the unmatched queue stops pretending it can't s
       suggestSettledLink({ amount: 1099.99, reference: "DINGLEY", description: null }, [dingley]),
     ).toBeNull();
   });
+
+  it("generic words are not identity — 'LTD' shared with a company customer proves nothing", () => {
+    const company = settledItem({ customer: "My Safety Ltd", amount: 1100, kind: "balance" });
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "PAYMENT FOR MOVE", description: null, counterparty: "ACME LTD" },
+        [company],
+      ),
+    ).toBeNull();
+  });
 });
 
 describe("matchTransactionLedger — open items keep primacy, settled explains the leftovers", () => {

@@ -101,11 +101,25 @@ function canonicalizeQuoteRefs(hay: string): string {
   );
 }
 
-/** Name tokens ≥3 chars, uppercased — "E Dingley" → ["DINGLEY"]. */
+/**
+ * Words that carry no identity: they appear in company suffixes and in the
+ * free text of a bank reference, so treating them as a name overlap would
+ * corroborate a stranger ("PAYMENT TO ACME LTD" vs a customer "MY SAFETY LTD").
+ * Corroboration is meant to prove WHO paid, so a token that could belong to
+ * anyone proves nothing.
+ */
+const GENERIC_NAME_TOKENS = new Set([
+  "LTD", "LIMITED", "PLC", "LLP", "THE", "AND", "FOR", "REF", "REFERENCE",
+  "PAYMENT", "PAYMENTS", "PAID", "INVOICE", "TRANSFER", "BANK", "ACCOUNT",
+  "DEPOSIT", "BALANCE", "COMMITMENT", "MOVE", "MOVES", "MOVING", "REMOVAL",
+  "REMOVALS", "MARLEY", "THANKS", "THANK",
+]);
+
+/** Identity-bearing name tokens ≥3 chars, uppercased — "E Dingley" → ["DINGLEY"]. */
 function nameTokens(name: string | null | undefined): string[] {
   return norm(name)
     .split(/[^A-Z]+/)
-    .filter((t) => t.length >= 3);
+    .filter((t) => t.length >= 3 && !GENERIC_NAME_TOKENS.has(t));
 }
 
 /**
