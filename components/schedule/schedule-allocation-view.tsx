@@ -784,7 +784,12 @@ export function ScheduleAllocationView(props: {
                             <StatePill state={grade.state} />
                           </div>
 
-                          {jobs.slice(0, 2).map((j) => {
+                          {/* EVERY job on the day is drawn — the cell grows and,
+                              because the week is one grid row, its siblings grow
+                              with it. A day used to show two and collapse the
+                              rest into "+N more", which hid real work on exactly
+                              the days that needed looking at hardest. */}
+                          {jobs.map((j) => {
                             // A move spanning several days draws a chip on each
                             // of them. Without saying so, one job reads as two
                             // and the week's count looks wrong.
@@ -813,12 +818,6 @@ export function ScheduleAllocationView(props: {
                               </div>
                             );
                           })}
-                          {jobs.length > 2 ? (
-                            <span className="text-[10px] text-mist-400">
-                              +{jobs.length - 2} more {jobs.length - 2 === 1 ? "job" : "jobs"}
-                            </span>
-                          ) : null}
-
                           <div className="tabular mt-auto flex items-center gap-2 pt-0.5 text-[10px] font-semibold">
                             <span
                               className={cn(

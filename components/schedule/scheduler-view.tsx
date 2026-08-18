@@ -509,7 +509,10 @@ export function SchedulerView({
           slotMinTime="07:00:00"
           slotMaxTime="20:00:00"
           allDaySlot
-          dayMaxEvents={3}
+          // No cap: a month row grows to fit its busiest day rather than
+          // collapsing the 4th job into a "+1 more" link. Hiding work on the
+          // fullest days defeats the point of looking at the month.
+          dayMaxEvents={false}
           eventDisplay="block"
           displayEventEnd={false}
           selectable
