@@ -203,8 +203,10 @@ export function SchedulerView({
         <span className="tabular text-[11px] font-bold text-foreground">
           £{Math.round(week.agreedTotal).toLocaleString("en-GB")}
           <span className="ml-1 font-medium text-mist-400">
-            {week.jobCount}
-            {week.unpricedJobs > 0 ? "*" : ""}
+            · {week.jobCount} {week.jobCount === 1 ? "job" : "jobs"}
+            {/* Same honesty as the /schedule rail: say when the figure excludes
+                a booking we can't price rather than letting it read low. */}
+            {week.unpricedJobs > 0 ? ` (${week.unpricedJobs} not priced)` : ""}
           </span>
         </span>
       );
