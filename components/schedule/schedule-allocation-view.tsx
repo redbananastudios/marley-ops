@@ -153,8 +153,17 @@ function WeekRail({ week }: { week?: WeekValue }): React.JSX.Element {
   if (!week || week.jobCount === 0) {
     return <div className="min-h-[92px] rounded-md border border-dashed border-border/60 bg-muted/20" aria-hidden />;
   }
+  // Hovering names the jobs behind the count. The grid can't be counted by eye
+  // — a two-day move draws a chip on both days and a busy day hides the rest
+  // behind "+N more" — so the rail carries its own working.
+  const working = `${week.jobCount} ${week.jobCount === 1 ? "job" : "jobs"} this week:\n${week.customers
+    .map((c) => `· ${c}`)
+    .join("\n")}`;
   return (
-    <div className="flex min-h-[92px] flex-col justify-center gap-0.5 rounded-md border border-border bg-muted/40 p-2 text-right">
+    <div
+      title={working}
+      className="flex min-h-[92px] cursor-help flex-col justify-center gap-0.5 rounded-md border border-border bg-muted/40 p-2 text-right"
+    >
       <p className="tabular font-display text-base font-bold leading-none text-foreground">
         {money(week.agreedTotal)}
       </p>
@@ -308,6 +317,19 @@ export function ScheduleAllocationView(props: {
     const d = new Date(`${selectedDate}T00:00:00Z`);
     return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
   });
+
+  // Revenue column on/off. Lives in the URL like the tab above, so the choice
+  // survives a refresh and the view stays linkable — ?revenue=0 hides it.
+  const [showRevenue, setShowRevenue] = useState(() => searchParams.get("revenue") !== "0");
+  const toggleRevenue = () => {
+    const next = !showRevenue;
+    setShowRevenue(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next) params.delete("revenue");
+    else params.set("revenue", "0");
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
 
   // Booking dialogs — the SAME create/view/edit/reschedule stack as the removals
   // diary, so this page is a full workstation, not a read-only dashboard. Booked
@@ -491,7 +513,7 @@ export function ScheduleAllocationView(props: {
     return starts;
   }, [cells]);
   const weekValues = useMemo(() => {
-    if (!showWeekValue) return null;
+    if (!showWeekValue || !showRevenue) return null;
     return buildWeekValues(
       availAppts.map((a) => ({
         id: a.id,
@@ -500,10 +522,11 @@ export function ScheduleAllocationView(props: {
         startDay: apptDays(a)[0] ?? "",
         value: a.value ?? null,
         toCollect: a.toCollect ?? null,
+        customer: a.lead_name,
       })),
       weekRows,
     );
-  }, [showWeekValue, availAppts, weekRows]);
+  }, [showWeekValue, showRevenue, availAppts, weekRows]);
 
   // Soft demand grouped by month + window tier ("Beginning of September" /
   // "Middle of September" / bare "September"; else provisional_date's month;
@@ -649,6 +672,37 @@ export function ScheduleAllocationView(props: {
           >
             Today
           </button>
+          {/* Admins only — nobody else ever gets the column, so nobody else
+              needs the switch. */}
+          {showWeekValue ? (
+            <button
+              type="button"
+              onClick={toggleRevenue}
+              aria-pressed={showRevenue}
+              className={cn(
+                "focus-ring inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-sm font-medium transition-colors",
+                showRevenue
+                  ? "border-mm-red/40 bg-mm-red-tint text-mm-red-deep"
+                  : "border-input bg-card text-mist-500 hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <span
+                className={cn(
+                  "inline-flex h-4 w-7 shrink-0 items-center rounded-pill p-0.5 transition-colors",
+                  showRevenue ? "bg-mm-red" : "bg-mist-300",
+                )}
+                aria-hidden
+              >
+                <span
+                  className={cn(
+                    "size-3 rounded-pill bg-white transition-transform",
+                    showRevenue ? "translate-x-3" : "translate-x-0",
+                  )}
+                />
+              </span>
+              Show revenue
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -730,22 +784,39 @@ export function ScheduleAllocationView(props: {
                             <StatePill state={grade.state} />
                           </div>
 
-                          {jobs.slice(0, 2).map((j) => (
-                            <div
-                              key={j.id}
-                              className={cn(
-                                "flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold",
-                                j.appt_type === "pack" ? "bg-warn-bg text-warn ring-1 ring-inset ring-warn-border" : "bg-foreground text-card",
-                              )}
-                            >
-                              <span className="tabular shrink-0 opacity-70">{startLabel(j)}</span>
-                              <span className="truncate">
-                                {j.appt_type === "pack" ? `Pack · ${j.lead_name ?? "job"}` : (j.lead_name ?? "Move")}
-                              </span>
-                            </div>
-                          ))}
+                          {jobs.slice(0, 2).map((j) => {
+                            // A move spanning several days draws a chip on each
+                            // of them. Without saying so, one job reads as two
+                            // and the week's count looks wrong.
+                            const days = apptDays(j);
+                            const dayIndex = days.indexOf(cell.iso);
+                            const continuation = days.length > 1 && dayIndex > 0;
+                            return (
+                              <div
+                                key={j.id}
+                                title={continuation ? `${j.lead_name ?? "Move"} — day ${dayIndex + 1} of ${days.length}` : undefined}
+                                className={cn(
+                                  "flex items-center gap-1 rounded-[4px] px-1.5 py-0.5 text-[10px] font-semibold",
+                                  j.appt_type === "pack"
+                                    ? "bg-warn-bg text-warn ring-1 ring-inset ring-warn-border"
+                                    : continuation
+                                      ? "bg-foreground/70 text-card"
+                                      : "bg-foreground text-card",
+                                )}
+                              >
+                                <span className="tabular shrink-0 opacity-70">
+                                  {continuation ? `day ${dayIndex + 1}` : startLabel(j)}
+                                </span>
+                                <span className="truncate">
+                                  {j.appt_type === "pack" ? `Pack · ${j.lead_name ?? "job"}` : (j.lead_name ?? "Move")}
+                                </span>
+                              </div>
+                            );
+                          })}
                           {jobs.length > 2 ? (
-                            <span className="text-[10px] text-mist-400">+{jobs.length - 2} more</span>
+                            <span className="text-[10px] text-mist-400">
+                              +{jobs.length - 2} more {jobs.length - 2 === 1 ? "job" : "jobs"}
+                            </span>
                           ) : null}
 
                           <div className="tabular mt-auto flex items-center gap-2 pt-0.5 text-[10px] font-semibold">

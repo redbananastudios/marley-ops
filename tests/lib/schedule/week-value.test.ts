@@ -87,6 +87,28 @@ describe("buildWeekValues — what a week of removals is worth", () => {
     expect(weeks.get("2026-08-10")?.jobCount).toBe(0);
   });
 
+  it("names the jobs behind the count, in date order, so the figure can be checked", () => {
+    // The grid can't be counted by eye (a two-day move draws twice, busy days
+    // hide jobs behind "+N more"), so the rail must be able to show its working.
+    const weeks = buildWeekValues(
+      [
+        job({ id: "a2", leadId: "l2", startDay: "2026-08-07", customer: "Kevin Mc Inerney" }),
+        job({ id: "a1", leadId: "l1", startDay: "2026-08-05", customer: "Brydee Thomas" }),
+        job({ id: "a3", leadId: "l3", startDay: "2026-08-06", customer: null }),
+      ],
+      WEEKS,
+    );
+    expect(weeks.get("2026-08-03")?.customers).toEqual(["Brydee Thomas", "Unnamed job", "Kevin Mc Inerney"]);
+  });
+
+  it("a two-day move contributes ONE name, not one per day", () => {
+    const weeks = buildWeekValues(
+      [job({ id: "a1", leadId: "l1", startDay: "2026-08-05", customer: "Justine Moyle" })],
+      WEEKS,
+    );
+    expect(weeks.get("2026-08-03")?.customers).toEqual(["Justine Moyle"]);
+  });
+
   it("every requested row gets an entry, with its Sunday end day", () => {
     const weeks = buildWeekValues([], WEEKS);
     expect(weeks.get("2026-08-03")).toMatchObject({ startDay: "2026-08-03", endDay: "2026-08-09" });

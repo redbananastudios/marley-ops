@@ -35,6 +35,8 @@ export interface WeekValueJob {
   value: number | null;
   /** Still outstanding on that quote (agreed − what has been paid). */
   toCollect: number | null;
+  /** Customer name, so the rail can SHOW which jobs make up its count. */
+  customer?: string | null;
 }
 
 export interface WeekValue {
@@ -48,6 +50,13 @@ export interface WeekValue {
   unpricedJobs: number;
   agreedTotal: number;
   toCollect: number;
+  /**
+   * The customers behind `jobCount`, in date order. The count cannot be
+   * verified by eye against the grid — a two-day move draws a chip on both its
+   * days, and a busy day collapses to "+N more" — so the rail has to be able
+   * to SHOW its working, or it is just a number to be argued with.
+   */
+  customers: string[];
 }
 
 /** The quote fields the value rules need. */
@@ -122,6 +131,7 @@ export function buildWeekValues(jobs: WeekValueJob[], weekStarts: string[]): Map
       unpricedJobs: 0,
       agreedTotal: 0,
       toCollect: 0,
+      customers: [],
     });
   }
 
@@ -136,10 +146,11 @@ export function buildWeekValues(jobs: WeekValueJob[], weekStarts: string[]): Map
     if (!held || job.startDay < held.startDay) perLead.set(key, job);
   }
 
-  for (const job of perLead.values()) {
+  for (const job of [...perLead.values()].sort((a, b) => a.startDay.localeCompare(b.startDay))) {
     const week = out.get(mondayOf(job.startDay));
     if (!week) continue; // outside the drawn rows
     week.jobCount += 1;
+    week.customers.push(job.customer?.trim() || "Unnamed job");
     if (job.value == null) {
       week.unpricedJobs += 1;
       continue;

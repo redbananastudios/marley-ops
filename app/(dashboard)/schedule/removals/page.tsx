@@ -2,13 +2,6 @@ import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { apptDays } from "@/lib/job-board";
-import {
-  jobValueOf,
-  pickCurrentQuotes,
-  type ValuableQuote,
-  type WeekValueJob,
-} from "@/lib/schedule/week-value";
 import { PageHeader } from "@/components/page-header";
 import {
   SchedulerView,
@@ -30,13 +23,7 @@ export default async function RemovalsSchedulePage({
 
   // Fetch removals + surveys both: surveys can be overlaid via the "Show surveys"
   // toggle so a survey-vs-move clash is visible without a separate Overlap page.
-  // Job values on the diary are admin-only, matching /schedule and /payments.
-  const { data: viewerProfile } = user
-    ? await sb.from("profiles").select("role").eq("id", user.id).single()
-    : { data: null };
-  const isAdmin = viewerProfile?.role === "admin";
-
-  const [appts, leads, quotes, { data: estimators }] = await Promise.all([
+  const [appts, leads, { data: estimators }] = await Promise.all([
     fetchAllRows((from, to) =>
       sb
         .from("appointments")
@@ -49,29 +36,12 @@ export default async function RemovalsSchedulePage({
     fetchAllRows((from, to) =>
       sb
         .from("leads")
-        .select("id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign,balance_paid_at")
+        .select("id,name,phone,email,from_postcode,from_address,to_postcode,to_address,property_size,notes,entry_channel,gclid,gbraid,wbraid,fbclid,utm_source,utm_medium,utm_campaign")
         .order("created_at", { ascending: false })
         .order("id", { ascending: true })
         .range(from, to),
       { strict: true },
     ),
-    // Accepted quotes carry what each booked job is worth (admin week figure).
-    // strict + deterministic paging like its siblings: a partial read here
-    // would make the week figures silently LOW, which is worse than absent.
-    isAdmin
-      ? fetchAllRows(
-          (from, to) =>
-            sb
-              .from("quotes")
-              .select(
-                "id, lead_id, accepted_at, booking_cancelled_at, agreed_price, grand_total, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at",
-              )
-              .eq("status", "accepted")
-              .order("id", { ascending: true })
-              .range(from, to),
-          { strict: true },
-        )
-      : Promise.resolve([]),
     // Estimator picker: office roles only (see the surveys page for why).
     sb
       .from("profiles")
@@ -89,34 +59,12 @@ export default async function RemovalsSchedulePage({
     if (a.appt_type === "survey" && a.status !== "cancelled" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
       surveyEst.set(a.lead_id, a.estimator_id);
   }
-  const leadOptions = leads.map(({ notes, balance_paid_at: _balancePaid, ...l }) => ({
+  const leadOptions = leads.map(({ notes, ...l }) => ({
     ...l,
     lead_notes: notes,
     source: classifySource(l as unknown as LeadLite),
     surveyEstimatorId: surveyEst.get(l.id) ?? null,
   }));
-
-  // Each removal's value, for the month view's per-week figure. Same rules as
-  // /schedule (shared helpers), so the two calendars can't disagree.
-  const settledByLead = new Map(leads.map((l) => [l.id, Boolean(l.balance_paid_at)]));
-  const currentQuotes = pickCurrentQuotes(quotes as ValuableQuote[]);
-  const weekJobs: WeekValueJob[] = isAdmin
-    ? appts
-        .filter((a) => a.appt_type === "removal" && a.status !== "cancelled" && a.starts_at)
-        .map((a) => {
-          const q = a.lead_id ? currentQuotes.get(a.lead_id) : undefined;
-          const v = q ? jobValueOf(q, settledByLead.get(a.lead_id as string) ?? false) : { value: null, toCollect: null };
-          return {
-            id: a.id,
-            leadId: a.lead_id,
-            apptType: a.appt_type,
-            startDay: apptDays(a)[0] ?? "",
-            value: v.value,
-            toCollect: v.toCollect,
-          };
-        })
-        .filter((j) => j.startDay)
-    : [];
 
   // Booked from a confirmed lead ("Book removal") — prefill the dialog with its address.
   let presetLocation: string | null = null;
@@ -141,7 +89,6 @@ export default async function RemovalsSchedulePage({
         presetLeadId={leadId ?? null}
         presetLocation={presetLocation}
         baseLocation={baseLocation}
-        weekJobs={weekJobs}
       />
     </main>
   );
