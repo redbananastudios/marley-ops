@@ -55,7 +55,10 @@ export interface JobSheetData {
   items: { label: string; qty: number }[];
   accessNotes: string;
   largeItemsNotes: string;
-  jobNotes: string; // internal quote notes
+  jobNotes: string; // internal quote notes (falls back to the lead's enquiry notes)
+  /** Quote notes only — no lead fallback. For surfaces that render enquiry
+   *  notes separately and must not duplicate them (diary job summary). */
+  quoteNotes?: string;
   /** Cubic-survey summary — "Volume: 812 ft³ (≈2 Lutons) · 3 to dismantle". Price-free. */
   volumeLine?: string | null;
   /** Survey photos (data URIs) — rendered on their own page when present. */

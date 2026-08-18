@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleJobSheetData, vehicleLabelOf } from "@/lib/job-sheet-data";
+import { accessLine, assembleJobSheetData, vehicleLabelOf } from "@/lib/job-sheet-data";
 import { buildJobSheetDocDef } from "@/lib/job-sheet-docdef";
 import { defaultQuoteValues } from "@/lib/quote/form-types";
 
@@ -82,6 +82,37 @@ describe("assembleJobSheetData", () => {
     expect(d.items).toEqual([]);
     expect(d.jobNotes).toBe("Gate code 4321"); // lead notes fill in
     expect(d.to.postcode).toBe("BH1 4DQ");
+  });
+
+  it("quoteNotes is quote-only — never the lead fallback jobNotes carries", () => {
+    // The diary summary shows enquiry notes separately, so a lead note leaking
+    // in under a "Quote notes" label would be the same two-hats bug again.
+    const quote = { quote_ref: "MM-260710-001", moving_date: "2026-07-15", state_blob: blob() };
+    expect(assembleJobSheetData(appt, lead, quote, [], []).quoteNotes).toBe("Piano in the lounge");
+    const bare = assembleJobSheetData(appt, lead, null, [], []);
+    expect(bare.jobNotes).toBe("Gate code 4321");
+    expect(bare.quoteNotes).toBe("");
+  });
+});
+
+describe("accessLine", () => {
+  it("reads a flat above ground with lift state and carry distance", () => {
+    expect(accessLine({ address: "", postcode: "", propertyType: "flat", floor: "2nd", lift: "no", accessM: 25 })).toBe(
+      "Flat · 2nd floor · no lift · ~25m carry",
+    );
+    expect(accessLine({ address: "", postcode: "", propertyType: "flat", floor: "1st", lift: "yes", accessM: 0 })).toBe(
+      "Flat · 1st floor · lift",
+    );
+  });
+
+  it("a ground-floor property never mentions the lift", () => {
+    expect(accessLine({ address: "", postcode: "", propertyType: "house", floor: "ground", lift: "no", accessM: 5 })).toBe(
+      "House · ground floor · ~5m carry",
+    );
+  });
+
+  it("no access details at all reads as empty, not a bare carry line", () => {
+    expect(accessLine({ address: "", postcode: "", propertyType: "", floor: "ground", lift: "no", accessM: 0 })).toBe("");
   });
 });
 

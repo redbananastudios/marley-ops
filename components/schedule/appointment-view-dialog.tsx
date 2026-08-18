@@ -25,6 +25,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { CommsDialog } from "@/components/comms/comms-dialog";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
+import { JobSummary } from "@/components/schedule/job-summary";
 import { updateAppointment } from "@/app/(dashboard)/schedule/actions";
 import { liveQuoteForLead } from "@/app/(dashboard)/quotes/actions";
 import { LeadContextPanels, type EditTarget, type LeadOption } from "./appointment-dialog";
@@ -275,6 +276,12 @@ export function AppointmentViewDialog({
 
           {lead ? <LeadContextPanels lead={lead} /> : null}
 
+          {/* The move itself — what the crew bring, who's on it, access at both
+              ends. Removals + packing days only; a survey has no job to brief. */}
+          {target.apptType !== "survey" ? (
+            <JobSummary appointmentId={target.id} apptNotes={target.notes} open={open} />
+          ) : null}
+
           {/* map left (75%), action stack right (25%) */}
           <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-[3fr_1fr]">
             {/* route map — legs load on demand and stay cached once rendered */}
@@ -394,7 +401,15 @@ export function AppointmentViewDialog({
             </div>
           </div>
 
-          {target.notes ? <p className="text-sm text-mist-500">{target.notes}</p> : null}
+          {/* Survey visits keep their notes here (removals/packs carry them in
+              the job summary above, labelled) — named so they can't be read as
+              the lead's enquiry notes. */}
+          {target.apptType === "survey" && target.notes ? (
+            <p className="text-sm text-mist-500">
+              <span className="font-semibold text-foreground">Job notes: </span>
+              {target.notes}
+            </p>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>

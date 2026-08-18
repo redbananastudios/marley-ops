@@ -37,6 +37,21 @@ export function vehicleLabelOf(v: QuoteFormValues): string {
   return parts.join(" + ");
 }
 
+/** "Flat · 2nd floor · no lift · ~25m carry" — the one-line access read the
+ *  diary job summary shows per end. Lift only matters off the ground floor. */
+export function accessLine(a: JobSheetAddress): string {
+  const parts: string[] = [];
+  if (a.propertyType) parts.push(a.propertyType.charAt(0).toUpperCase() + a.propertyType.slice(1));
+  if (a.floor && a.floor !== "ground") {
+    parts.push(`${a.floor} floor`);
+    parts.push(a.lift === "yes" ? "lift" : "no lift");
+  } else if (a.propertyType) {
+    parts.push("ground floor");
+  }
+  if (a.accessM > 0) parts.push(`~${a.accessM}m carry`);
+  return parts.join(" · ");
+}
+
 const PACK_LABELS: Record<string, string> = {
   owner: "Owner packs",
   fragile: "Fragile-only pack",
@@ -90,5 +105,9 @@ export function assembleJobSheetData(
     accessNotes: q?.survey.accessNotes?.trim() ?? "",
     largeItemsNotes: q?.survey.largeItemsNotes?.trim() ?? "",
     jobNotes: (q?.review.quoteNotes || lead?.notes || "").trim(),
+    // Quote notes WITHOUT the lead fallback jobNotes carries — surfaces that
+    // already show the lead's enquiry notes separately (the diary job summary)
+    // must not repeat them under a "quote" label.
+    quoteNotes: q?.review.quoteNotes?.trim() ?? "",
   };
 }

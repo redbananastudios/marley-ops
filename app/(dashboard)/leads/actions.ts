@@ -64,6 +64,24 @@ async function upsertLeadWindow(
   return { ok: !error };
 }
 
+/** Update ONLY a lead's enquiry notes — the diary dialogs' inline editor.
+ *  Deliberately touches nothing else: the full edit form owns the rest, and a
+ *  notes-only save must never wipe fields the caller never loaded. */
+export async function updateLeadNotesAction(leadId: string, notes: string) {
+  if (!z.string().uuid().safeParse(leadId).success) return { ok: false as const, error: "Invalid lead" };
+  const { sb } = await actor();
+  const { error } = await sb
+    .from("leads")
+    .update({ notes: notes.trim() || null })
+    .eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+  revalidatePath("/leads");
+  revalidatePath("/schedule");
+  revalidatePath("/schedule/removals");
+  revalidatePath("/schedule/surveys");
+  return { ok: true as const };
+}
+
 /** Live dedupe check for the Add-lead form. Read-only. */
 export async function checkDuplicateAction(input: { phone?: string; email?: string }) {
   const { sb } = await actor();

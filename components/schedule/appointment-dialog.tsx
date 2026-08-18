@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2, Phone, Mail, User, Home, ArrowRight, StickyNote } from "lucide-react";
+import { Loader2, Trash2, Phone, Mail, User, Home, ArrowRight, StickyNote, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { reportSurveySend, duplicateWarning } from "@/lib/comms/survey-send-report";
 import { cn } from "@/lib/utils";
@@ -46,6 +46,7 @@ import {
   rescheduleAppointment,
   setPackDayAction,
 } from "@/app/(dashboard)/schedule/actions";
+import { updateLeadNotesAction } from "@/app/(dashboard)/leads/actions";
 import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 
 export type ApptType = "survey" | "removal" | "pack";
@@ -158,7 +159,39 @@ function AddrBlock({ lines }: { lines: string[] }) {
  *  move is. Tap-to-call / tap-to-email (44px targets — this runs on phones/tablets).
  *  Shared with the view-first appointment modal. */
 export function LeadContextPanels({ lead }: { lead: LeadOption }) {
+  const router = useRouter();
   const [emailOpen, setEmailOpen] = useState(false);
+  // Inline enquiry-notes editor. These notes live on the LEAD (they follow the
+  // customer everywhere), which is why the appointment edit form can't touch
+  // them — before this editor existed, a stale note on the diary card could
+  // only be cleared by going to /leads, and deleting the JOB notes looked like
+  // it should have done it (Peter, 2026-08-18: the two fields both said "Notes").
+  // Editor + override state is KEYED by lead id (derived, no reset effect): the
+  // panels component is reused as the dialog moves between appointments, and a
+  // saved override must never follow it onto a different lead's card.
+  const [editingFor, setEditingFor] = useState<string | null>(null);
+  const [notesDraft, setNotesDraft] = useState("");
+  const [notesOverride, setNotesOverride] = useState<{ leadId: string; value: string | null } | null>(null);
+  const [savingNotes, setSavingNotes] = useState(false);
+  const editingNotes = editingFor === lead.id;
+  const shownNotes = notesOverride?.leadId === lead.id ? notesOverride.value : lead.lead_notes ?? null;
+
+  async function saveLeadNotes() {
+    setSavingNotes(true);
+    try {
+      const r = await updateLeadNotesAction(lead.id, notesDraft);
+      if (!r.ok) {
+        toast.error(r.error || "Could not save the enquiry notes.");
+        return;
+      }
+      setNotesOverride({ leadId: lead.id, value: notesDraft.trim() || null });
+      setEditingFor(null);
+      toast.success("Enquiry notes saved.");
+      router.refresh();
+    } finally {
+      setSavingNotes(false);
+    }
+  }
   // A bare client anchors on client_id; a real lead on lead_id (so the email
   // logs against the right record + reply routing).
   const emailLeadId = lead.isClient ? undefined : lead.id;
@@ -233,16 +266,52 @@ export function LeadContextPanels({ lead }: { lead: LeadOption }) {
         {lead.property_size ? <p className="mt-1.5 text-xs font-medium text-[#16a34a]">{lead.property_size}</p> : null}
       </div>
 
-      {/* Notes */}
+      {/* Enquiry notes — the LEAD's notes, distinct from the diary entry's own
+          "Job notes". Editable in place so a stale note can be cleared from the
+          card it appears on. */}
       <div className="rounded-md border border-border bg-muted/30 p-3">
-        <p className="mb-2 flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
-          <StickyNote className="size-3.5" strokeWidth={2} />
-          Notes
-        </p>
-        {lead.lead_notes ? (
-          <p className="max-h-28 overflow-y-auto text-sm whitespace-pre-wrap text-foreground">{lead.lead_notes}</p>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <p className="flex items-center gap-1.5 text-[11px] font-bold tracking-[0.14em] text-mist-400 uppercase">
+            <StickyNote className="size-3.5" strokeWidth={2} />
+            Enquiry notes
+          </p>
+          {!lead.isClient && !editingNotes ? (
+            <button
+              type="button"
+              onClick={() => {
+                setNotesDraft(shownNotes ?? "");
+                setEditingFor(lead.id);
+              }}
+              aria-label="Edit enquiry notes"
+              className="focus-ring -my-1 rounded-md p-1.5 text-mist-400 hover:bg-muted hover:text-foreground"
+            >
+              <Pencil className="size-3.5" strokeWidth={1.75} />
+            </button>
+          ) : null}
+        </div>
+        {editingNotes ? (
+          <div className="grid gap-2">
+            <textarea
+              value={notesDraft}
+              onChange={(e) => setNotesDraft(e.target.value)}
+              rows={3}
+              autoFocus
+              className="border-input focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border bg-card px-2.5 py-1.5 text-sm outline-none focus-visible:ring-[3px]"
+            />
+            <div className="flex items-center justify-end gap-1.5">
+              <Button type="button" size="sm" variant="ghost" onClick={() => setEditingFor(null)} disabled={savingNotes} className="h-8">
+                Cancel
+              </Button>
+              <Button type="button" size="sm" onClick={saveLeadNotes} disabled={savingNotes} className="h-8">
+                {savingNotes ? <Loader2 className="size-3.5 animate-spin" strokeWidth={1.75} /> : null}
+                Save
+              </Button>
+            </div>
+          </div>
+        ) : shownNotes ? (
+          <p className="max-h-28 overflow-y-auto text-sm whitespace-pre-wrap text-foreground">{shownNotes}</p>
         ) : (
-          <p className="text-sm text-mist-400">No notes on the lead.</p>
+          <p className="text-sm text-mist-400">No notes on the enquiry.</p>
         )}
       </div>
     </div>
@@ -719,15 +788,18 @@ export function AppointmentDialog({
           ) : null}
 
           <div className="grid gap-2">
-            <Label htmlFor="appt-notes">Notes</Label>
+            <Label htmlFor="appt-notes">Job notes</Label>
             <textarea
               id="appt-notes"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
               className="border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]"
-              placeholder="Anything the crew needs to know"
+              placeholder="Anything the crew needs to know about this visit"
             />
+            <p className="-mt-1 text-xs text-mist-400">
+              These belong to this diary entry. The enquiry notes above follow the customer — edit them with the pencil on their panel.
+            </p>
           </div>
 
           {/* Whether we write to the customer at all. Shown for surveys because
