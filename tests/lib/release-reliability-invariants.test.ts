@@ -4,12 +4,16 @@ import { describe, expect, it } from "vitest";
 const read = (path: string) => readFileSync(path, "utf8");
 
 describe("final-release reliability invariants", () => {
-  it("paginates both growing removal-calendar datasets deterministically", () => {
+  it("paginates every growing removal-calendar dataset deterministically", () => {
+    // Three now: appointments, leads, and the accepted quotes behind the
+    // month view's per-week value. All three grow forever with trading, so all
+    // three must page deterministically AND strictly — a partial read of any
+    // of them shows a calendar that looks complete while being short.
     const source = read("app/(dashboard)/schedule/removals/page.tsx");
-    expect(source.match(/fetchAllRows\(/g)).toHaveLength(2);
-    expect(source.match(/\.range\(from, to\)/g)).toHaveLength(2);
-    expect(source.match(/\.order\("id", \{ ascending: true \}\)/g)).toHaveLength(2);
-    expect(source.match(/\{ strict: true \}/g)).toHaveLength(2);
+    expect(source.match(/fetchAllRows\(/g)).toHaveLength(3);
+    expect(source.match(/\.range\(from, to\)/g)).toHaveLength(3);
+    expect(source.match(/\.order\("id", \{ ascending: true \}\)/g)).toHaveLength(3);
+    expect(source.match(/\{ strict: true \}/g)).toHaveLength(3);
   });
 
   it("claims communications and inbound webhooks before provider side effects", () => {

@@ -38,6 +38,8 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { rescheduleAppointment } from "@/app/(dashboard)/schedule/actions";
+import { mondayOf } from "@/lib/payments/upcoming";
+import { buildWeekValues, type WeekValueJob } from "@/lib/schedule/week-value";
 import {
   AppointmentDialog,
   type ApptType,
@@ -102,6 +104,7 @@ export function SchedulerView({
   presetLocation,
   openOnLoad = false,
   baseLocation,
+  weekJobs,
 }: {
   view: SchedulerKind;
   events: SchedulerEvent[];
@@ -115,6 +118,9 @@ export function SchedulerView({
   openOnLoad?: boolean;
   /** business base address — origin for the view modal's route map */
   baseLocation: string;
+  /** Booked removals + their value, for the month view's per-week figure.
+   *  Empty/absent for non-admins, who see the diary exactly as before. */
+  weekJobs?: WeekValueJob[];
 }) {
   const calRef = useRef<FullCalendar | null>(null);
   const router = useRouter();
@@ -174,6 +180,37 @@ export function SchedulerView({
     if (view === "removal") return "dayGridMonth";
     return "timeGridWeek"; // surveys
   }, [view, isNarrow]);
+
+  // What each Mon–Sun row of the month grid is worth. Keyed by Monday and
+  // derived from the jobs themselves rather than a fixed month, because
+  // FullCalendar navigates months client-side — precomputing one month's rows
+  // would leave every other month blank.
+  const weekValues = useMemo(() => {
+    if (!weekJobs?.length) return null;
+    const starts = [...new Set(weekJobs.map((j) => mondayOf(j.startDay)))];
+    return buildWeekValues(weekJobs, starts);
+  }, [weekJobs]);
+
+  /** FullCalendar renders this in the week-number slot (top-left of each month
+   *  row — the only per-week hook the library exposes; a true trailing column
+   *  would mean patching its internals). Blank weeks show nothing. */
+  const renderWeekNumber = useCallback(
+    (arg: { date: Date }) => {
+      const ukDay = arg.date.toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+      const week = weekValues?.get(mondayOf(ukDay));
+      if (!week || week.jobCount === 0) return <span className="text-[10px] text-mist-400" />;
+      return (
+        <span className="tabular text-[11px] font-bold text-foreground">
+          £{Math.round(week.agreedTotal).toLocaleString("en-GB")}
+          <span className="ml-1 font-medium text-mist-400">
+            {week.jobCount}
+            {week.unpricedJobs > 0 ? "*" : ""}
+          </span>
+        </span>
+      );
+    },
+    [weekValues],
+  );
 
   // Arrived from a lead's "Book survey" — pop the create dialog straight away.
   // Cancelled appointments leave the diary entirely (the lead keeps the history).
@@ -505,6 +542,8 @@ export function SchedulerView({
           expandRows
           nowIndicator
           firstDay={1}
+          weekNumbers={Boolean(weekValues)}
+          weekNumberContent={weekValues ? renderWeekNumber : undefined}
           weekends
           slotMinTime="07:00:00"
           slotMaxTime="20:00:00"

@@ -4,6 +4,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { crewRequired } from "@/lib/job-board";
 import { packRequirement } from "@/lib/schedule/pack-days";
 import { MIN_BOOKED_REQUIREMENT } from "@/lib/schedule/capacity";
+import { jobValueOf, pickCurrentQuotes } from "@/lib/schedule/week-value";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -40,6 +41,12 @@ export default async function SchedulePage({
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  // Job values are admin-only, matching /payments Due + Upcoming — /schedule is
+  // an estimator surface too, and it has never shown money before.
+  const { data: viewerProfile } = user
+    ? await supabase.from("profiles").select("role").eq("id", user.id).single()
+    : { data: null };
+  const isAdmin = viewerProfile?.role === "admin";
 
   const [appts, leads, quotes, { data: staff }, { data: vehicles }, assignments, unavailability, staffAvailability, bookingDetails, { data: estimators }] =
     await Promise.all([
@@ -55,7 +62,7 @@ export default async function SchedulePage({
         supabase
           .from("leads")
           .select(
-            "id, name, status, phone, email, from_postcode, from_address, to_postcode, to_address, property_size, notes, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+            "id, name, status, phone, email, from_postcode, from_address, to_postcode, to_address, property_size, notes, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign, balance_paid_at",
           )
           .order("id")
           .range(f, t),
@@ -63,7 +70,7 @@ export default async function SchedulePage({
       fetchAllRows((f, t) =>
         supabase
           .from("quotes")
-          .select("id, lead_id, status, source, breakdown, deposit_paid_at, commitment_paid_at, commitment_invoice_amount, accepted_at, booking_cancelled_at, moving_date")
+          .select("id, lead_id, status, source, breakdown, deposit_paid_at, deposit_amount, commitment_paid_at, commitment_invoice_amount, accepted_at, booking_cancelled_at, moving_date, agreed_price, grand_total")
           .eq("status", "accepted")
           .order("id")
           .range(f, t),
@@ -110,7 +117,7 @@ export default async function SchedulePage({
     if (a.appt_type === "survey" && a.lead_id && a.estimator_id && !surveyEst.has(a.lead_id))
       surveyEst.set(a.lead_id, a.estimator_id);
   }
-  const leadOptions = leads.map(({ notes, status: _status, ...l }) => ({
+  const leadOptions = leads.map(({ notes, status: _status, balance_paid_at: _balancePaid, ...l }) => ({
     ...l,
     lead_notes: notes,
     source: classifySource(l as unknown as LeadLite),
@@ -125,15 +132,12 @@ export default async function SchedulePage({
   // rule /bookings uses.
   const reqByLead = new Map<string, { vans: number; men: number }>();
   const payByLead = new Map<string, { deposit: boolean; commitment: boolean; commitmentApplies: boolean }>();
+  /** What each booked job is worth, for the month calendar's week rail. */
+  const valueByLead = new Map<string, { value: number | null; toCollect: number | null }>();
   const legacyLeadIds = new Set<string>();
-  const currentQuoteByLead = new Map<string, (typeof quotes)[number]>();
-  for (const q of quotes) {
-    if (!q.lead_id || q.booking_cancelled_at) continue;
-    const held = currentQuoteByLead.get(q.lead_id);
-    if (!held || (q.accepted_at ?? "").localeCompare(held.accepted_at ?? "") > 0) {
-      currentQuoteByLead.set(q.lead_id, q);
-    }
-  }
+  // Shared with /schedule/removals so the two calendars can never disagree
+  // about which quote a booked job's figures come from.
+  const currentQuoteByLead = pickCurrentQuotes(quotes);
   for (const [leadId, q] of currentQuoteByLead) {
     const req = crewRequired((q.breakdown ?? null) as Partial<QuoteBreakdown> | null);
     if (req) reqByLead.set(leadId, req);
@@ -147,6 +151,7 @@ export default async function SchedulePage({
       // fully-paid jobs and sent the office chasing money never asked for.
       commitmentApplies: Number(q.commitment_invoice_amount ?? 0) > 0,
     });
+    valueByLead.set(leadId, jobValueOf(q, Boolean(leadById.get(leadId)?.balance_paid_at)));
     if (q.source === "imve") legacyLeadIds.add(leadId);
   }
 
@@ -238,6 +243,8 @@ export default async function SchedulePage({
       commitment: r.lead_id ? (payByLead.get(r.lead_id)?.commitment ?? false) : false,
       commitmentApplies: r.lead_id ? (payByLead.get(r.lead_id)?.commitmentApplies ?? false) : false,
       legacy: r.lead_id ? legacyLeadIds.has(r.lead_id) : false,
+      value: r.lead_id ? (valueByLead.get(r.lead_id)?.value ?? null) : null,
+      toCollect: r.lead_id ? (valueByLead.get(r.lead_id)?.toCollect ?? null) : null,
       // For the view/edit/reschedule dialogs (mirrors the removals diary payload).
       title: raw?.title ?? null,
       status: raw?.status ?? null,
@@ -284,6 +291,7 @@ export default async function SchedulePage({
       <PageHeader eyebrow="Schedule" title="Schedule & Allocation" />
       <ScheduleAllocationView
         availAppts={availAppts}
+        showWeekValue={isAdmin}
         softDemand={softDemand}
         selectedDate={selectedDate}
         today={ukToday}

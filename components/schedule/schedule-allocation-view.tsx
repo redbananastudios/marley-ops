@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { cleanApproxWindow, windowTierLabel, WINDOW_TIER_LABELS } from "@/lib/bookings/booking-details";
 import { apptDays, apptWindow } from "@/lib/job-board";
 import { dayCapacityState, sumRequired, usableFleetForDay, type CapacityState } from "@/lib/schedule/capacity";
+import { buildWeekValues, type WeekValue } from "@/lib/schedule/week-value";
 import { type AvailabilityRow } from "@/lib/staff/availability";
 import { type UnavailabilityWindow } from "@/lib/fleet/availability";
 import {
@@ -76,6 +77,12 @@ export interface AvailAppt {
   commitmentApplies: boolean;
   /** Imported iMVE booking — old-terms job, the 25% commitment never applies. */
   legacy: boolean;
+  /** Agreed value of this job, for the month view's week rail. Null when the
+   *  booking carries no priceable quote — the rail reports those separately
+   *  rather than counting them as £0. Admin-only; null for everyone else. */
+  value?: number | null;
+  /** Still outstanding on the job (0 once the balance is settled). */
+  toCollect?: number | null;
   // For the view/edit/reschedule dialogs (same payload the removals diary carries).
   title: string | null;
   status: string | null;
@@ -126,6 +133,47 @@ function startLabel(a: AvailAppt): string {
     hour12: false,
     timeZone: "Europe/London",
   });
+}
+
+/** 7 day columns + the week rail. One constant so the header row and every
+ *  week row are guaranteed to line up. */
+const GRID_COLS_WITH_RAIL = "grid-cols-[repeat(7,minmax(0,1fr))_104px]";
+
+const money = (n: number): string =>
+  "£" + Math.round(n).toLocaleString("en-GB");
+
+/**
+ * What this week of removals is worth, beside the week it describes. Headline
+ * is the agreed value of the jobs booked in the row; "to collect" appears only
+ * when something is still owed. A week with nothing booked stays blank rather
+ * than reading "£0" — an empty diary is not a zero-pound week, and printing
+ * £0 six times makes the rail noise instead of signal.
+ */
+function WeekRail({ week }: { week?: WeekValue }): React.JSX.Element {
+  if (!week || week.jobCount === 0) {
+    return <div className="min-h-[92px] rounded-md border border-dashed border-border/60 bg-muted/20" aria-hidden />;
+  }
+  return (
+    <div className="flex min-h-[92px] flex-col justify-center gap-0.5 rounded-md border border-border bg-muted/40 p-2 text-right">
+      <p className="tabular font-display text-base font-bold leading-none text-foreground">
+        {money(week.agreedTotal)}
+      </p>
+      <p className="text-[10px] font-semibold text-mist-500">
+        {week.jobCount} {week.jobCount === 1 ? "job" : "jobs"}
+      </p>
+      {week.toCollect > 0 ? (
+        <p className="tabular text-[10px] text-mist-400">{money(week.toCollect)} to collect</p>
+      ) : null}
+      {/* Says so rather than quietly under-reporting: an unpriced booking (a
+          legacy import, or a diary block with no quote) is real work whose
+          value is not in the figure above. */}
+      {week.unpricedJobs > 0 ? (
+        <p className="text-[10px] font-medium text-warn">
+          {week.unpricedJobs} not priced
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /* ── capacity-state presentation ──────────────────────────────────────────── */
@@ -225,6 +273,8 @@ function Estimate({ vans, crew }: { vans: number | null; crew: number | null }):
 
 export function ScheduleAllocationView(props: {
   availAppts: AvailAppt[];
+  /** Show the month calendar's week-value rail (admin only). */
+  showWeekValue?: boolean;
   softDemand: SoftDemandItem[];
   selectedDate: string; // YYYY-MM-DD
   today: string; // YYYY-MM-DD
@@ -244,7 +294,7 @@ export function ScheduleAllocationView(props: {
     today: string;
   };
 }): React.JSX.Element {
-  const { availAppts, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
+  const { availAppts, showWeekValue = false, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -432,6 +482,29 @@ export function ScheduleAllocationView(props: {
     });
   }, [monthCursor]);
 
+  // The six Mon–Sun rows the grid draws, and what each is worth. Weeks come
+  // from the drawn cells (not the month), so the rail always describes the row
+  // beside it — including its leading/trailing days from the next month along.
+  const weekRows = useMemo(() => {
+    const starts: string[] = [];
+    for (let w = 0; w < 6; w++) starts.push(cells[w * 7].iso);
+    return starts;
+  }, [cells]);
+  const weekValues = useMemo(() => {
+    if (!showWeekValue) return null;
+    return buildWeekValues(
+      availAppts.map((a) => ({
+        id: a.id,
+        leadId: a.lead_id,
+        apptType: a.appt_type,
+        startDay: apptDays(a)[0] ?? "",
+        value: a.value ?? null,
+        toCollect: a.toCollect ?? null,
+      })),
+      weekRows,
+    );
+  }, [showWeekValue, availAppts, weekRows]);
+
   // Soft demand grouped by month + window tier ("Beginning of September" /
   // "Middle of September" / bare "September"; else provisional_date's month;
   // else "No date yet"). Tier order inside a month: Beginning → Middle → End
@@ -594,16 +667,27 @@ export function ScheduleAllocationView(props: {
           <div className="flex min-w-0 flex-col gap-4">
             <div className="rounded-lg border border-border bg-card p-2.5">
               <div className="overflow-x-auto">
-                <div className="min-w-[560px]">
-                  <div className="mb-1.5 grid grid-cols-7 gap-1.5">
+                <div className={weekValues ? "min-w-[672px]" : "min-w-[560px]"}>
+                  <div className={cn("mb-1.5 grid gap-1.5", weekValues ? GRID_COLS_WITH_RAIL : "grid-cols-7")}>
                     {DOW.map((d) => (
                       <div key={d} className="text-center text-[10px] font-bold uppercase tracking-wide text-mist-400">
                         {d}
                       </div>
                     ))}
+                    {weekValues ? (
+                      <div className="text-center text-[10px] font-bold uppercase tracking-wide text-mist-400">
+                        Week
+                      </div>
+                    ) : null}
                   </div>
-                  <div className="grid grid-cols-7 gap-1.5">
-                    {cells.map((cell) => {
+                  {/* One grid PER WEEK so each row can carry a trailing rail —
+                      the 42 cells used to be a single 7-column grid where a
+                      "week" was only an implicit CSS wrap with no element to
+                      hang anything off. */}
+                  <div className="flex flex-col gap-1.5">
+                    {weekRows.map((weekStart, w) => (
+                      <div key={weekStart} className={cn("grid gap-1.5", weekValues ? GRID_COLS_WITH_RAIL : "grid-cols-7")}>
+                        {cells.slice(w * 7, w * 7 + 7).map((cell) => {
                       if (!cell.inMonth)
                         return (
                           <div
@@ -686,7 +770,10 @@ export function ScheduleAllocationView(props: {
                           </div>
                         </button>
                       );
-                    })}
+                        })}
+                        {weekValues ? <WeekRail week={weekValues.get(weekStart)} /> : null}
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
