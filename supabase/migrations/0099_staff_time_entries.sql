@@ -125,6 +125,16 @@ grant insert (staff_id, work_date, started_at, ended_at, expense_amount, expense
 grant update (staff_id, work_date, started_at, ended_at, expense_amount, expense_note)
   on public.staff_time_entries to authenticated;
 
+-- Private receipt-photo bucket for the SUPABASE storage driver (dev fallback /
+-- staging while its R2 bucket is unprovisioned; the s3 driver treats the name
+-- as a key prefix and needs none of this). Mirror of job-media (0050): staff
+-- capture + view, admin delete.
+insert into storage.buckets (id, name, public) values ('expense-receipts','expense-receipts', false)
+  on conflict (id) do nothing;
+create policy expense_receipts_obj_read   on storage.objects for select using (bucket_id = 'expense-receipts' and is_staff());
+create policy expense_receipts_obj_write  on storage.objects for insert with check (bucket_id = 'expense-receipts' and is_staff());
+create policy expense_receipts_obj_delete on storage.objects for delete using (bucket_id = 'expense-receipts' and is_admin());
+
 -- Expense repayment lines on the weekly contractor invoice. Append to the FULL
 -- existing source list (0064's), never the original 0056 one — dropping any
 -- live value would silently un-support existing rows.
