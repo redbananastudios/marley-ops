@@ -3,6 +3,7 @@ import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { runCommsRetry, escalateUnretryableComms, sweepStrandedQueuedComms } from "@/lib/comms/retry-worker";
+import { sweepUnemailedReceipts } from "@/lib/staff/receipts";
 
 /**
  * Comms-retry worker (cron): re-drives any customer email/SMS whose provider
@@ -30,7 +31,10 @@ export async function GET(req: Request) {
     // Runs LAST so anything it hands back as 'failed' is picked up by the next
     // tick's retry sweep rather than being re-driven inside this one.
     const { requeued } = await sweepStrandedQueuedComms(sb);
-    return { ...retry, stranded, requeued };
+    // Expense receipts whose emailed stamp never landed — re-send (content-hash
+    // dedupe makes an already-delivered one a stamp-only no-op).
+    const receipts = await sweepUnemailedReceipts(sb);
+    return { ...retry, stranded, requeued, ...receipts };
   });
   return NextResponse.json(
     { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },

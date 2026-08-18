@@ -8,12 +8,13 @@ import { getSessionProfile } from "@/lib/auth";
 import {
   computeLineAmount,
   MAX_LINE_AMOUNT,
-  seedLinesFromDays,
+  earningsTotal,
   guaranteeTopUp,
   round2,
   DEFAULT_DAY_HOURS,
   type SeedDay,
 } from "@/lib/staff/statements";
+import { seedLinesFromWork, type DayTimeEntry } from "@/lib/staff/time-entries";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
 import { hasSignedCurrentAgreement } from "@/lib/contractor/status";
 
@@ -63,8 +64,9 @@ async function meAsStaff() {
   const weeklyGuarantee = pay?.weekly_guarantee == null ? null : Number(pay.weekly_guarantee);
 
   // No pay basis set → block invoicing rather than let them post silent £0 lines
-  // (hours × a blank rate = £0). The office must set a rate (or a guarantee) first.
-  if (hourlyRate == null && weeklyGuarantee == null) {
+  // (hours × a blank rate = £0). A rate of £0 is the same trap wearing a
+  // different value — only a positive rate or a positive guarantee counts.
+  if (!(hourlyRate != null && hourlyRate > 0) && !(weeklyGuarantee != null && weeklyGuarantee > 0)) {
     return { error: "Your pay rate isn’t set yet — ask the office to add it before you invoice." as const };
   }
 
@@ -83,10 +85,17 @@ async function recomputeTotal(
 ) {
   // Drop any prior top-up first — it is derived from the current lines.
   await sb.from("staff_statement_lines").delete().eq("statement_id", statementId).eq("source", "guarantee");
-  const { data: lines } = await sb.from("staff_statement_lines").select("amount").eq("statement_id", statementId);
+  const { data: lines } = await sb
+    .from("staff_statement_lines")
+    .select("amount, source")
+    .eq("statement_id", statementId);
   const base = round2((lines ?? []).reduce((s, l) => s + Number(l.amount ?? 0), 0));
 
-  const topUp = guaranteeTopUp(base, weeklyGuarantee);
+  // The guarantee floor is tested against EARNINGS only. An expense line is the
+  // crew member's own money coming back at cost — counting it would shrink the
+  // top-up pound-for-pound and make Rob pay his own fuel out of his £600.
+  const earnings = earningsTotal((lines ?? []).map((l) => ({ amount: Number(l.amount ?? 0), source: l.source })));
+  const topUp = guaranteeTopUp(earnings, weeklyGuarantee);
   let total = base;
   if (topUp > 0 && weeklyGuarantee != null) {
     const { data: last } = await sb
@@ -130,16 +139,17 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
   const { sb, userId, staff, weeklyGuarantee } = ctx;
   const { period_start, period_end } = parsed.data;
 
-  // One live statement per period (0057 backs this at the DB). Reuse an existing
-  // draft; refuse if the week was already submitted/paid so it can't be double-paid.
-  const { data: existing } = await sb
+  // One live statement per period (0057 backs the exact match at the DB), and
+  // no OVERLAPPING period either — a shifted range would seed days (and their
+  // expenses) that are already on another invoice, billing them twice.
+  const { data: overlapping } = await sb
     .from("staff_statements")
-    .select("id, status")
+    .select("id, status, period_start, period_end")
     .eq("staff_id", staff.id)
-    .eq("period_start", period_start)
-    .eq("period_end", period_end)
     .neq("status", "void")
-    .maybeSingle();
+    .lte("period_start", period_end)
+    .gte("period_end", period_start);
+  const existing = (overlapping ?? []).find((s) => s.period_start === period_start && s.period_end === period_end);
   if (existing) {
     if (existing.status === "draft") {
       // Reconcile the guarantee line so a guaranteed crew member sees (and can
@@ -148,6 +158,9 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
       return { ok: true as const, id: existing.id };
     }
     return { ok: false as const, error: "You've already submitted a statement for that week." };
+  }
+  if (overlapping?.length) {
+    return { ok: false as const, error: "That period overlaps an invoice you already have — use the standard week." };
   }
 
   const { data: refRow, error: refErr } = await sb.rpc("next_statement_ref");
@@ -169,9 +182,12 @@ export async function createMyStatementAction(input: z.infer<typeof createSchema
   return { ok: true as const, id: created.id };
 }
 
-/** Pull the crew member's assigned jobs in the period into suggested lines — one
- *  per DAY at their day rate. Re-seeding replaces the previous job lines only;
- *  hand-added lines (retainer, extras) are left untouched. */
+/** Pull the crew member's period into suggested lines: assigned days give the
+ *  job label, LOGGED time entries give the real hours (times shown in the
+ *  description as the office's evidence), and each day's expense rides as its
+ *  own at-cost repayment line. A day with nothing logged falls back to the
+ *  standard 8-hour suggestion. Re-seeding replaces the previous job + expense
+ *  lines only; hand-added lines (retainer, extras) are left untouched. */
 export async function seedMyStatementJobsAction(input: { statement_id: string }) {
   const id = z.string().uuid().safeParse(input.statement_id);
   if (!id.success) return { ok: false as const, error: "Invalid statement." };
@@ -222,12 +238,31 @@ export async function seedMyStatementJobsAction(input: { statement_id: string })
     }
   }
 
-  if (!days.length) return { ok: false as const, error: "No assigned jobs found in this period." };
+  // Their own logged hours + expenses for the week (/my-jobs/hours). RLS scopes
+  // this to the caller's own rows; a bounded Mon–Sun read, never a growing scan.
+  const { data: entryRows } = await sb
+    .from("staff_time_entries")
+    .select("work_date, started_at, ended_at, expense_amount, expense_note, receipt_key")
+    .eq("staff_id", staff.id)
+    .gte("work_date", stmt.period_start)
+    .lte("work_date", stmt.period_end);
+  const timeEntries: DayTimeEntry[] = (entryRows ?? []).map((e) => ({
+    work_date: e.work_date,
+    started_at: e.started_at,
+    ended_at: e.ended_at,
+    expense_amount: e.expense_amount == null ? null : Number(e.expense_amount),
+    expense_note: e.expense_note,
+    has_receipt: !!e.receipt_key,
+  }));
 
-  // Replace previous job-seeded lines only. Seeded at the standard day length ×
-  // the crew member's hourly rate; they then edit the actual hours per line.
-  await sb.from("staff_statement_lines").delete().eq("statement_id", stmt.id).eq("source", "job");
-  const rows = seedLinesFromDays(days, hourlyRate, DEFAULT_DAY_HOURS).map((l, i) => ({
+  if (!days.length && !timeEntries.length) {
+    return { ok: false as const, error: "No assigned jobs or logged hours found in this period." };
+  }
+
+  // Compute the replacement lines BEFORE touching the existing ones — the no-op
+  // path must not mutate (a delete followed by "nothing to add" would silently
+  // strip previously seeded lines).
+  const rows = seedLinesFromWork(days, timeEntries, hourlyRate, DEFAULT_DAY_HOURS).map((l, i) => ({
     statement_id: stmt.id,
     description: l.description,
     work_date: l.work_date,
@@ -237,8 +272,25 @@ export async function seedMyStatementJobsAction(input: { statement_id: string })
     source: l.source,
     sort_index: i,
   }));
+  if (!rows.length) {
+    return { ok: false as const, error: "Nothing to add yet — log your hours for the week first." };
+  }
+
+  // Replace previous job + expense seeded lines. Logged days seed their real
+  // hours; unlogged assigned days keep the standard-day suggestion.
+  const { error: delErr } = await sb
+    .from("staff_statement_lines")
+    .delete()
+    .eq("statement_id", stmt.id)
+    .in("source", ["job", "expense"]);
+  if (delErr) return { ok: false as const, error: delErr.message };
   const { error } = await sb.from("staff_statement_lines").insert(rows);
-  if (error) return { ok: false as const, error: error.message };
+  if (error) {
+    // The delete landed but the insert didn't — keep the stored total honest
+    // (sum of the lines that actually exist) so the draft can't overstate.
+    await recomputeTotal(sb, stmt.id, weeklyGuarantee);
+    return { ok: false as const, error: error.message };
+  }
   await recomputeTotal(sb, stmt.id, weeklyGuarantee);
 
   revalidatePath(`/my-jobs/pay/${stmt.id}`);
@@ -298,9 +350,11 @@ export async function upsertMyStatementLineAction(input: z.infer<typeof lineSche
     quantity: qty,
     unit_amount: unit,
     amount,
-    source: "manual" as const,
   };
   if (l.id) {
+    // Preserve the line's original source. Flipping an edited seeded line to
+    // 'manual' would let it survive the next re-seed's delete-by-source while a
+    // fresh line for the same day is inserted — the same day billed twice.
     const { error } = await sb.from("staff_statement_lines").update(row).eq("id", l.id);
     if (error) return { ok: false as const, error: error.message };
   } else {
@@ -314,7 +368,7 @@ export async function upsertMyStatementLineAction(input: z.infer<typeof lineSche
       .maybeSingle();
     const { error } = await sb
       .from("staff_statement_lines")
-      .insert({ ...row, sort_index: (last?.sort_index ?? -1) + 1 });
+      .insert({ ...row, source: "manual" as const, sort_index: (last?.sort_index ?? -1) + 1 });
     if (error) return { ok: false as const, error: error.message };
   }
   await recomputeTotal(sb, l.statement_id, weeklyGuarantee);
@@ -363,11 +417,37 @@ export async function submitMyStatementAction(input: { statement_id: string; not
 
   const { data: stmt } = await sb
     .from("staff_statements")
-    .select("id, staff_id, status")
+    .select("id, staff_id, status, period_start, period_end")
     .eq("id", p.data.statement_id)
     .maybeSingle();
   if (!stmt || stmt.staff_id !== staff.id) return { ok: false as const, error: "Statement not found." };
   if (stmt.status !== "draft") return { ok: false as const, error: "This statement has already been submitted." };
+
+  // A logged expense that never made it onto the invoice would vanish silently
+  // (the receipt email tells accounts it's coming). Cheap day-level check: every
+  // day with a logged expense must be covered by SOME expense line.
+  const { data: expenseEntries } = await sb
+    .from("staff_time_entries")
+    .select("work_date, expense_amount")
+    .eq("staff_id", staff.id)
+    .gte("work_date", stmt.period_start)
+    .lte("work_date", stmt.period_end)
+    .gt("expense_amount", 0);
+  if (expenseEntries?.length) {
+    const { data: expenseLines } = await sb
+      .from("staff_statement_lines")
+      .select("work_date")
+      .eq("statement_id", stmt.id)
+      .eq("source", "expense");
+    const covered = new Set((expenseLines ?? []).map((l) => l.work_date));
+    const missing = expenseEntries.find((e) => !covered.has(e.work_date));
+    if (missing) {
+      return {
+        ok: false as const,
+        error: "You've logged an expense that isn't on this invoice yet — tap “Add my hours this period” first.",
+      };
+    }
+  }
 
   // Recompute FIRST so a guaranteed crew member's minimum top-up line exists
   // before the "at least one line" check — a guaranteed week with genuinely no

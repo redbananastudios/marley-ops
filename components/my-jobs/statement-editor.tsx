@@ -124,8 +124,10 @@ export function StatementEditor({
             {busy === "seed" ? <Loader2 className="size-5 animate-spin" strokeWidth={1.75} /> : <CalendarPlus className="size-5" strokeWidth={1.75} />}
           </span>
           <span className="min-w-0">
-            <span className="block text-sm font-semibold text-foreground">Add my jobs this period</span>
-            <span className="block text-xs text-mist-400">Pulls the days you were on a job — then edit or add retainer days</span>
+            <span className="block text-sm font-semibold text-foreground">Add my hours this period</span>
+            <span className="block text-xs text-mist-400">
+              Pulls your logged hours and expenses — days with nothing logged use the standard 8
+            </span>
           </span>
         </button>
       ) : null}
@@ -144,6 +146,7 @@ export function StatementEditor({
                   {[
                     l.work_date ? new Date(`${l.work_date}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) : null,
                     l.quantity != null && l.unit_amount != null ? `${l.quantity} hrs × ${gbp(l.unit_amount)}` : null,
+                    l.source === "expense" ? "Expense — repaid at cost" : null,
                   ]
                     .filter(Boolean)
                     .join(" · ") ||

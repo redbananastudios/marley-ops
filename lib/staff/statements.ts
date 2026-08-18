@@ -44,6 +44,14 @@ export function statementTotal(lines: { amount: number | null }[]): number {
   return round2(lines.reduce((s, l) => s + (l.amount ?? 0), 0));
 }
 
+/** The EARNINGS on a statement — every line except at-cost expense repayments.
+ *  This is the figure the weekly guarantee is tested against: an expense is the
+ *  crew member's own money coming back, so counting it toward the £600 floor
+ *  would make them pay their own fuel out of the guarantee. */
+export function earningsTotal(lines: { amount: number | null; source?: string | null }[]): number {
+  return round2(lines.filter((l) => l.source !== "expense").reduce((s, l) => s + (l.amount ?? 0), 0));
+}
+
 /** Weekly-guarantee top-up: the amount to add so a guaranteed crew member's week
  *  reaches the floor (Rob: £600 whether there's work or not). Zero when there is
  *  no guarantee, or when the hours already earn at or above it (they keep the
@@ -105,7 +113,7 @@ export interface NewStatementLine {
   quantity: number | null;
   unit_amount: number | null;
   amount: number;
-  source: "manual" | "job" | "retainer" | "guarantee";
+  source: "manual" | "job" | "retainer" | "guarantee" | "expense";
 }
 
 /** Suggest draft lines from the days a crew member was assigned — ONE line per

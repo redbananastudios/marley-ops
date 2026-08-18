@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeLineAmount,
   DEFAULT_DAY_HOURS,
+  earningsTotal,
   guaranteeTopUp,
   periodLabel,
   previousWeekPeriod,
@@ -24,6 +25,22 @@ describe("computeLineAmount", () => {
   it("never goes negative and rounds to pennies", () => {
     expect(computeLineAmount(null, null, -5)).toBe(0);
     expect(computeLineAmount(3, 33.333, null)).toBe(100); // 99.999 → 100.00
+  });
+});
+
+describe("earningsTotal — the figure the weekly guarantee is tested against", () => {
+  it("excludes expense repayments, so Rob never pays his own fuel out of his £600 floor", () => {
+    // £400 of hours + £150 fuel: the guarantee must top up £200 (to £600 earnings),
+    // making the invoice £750 — NOT read the £550 sum and top up only £50.
+    const lines = [
+      { amount: 400, source: "job" },
+      { amount: 150, source: "expense" },
+    ];
+    expect(earningsTotal(lines)).toBe(400);
+    expect(guaranteeTopUp(earningsTotal(lines), 600)).toBe(200);
+  });
+  it("counts every non-expense source and tolerates missing source", () => {
+    expect(earningsTotal([{ amount: 100, source: "manual" }, { amount: 50 }])).toBe(150);
   });
 });
 

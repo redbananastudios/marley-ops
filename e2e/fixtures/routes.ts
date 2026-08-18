@@ -56,6 +56,7 @@ export const CREW_ROUTES = [
   "/my-jobs",
   "/my-jobs/availability",
   "/my-jobs/agreement",
+  "/my-jobs/hours",
   "/my-jobs/pay",
   "/my-jobs/manual",
 ] as const;

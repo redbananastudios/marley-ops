@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { BookOpen, CalendarCheck, ChevronRight, HandCoins, MapPin, Phone, Truck, UserRound } from "lucide-react";
+import { BookOpen, CalendarCheck, ChevronRight, Clock3, HandCoins, MapPin, Phone, Truck, UserRound } from "lucide-react";
 import { getSessionProfile } from "@/lib/auth";
 import { likeEscape } from "@/lib/util/like";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -264,6 +264,22 @@ export default async function MyJobsPage() {
             <span className="min-w-0 flex-1">
               <span className="block text-sm font-semibold text-foreground">My availability</span>
               <span className="block text-xs text-mist-400">Book a day off, or tell us which weekends you can work</span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
+          </Link>
+        ) : null}
+
+        {staffRow ? (
+          <Link
+            href="/my-jobs/hours"
+            className="focus-ring mt-3 flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5 hover:border-mm-red/40"
+          >
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-mm-red/10 text-mm-red">
+              <Clock3 className="size-5" strokeWidth={1.75} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-foreground">My hours</span>
+              <span className="block text-xs text-mist-400">Log your start and finish times, fuel and expenses</span>
             </span>
             <ChevronRight className="size-4 shrink-0 text-mist-400" strokeWidth={1.75} />
           </Link>

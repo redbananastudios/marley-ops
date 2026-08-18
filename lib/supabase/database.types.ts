@@ -3685,6 +3685,56 @@ export type Database = {
           },
         ]
       }
+      staff_time_entries: {
+        Row: {
+          created_at: string
+          ended_at: string | null
+          expense_amount: number | null
+          expense_note: string | null
+          id: string
+          receipt_emailed_at: string | null
+          receipt_key: string | null
+          staff_id: string
+          started_at: string | null
+          updated_at: string
+          work_date: string
+        }
+        Insert: {
+          created_at?: string
+          ended_at?: string | null
+          expense_amount?: number | null
+          expense_note?: string | null
+          id?: string
+          receipt_emailed_at?: string | null
+          receipt_key?: string | null
+          staff_id: string
+          started_at?: string | null
+          updated_at?: string
+          work_date: string
+        }
+        Update: {
+          created_at?: string
+          ended_at?: string | null
+          expense_amount?: number | null
+          expense_note?: string | null
+          id?: string
+          receipt_emailed_at?: string | null
+          receipt_key?: string | null
+          staff_id?: string
+          started_at?: string | null
+          updated_at?: string
+          work_date?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "staff_time_entries_staff_id_fkey"
+            columns: ["staff_id"]
+            isOneToOne: false
+            referencedRelation: "staff"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       storage_handling_events: {
         Row: {
           amount: number
