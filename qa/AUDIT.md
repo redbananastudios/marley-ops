@@ -10,6 +10,7 @@ The test bed is the DEPLOYED staging site: https://staging.ops.marleymoves.co.uk
 - Repo: in the cloud the repo is available via the connected GitHub integration — make sure you are on the latest `origin/staging` before working. On i9, never work in the primary checkout: create a worktree off `origin/staging` and remove it when done.
 - DB access: `@supabase/supabase-js` (in node_modules after install) with the service key — write small node scripts for seeding, read-backs and teardown.
 - Browser: prefer writing **Playwright scripts** using the repo's `@playwright/test` harness against the deployed staging URL — they double as drafts for permanent specs. An MCP browser (if available in the host) is fine for quick exploratory looks. Never localhost.
+- Known cloud-sandbox quirk (found 2026-08-19, every role agent independently rediscovered it — don't): Chromium's default TLS 1.3 ClientHello gets RESET by the egress proxy. Launch Chromium/Playwright with `--ssl-version-max=tls1.2` (plus `--proxy-server=$HTTPS_PROXY` and trusting `/root/.ccr/ca-bundle.crt`) and page loads work normally.
 - Time box: 45 minutes of work, then wrap up cleanly whatever state you're in. Cleanup and the run log are never skipped.
 
 ## Hard safety rules (non-negotiable)
