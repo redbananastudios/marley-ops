@@ -13,7 +13,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Admin — every office route loads (27) | ✅ | office/access.spec.ts |
 | Crew — /my-jobs routes load (5) + bounced off 10 dashboard routes | ✅ | crew/access.spec.ts |
 | Estimator — every nav route loads (11) | ✅ | estimator/access.spec.ts |
-| Estimator — /finance, /finance/statements, / redirect | ✅ | estimator/gating.spec.ts |
+| Estimator — /finance, /finance/statements, /refunds, / redirect | ✅ | estimator/gating.spec.ts |
 
 ## Office / admin features
 | Flow | Status | Spec |

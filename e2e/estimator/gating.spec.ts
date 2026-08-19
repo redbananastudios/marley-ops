@@ -17,6 +17,11 @@ test.describe("Estimator gating — admin-only routes redirect", () => {
     await expectBounced(page, "/finance/statements", /\/estimator\/pay/);
   });
 
+  test("/refunds (held-money decision queue) → the estimator's own pay page", async ({ page }) => {
+    // Same admin-only gate as /finance/statements (refunds/page.tsx: estimator → /estimator/pay).
+    await expectBounced(page, "/refunds", /\/estimator\/pay/);
+  });
+
   test("the dashboard root → the estimator cockpit", async ({ page }) => {
     await expectBounced(page, "/", /\/estimator$/);
   });
