@@ -4,6 +4,15 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-19T13:30Z–13:45Z — repair run (first-pass, Fable): 1 finding fixed, PR #20 opened
+
+- Tier: first-pass. Base: `fa3c5ba` (origin/staging at checkout).
+- Findings taken: QA-20260819-02 (safe-fix, e2e cubic-survey seed shape) — claimed, fixed on `qa-repair/QA-20260819-02`, finding updated to `fixed-pending-verify` in the branch.
+- Fix: seed items extracted to `scripts/seed-e2e-fixtures.mjs` as a spec-correct `CubicLine` (real catalogue entry `living-space:sofa-2-seater`); contract test `tests/scripts/seed-e2e-cubic-items.test.ts` pins the literal to `sanitizeCubicLines` + the catalogue (verified failing 3/3 on the old shape). Gates: lint 0 · tsc 0 · vitest 1686 · build green.
+- PRs opened: [#20](https://github.com/redbananastudios/marley-ops/pull/20) → staging, labelled `qa-repair`.
+- Escalations: none. QA-20260819-01 is `class: risky` (shared-client contact overwrite) — untouched per scope rules, awaits a human/risky-tier route.
+- Time spent: ~15 min.
+
 ## 2026-08-19T12:00Z–12:50Z — first full run: 2 findings filed, 1 spec added
 
 - sha audited: 66d75f1 (origin/staging, HEAD at checkout) — deployed staging matched the last code-bearing commit `e1eeb1c` (`curl /api/version` → `e1eeb1c`, CI+Deploy run 83 green); the two commits between it and HEAD were prior run's log-only entries, no code change, so no pending deploy to wait on.
