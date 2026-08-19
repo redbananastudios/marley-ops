@@ -26,6 +26,7 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import { CUBIC_SURVEY_SEED_ITEMS } from "./seed-e2e-fixtures.mjs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -535,7 +536,7 @@ await resetCrewContractorState();
     lead_id: ids.leadId,
     client_id: ids.clientId,
     status: "draft",
-    items: [{ key: "sofa_2", label: "2-seat sofa", qty: 1, ft3: 35 }],
+    items: CUBIC_SURVEY_SEED_ITEMS,
     customer_notes: "",
     notes: MARKER,
     share_token: SEED.cubicSurvey.shareToken,
