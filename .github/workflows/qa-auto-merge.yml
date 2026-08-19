@@ -1,0 +1,51 @@
+name: QA repair auto-merge
+
+# Repair PRs from the QA loop (label `qa-repair`, base `staging`) get the full
+# four-gate check ON THE PR — the repo's other workflows only run on push, so
+# without this job an auto-merge would land unvalidated. Green → squash-merge →
+# explicitly dispatch the staging deploy (a GITHUB_TOKEN merge does not trigger
+# push workflows, so without the dispatch the fix would never reach staging or
+# the e2e suite). Scope: only labelled PRs; everything else is untouched.
+on:
+  pull_request:
+    types: [opened, labeled, synchronize, reopened]
+    branches: [staging]
+
+concurrency:
+  group: qa-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build
+
+  merge:
+    needs: gate
+    if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Squash-merge and deploy staging
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr merge ${{ github.event.pull_request.number }} --squash --repo ${{ github.repository }}
+          gh workflow run staging.yml --ref staging --repo ${{ github.repository }}

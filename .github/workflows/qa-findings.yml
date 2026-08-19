@@ -1,0 +1,53 @@
+name: QA findings to issues
+
+# Every finding file the audit pushes to qa/findings/open/ becomes a labelled
+# GitHub issue — the handoff surface the repair agent (Codex cloud) watches.
+# Idempotent sweep, not a diff: every open finding without an issue gets one,
+# so a missed run can never strand a finding. `safe-fix` findings are the ones
+# the repair loop may take; `qa-risky` issues are for Peter only — automation
+# must never fix those (money/RLS/schema/comms/auth classes).
+on:
+  push:
+    branches: [staging]
+    paths:
+      - "qa/findings/open/**"
+  workflow_dispatch:
+
+concurrency:
+  group: qa-findings
+  cancel-in-progress: false
+
+jobs:
+  raise:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Raise an issue per unraised finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh label create qa-finding  --color 1d76db --description "Filed by the QA audit"        --force --repo "$GITHUB_REPOSITORY"
+          gh label create qa-safe-fix --color 0e8a16 --description "Repair loop may fix this"     --force --repo "$GITHUB_REPOSITORY"
+          gh label create qa-risky    --color b60205 --description "Peter only - do not auto-fix" --force --repo "$GITHUB_REPOSITORY"
+          gh label create qa-repair   --color 5319e7 --description "Repair PR - auto-merge on green" --force --repo "$GITHUB_REPOSITORY"
+          shopt -s nullglob
+          for f in qa/findings/open/QA-*.md; do
+            id=$(basename "$f" .md)
+            existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number --jq 'length')
+            if [ "$existing" = "0" ]; then
+              class=$(grep -m1 '^class:' "$f" | awk '{print $2}' || true)
+              summary=$(awk '/^## Summary/{getline; while($0 ~ /^$/){getline}; print; exit}' "$f")
+              label="qa-safe-fix"; [ "$class" = "risky" ] && label="qa-risky"
+              gh issue create --repo "$GITHUB_REPOSITORY" \
+                --title "[$id] ${summary:-QA finding}" \
+                --label qa-finding --label "$label" \
+                --body-file "$f"
+              echo "raised: $id ($label)"
+            else
+              echo "already raised: $id"
+            fi
+          done

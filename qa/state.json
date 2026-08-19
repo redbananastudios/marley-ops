@@ -1,0 +1,77 @@
+{
+  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
+  "lastAuditSha": null,
+  "crew": {
+    "availability_set_remove": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/availability/**", "components/my-jobs/availability-editor.tsx"] },
+    "hours_log_edit_clear": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/hours/**", "components/my-jobs/hours-editor.tsx", "lib/staff/time-entries.ts"] },
+    "expense_receipt_upload": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/staff/receipts.ts", "app/my-jobs/hours/**"] },
+    "job_list_detail": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/page.tsx", "app/my-jobs/[id]/**"] },
+    "job_note_photo": { "lastTestedAt": null, "lastResult": null, "watch": ["components/crew/job-notes.tsx", "app/actions/job-notes.ts", "app/actions/job-media.ts"] },
+    "complete_job": { "lastTestedAt": null, "lastResult": null, "watch": ["components/crew/complete-job-button.tsx", "components/crew/crew-action-bar.tsx"] },
+    "contractor_agreement_sign": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/agreement/**", "components/contractor/agreement-sign.tsx"] },
+    "weekly_invoice_create_seed_submit": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/pay/**", "components/my-jobs/statement-editor.tsx", "lib/staff/statements.ts"] },
+    "job_sheet_pdf": { "lastTestedAt": null, "lastResult": null, "watch": ["components/job-sheet-button.tsx", "lib/job-sheet-*.ts", "app/actions/job-sheet.ts"] }
+  },
+  "admin": {
+    "lead_create_edit": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/leads/**", "components/leads/edit-lead-dialog.tsx"] },
+    "lead_status_lost_noreply": { "lastTestedAt": null, "lastResult": null, "watch": ["components/leads/leads-board.tsx", "components/leads/lead-action-bar.tsx", "components/leads/status-reason-dialog.tsx"] },
+    "followups_snooze_complete": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/follow-ups/**", "components/followups/**", "components/leads/add-followup-dialog.tsx"] },
+    "quote_build_send_supersede": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/quotes/**", "components/quote/**"] },
+    "survey_book_reschedule_cancel": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/schedule/**", "components/schedule/appointment-dialog.tsx", "components/schedule/reschedule-dialog.tsx"] },
+    "removal_book_changedate_cancel": { "lastTestedAt": null, "lastResult": null, "watch": ["components/bookings/change-date-dialog.tsx", "components/bookings/cancel-booking-dialog.tsx", "app/actions/booking-change.ts"] },
+    "appointment_view_job_summary": { "lastTestedAt": "2026-08-18T22:00:00Z", "lastResult": "pass", "watch": ["components/schedule/appointment-view-dialog.tsx", "components/schedule/job-summary.tsx"] },
+    "mark_deposit_balance_paid": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/bookings/**", "app/(dashboard)/invoicing/**"] },
+    "bank_feed_attach_link_unlink": { "lastTestedAt": null, "lastResult": null, "watch": ["components/payments/attach-dialog.tsx", "app/actions/bank-feed.ts"] },
+    "refunds_queue": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/refunds/**", "app/actions/refunds.ts"] },
+    "storage_sites_units_lets": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/storage/**", "components/storage/**"] },
+    "staff_vehicle_crud_join_approve": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/resources/**", "components/resources/**"] },
+    "claims_open_update_settle": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/claims/**", "components/claims/**", "app/actions/claims.ts"] },
+    "documents_content_review": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/documents/**", "app/(dashboard)/content/**", "app/actions/job-media.ts"] },
+    "cubic_survey_review": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/leads/[id]/cubic/**", "app/actions/ai-survey-review.ts"] },
+    "settings_safe_fields": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/settings/**", "components/settings/**"] },
+    "finance_statements_amend_return": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/finance/statements/**"] },
+    "clients_register_detail": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/clients/**", "components/clients/**"] },
+    "board_kanban_jobs_list": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/board/**", "app/(dashboard)/jobs/**", "components/board/**"] },
+    "performance_growth_automations": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/performance/**", "app/(dashboard)/growth/**", "app/(dashboard)/automations/**"] }
+  },
+  "estimator": {
+    "cockpit": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/estimator/**"] },
+    "book_survey_quote_from_visit": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/schedule/surveys/**", "components/schedule/appointment-view-dialog.tsx"] },
+    "estimator_pay_statement": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/estimator/pay/**", "components/estimator/**"] },
+    "gating_forbidden_surfaces": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/finance/**", "app/(dashboard)/refunds/**", "lib/supabase/proxy-session.ts"] }
+  },
+  "customer": {
+    "q_accept_sandbox_card": { "lastTestedAt": null, "lastResult": null, "watch": ["app/q/**", "app/actions/card-payments.ts", "app/api/card/**"] },
+    "cv_self_fill_survey": { "lastTestedAt": null, "lastResult": null, "watch": ["app/cv/**", "app/actions/cubic-survey.ts"] },
+    "s_storage_signing": { "lastTestedAt": null, "lastResult": null, "watch": ["app/s/**"] },
+    "sheet_day_sheet": { "lastTestedAt": null, "lastResult": null, "watch": ["app/sheet/**", "lib/crew-sheet/**"] },
+    "join_signup": { "lastTestedAt": null, "lastResult": null, "watch": ["app/join/**"] }
+  },
+  "handoffs": {
+    "h1_crew_availability_to_admin_schedule": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/availability/**", "app/(dashboard)/schedule/**"] },
+    "h2_crew_hours_to_admin_statements": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/hours/**", "app/(dashboard)/finance/statements/**"] },
+    "h3_customer_accept_to_admin_bookings_payments": { "lastTestedAt": null, "lastResult": null, "watch": ["app/q/**", "app/(dashboard)/bookings/**", "app/(dashboard)/payments/**"] },
+    "h4_customer_cv_to_admin_review": { "lastTestedAt": null, "lastResult": null, "watch": ["app/cv/**", "app/(dashboard)/leads/[id]/cubic/**"] },
+    "h5_join_to_admin_approve_to_login": { "lastTestedAt": null, "lastResult": null, "watch": ["app/join/**", "app/(dashboard)/resources/**"] },
+    "h6_admin_survey_to_estimator_diary": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/schedule/surveys/**", "app/(dashboard)/estimator/**"] },
+    "h7_crew_complete_to_admin_content": { "lastTestedAt": null, "lastResult": null, "watch": ["components/crew/**", "app/(dashboard)/content/**"] },
+    "h8_admin_changedate_to_crew_myjobs": { "lastTestedAt": null, "lastResult": null, "watch": ["app/actions/booking-change.ts", "app/my-jobs/**"] }
+  },
+  "io": {
+    "uploads_5_buckets": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/storage/**", "components/capture/**"] },
+    "pdf_jobsheet_contract_daysheet": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/pdf/**", "lib/job-sheet-docdef.ts", "lib/crew-sheet/**", "app/api/documents/**"] },
+    "email_sms_dispatch_dryrun": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/comms/**"] },
+    "cron_13_routes": { "lastTestedAt": null, "lastResult": null, "watch": ["app/api/cron/**"] }
+  },
+  "truth": {
+    "payments_tabs_totals": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/payments/**", "lib/payments/**"] },
+    "schedule_week_values": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/schedule/week-value.ts", "components/schedule/**"] },
+    "dashboard_counts_badges": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/page.tsx", "lib/dashboard/**"] },
+    "bookings_money_queues": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/bookings/**", "app/(dashboard)/bookings/**"] }
+  },
+  "spec_gaps": {
+    "office_jobs_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/jobs/**"] },
+    "estimator_work_quote_specs": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/estimator/**"] },
+    "crew_invoicing_submit_lines_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/pay/**"] }
+  }
+}
