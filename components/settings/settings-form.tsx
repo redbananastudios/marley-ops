@@ -350,7 +350,7 @@ export function SettingsForm({
           value={googleReviewUrl}
           disabled={!canEdit || busy}
           onChange={(e) => setGoogleReviewUrl(e.target.value)}
-          placeholder="https://search.google.com/local/writereview?placeid=…"
+          placeholder="https://g.page/r/…/review"
           className="mt-1.5 flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
         />
         <p className="mt-1.5 text-xs text-mist-400">

@@ -12,16 +12,9 @@ import { dispatchComm } from "@/lib/comms/dispatch";
 import { buildReviewRequestEmailHtml } from "@/lib/comms/payment-email";
 import { replyAddressFor } from "@/lib/quote/chase";
 import { leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
+import { selectReviewLink } from "@/lib/comms/review-platform";
 
 type Sb = SupabaseClient<Database>;
-
-/** Where we send customers to review, by platform. Google is the default (drives
- *  local search); a lead that came via Checkatrade is asked on Checkatrade. */
-export const REVIEW_LINKS = {
-  google: { platform: "Google", url: "https://g.page/r/CXD_Yh4RUF1cEBM/review" },
-  checkatrade: { platform: "Checkatrade", url: "https://www.checkatrade.com/give-feedback/trades/marleymoves" },
-  trustpilot: { platform: "Trustpilot", url: "https://uk.trustpilot.com/evaluate/marleymoves.co.uk" },
-} as const;
 
 export async function sendReviewRequest(
   sb: Sb,
@@ -29,7 +22,12 @@ export async function sendReviewRequest(
   actorId: string | null,
 ): Promise<{ sent: boolean; reason?: string }> {
   const settings = await getBusinessSettings(sb);
-  const googleUrl = settings.googleReviewUrl?.trim() || REVIEW_LINKS.google.url;
+  // The Settings field is the review-ask kill switch — the Settings UI has
+  // always said "clear it to switch the review ask off", so a cleared value
+  // sends NOTHING rather than silently falling back to a hardcoded link.
+  // Bails before the claim, so switching it back on can still send later.
+  const googleUrl = settings.googleReviewUrl?.trim() ?? "";
+  if (!googleUrl) return { sent: false, reason: "review ask switched off in Settings" };
 
   const { data: lead } = await sb
     .from("leads")
@@ -64,12 +62,11 @@ export async function sendReviewRequest(
 
   const first = (lead.name ?? "").trim().split(/\s+/)[0] || "there";
 
-  // Ask on the platform the lead came from — a Checkatrade lead is asked on
-  // Checkatrade (feeds that profile); everyone else on Google (local-search default).
-  const review =
-    lead.entry_channel === "checkatrade"
-      ? REVIEW_LINKS.checkatrade
-      : { platform: "Google", url: googleUrl };
+  // Ask where this customer can actually leave the review: a Checkatrade lead
+  // on Checkatrade (feeds the profile they found us on), a Google-mailbox
+  // customer on Google (a Google review needs a Google account), everyone
+  // else on Trustpilot (no account barrier). Routing is pure + unit-tested.
+  const review = selectReviewLink(lead.email, lead.entry_channel, googleUrl);
 
   const owner = await leadOwnerIdentity(sb, leadId, lead.estimator_id);
   const reviewFrom = ownerFrom(owner.name, owner.email);
@@ -84,7 +81,7 @@ export async function sendReviewRequest(
     bodyText: `Thanks for moving with Marley Moves. If Connor and the crew looked after you, a quick ${review.platform} review makes a real difference to us: ${review.url}. If anything wasn't right, reply to this email or call the team on 01747 637070 first.`,
     // bodyHtml rides alongside the template as the rendered fallback (oversize
     // guard + SMTP outage transport) — the template wins when usable.
-    bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url }),
+    bodyHtml: buildReviewRequestEmailHtml({ firstName: lead.name, reviewUrl: review.url, platform: review.platform }),
     ...(templateId
       ? {
           template: {

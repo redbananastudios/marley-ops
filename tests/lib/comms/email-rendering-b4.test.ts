@@ -116,6 +116,18 @@ describe("B4 — customer email templates render clean", () => {
     assertB4Clean(html, "review-request");
     expect(html).toContain("https://g.page/r/xyz");
     expect(html).toContain("Jane");
+    expect(html).toContain("Leave a Google review"); // platform defaults to Google
+  });
+
+  it("review request names the platform the link goes to", () => {
+    const html = buildReviewRequestEmailHtml({
+      firstName: "Jane",
+      reviewUrl: "https://uk.trustpilot.com/evaluate/marleymoves.co.uk",
+      platform: "Trustpilot",
+    });
+    assertB4Clean(html, "review-request-trustpilot");
+    expect(html).toContain("Leave a Trustpilot review");
+    expect(html).not.toContain("Google review"); // copy must not claim Google while the button goes to Trustpilot
   });
 
   it("completion certificate email", () => {

@@ -80,8 +80,10 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   vatFlatRatePct: 10,
   baseLocation: DEFAULT_BASE_LOCATION,
   defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
-  // Same place id the marleymoves.co.uk site links to.
-  googleReviewUrl: "https://search.google.com/local/writereview?placeid=ChIJq8R84fCs_EkRc_9iHhFQXW8",
+  // The GBP "write a review" short link for the CURRENT listing (Peter,
+  // 2026-08-19). The old writereview?placeid=… form pointed at the wrong
+  // listing — do not reintroduce it.
+  googleReviewUrl: "https://g.page/r/CXD_Yh4RUF1cEBM/review",
   cubicFillPct: 90,
   cubicTransitFt3: 280,
   cubicLutonFt3: 550,

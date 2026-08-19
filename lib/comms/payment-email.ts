@@ -308,22 +308,26 @@ export function buildBalanceReceivedEmailHtml(m: {
 
 /* ------------------------------------------------- review request */
 
-/** Post-move "how did we do?" — the Google review ask. Sent once per lead,
- *  after the move completes, only when a review URL is configured. */
+/** Post-move "how did we do?" — the review ask. Sent once per lead, after the
+ *  move completes. The platform names whichever link we chose for this
+ *  customer (Google / Trustpilot / Checkatrade) so the copy never claims
+ *  Google while the button goes elsewhere. */
 export function buildReviewRequestEmailHtml(m: {
   firstName?: string | null;
   reviewUrl: string;
+  platform?: string;
 }): string {
   const name = (m.firstName ?? "").trim().split(/\s+/)[0];
+  const platform = escapeHtml((m.platform ?? "Google").trim() || "Google");
   const inner = [
     pill("Move complete"),
     headline(`How did we do${name ? ", " + escapeHtml(name) : ""}?`),
     subline(
-      `That's your move done. Thank you for choosing Marley Moves. If Connor and the crew looked after you, a quick Google review makes a real difference to a small local firm like ours. It takes about a minute.`,
+      `That's your move done. Thank you for choosing Marley Moves. If Connor and the crew looked after you, a quick ${platform} review makes a real difference to a small local firm like ours. It takes about a minute.`,
     ),
     `  <tr><td align="center" style="padding:0 36px 22px;">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
-      <a href="${m.reviewUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Leave a Google review &rarr;</a>
+      <a href="${m.reviewUrl}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">Leave a ${platform} review &rarr;</a>
     </td></tr></table>
   </td></tr>`,
     subline(
