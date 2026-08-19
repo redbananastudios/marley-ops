@@ -4,6 +4,27 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-19T12:00Z–12:50Z — first full run: 2 findings filed, 1 spec added
+
+- sha audited: 66d75f1 (origin/staging, HEAD at checkout) — deployed staging matched the last code-bearing commit `e1eeb1c` (`curl /api/version` → `e1eeb1c`, CI+Deploy run 83 green); the two commits between it and HEAD were prior run's log-only entries, no code change, so no pending deploy to wait on.
+- Credential check: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present.
+- Health gate: staging reachable (200, sha matched). Four local gates on the untouched tree: lint 0 errors/36 pre-existing warnings · tsc 0 · vitest 1673 passed/7 skipped · build clean.
+- Verify-first: `qa/findings/open/` was empty (first real run) — nothing to re-verify.
+- Seed: swept 0 leftover `QA-SENTINEL` rows (clean slate), minted 3 throwaway users (admin/estimator/crew, random passwords) + 1 marker client+lead+accepted-quote fixture.
+- Rota: dispatched one subagent per role (admin, estimator, crew, customer), each ~30 min budget, each proving own-UI → SQL read-back → (where applicable) the other role's UI, plus two-hats/IO-proof/truth-of-UI lenses throughout.
+  - **Admin**: 10 of 12 planned ops run (lead create/edit, lead lost/no-reply, quote-build-draft, survey book/reschedule/cancel, removal book/changedate/cancel, staff add/edit, claims full lifecycle, documents review, settings view-only) — deposit/balance-paid and refunds-queue not reached (time budget); bank-feed attach/link/unlink correctly skipped (no safe marker-only row). 1 finding (below).
+  - **Estimator**: 12/12 ops PASS incl. the two security-critical checks — `/finance`, `/finance/statements`, `/refunds` all correctly bounce an estimator login, nav never exposes those links. 0 findings.
+  - **Crew**: 22/22 ops PASS incl. a targeted re-probe of the historical hours/notes-nulling bug (edit round-trip correctly preserves untouched fields) and IO proof on two storage buckets + the job-sheet PDF (`%PDF` magic bytes). 0 findings.
+  - **Customer**: 12 of 15 planned ops run (`/q` accept + deposit self-report + Zoho invoice self-heal — card payment correctly SKIPPED, `card_payments_enabled=false` kill switch confirmed off, not ambiguous; `/cv` submit; `/s` sign with full legal-snapshot proof — `terms_version`/`terms_sha256`/full snapshot text captured; `/sheet` render; bad-token 404s ×3). `/join` skipped per scope. 1 finding (below).
+- Findings filed: **QA-20260819-01** (`risky`, medium — a lead's Contact card reads the shared client's name/phone/email/postcode instead of the lead's own, and editing one lead silently overwrites those fields on the client for every other lead sharing it; verified against source + live SQL reproduction), **QA-20260819-02** (`safe-fix`, low — `scripts/seed-e2e.mjs`'s cubic-survey fixture writes an item shape `CubicLine` rejects, so a customer can never submit a survey seeded that way; verified by reseeding with the correct shape and confirming submit then succeeds).
+- Specs added: `e2e/estimator/gating.spec.ts` gained the `/refunds` case (verified live this run, matches the file's existing `/finance`/`/finance/statements` pattern exactly, source-confirmed redirect target); `e2e/COVERAGE.md` updated in the same commit. Several other verified-PASS flows (crew full journey, admin survey book/reschedule/cancel, customer accept+sign mutations) came back from the role agents as working script drafts but were not converted to permanent specs this run — left for a future run to avoid shipping unreviewed Playwright against a live TLS/proxy workaround this environment needed (see below).
+- Environment note for future runs: Chromium's default TLS 1.3 ClientHello gets reset by this sandbox's egress proxy; every role agent independently found the fix (`--ssl-version-max=tls1.2`, plus proxying/cert-trust flags). Worth folding into `playwright.config.ts` or documenting explicitly in `qa/AUDIT.md` so a future run doesn't spend its budget rediscovering it.
+- Push: `a0528d7` on `staging` (findings + spec + `qa/state.json` + `e2e/COVERAGE.md`), rebase clean (no upstream changes), this log entry pushed separately.
+- Cleanup verification (all zero, by query, after fixing an appointments↔surveys FK-cycle wrinkle and two profile-referencing tables — `communications.sent_by`, `events_log.actor_id` — that blocked two auth-user deletes on the first pass): leads 0 · clients 0 · quotes 0 · appointments 0 · staff 0 · storage_sites/units/lets 0 · cubic_surveys 0 · crew_job_sheets 0 · profiles 0 · auth users 0.
+- Time spent: ~50 min wall clock (setup/gates ~15 min, 4 role agents in parallel background ~30 min longest, triage/spec/ledger/cleanup/push ~20 min) — over the 45 min soft budget, under the 60 min abort; the overrun was mostly agents independently diagnosing the same TLS proxy issue, now documented above for next time.
+
+---
+
 ## 2026-08-19 — run skipped: missing staging credentials
 
 - sha audited: e1eeb1c (origin/staging, HEAD at checkout)
