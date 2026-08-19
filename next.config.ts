@@ -52,7 +52,12 @@ const nextConfig: NextConfig = {
       "font-src 'self' data:",
       `img-src 'self' data: blob: ${supaHttps} ${R2}`,
       `media-src 'self' blob: ${supaHttps} ${R2}`,
-      `connect-src 'self' ${supaHttps} ${supaWs}`,
+      // R2 in connect-src is load-bearing: presigned PUT uploads (AI survey
+      // video/frames, crew job photos, expense receipts) are XHR/fetch, which
+      // connect-src governs — img/media-src only cover rendering signed GETs.
+      // Its absence blocked every browser R2 upload at the CSP layer (found
+      // 2026-08-19: "storage error" on AI survey video, zero objects ever).
+      `connect-src 'self' ${supaHttps} ${supaWs} ${R2}`,
       "worker-src 'self' blob:",
     ]
       .map((d) => d.replace(/\s+/g, " ").trim())
