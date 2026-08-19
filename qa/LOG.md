@@ -54,3 +54,7 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 - No code/spec changes beyond this log entry; pushing to `staging` only.
 - **For Peter:** this run's environment (the scheduled/cloud host running this session) needs `staging.ops.marleymoves.co.uk` allow-listed in its egress policy, or the QA schedule needs to run from a host whose policy already allows it (e.g. i9), or the audit can't execute.
 - Time spent: <10 min (credential + connectivity check only).
+
+---
+
+## 2026-08-19 — first-pass repair sweep (scheduled): no eligible findings — QA-20260819-01 is class: risky (not touched), QA-20260819-02 already fixed-pending-verify (PR #20, landed on staging as 6f6a8dd, awaiting next audit verify). Nothing claimed, no branches, no PRs.
