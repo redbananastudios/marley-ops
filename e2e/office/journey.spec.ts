@@ -17,7 +17,10 @@ test.describe("Office — dashboard + operations", () => {
     await step("automations page shows the cron log (incl. crew job sheets)", page, async () => {
       await page.goto("/automations");
       await expect(page.getByRole("heading", { name: "Automations" })).toBeVisible();
-      await expect(page.getByText("Crew job sheets")).toBeVisible();
+      // Exact match: an open operational-issue alert (e.g. "Crew job sheets has
+      // never run") also contains this substring and would otherwise trip
+      // Playwright's strict-mode duplicate-match check.
+      await expect(page.getByText("Crew job sheets", { exact: true })).toBeVisible();
     });
   });
 
