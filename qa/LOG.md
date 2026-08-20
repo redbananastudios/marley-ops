@@ -4,6 +4,15 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-20T00:26Z–00:37Z — repair run (first-pass, Fable, push-triggered): 1 finding fixed, PR #25 opened
+
+- Tier: first-pass. Base: `9f42bd1` (origin/staging at checkout).
+- Findings taken: QA-20260820-01 (safe-fix, medium — staging CI e2e job can hang 6h with no `timeout-minutes`, wedging the deploy-staging concurrency group and silently skipping the prod-promotion gate) — claimed, fixed on `qa-repair/QA-20260820-01`, finding updated to `fixed-pending-verify` in the branch.
+- Fix: `timeout-minutes` on every job in all four workflows (staging 15/20/45, deploy 15/20, qa-auto-merge 20/10, qa-findings 10); `tests/config/workflow-timeouts.test.ts` line-parses the workflows and enforces the invariant repo-wide (verified failing 4 files/8 jobs pre-fix). Playwright browser caching deliberately skipped — not needed to kill the failure scenario. Gates: lint 0 · tsc 0 · vitest 1694 · build green.
+- PRs opened: [#25](https://github.com/redbananastudios/marley-ops/pull/25) → staging, labelled `qa-repair`.
+- Escalations: none. Not taken: QA-20260819-01, QA-20260820-03, QA-20260820-04 all `class: risky` (untouched per scope rules); QA-20260820-02 `status: fixing`, owned by a concurrent run.
+- Time spent: ~11 min.
+
 ## 2026-08-19T13:30Z–13:45Z — repair run (first-pass, Fable): 1 finding fixed, PR #20 opened
 
 - Tier: first-pass. Base: `fa3c5ba` (origin/staging at checkout).
