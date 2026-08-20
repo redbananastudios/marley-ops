@@ -151,3 +151,18 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 - Pushes: this commit (2 finding closes + state.json + log) — staging only, no PRs, master untouched.
 - Cleanup verification (all zero, by query): appointments 0 · quotes(ref~RUN) 0 · leads 0 · clients(name~RUN) 0 · staff 0 · profiles 0 · activities(F1 lead) 0 · auth users 3/3 deleted; final broad QA-SENTINEL sweep across 10 tables + auth all 0. health-watchdog NOT triggered (no operational_issues noise created).
 - Time spent: ~40 min wall clock (gates ~12 min background; verify-first + fresh-code browser drives + cleanup in main loop).
+
+---
+
+## 2026-08-20 — scheduled audit: fresh-code verify of the direct website-lead ingest (e30fb02)
+
+- sha audited: 7b712a9 (origin/staging HEAD; deployed staging /api/version = 28b2199 — HEAD is one docs-only commit ahead, no app-code delta; base CI on 28b2199 = success).
+- Verify-first: nothing to close — both open findings are class:risky (QA-20260819-01 Contact-card two-hats, QA-20260820-08 storage-let delete-guard dead code), untouched, stay open for Peter. No finding sat in fixed-pending-verify.
+- Health gate: lint 0 errors (36-warn baseline) · tsc 0 · vitest 1800 passed/7 skipped · build ok — all four green on the untouched tree. Staging CI green on the deployed sha.
+- Seed: swept 0 QA-SENTINEL leftovers (clean slate). Minted only throwaway leads/clients for the ingest checks (all carried QA-SENTINEL, all torn down in-script).
+- Items tested (queue-jumped to freshest code — e30fb02 direct website lead ingest + migration 0102): io/website_lead_ingest PASS (new ledger item). Three live proofs: (1) migration 0102 index leads_external_lead_uq ENFORCES on deployed staging — duplicate external_lead_id insert → 23505 on the named constraint (the atomic idempotency backstop). (2) Route fails closed — POST no-auth → 401, wrong bearer → 401 {error:unauthorized}, GET → 405. (3) landWebsiteLead run against the REAL staging schema (throwaway vitest, deleted/uncommitted): first land creates status=website_enquiry/source_system=website/entry_channel=web (valid enums), name+postcode normalized, free-text preferredDate 'ASAP' coerced to null; second land same externalLeadId + different fields → created:false, row NOT rewritten (immutability holds).
+- Findings filed: none — freshest code verified correct live (same shape as the prior run's /q balance verify).
+- Specs added: none. SPEC GAP recorded (io.website_lead_ingest): /api/ingest/lead has no e2e spec; an auth-boundary spec (401/405) is writable without LEAD_INGEST_SECRET, but the e2e 'public' project depends on the setup auth project which needs E2E_* creds absent from this env, so nothing could be validated locally — an unvalidatable spec was deliberately NOT shipped. Happy-path HTTP also unreachable (no LEAD_INGEST_SECRET by design); dedup/immutability proven via the module instead.
+- Pushes: this commit (state.json ledger + log) — staging only, no PRs, master untouched.
+- Cleanup verification (all zero, by query): leads(QA-SENTINEL / external_lead_id qa-live-% / qa-ingest-%) 0 · clients(QA-SENTINEL) 0. No auth users minted this run. health-watchdog NOT triggered (no operational_issues noise).
+- Time spent: ~35 min (npm ci + gates ~15 min background; migration/route/module live proofs + ledger + log in main loop).
