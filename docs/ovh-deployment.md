@@ -93,6 +93,23 @@ before AND after, `ON_ERROR_STOP` semantics via try/rollback. First applied: 008
 Edit `/opt/marley-ops/app.env` on the box, then `sudo docker restart marley-ops-app`.
 If it's a `NEXT_PUBLIC_*` var it must also be rebuilt (re-run `deploy-ovh.sh`).
 
+### `LEAD_INGEST_SECRET` — the website's direct lead post
+
+`POST /api/ingest/lead` is how marleymoves.co.uk hands an enquiry straight to the
+panel instead of leaving it in a public Sanity dataset for the sync to find. It
+authenticates on `Authorization: Bearer <LEAD_INGEST_SECRET>` — one long random
+string, the SAME value in this box's `app.env` and in the site's Vercel env for
+the matching environment (staging talks to staging, prod to prod).
+
+It **fails closed**: blank, missing, or shorter than 16 characters and every post
+is refused with a 401, which the site treats as a failure and falls back to
+emailing the office. A lead is never lost by this, but nothing lands in the panel
+either — so if enquiries stop appearing, grep the app logs for
+`lead-ingest.secret_unconfigured` before looking anywhere else.
+
+Rotating it needs both sides changed within the same window; leads submitted in
+between fall back to the office email rather than disappearing.
+
 ## Rollback
 
 **Vercel is deleted** (2026-07-13) — there is no longer a warm app fallback. Options:

@@ -53,6 +53,11 @@ export async function updateSession(request: NextRequest) {
     // here would silently break them.
     path.startsWith("/api/cron/") ||
     path.startsWith("/api/sync/") ||
+    // The website posting an enquiry straight in. It has no Supabase session
+    // and never will — it authenticates with a bearer secret INSIDE the route
+    // (ingestAuthorized, which fails closed). Listed EXACTLY, not by prefix, so
+    // a future /api/ingest/* helper is not silently exposed by inheritance.
+    path === "/api/ingest/lead" ||
     // Provider webhooks (svix-signature verified inside the route).
     path.startsWith("/api/webhooks/") ||
     // takepayments gateway messages (SHA-512 signature verified inside each

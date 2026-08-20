@@ -1,8 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { attachOrCreateClient } from "@/lib/leads/resolver";
-import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
 import { isImportedUnackedRow } from "@/lib/lead-alerts";
 import { applySyncFloor, resolveLeadFloor } from "@/lib/sync/sync-window";
+import { landWebsiteLead, toTimestampOrNull } from "@/lib/leads/website-lead";
 import { decideEnquiryPushes, isFreshEnquiryTimestamp } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import { log } from "@/lib/log";
@@ -14,6 +13,11 @@ type LeadStatus = Database["public"]["Enums"]["lead_status"];
 interface SanityQuote {
   _id: string;
   _createdAt?: string | null;
+  /** The id the SITE minted for the submission — the same one the direct
+   *  ingest route keys on. Reading it here is what stops one enquiry landing
+   *  twice while both delivery routes are live. Absent on documents written
+   *  before the site started stamping it. */
+  leadId?: string | null;
   name?: string | null;
   phone?: string | null;
   email?: string | null;
@@ -26,6 +30,7 @@ interface SanityQuote {
   submittedAt?: string | null;
   status?: string | null;
   source?: string | null;
+  referrer?: string | null;
   campaign?: string | null;
   variantKey?: string | null;
   landingUrl?: string | null;
@@ -41,23 +46,7 @@ interface SanityQuote {
   msclkid?: string | null;
 }
 
-const FIELDS = `_id, _createdAt, name, phone, email, fromPostcode, toPostcode, propertySize, preferredDate, services, notes, submittedAt, status, source, campaign, variantKey, landingUrl, utmSource, utmMedium, utmCampaign, utmContent, utmTerm, "gclid":gclid, "gbraid":gbraid, "wbraid":wbraid, "fbclid":fbclid, "msclkid":msclkid`;
-
-/** Coerce a Sanity value to a Postgres `date` (YYYY-MM-DD) or null — Sanity free-text
- *  ("ASAP", "2-3 weeks", "") would otherwise break the date column. */
-function toDateOrNull(s?: string | null): string | null {
-  if (!s) return null;
-  const t = s.trim();
-  const m = t.match(/^\d{4}-\d{2}-\d{2}/);
-  return m ? m[0] : null;
-}
-
-/** Coerce to a valid ISO timestamp or null. */
-function toTimestampOrNull(s?: string | null): string | null {
-  if (!s) return null;
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : s;
-}
+const FIELDS = `_id, _createdAt, leadId, name, phone, email, fromPostcode, toPostcode, propertySize, preferredDate, services, notes, submittedAt, status, source, referrer, campaign, variantKey, landingUrl, utmSource, utmMedium, utmCampaign, utmContent, utmTerm, "gclid":gclid, "gbraid":gbraid, "wbraid":wbraid, "fbclid":fbclid, "msclkid":msclkid`;
 
 /** Map a Sanity submission status onto our funnel enum. Only applied on INSERT. */
 function mapStatus(raw?: string | null): LeadStatus {
@@ -180,100 +169,73 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   for (const doc of docs) {
     // One bad doc must not abort the batch — isolate each.
     try {
-      const { clientId } = await attachOrCreateClient(admin, {
-        name: doc.name,
-        phone: doc.phone,
-        email: doc.email,
-        postcode: doc.fromPostcode,
-      });
+      // Freshness anchor: fall back to the Sanity document's own creation time
+      // when submittedAt is missing or garbled — a genuinely new enquiry must
+      // never be silently skipped by the alert.
+      const alertSubmittedAt = toTimestampOrNull(doc.submittedAt) ?? toTimestampOrNull(doc._createdAt);
 
-      const submittedAt = toTimestampOrNull(doc.submittedAt);
-      const alertSubmittedAt = submittedAt ?? toTimestampOrNull(doc._createdAt);
-      const isFreshAlert = isFreshEnquiryTimestamp(alertSubmittedAt, syncNow);
-      const baseFields = {
-        client_id: clientId,
-        entry_channel: "web" as const,
-        source_system: "website",
-        sanity_id: doc._id,
-        // Website visitors type freely ("paul betty", "bh218nb") — normalise
-        // on ingest so the panel never shows the raw casing.
-        name: formatPersonNameOrNull(doc.name),
-        phone: doc.phone ?? null,
-        email: doc.email ?? null,
-        from_postcode: formatUkPostcodeOrNull(doc.fromPostcode),
-        to_postcode: formatUkPostcodeOrNull(doc.toPostcode),
-        property_size: doc.propertySize ?? null,
-        preferred_date: toDateOrNull(doc.preferredDate),
-        services: Array.isArray(doc.services) ? doc.services : [],
-        notes: doc.notes ?? null,
-        campaign: doc.campaign ?? null,
-        variant_key: doc.variantKey ?? null,
-        landing_url: doc.landingUrl ?? null,
-        utm_source: doc.utmSource ?? null,
-        utm_medium: doc.utmMedium ?? null,
-        utm_campaign: doc.utmCampaign ?? null,
-        utm_content: doc.utmContent ?? null,
-        utm_term: doc.utmTerm ?? null,
-        gclid: doc.gclid ?? null,
-        gbraid: doc.gbraid ?? null,
-        wbraid: doc.wbraid ?? null,
-        fbclid: doc.fbclid ?? null,
-        msclkid: doc.msclkid ?? null,
-        ...(alertSubmittedAt ? { submitted_at: alertSubmittedAt } : {}),
-      };
+      // Shared with the direct ingest route (lib/leads/website-lead.ts) so the
+      // two delivery routes cannot produce different rows. Passing the site's
+      // own leadId as well as the document id is what makes running both at
+      // once safe: whichever delivery arrives second finds the first one's row.
+      const landed = await landWebsiteLead(
+        admin,
+        {
+          externalLeadId: doc.leadId ?? null,
+          sanityId: doc._id,
+          name: doc.name,
+          phone: doc.phone,
+          email: doc.email,
+          fromPostcode: doc.fromPostcode,
+          toPostcode: doc.toPostcode,
+          propertySize: doc.propertySize,
+          preferredDate: doc.preferredDate,
+          services: doc.services,
+          notes: doc.notes,
+          sourceForm: doc.source,
+          referrerAnswer: doc.referrer,
+          submittedAt: alertSubmittedAt,
+          status: mapStatus(doc.status),
+          attribution: {
+            campaign: doc.campaign,
+            variantKey: doc.variantKey,
+            landingUrl: doc.landingUrl,
+            utmSource: doc.utmSource,
+            utmMedium: doc.utmMedium,
+            utmCampaign: doc.utmCampaign,
+            utmContent: doc.utmContent,
+            utmTerm: doc.utmTerm,
+            gclid: doc.gclid,
+            gbraid: doc.gbraid,
+            wbraid: doc.wbraid,
+            fbclid: doc.fbclid,
+            msclkid: doc.msclkid,
+          },
+        },
+        syncNow,
+      );
 
-      const { data: existing } = await admin
-        .from("leads")
-        .select("id, web_alert_ack_at, created_at")
-        .eq("sanity_id", doc._id)
-        .maybeSingle();
-
-      if (existing) {
-        // An already-landed lead is NEVER re-written from the site payload. A
-        // Sanity quoteSubmission is immutable once submitted, so re-applying
-        // baseFields could only re-assert the original submission — which
-        // silently reverted every office correction (name, phone, email,
-        // postcodes, notes) on the next dashboard load: Stephen Bull's
-        // postcode fix was clobbered twice on 2026-08-14 and the Edit-Lead
-        // dialog looked broken. After landing, the panel is the system of
-        // record. The only touch an existing row gets is the one-shot alarm
-        // repair for historical imports (migration 0071's guard) — a
+      if (landed.created) {
+        inserted += 1;
+        insertedLeads.push({ id: landed.leadId, name: doc.name ?? null, submittedAt: alertSubmittedAt });
+      } else if (landed.existing) {
+        // An already-landed lead is NEVER re-written from the site payload (see
+        // landWebsiteLead). The only touch an existing row gets is the one-shot
+        // alarm repair for historical imports (migration 0071's guard) — a
         // genuinely fresh lead has created_at ≈ submitted_at and stays
         // unacknowledged until a human acks it.
         if (
-          existing.web_alert_ack_at === null &&
-          !isFreshAlert &&
-          isImportedUnackedRow(existing.created_at, alertSubmittedAt)
+          landed.existing.web_alert_ack_at === null &&
+          !isFreshEnquiryTimestamp(alertSubmittedAt, syncNow) &&
+          isImportedUnackedRow(landed.existing.created_at, alertSubmittedAt)
         ) {
           const { error } = await admin
             .from("leads")
             .update({ web_alert_ack_at: syncNow.toISOString() })
-            .eq("id", existing.id);
+            .eq("id", landed.leadId);
           if (error) throw error;
           updated += 1;
         }
-      } else {
-        const { data: created, error } = await admin
-          .from("leads")
-          .insert({
-            ...baseFields,
-            status: mapStatus(doc.status),
-            // Historical imports must not surface as new desktop alarms. Only
-            // genuinely fresh inserts start unacknowledged.
-            web_alert_ack_at: isFreshAlert ? null : syncNow.toISOString(),
-          })
-          .select("id")
-          .single();
-        if (error) throw error;
-        inserted += 1;
-        // Freshness for the push decision: fall back to the Sanity document's
-        // own creation time when submittedAt is missing/garbled — a genuinely
-        // new enquiry must never be silently skipped by the alert.
-        insertedLeads.push({
-          id: created.id,
-          name: doc.name ?? null,
-          submittedAt: alertSubmittedAt,
-        });
       }
     } catch (docErr) {
       failed += 1;
