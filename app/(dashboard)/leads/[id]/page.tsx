@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MessageButton } from "@/components/comms/message-button";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 import { LeadActionBar } from "@/components/leads/lead-action-bar";
+import { DeleteLeadButton } from "@/components/leads/delete-lead-button";
 import { LegacyCommsToggle } from "@/components/leads/legacy-comms-toggle";
 import { PipelineStepper } from "@/components/leads/pipeline-stepper";
 import { LeadFollowUpsCard } from "@/components/leads/lead-followups-card";
@@ -453,6 +454,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           }
           depositPaid={!!lead.deposit_paid_at}
         />
+        {isAdminViewer && (
+          <div className="mt-3 flex justify-end border-t border-border pt-3">
+            <DeleteLeadButton
+              leadId={lead.id}
+              leadName={lead.name}
+              hasSibling={(clientLeadCount ?? 1) - 1 === 1}
+            />
+          </div>
+        )}
       </Card>
 
       <Tabs defaultValue="overview">

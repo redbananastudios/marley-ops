@@ -14,6 +14,7 @@ import { ukDayOf } from "@/lib/sales-report";
 import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { isBackwardMove } from "@/lib/leads/funnel";
+import { canDeleteLead } from "@/lib/leads/deletable";
 import { normalizePhone } from "@/lib/leads/phone";
 import {
   editLeadSchema,
@@ -910,4 +911,102 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   revalidatePath("/follow-ups");
   revalidatePath("/");
   return { ok: true as const, apptsCancelled, voidedInvoices, refundTask };
+}
+
+/**
+ * Delete a lead outright. This exists for DUPLICATES — the same customer
+ * enquiring twice, the second carrying a typo — so the office can tidy the
+ * pipeline without asking an engineer to run SQL (Peter, 2026-08-20).
+ *
+ * Deliberately narrow. `canDeleteLead` refuses anything carrying business
+ * history (a quote, money, a diary slot, a signature), because deleting those
+ * destroys the trail behind an invoice or a contract. Admin-only: this is the
+ * one lead action with no undo.
+ *
+ * The lead's own history (activities, comms, follow-ups) is re-pointed at the
+ * surviving sibling on the same client when there is exactly one, so a merge
+ * keeps the conversation instead of dropping it. With no sibling, those rows
+ * go with the lead — there is nowhere to keep them and nothing referring to
+ * them.
+ */
+export async function deleteLeadAction(
+  leadId: string,
+): Promise<{ ok: true; mergedInto: string | null } | { ok: false; error: string }> {
+  const office = await requireOfficeProfile();
+  if (!office) return { ok: false, error: "Office access required." };
+  if (office.role !== "admin") return { ok: false, error: "Only an admin can delete a lead." };
+  const id = z.string().uuid().safeParse(leadId);
+  if (!id.success) return { ok: false, error: "Invalid lead." };
+
+  const admin = createAdminClient();
+  const { data: lead } = await admin
+    .from("leads")
+    .select("id, name, client_id")
+    .eq("id", id.data)
+    .maybeSingle();
+  if (!lead) return { ok: false, error: "Lead not found." };
+
+  const COUNTED = [
+    ["quotes", "quotes"],
+    ["appointments", "appointments"],
+    ["signatures", "signatures"],
+    ["cardPayments", "card_payments"],
+    ["cubicSurveys", "cubic_surveys"],
+    ["storageLets", "storage_lets"],
+    ["claims", "claims"],
+    ["jobCompletions", "job_completions"],
+  ] as const;
+
+  let verdict;
+  try {
+    const facts = {} as Record<(typeof COUNTED)[number][0], number>;
+    for (const [key, table] of COUNTED) {
+      const { count: n, error } = await admin
+        .from(table)
+        .select("id", { count: "exact", head: true })
+        .eq("lead_id", id.data);
+      // A failed count must never read as "nothing there" — that would let a
+      // lead carrying money past the guard.
+      if (error) throw new Error(`could not check ${table}: ${error.message}`);
+      facts[key] = n ?? 0;
+    }
+    verdict = canDeleteLead(facts);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not check the lead." };
+  }
+  if (!verdict.deletable) {
+    return { ok: false, error: `This lead can't be deleted because ${verdict.reason}. Mark it lost instead.` };
+  }
+
+  // Exactly one sibling on the same client = a duplicate being merged; keep the
+  // history on the survivor. Two or more and we cannot know which it belongs to.
+  let mergedInto: string | null = null;
+  if (lead.client_id) {
+    const { data: siblings } = await admin
+      .from("leads")
+      .select("id")
+      .eq("client_id", lead.client_id)
+      .neq("id", id.data);
+    if (siblings?.length === 1) mergedInto = siblings[0].id as string;
+  }
+  if (mergedInto) {
+    for (const table of ["activities", "communications", "follow_ups"] as const) {
+      await admin.from(table).update({ lead_id: mergedInto }).eq("lead_id", id.data);
+    }
+  }
+
+  const { error } = await admin.from("leads").delete().eq("id", id.data);
+  if (error) return { ok: false, error: "Could not delete the lead." };
+
+  if (mergedInto) {
+    await admin.from("activities").insert({
+      lead_id: mergedInto,
+      client_id: lead.client_id,
+      actor_id: office.id,
+      type: "note",
+      summary: `Duplicate lead deleted (${lead.name ?? "unnamed"}); its history was merged here`,
+    });
+  }
+  revalidatePath("/leads");
+  return { ok: true, mergedInto };
 }
