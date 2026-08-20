@@ -495,7 +495,13 @@ const balanceInvoiceHtml = shellHtml(
     ),
     amountCard("Balance due{{{INVOICE_META}}}", "{{{AMOUNT}}}", "Your {{{QUOTE_REF}}} deposit is already deducted."),
     "{{{INVOICE_BUTTON}}}",
-    paymentCard("{{{QUOTE_REF}}}"),
+    // bankOnlyCard, NOT paymentCard: the balance rail takes no online card.
+    // paymentCard says "Card via the button above", but the button above this
+    // email is "View your invoice" and the balance invoice is raised with
+    // disableOnlinePayments — so the customer was sent to a page that cannot
+    // take their money. Greig James (MMR015) followed it and emailed back
+    // asking for a link to pay. The commitment template already uses this one.
+    bankOnlyCard("{{{QUOTE_REF}}}"),
     sublineRow(
       `Already paid, or need a different arrangement? Call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
       "0 36px 6px",
