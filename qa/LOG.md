@@ -74,3 +74,7 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 - Pushes: 9f42bd1 (findings close/file + spec + COVERAGE) then this commit (3 truth findings + state.json + log) — staging only, no PRs, master untouched.
 - Cleanup verification (all zero, by query): leads 0 · clients 0 · quotes 0 · appointments 0 · cubic_surveys 0 · staff 0 · storage_lets/units/sites 0 · profiles 0 · activities(marker leads) 0 · auth users 3/3 deleted.
 - Time spent: ~40 min wall clock (gates ~12 min background; 2 role agents in parallel ~10/~13 min; main-loop cron proofs, CI-hang investigation, spec, findings, cleanup).
+
+---
+
+## 2026-08-20 — escalation repair sweep (scheduled): nothing escalated — no open finding carries `escalate: opus-5` (QA-20260820-01/-02 are `status: fixing`, owned by in-flight first-pass runs; QA-20260819-01, QA-20260820-03/-04 are `class: risky`, never in scope). Nothing claimed, no branches, no PRs. Time spent: ~5 min.
