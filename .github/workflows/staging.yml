@@ -19,6 +19,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # timeout-minutes on every job: without it a hung step holds the
+    # deploy-staging concurrency group for GitHub's 6-hour default (observed
+    # 2026-08-19: `playwright install` stalled 3.5h+ and the e2e gate never
+    # reported on the deployed commit).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -33,6 +38,7 @@ jobs:
   deploy-staging:
     needs: test
     runs-on: [self-hosted, ovh]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - name: Build staging image (NEXT_PUBLIC_* from staging app.env)
@@ -81,6 +87,7 @@ jobs:
   e2e:
     needs: deploy-staging
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     env:
       # The seed/create-users scripts talk to the staging DB directly; the specs
       # sign in through the live staging app at E2E_BASE_URL. Zoho points at the

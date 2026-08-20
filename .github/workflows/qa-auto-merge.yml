@@ -19,6 +19,7 @@ jobs:
   gate:
     if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
@@ -37,6 +38,7 @@ jobs:
     needs: gate
     if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write

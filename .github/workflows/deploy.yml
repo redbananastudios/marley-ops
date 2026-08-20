@@ -17,6 +17,11 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # timeout-minutes on every job: a hung step otherwise holds the deploy-ovh
+    # concurrency group for GitHub's 6-hour default (same failure shape as the
+    # 2026-08-19 staging e2e hang). The `deploy` job's approval wait does not
+    # count — the clock starts when the job starts running.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -35,6 +40,7 @@ jobs:
     # Promotion policy: only merge to master once the staging `e2e` check passed.
     environment: production
     runs-on: [self-hosted, ovh]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
       - name: Build image (NEXT_PUBLIC_* baked from the box env)
