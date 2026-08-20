@@ -1,6 +1,6 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "lastAuditSha": "66d75f1",
+  "lastAuditSha": "d00bf0d",
   "crew": {
     "availability_set_remove": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/my-jobs/availability/**", "components/my-jobs/availability-editor.tsx"] },
     "hours_log_edit_clear": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/my-jobs/hours/**", "components/my-jobs/hours-editor.tsx", "lib/staff/time-entries.ts"] },
@@ -42,7 +42,7 @@
   },
   "customer": {
     "q_accept_sandbox_card": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/q/**", "app/actions/card-payments.ts", "app/api/card/**"] },
-    "cv_self_fill_survey": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "finding", "watch": ["app/cv/**", "app/actions/cubic-survey.ts"] },
+    "cv_self_fill_survey": { "lastTestedAt": "2026-08-20T00:15:00Z", "lastResult": "pass", "watch": ["app/cv/**", "app/actions/cubic-survey.ts"] },
     "s_storage_signing": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/s/**"] },
     "sheet_day_sheet": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/sheet/**", "lib/crew-sheet/**"] },
     "join_signup": { "lastTestedAt": null, "lastResult": null, "watch": ["app/join/**"] }
@@ -61,16 +61,16 @@
     "uploads_5_buckets": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/storage/**", "components/capture/**"] },
     "pdf_jobsheet_contract_daysheet": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/pdf/**", "lib/job-sheet-docdef.ts", "lib/crew-sheet/**", "app/api/documents/**"] },
     "email_sms_dispatch_dryrun": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/comms/**"] },
-    "cron_13_routes": { "lastTestedAt": null, "lastResult": null, "watch": ["app/api/cron/**"] }
+    "cron_13_routes": { "lastTestedAt": "2026-08-20T00:14:00Z", "lastResult": "pass", "note": "2/13 proven this run (ai-jobs, comms-retry): 200 + ok cron_runs row + zero-summaries verified true zeros by queue SQL; remaining 11 untested", "watch": ["app/api/cron/**"] }
   },
   "truth": {
-    "payments_tabs_totals": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/payments/**", "lib/payments/**"] },
+    "payments_tabs_totals": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "all rendered numbers match SQL exactly; QA-20260820-04 filed on cross-tab definitional disagreement (Owed-right-now vs Upcoming)", "watch": ["app/(dashboard)/payments/**", "lib/payments/**"] },
     "schedule_week_values": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/schedule/week-value.ts", "components/schedule/**"] },
-    "dashboard_counts_badges": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/page.tsx", "lib/dashboard/**"] },
-    "bookings_money_queues": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/bookings/**", "app/(dashboard)/bookings/**"] }
+    "dashboard_counts_badges": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "all 12 tiles/KPIs match SQL; QA-20260820-02 (awaiting-deposit definition split vs /bookings) + QA-20260820-03 (surveys-booked inferred from status rank) filed", "watch": ["app/(dashboard)/page.tsx", "lib/dashboard/**"] },
+    "bookings_money_queues": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "every queue count/£ matches SQL incl. tracer quote; shares QA-20260820-02/-04 definitional findings", "watch": ["lib/bookings/**", "app/(dashboard)/bookings/**"] }
   },
   "spec_gaps": {
-    "office_jobs_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/jobs/**"] },
+    "office_jobs_spec": { "lastTestedAt": "2026-08-20T00:20:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/jobs/**"] },
     "estimator_work_quote_specs": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/estimator/**"] },
     "crew_invoicing_submit_lines_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/pay/**"] }
   }
