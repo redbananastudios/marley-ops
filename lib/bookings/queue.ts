@@ -53,9 +53,73 @@ export function daysBetweenUk(todayUk: string, dayUk: string): number {
   return Math.round((Date.parse(`${dayUk}T00:00:00Z`) - Date.parse(`${todayUk}T00:00:00Z`)) / 86_400_000);
 }
 
-/** How close to the move the balance conversation starts (matches the existing
- *  "invoice before move day" nudge). */
-export const BALANCE_WINDOW_DAYS = 3;
+/** How close to the move the balance falls due. 7 days, matching the T-7
+ *  automatic final balance invoice — the point at which the customer is
+ *  actually asked for the money (Peter, 2026-08-20). */
+export const BALANCE_WINDOW_DAYS = 7;
+
+/** What a booking owes RIGHT NOW, in money the business can actually ask for
+ *  today. Deliberately independent of `classifyBooking`: that ladder puts a
+ *  booking in exactly ONE bucket, so an unpaid deposit used to mask the
+ *  balance on a job moving the same week (QA-20260820-04 — three move-day jobs
+ *  owing £5,400 read as £600). A booking can owe the 25% AND the balance at
+ *  once, so the money is computed per obligation, not per bucket.
+ *
+ *  The £100 deposit is NEVER counted (Peter, 2026-08-20): it secures the
+ *  booking rather than falling due on a date, so counting it inflates "owed
+ *  right now" with money nobody is chasing today. It keeps its own queue on
+ *  /payments — it just isn't part of the headline.
+ *
+ *  No double-count by construction: `balanceAmount` is already
+ *  agreed − deposit − commitment (see load-signals), so commitment + balance
+ *  is exactly what is outstanding after the deposit. */
+export interface OwedSignals {
+  commitmentInvoiceAmount: number;
+  commitmentPaidAt: string | null;
+  commitmentDueDate: string | null;
+  dateReleasableAt: string | null;
+  balanceAmount: number;
+  balancePaidAt: string | null;
+  balanceInvoiceNumber: string | null;
+  hasRemovalAppt: boolean;
+  apptDayUk: string | null;
+}
+
+export interface OwedNow {
+  /** Invoiced-and-unpaid 25%. */
+  commitment: number;
+  /** Balance that has fallen due (invoiced, inside the window, or move passed). */
+  balance: number;
+  total: number;
+  /** The portion of `total` already past its date — chase first. */
+  overdue: number;
+}
+
+export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
+  const commitmentAmount = Number(s.commitmentInvoiceAmount ?? 0);
+  const commitmentOwed = commitmentAmount > 0 && !s.commitmentPaidAt ? commitmentAmount : 0;
+  const commitmentPastDue =
+    commitmentOwed > 0 && (!!s.dateReleasableAt || (!!s.commitmentDueDate && s.commitmentDueDate < todayUk));
+
+  const days = s.apptDayUk ? daysBetweenUk(todayUk, s.apptDayUk) : null;
+  const balanceAmount = Number(s.balanceAmount ?? 0);
+  // A balance is only askable once there is a real move behind it: a booking
+  // with no date owes nothing *today*, however large the job.
+  const balanceIsDue =
+    !s.balancePaidAt &&
+    balanceAmount > 0 &&
+    s.hasRemovalAppt &&
+    (!!s.balanceInvoiceNumber || (days !== null && days <= BALANCE_WINDOW_DAYS));
+  const balanceOwed = balanceIsDue ? balanceAmount : 0;
+  const balancePastDue = balanceOwed > 0 && days !== null && days < 0;
+
+  return {
+    commitment: commitmentOwed,
+    balance: balanceOwed,
+    total: commitmentOwed + balanceOwed,
+    overdue: (commitmentPastDue ? commitmentOwed : 0) + (balancePastDue ? balanceOwed : 0),
+  };
+}
 
 /** Dashboard needs-action money tiles, counted off the classified /bookings
  *  ledger so tile and queue can never disagree (QA-20260820-02: the tile

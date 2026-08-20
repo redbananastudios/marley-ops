@@ -152,9 +152,11 @@ export default async function BookingsPage() {
   const allSet = by("all_set").sort(byMoveDay);
 
   const commitmentToCollect = commitmentOverdue.concat(commitmentDue).reduce((s, r) => s + r.commitmentInvoiceAmount, 0);
-  const balanceOutstanding = rows
-    .filter((r) => r.depositPaidAt && !r.balancePaidAt)
-    .reduce((s, r) => s + r.balanceAmount, 0);
+  // Reads the same computed figure as /payments. It previously required
+  // depositPaidAt, so a job moving this week with the deposit unpaid reported
+  // £0 outstanding while /payments Upcoming counted its full balance
+  // (QA-20260820-04).
+  const balanceOutstanding = rows.reduce((s, r) => s + r.owed.balance, 0);
   const needsCrew = (r: Row) =>
     !!r.apptStartsAt && r.crewAssigned === 0 && daysBetweenUk(todayUk, ukDayOf(r.apptStartsAt)) >= 0;
   const toAllocate = rows.filter(needsCrew);

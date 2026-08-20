@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getBusinessSettings } from "@/lib/settings";
 import { balanceDue } from "@/lib/quote/payments";
-import { classifyBooking, type BookingBucket } from "@/lib/bookings/queue";
+import { classifyBooking, owedNow, type BookingBucket, type OwedNow } from "@/lib/bookings/queue";
 
 /**
  * One row per lead with an accepted quote — the booking money signals, loaded
@@ -58,6 +58,8 @@ export interface BookingRow {
   /** Imported iMVE booking — old-terms job, all money handling is manual. */
   legacy: boolean;
   bucket: BookingBucket;
+  /** Money askable TODAY (25% + balance; never the deposit) — see owedNow. */
+  owed: OwedNow;
 }
 
 export async function loadBookingRows(
@@ -177,7 +179,7 @@ export async function loadBookingRows(
     const commitmentCredit = Number(q.commitment_invoice_amount ?? 0);
     const appt = apptByLead.get(lead.id) ?? null;
     const bd = bdByLead.get(lead.id);
-    const row: Omit<BookingRow, "bucket"> = {
+    const row: Omit<BookingRow, "bucket" | "owed"> = {
       quoteId: q.id,
       quoteRef: q.quote_ref,
       leadId: lead.id,
@@ -218,13 +220,15 @@ export async function loadBookingRows(
       propertyType: (bd?.property_type as string | null) ?? null,
       legacy: q.source === "imve",
     };
+    const hasRemovalAppt = !!row.apptStartsAt;
+    const apptDayUk = row.apptStartsAt ? ukDayOfInstant(row.apptStartsAt) : null;
     rows.push({
       ...row,
       bucket: classifyBooking(
         {
           depositPaidAt: row.depositPaidAt,
-          hasRemovalAppt: !!row.apptStartsAt,
-          apptDayUk: row.apptStartsAt ? ukDayOfInstant(row.apptStartsAt) : null,
+          hasRemovalAppt,
+          apptDayUk,
           provisionalDate: row.provisionalDate,
           approxWindow: row.approxWindow,
           approxMonth: row.approxMonth,
@@ -234,6 +238,23 @@ export async function loadBookingRows(
           dateReleasableAt: row.dateReleasableAt,
           balancePaidAt: row.balancePaidAt,
           balanceInvoiceNumber: row.balanceInvoiceNumber,
+        },
+        todayUk,
+      ),
+      // Computed ONCE, here, so /payments, /bookings and the dashboard tiles
+      // all read the same figure. They previously each derived money their own
+      // way and disagreed about the same job in the same week (QA-20260820-04).
+      owed: owedNow(
+        {
+          commitmentInvoiceAmount: row.commitmentInvoiceAmount,
+          commitmentPaidAt: row.commitmentPaidAt,
+          commitmentDueDate: row.commitmentDueDate,
+          dateReleasableAt: row.dateReleasableAt,
+          balanceAmount: row.balanceAmount,
+          balancePaidAt: row.balancePaidAt,
+          balanceInvoiceNumber: row.balanceInvoiceNumber,
+          hasRemovalAppt,
+          apptDayUk,
         },
         todayUk,
       ),

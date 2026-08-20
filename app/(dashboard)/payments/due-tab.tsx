@@ -115,8 +115,13 @@ export async function DueTab() {
   const balanceOverdue = by("balance_overdue").sort(byMoveDay);
   const balanceDueRows = by("balance_due").sort(byMoveDay);
 
-  const overdueTotal = sum(commitmentOverdue) + sum(balanceOverdue);
-  const dueTotal = sum(deposits) + sum(commitmentDue) + sum(balanceDueRows);
+  // Headline money is computed per OBLIGATION, not per bucket, so a job whose
+  // deposit is unpaid can still show the balance it owes this week — and the
+  // £100 deposits are excluded entirely, because a deposit secures a booking
+  // rather than falling due today (Peter, 2026-08-20). The deposits queue
+  // below is unchanged; it just no longer inflates the headline.
+  const overdueTotal = rows.reduce((s, r) => s + r.owed.overdue, 0);
+  const dueTotal = rows.reduce((s, r) => s + r.owed.total, 0) - overdueTotal;
 
   const moveIn = (r: BookingRow): string => {
     if (!r.apptStartsAt) return "";
@@ -135,7 +140,7 @@ export async function DueTab() {
         <Stat
           label="Owed right now"
           value={poundsMoney(overdueTotal + dueTotal)}
-          sub="deposits + invoiced 25% + balances due"
+          sub="invoiced 25% + balances due (deposits excluded)"
         />
         <Stat
           label="Overdue"

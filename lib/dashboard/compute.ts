@@ -273,7 +273,13 @@ export function buildPeriodStats(
     (STATUS_RANK[l.status] ?? -1) >= (STATUS_RANK[target] ?? 99);
 
   const isContacted = (l: LeadLite) => l.first_contacted_at != null;
-  const isSurveyed = (l: LeadLite) => prog.surveyed.has(l.id) || reached(l, "survey_booked");
+  // A survey counts ONLY when a survey appointment actually exists (Peter,
+  // 2026-08-20). It used to also count any lead whose STATUS had reached
+  // survey_booked, which meant quote-without-survey jobs — a real flow, Luke
+  // often quotes before visiting — were counted as surveyed: 81 leads read as
+  // surveyed against 11 real survey appointments, so the tile could not tell
+  // "we surveyed everyone" from "we surveyed no one" (QA-20260820-03).
+  const isSurveyed = (l: LeadLite) => prog.surveyed.has(l.id);
   const isQuoted = (l: LeadLite) => prog.quoted.has(l.id) || reached(l, "quoted");
   const isWon = (l: LeadLite) => prog.won.has(l.id) || reached(l, "confirmed");
 
