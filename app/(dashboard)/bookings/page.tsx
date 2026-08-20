@@ -276,6 +276,10 @@ export default async function BookingsPage() {
               {r.balanceInvoiceNumber} · {gbp(r.balanceAmount)} due
             </span>
             <MarkPaidButton quoteId={r.quoteId} kind="balance" amount={r.balanceAmount} customerName={r.customer} />
+            {/* Sending the invoice again belongs exactly here — the row that says
+                it is raised and unpaid. Without it the office can only mark the
+                money in, never ask for it a second time. */}
+            <BalanceInvoiceButton leadId={r.leadId} />
           </>
         ) : (
           <>

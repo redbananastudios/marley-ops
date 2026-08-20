@@ -223,7 +223,15 @@ export function PaymentsCard({
                 {gbp(state.balanceAmount)} due {fmt(state.balanceDueDate)}{" "}
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
-              <MarkReceivedButton leadId={leadId} kind="balance" amount={state.balanceAmount} />
+              <div className="flex flex-wrap items-center gap-2">
+                <MarkReceivedButton leadId={leadId} kind="balance" amount={state.balanceAmount} />
+                {/* Raising the invoice SETS balance amount + due date, which used to
+                    take this branch and hide the Final invoice button — so the one
+                    state where the office needs to send the invoice again (it
+                    already exists) was the one state with no way to reach it.
+                    Greig James asked where to pay and there was no button to press. */}
+                <BalanceInvoiceButton leadId={leadId} />
+              </div>
             </div>
           ) : (
             <div className="space-y-2">
