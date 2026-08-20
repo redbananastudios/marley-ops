@@ -189,6 +189,25 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
       // redirect target + the force-dynamic /quotes list refetch on nav anyway.
       return { ok: true as const, id: data.id, quoteRef: data.quote_ref };
     }
+    // A concurrent call minted this lead's draft first (partial unique index
+    // quotes_one_draft_per_lead_uq, migration 0101). /quotes/new creates the
+    // draft during its render, which Next can fire twice for one navigation,
+    // and both passes clear the resume check above before either commits —
+    // the other row IS the draft the user wanted, so hand it back rather than
+    // retrying into the same wall or burning a second quote_ref.
+    if (opts.leadId && error.message.includes("quotes_one_draft_per_lead_uq")) {
+      const { data: winner } = await sb
+        .from("quotes")
+        .select("id, quote_ref")
+        .eq("lead_id", opts.leadId)
+        .eq("status", "draft")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (winner) return { ok: true as const, id: winner.id, quoteRef: winner.quote_ref };
+      // Winner vanished between the violation and the re-read (draft deleted)
+      // — fall through so the duplicate branch below retries the insert.
+    }
     if (!error.message.includes("duplicate") && !error.message.includes("unique")) {
       return { ok: false as const, error: error.message };
     }
