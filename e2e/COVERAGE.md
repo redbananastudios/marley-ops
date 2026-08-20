@@ -73,6 +73,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | /s storage-agreement signing (render + affordance + bad-token 404) | ✅ | public/signing.spec.ts |
 | /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
 | /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
+| /join crew sign-up (submit → success state + bad-token dead-link card) | ✅ | public/join.spec.ts |
 
 ## Bugs this suite surfaced
 - **`/sheet/<token>` was 307'd to /login** — the crew day-sheet page (designed to

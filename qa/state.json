@@ -1,10 +1,10 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "lastAuditSha": "d00bf0d",
+  "lastAuditSha": "fa48e83",
   "crew": {
-    "availability_set_remove": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/my-jobs/availability/**", "components/my-jobs/availability-editor.tsx"] },
-    "hours_log_edit_clear": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/my-jobs/hours/**", "components/my-jobs/hours-editor.tsx", "lib/staff/time-entries.ts"] },
-    "expense_receipt_upload": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["lib/staff/receipts.ts", "app/my-jobs/hours/**"] },
+    "availability_set_remove": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/my-jobs/availability/**", "components/my-jobs/availability-editor.tsx"] },
+    "hours_log_edit_clear": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/my-jobs/hours/**", "components/my-jobs/hours-editor.tsx", "lib/staff/time-entries.ts"] },
+    "expense_receipt_upload": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "IO proof end-to-end: storage object path matches DB receipt_key exactly; 'clear day' correctly removes the object too once receipt_emailed_at is stamped (documented policy), no orphan left either direction", "watch": ["lib/staff/receipts.ts", "app/my-jobs/hours/**"] },
     "job_list_detail": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/my-jobs/page.tsx", "app/my-jobs/[id]/**"] },
     "job_note_photo": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["components/crew/job-notes.tsx", "app/actions/job-notes.ts", "app/actions/job-media.ts"] },
     "complete_job": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["components/crew/complete-job-button.tsx", "components/crew/crew-action-bar.tsx"] },
@@ -13,18 +13,18 @@
     "job_sheet_pdf": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["components/job-sheet-button.tsx", "lib/job-sheet-*.ts", "app/actions/job-sheet.ts"] }
   },
   "admin": {
-    "lead_create_edit": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "finding", "watch": ["app/(dashboard)/leads/**", "components/leads/edit-lead-dialog.tsx"] },
+    "lead_create_edit": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "finding", "note": "QA-20260819-01 (Contact card two-hats) re-confirmed still reproducing unchanged, no regression/no fix — still risky/Peter-only", "watch": ["app/(dashboard)/leads/**", "components/leads/edit-lead-dialog.tsx"] },
     "lead_status_lost_noreply": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["components/leads/leads-board.tsx", "components/leads/lead-action-bar.tsx", "components/leads/status-reason-dialog.tsx"] },
-    "followups_snooze_complete": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/follow-ups/**", "components/followups/**", "components/leads/add-followup-dialog.tsx"] },
+    "followups_snooze_complete": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/follow-ups/**", "components/followups/**", "components/leads/add-followup-dialog.tsx"] },
     "quote_build_send_supersede": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/quotes/**", "components/quote/**"] },
     "survey_book_reschedule_cancel": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/schedule/**", "components/schedule/appointment-dialog.tsx", "components/schedule/reschedule-dialog.tsx"] },
     "removal_book_changedate_cancel": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["components/bookings/change-date-dialog.tsx", "components/bookings/cancel-booking-dialog.tsx", "app/actions/booking-change.ts"] },
     "appointment_view_job_summary": { "lastTestedAt": "2026-08-18T22:00:00Z", "lastResult": "pass", "watch": ["components/schedule/appointment-view-dialog.tsx", "components/schedule/job-summary.tsx"] },
-    "mark_deposit_balance_paid": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/bookings/**", "app/(dashboard)/invoicing/**"] },
+    "mark_deposit_balance_paid": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "deposit marked paid via bank transfer on /bookings; quotes.deposit_paid_at, leads.deposit_paid_at, lead status auto-advance, /leads/[id] Payments card and /payments all agreed exactly; dry-run confirmation email correctly queued not sent", "watch": ["app/(dashboard)/bookings/**", "app/(dashboard)/invoicing/**"] },
     "bank_feed_attach_link_unlink": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "blocked", "watch": ["components/payments/attach-dialog.tsx", "app/actions/bank-feed.ts"] },
     "refunds_queue": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/refunds/**", "app/actions/refunds.ts"] },
     "storage_sites_units_lets": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/storage/**", "components/storage/**"] },
-    "staff_vehicle_crud_join_approve": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/resources/**", "components/resources/**"] },
+    "staff_vehicle_crud_join_approve": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "join-to-approve handoff (h5) confirms approve creates staff row only, does not auto-provision a login by design (separate Activate crew login + Send invite actions)", "watch": ["app/(dashboard)/resources/**", "components/resources/**"] },
     "claims_open_update_settle": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/claims/**", "components/claims/**", "app/actions/claims.ts"] },
     "documents_content_review": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/documents/**", "app/(dashboard)/content/**", "app/actions/job-media.ts"] },
     "cubic_survey_review": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/leads/[id]/cubic/**", "app/actions/ai-survey-review.ts"] },
@@ -35,43 +35,44 @@
     "performance_growth_automations": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/performance/**", "app/(dashboard)/growth/**", "app/(dashboard)/automations/**"] }
   },
   "estimator": {
-    "cockpit": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/estimator/**"] },
-    "book_survey_quote_from_visit": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/schedule/surveys/**", "components/schedule/appointment-view-dialog.tsx"] },
+    "cockpit": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/estimator/**"] },
+    "book_survey_quote_from_visit": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "finding", "note": "QA-20260820-05 filed: one Create Quote click produced two draft quotes (racy SELECT-then-INSERT dedup in createDraftQuote, no DB constraint backing it); survey booking itself + out-of-hours calendar-render edge case both fine", "watch": ["app/(dashboard)/schedule/surveys/**", "components/schedule/appointment-view-dialog.tsx", "app/(dashboard)/quotes/actions.ts", "app/(dashboard)/quotes/new/page.tsx"] },
     "estimator_pay_statement": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/estimator/pay/**", "components/estimator/**"] },
-    "gating_forbidden_surfaces": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/finance/**", "app/(dashboard)/refunds/**", "lib/supabase/proxy-session.ts"] }
+    "gating_forbidden_surfaces": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "/finance, /finance/statements, /refunds all bounce correctly under a freshly-verified estimator session; no financial data leaked", "watch": ["app/(dashboard)/finance/**", "app/(dashboard)/refunds/**", "lib/supabase/proxy-session.ts"] }
   },
   "customer": {
-    "q_accept_sandbox_card": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/q/**", "app/actions/card-payments.ts", "app/api/card/**"] },
+    "q_accept_sandbox_card": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "note": "card PANs (E2E_CARD_*) still unconfigured in this env, card P0s remain fixme'd", "watch": ["app/q/**", "app/actions/card-payments.ts", "app/api/card/**"] },
     "cv_self_fill_survey": { "lastTestedAt": "2026-08-20T00:15:00Z", "lastResult": "pass", "watch": ["app/cv/**", "app/actions/cubic-survey.ts"] },
-    "s_storage_signing": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/s/**"] },
-    "sheet_day_sheet": { "lastTestedAt": "2026-08-19T12:00:00Z", "lastResult": "pass", "watch": ["app/sheet/**", "lib/crew-sheet/**"] },
-    "join_signup": { "lastTestedAt": null, "lastResult": null, "watch": ["app/join/**"] }
+    "s_storage_signing": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/s/**"] },
+    "sheet_day_sheet": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "watch": ["app/sheet/**", "lib/crew-sheet/**"] },
+    "join_signup": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "new permanent spec e2e/public/join.spec.ts (submit -> success state; bad-token -> DeadLinkCard, never the form); staff_onboard_enabled now left ON as the E2E baseline (mirrors self_billing_enabled), staff_submissions row created by the form has no auto-provisioned staff/auth row (matches admin.staff_vehicle_crud_join_approve finding)", "watch": ["app/join/**"] }
   },
   "handoffs": {
     "h1_crew_availability_to_admin_schedule": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/availability/**", "app/(dashboard)/schedule/**"] },
     "h2_crew_hours_to_admin_statements": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/hours/**", "app/(dashboard)/finance/statements/**"] },
     "h3_customer_accept_to_admin_bookings_payments": { "lastTestedAt": null, "lastResult": null, "watch": ["app/q/**", "app/(dashboard)/bookings/**", "app/(dashboard)/payments/**"] },
     "h4_customer_cv_to_admin_review": { "lastTestedAt": null, "lastResult": null, "watch": ["app/cv/**", "app/(dashboard)/leads/[id]/cubic/**"] },
-    "h5_join_to_admin_approve_to_login": { "lastTestedAt": null, "lastResult": null, "watch": ["app/join/**", "app/(dashboard)/resources/**"] },
+    "h5_join_to_admin_approve_to_login": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "full chain verified end-to-end incl. real /login as the newly-activated crew user; approve/activate/invite is a deliberate 3-step design, not a bug; self-cleaned (0/0/0/404 after)", "watch": ["app/join/**", "app/(dashboard)/resources/**"] },
     "h6_admin_survey_to_estimator_diary": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/schedule/surveys/**", "app/(dashboard)/estimator/**"] },
     "h7_crew_complete_to_admin_content": { "lastTestedAt": null, "lastResult": null, "watch": ["components/crew/**", "app/(dashboard)/content/**"] },
     "h8_admin_changedate_to_crew_myjobs": { "lastTestedAt": null, "lastResult": null, "watch": ["app/actions/booking-change.ts", "app/my-jobs/**"] }
   },
   "io": {
-    "uploads_5_buckets": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/storage/**", "components/capture/**"] },
+    "uploads_5_buckets": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "1/5 buckets proven this run (expense-receipts, via crew agent); remaining 4 untested", "watch": ["lib/storage/**", "components/capture/**"] },
     "pdf_jobsheet_contract_daysheet": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/pdf/**", "lib/job-sheet-docdef.ts", "lib/crew-sheet/**", "app/api/documents/**"] },
-    "email_sms_dispatch_dryrun": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/comms/**"] },
+    "email_sms_dispatch_dryrun": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "deposit-paid confirmation email observed in communications as status=sent provider_id=dryrun-email-... - staging dry-run confirmed live, not just assumed", "watch": ["lib/comms/**"] },
     "cron_13_routes": { "lastTestedAt": "2026-08-20T04:19:00Z", "lastResult": "pass", "note": "5/13 proven cumulative (ai-jobs, comms-retry, +health-watchdog/fleet-reminders/ai-retention this run): 200 + ok cron_runs row + zero-summaries verified true zeros by queue SQL (1 active vehicle w/ null mot_due/tax_due -> fleet-reminders due:0 is real, not silent). health-watchdog surfaced staging has NO real cron scheduler wired (zoho-deposits/sanity-leads-sync/storage-billing/crew-job-sheets/card-reconcile/job-media-transcribe/weekly-digest all 'never run', chase 211h stale, bank-feed 328h stale) - expected for staging (routes are manually proven by audits, not scheduled), not a finding. remaining 8/13 route dirs untested: bank-feed, card-reconcile, chase, crew-job-sheets, job-media-transcribe, storage-billing, weekly-digest, zoho-deposits (weekly-digest + crew-job-sheets send real email/SMS to real staff/owners even on staging per their own header comments - do NOT trigger unattended without a dry-run flag check first; chase/bank-feed/card-reconcile/zoho-deposits touch money/comms state and need careful marker-only fixtures before triggering)", "watch": ["app/api/cron/**"] }
   },
   "truth": {
-    "payments_tabs_totals": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "all rendered numbers match SQL exactly; QA-20260820-04 filed on cross-tab definitional disagreement (Owed-right-now vs Upcoming)", "watch": ["app/(dashboard)/payments/**", "lib/payments/**"] },
+    "payments_tabs_totals": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "all rendered numbers match SQL exactly; QA-20260820-04 filed on cross-tab definitional disagreement (Owed-right-now vs Upcoming), still open/risky", "watch": ["app/(dashboard)/payments/**", "lib/payments/**"] },
     "schedule_week_values": { "lastTestedAt": null, "lastResult": null, "watch": ["lib/schedule/week-value.ts", "components/schedule/**"] },
-    "dashboard_counts_badges": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "all 12 tiles/KPIs match SQL; QA-20260820-02 (awaiting-deposit definition split vs /bookings) + QA-20260820-03 (surveys-booked inferred from status rank) filed", "watch": ["app/(dashboard)/page.tsx", "lib/dashboard/**"] },
-    "bookings_money_queues": { "lastTestedAt": "2026-08-20T00:30:00Z", "lastResult": "finding", "note": "every queue count/£ matches SQL incl. tracer quote; shares QA-20260820-02/-04 definitional findings", "watch": ["lib/bookings/**", "app/(dashboard)/bookings/**"] }
+    "dashboard_counts_badges": { "lastTestedAt": "2026-08-20T04:12:00Z", "lastResult": "finding", "note": "QA-20260820-02 (awaiting-deposit definition split vs /bookings) CLOSED this run - both tiles now share loadBookingRows+moneyTileCounts, confirmed live (1 vs 6 -> can no longer diverge). QA-20260820-03 (surveys-booked inferred from status rank) still open/risky.", "watch": ["app/(dashboard)/page.tsx", "lib/dashboard/**"] },
+    "bookings_money_queues": { "lastTestedAt": "2026-08-20T04:12:00Z", "lastResult": "finding", "note": "shares QA-20260820-02 (closed this run) + QA-20260820-04 (still open/risky) definitional findings", "watch": ["lib/bookings/**", "app/(dashboard)/bookings/**"] }
   },
   "spec_gaps": {
     "office_jobs_spec": { "lastTestedAt": "2026-08-20T00:20:00Z", "lastResult": "pass", "watch": ["app/(dashboard)/jobs/**"] },
     "estimator_work_quote_specs": { "lastTestedAt": null, "lastResult": null, "watch": ["app/(dashboard)/estimator/**"] },
-    "crew_invoicing_submit_lines_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/pay/**"] }
+    "crew_invoicing_submit_lines_spec": { "lastTestedAt": null, "lastResult": null, "watch": ["app/my-jobs/pay/**"] },
+    "public_join_spec": { "lastTestedAt": "2026-08-20T04:30:00Z", "lastResult": "pass", "note": "e2e/public/join.spec.ts added this run - closes this gap", "watch": ["app/join/**"] }
   }
 }

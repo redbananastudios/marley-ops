@@ -84,4 +84,13 @@ export const SEED = {
   claim: { name: "E2E Claim Lead" },
   /** A lead with a DUE follow-up — the follow-ups queue (snooze / done). */
   followUp: { name: "E2E Follow-up Lead" },
+  /** The crew sign-up link — /join/<token>. Unlike the other public-page
+   *  fixtures above (which seed a record for the page to READ), this one is
+   *  purely the feature switched ON + a stable token: the spec itself POSTs a
+   *  fresh application every run, using the shared E2E sink contact. `actions.ts`
+   *  treats a repeat submission with the same email+phone as an UPDATE to the
+   *  still-pending row (not a duplicate), so re-runs stay idempotent without a
+   *  wipe step. Mirrors `self_billing_enabled` — a singleton settings toggle the
+   *  seed turns on unconditionally. */
+  joinApplicant: { token: "e2e-join-token-0001", name: "E2E Join Applicant" },
 } as const;

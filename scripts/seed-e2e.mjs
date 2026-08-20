@@ -77,6 +77,7 @@ const SEED = {
   payCrew: { name: "E2E Pay Crew", statementRef: "MMP-E2E01" },
   claim: { name: "E2E Claim Lead" },
   followUp: { name: "E2E Follow-up Lead" },
+  joinApplicant: { token: "e2e-join-token-0001", name: "E2E Join Applicant" },
 };
 const ESTIMATOR_EMAIL = process.env.E2E_ESTIMATOR_EMAIL || "e2e-estimator@marleymoves.test";
 // Derive the agreement version + ack keys from the app's source of truth so a
@@ -168,6 +169,11 @@ async function wipe() {
   }
   // Crew day-sheet token is unique — a re-seed would collide; clear it.
   await sb.from("crew_job_sheets").delete().eq("token", SEED.daySheet.token);
+  // The /join spec POSTs a real application each run. actions.ts updates a still-
+  // PENDING row in place (same email+phone), but if the office has since
+  // approved/rejected it a re-seed would otherwise insert a stray duplicate —
+  // clear any prior E2E applications outright so every seed starts unclaimed.
+  await sb.from("staff_submissions").delete().ilike("full_name", "E2E %");
   await sb.from("clients").delete().ilike("display_name", "E2E %");
   console.log(`wiped prior E2E data (${leadIds.length} leads)`);
 }
@@ -630,5 +636,12 @@ await resetCrewContractorState();
     console.log(`seeded estimator pay unlock: ${ESTIMATOR_EMAIL}`);
   }
 }
+
+// 14. Crew sign-up link (/join/<token>) switched ON with a fixed token — mirrors
+//     the self_billing_enabled toggle above (a singleton business_settings flag
+//     the seed enforces unconditionally, not a per-record insert). The public
+//     spec POSTs its own application at this token each run.
+await sb.from("business_settings").update({ staff_onboard_enabled: true, staff_onboard_token: SEED.joinApplicant.token }).eq("id", true);
+console.log(`enabled crew sign-up: /join/${SEED.joinApplicant.token}`);
 
 console.log("\n✓ E2E seed complete.");
