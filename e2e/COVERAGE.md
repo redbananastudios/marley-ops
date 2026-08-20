@@ -31,7 +31,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Contractor pay — return a submitted invoice | ✅ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
 | Job Board — resources, week nav, assign modal | ✅ | office/job-board.spec.ts |
-| Completed Jobs | ⬜ | office/jobs.spec.ts |
+| Completed Jobs — ledger renders, search by ref, empty-state | ✅ | office/jobs.spec.ts |
 | Clients — toggle/search, detail, add-client dialog | ✅ | office/clients.spec.ts |
 | Documents — tabs + search | ✅ | office/records.spec.ts |
 | Claims — register + working page (advance → settle w/ resolution + amount) | ✅ | office/records.spec.ts + claims.spec.ts |
