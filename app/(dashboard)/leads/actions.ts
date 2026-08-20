@@ -993,6 +993,15 @@ export async function deleteLeadAction(
     for (const table of ["activities", "communications", "follow_ups"] as const) {
       await admin.from(table).update({ lead_id: mergedInto }).eq("lead_id", id.data);
     }
+  } else {
+    // No survivor to keep the history on. Neither FK cascades (follow_ups
+    // does), so these rows must go first or Postgres refuses the lead delete —
+    // which is exactly what any real lead hit, since creating one writes an
+    // activity.
+    for (const table of ["activities", "communications"] as const) {
+      const { error } = await admin.from(table).delete().eq("lead_id", id.data);
+      if (error) return { ok: false, error: "Could not delete the lead." };
+    }
   }
 
   const { error } = await admin.from("leads").delete().eq("id", id.data);
