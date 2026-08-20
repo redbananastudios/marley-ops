@@ -24,6 +24,26 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
+          # The risky-path guard diffs against the base branch.
+          fetch-depth: 0
+      # Structural enforcement of the risky-class boundary: schema, RLS, money,
+      # comms-sending and auth paths must never land without a human, whatever
+      # the finding's class says (PR #28 auto-merged a migration under a
+      # safe-fix label, 2026-08-20). A hit fails the gate; the PR then sits for
+      # Peter — exactly the behaviour an unlabelled PR gets.
+      - name: Refuse risky paths (human-only)
+        run: |
+          risky=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD -- \
+            'supabase/migrations/**' \
+            'lib/payments/**' \
+            'lib/comms/**' \
+            'app/api/card/**' \
+            'lib/supabase/proxy-session.ts')
+          if [ -n "$risky" ]; then
+            echo "::error::qa-repair PR touches human-only paths — auto-merge refused:"
+            echo "$risky"
+            exit 1
+          fi
       - uses: actions/setup-node@v5
         with:
           node-version: 22
