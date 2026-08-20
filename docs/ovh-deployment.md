@@ -90,8 +90,25 @@ before AND after, `ON_ERROR_STOP` semantics via try/rollback. First applied: 008
 
 ## Change an env var
 
-Edit `/opt/marley-ops/app.env` on the box, then `sudo docker restart marley-ops-app`.
-If it's a `NEXT_PUBLIC_*` var it must also be rebuilt (re-run `deploy-ovh.sh`).
+Edit `/opt/marley-ops/app.env` on the box, then **RECREATE** the container:
+
+```bash
+sudo docker rm -f marley-ops-app
+sudo docker run -d --name marley-ops-app --restart unless-stopped \
+  --network rbs -p 127.0.0.1:3000:3000 --env-file /opt/marley-ops/app.env marley-ops:latest
+```
+
+**`docker restart` is NOT enough and fails silently.** `--env-file` is read by the
+Docker CLI at `docker run` and baked into the container's config; a restart reuses
+that config, so the edited file is never re-read. The app keeps the OLD value with
+nothing in any log saying so — which reads exactly like a broken feature rather
+than a stale variable. (Cost an hour on staging, 2026-08-20: a correct
+`LEAD_INGEST_SECRET` kept answering 401 until the container was recreated.)
+A normal deploy already does `rm -f` + `run`, so setting a var **before** a deploy
+needs no separate step.
+
+If it's a `NEXT_PUBLIC_*` var it must also be rebuilt (re-run `deploy-ovh.sh`) —
+those are inlined into the client bundle at build time, not read at runtime.
 
 ### `LEAD_INGEST_SECRET` — the website's direct lead post
 
