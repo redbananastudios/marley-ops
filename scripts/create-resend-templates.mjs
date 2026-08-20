@@ -135,29 +135,14 @@ const amountCard = (label, amount, note) => `  <tr><td style="padding:0 36px 22p
     </table>
   </td></tr>`;
 
-const paymentCard = (reference) => {
-  const row = (l, v, last) => `<tr>
-    <td style="padding:8px 0;${last ? "" : "border-bottom:1px solid #F0EDE8;"}font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;width:42%;">${l}</td>
-    <td style="padding:8px 0;${last ? "" : "border-bottom:1px solid #F0EDE8;"}font-size:14px;color:${INK};font-weight:600;">${v}</td>
-  </tr>`;
-  return `  <tr><td style="padding:0 36px 22px;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
-      <tr><td style="padding:20px 24px;">
-        <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">How to pay</div>
-        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, card or cash, whichever suits. Card via the button above; bank details below.</div>
-        <table width="100%" cellpadding="0" cellspacing="0">
-          ${row("Account name", "MARLEYMOVES LTD")}
-          ${row("Sort code", "04-00-03")}
-          ${row("Account number", "12787423")}
-          <tr>
-            <td style="padding:8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Reference</td>
-            <td style="padding:8px 0;font-size:14px;color:${RED};font-weight:700;">${reference}</td>
-          </tr>
-        </table>
-      </td></tr>
-    </table>
-  </td></tr>`;
-};
+/* paymentCard() lived here: the same block but headed "Card via the button
+ * above; bank details below". Only the balance-invoice template ever called it,
+ * and that email's button is "View your invoice" pointing at an invoice raised
+ * with online payments disabled — so the sentence sent customers to a page that
+ * could not take their money (Greig James MMR015, 2026-08-20). Deleted rather
+ * than left dangling: no email in this file offers an online card button, so a
+ * helper that claims one is a bug waiting for its next caller. If a card-payable
+ * email is ever added, write its copy against that specific button. */
 
 /** Payment card without an online card button: the commitment and balance
  *  rails are BACS/cash/card-by-phone (card accepted, Peter 2026-07-29 — only
@@ -495,12 +480,11 @@ const balanceInvoiceHtml = shellHtml(
     ),
     amountCard("Balance due{{{INVOICE_META}}}", "{{{AMOUNT}}}", "Your {{{QUOTE_REF}}} deposit is already deducted."),
     "{{{INVOICE_BUTTON}}}",
-    // bankOnlyCard, NOT paymentCard: the balance rail takes no online card.
-    // paymentCard says "Card via the button above", but the button above this
-    // email is "View your invoice" and the balance invoice is raised with
-    // disableOnlinePayments — so the customer was sent to a page that cannot
-    // take their money. Greig James (MMR015) followed it and emailed back
-    // asking for a link to pay. The commitment template already uses this one.
+    // The balance rail takes no online card — bank transfer, phone card or cash.
+    // This used to render the deposit rail's block, which told the customer
+    // "Card via the button above" while the button above is "View your invoice"
+    // on an invoice raised with disableOnlinePayments (see the note by
+    // bankOnlyCard). The commitment template already uses this one.
     bankOnlyCard("{{{QUOTE_REF}}}"),
     sublineRow(
       `Already paid, or need a different arrangement? Call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
