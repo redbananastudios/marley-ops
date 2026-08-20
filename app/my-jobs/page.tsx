@@ -7,6 +7,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isSelfBillingEnabled } from "@/lib/staff/self-billing";
 import { apptWindow } from "@/lib/job-board";
+import { jobCardLook } from "@/lib/my-jobs/job-card";
 import { BrandMark } from "@/components/app-sidebar";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { SignOutButton } from "@/components/my-jobs/sign-out-button";
@@ -72,6 +73,7 @@ export default async function MyJobsPage() {
     ends_at: string | null;
     all_day: boolean | null;
     appt_type: string;
+    status: string;
     location: string | null;
     lead_name: string | null;
     lead_phone: string | null;
@@ -139,6 +141,7 @@ export default async function MyJobsPage() {
             ends_at: a.ends_at,
             all_day: a.all_day,
             appt_type: a.appt_type,
+            status: a.status,
             location: a.location,
             lead_name: lead?.name ?? null,
             lead_phone: lead?.phone ?? null,
@@ -318,43 +321,36 @@ export default async function MyJobsPage() {
                 {dayHeading(day, today)}
               </h2>
               <div className="space-y-3">
-                {groups.get(day)!.map((j, ji) => (
+                {groups.get(day)!.map((j, ji) => {
+                  const look = jobCardLook(j.appt_type, j.status);
+                  return (
                   <div
                     key={j.id}
                     data-tour={day === orderedDays[0] && ji === 0 ? "crew-job-card" : undefined}
                     className={
                       "overflow-hidden rounded-xl border bg-card p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] " +
-                      (j.appt_type === "removal"
-                        ? "border-l-[3px] border-l-mm-red"
-                        : j.appt_type === "pack"
-                          ? "border-l-[3px] border-l-warn"
-                          : "border-l-[3px] border-l-survey")
+                      look.accent
                     }
                   >
                     {/* Card body opens the full job page; buttons below stay their own targets. */}
                     <Link href={`/my-jobs/${j.id}`} className="focus-ring -m-2 block rounded-md p-2 active:bg-muted">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="text-base font-semibold text-foreground">{j.lead_name ?? j.title ?? "Job"}</p>
+                          <p className={"text-base font-semibold " + (look.completed ? "text-mist-500" : "text-foreground")}>
+                            {j.lead_name ?? j.title ?? "Job"}
+                          </p>
                           <p className="mt-0.5 text-sm text-mist-500">
-                            {apptWindow(j)} ·{" "}
-                            <span className="capitalize">
-                              {j.appt_type === "removal" ? "Move" : j.appt_type === "pack" ? "Packing" : j.appt_type}
-                            </span>
+                            {apptWindow(j)} · <span className="capitalize">{look.typeLabel}</span>
                           </p>
                         </div>
                         <span className="flex shrink-0 items-center gap-1.5">
                           <span
                             className={
                               "rounded-pill px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide " +
-                              (j.appt_type === "removal"
-                                ? "bg-mm-red text-white"
-                                : j.appt_type === "pack"
-                                  ? "bg-warn-bg text-warn"
-                                  : "bg-muted text-mist-500")
+                              look.pill.cls
                             }
                           >
-                            {j.appt_type === "removal" ? "Move" : j.appt_type === "pack" ? "Packing" : "Survey"}
+                            {look.pill.label}
                           </span>
                           <ChevronRight className="size-4 text-mist-400" strokeWidth={1.75} />
                         </span>
@@ -404,7 +400,8 @@ export default async function MyJobsPage() {
                       ) : null}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </section>
           ))}
