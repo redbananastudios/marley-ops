@@ -57,6 +57,24 @@ export function daysBetweenUk(todayUk: string, dayUk: string): number {
  *  "invoice before move day" nudge). */
 export const BALANCE_WINDOW_DAYS = 3;
 
+/** Dashboard needs-action money tiles, counted off the classified /bookings
+ *  ledger so tile and queue can never disagree (QA-20260820-02: the tile
+ *  counted leads.status='provisional', which diverges the moment a lead is
+ *  hand-confirmed with the deposit unpaid). balanceDue is money owed NOW —
+ *  a far-future all_set booking owes nothing yet. */
+export function moneyTileCounts(rows: ReadonlyArray<{ bucket: BookingBucket }>): {
+  awaitingDeposit: number;
+  balanceDue: number;
+} {
+  let awaitingDeposit = 0;
+  let balanceDue = 0;
+  for (const r of rows) {
+    if (r.bucket === "deposit_outstanding") awaitingDeposit++;
+    else if (r.bucket === "balance_due" || r.bucket === "balance_overdue") balanceDue++;
+  }
+  return { awaitingDeposit, balanceDue };
+}
+
 export function classifyBooking(s: QueueSignals, todayUk: string): BookingBucket {
   if (!s.depositPaidAt) return "deposit_outstanding";
 

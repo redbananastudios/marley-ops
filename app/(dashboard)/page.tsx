@@ -15,7 +15,8 @@ import {
   type PeriodStats,
   type ProgressSets,
 } from "@/lib/dashboard/compute";
-import { classifyBooking } from "@/lib/bookings/queue";
+import { moneyTileCounts } from "@/lib/bookings/queue";
+import { loadBookingRows } from "@/lib/bookings/load-signals";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
 import { vehicleHasExpiryDue } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
@@ -132,80 +133,15 @@ export default async function DashboardPage() {
           releasableSince: q.date_releasable_at,
         }));
     })(),
-    // "Balance due" needs-action count — money owed NOW. Classifies each booked
-    // job through the SAME /bookings queue (lib/bookings/queue.classifyBooking)
-    // and counts only balance_due + balance_overdue. A confirmed booking months
-    // out with no balance invoice is 'all_set' and must NOT show as a balance
-    // owed (it did before — every confirmed, balance-unpaid lead was counted).
-    (async (): Promise<number> => {
-      const ukToday = new Date().toLocaleDateString("en-CA", { timeZone: UK_TZ });
-      const ukDayOf = (iso: string): string => new Date(iso).toLocaleDateString("en-CA", { timeZone: UK_TZ });
-      const { data: bdQuotes } = await supabase
-        .from("quotes")
-        .select(
-          "lead_id, accepted_at, deposit_paid_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount",
-        )
-        .eq("status", "accepted")
-        .is("booking_cancelled_at", null)
-        .not("lead_id", "is", null);
-      const bdLeadIds = [...new Set((bdQuotes ?? []).map((q) => q.lead_id).filter(Boolean))] as string[];
-      if (!bdLeadIds.length) return 0;
-      const [{ data: bdLeads }, { data: bdAppts }, { data: bdDetails }] = await Promise.all([
-        supabase.from("leads").select("id, balance_paid_at").in("id", bdLeadIds).eq("status", "confirmed"),
-        supabase
-          .from("appointments")
-          .select("lead_id, starts_at")
-          .eq("appt_type", "removal")
-          .in("status", ["scheduled", "completed"])
-          .in("lead_id", bdLeadIds),
-        supabase
-          .from("booking_details")
-          .select("lead_id, approx_window, approx_month, provisional_date")
-          .in("lead_id", bdLeadIds),
-      ]);
-      const bdLeadById = new Map((bdLeads ?? []).map((l) => [l.id, l]));
-      // Earliest removal slot per lead (matches /bookings apptByLead).
-      const bdApptByLead = new Map<string, string>();
-      for (const a of bdAppts ?? []) {
-        const cur = bdApptByLead.get(a.lead_id as string);
-        if (a.starts_at && (!cur || (a.starts_at as string) < cur)) bdApptByLead.set(a.lead_id as string, a.starts_at as string);
-      }
-      const bdDetailByLead = new Map((bdDetails ?? []).map((b) => [b.lead_id as string, b]));
-      // One accepted quote per confirmed lead — the most recently accepted.
-      const seen = new Set<string>();
-      const sorted = (bdQuotes ?? []).slice().sort((a, b) => (b.accepted_at ?? "").localeCompare(a.accepted_at ?? ""));
-      let count = 0;
-      for (const q of sorted) {
-        const leadId = q.lead_id as string;
-        const lead = bdLeadById.get(leadId);
-        if (!lead || seen.has(leadId)) continue;
-        seen.add(leadId);
-        const apptStartsAt = bdApptByLead.get(leadId) ?? null;
-        const bd = bdDetailByLead.get(leadId);
-        const bucket = classifyBooking(
-          {
-            depositPaidAt: q.deposit_paid_at,
-            hasRemovalAppt: !!apptStartsAt,
-            apptDayUk: apptStartsAt ? ukDayOf(apptStartsAt) : null,
-            provisionalDate: (bd?.provisional_date as string | null) ?? null,
-            approxWindow: (bd?.approx_window as string | null) ?? null,
-            approxMonth: (bd?.approx_month as string | null) ?? null,
-            commitmentPaidAt: (q.commitment_paid_at as string | null) ?? null,
-            commitmentInvoiceAmount: Number(q.commitment_invoice_amount ?? 0),
-            commitmentDueDate: (q.commitment_due_date as string | null) ?? null,
-            dateReleasableAt: (q.date_releasable_at as string | null) ?? null,
-            balancePaidAt: lead.balance_paid_at as string | null,
-            balanceInvoiceNumber:
-              q.zoho_balance_invoice_id && q.zoho_balance_invoice_id !== "pending"
-                ? (q.zoho_balance_invoice_number as string | null)
-                : null,
-          },
-          ukToday,
-        );
-        if (bucket === "balance_due" || bucket === "balance_overdue") count++;
-      }
-      return count;
-    })(),
+    // Money tiles ("Awaiting deposit" + "Balance due") — counted off the SAME
+    // classified ledger /bookings and the /payments Due tab render
+    // (lib/bookings/load-signals.ts), so the tiles and the queues they link to
+    // can never disagree. awaitingDeposit used to count leads.status=
+    // 'provisional', which diverged the moment a lead was hand-confirmed with
+    // the deposit unpaid (QA-20260820-02); balanceDue counts only balance_due +
+    // balance_overdue — money owed NOW, not every deposit-paid booking
+    // (far-future all_set bookings owe nothing yet).
+    loadBookingRows(supabase).then(({ rows }) => moneyTileCounts(rows)),
   ]);
 
   // Unbounded, all-time tables → page through fetchAllRows (PostgREST caps a
@@ -346,7 +282,7 @@ export default async function DashboardPage() {
     followUpsResult,
     refundQueueResult,
     datesAtRisk,
-    balanceDueCount,
+    moneyTiles,
   ] = await attentionPromise;
   const signedIds = new Set((signedResult.data ?? []).map((signature) => signature.quote_id));
   let followUpsOverdue = 0;
@@ -367,12 +303,10 @@ export default async function DashboardPage() {
         new Date(a.starts_at).getTime() < startToday + DAY,
     ).length,
     quotesAwaiting: quotes.filter((q) => q.status === "sent").length,
-    // Money pipeline (mirrors /bookings): provisional = accepted awaiting the
-    // deposit; balanceDue = booked jobs the /bookings queue classifies as
-    // balance_due / balance_overdue (money owed NOW), NOT every deposit-paid
-    // booking (far-future all_set bookings owe nothing yet).
-    awaitingDeposit: statusCounts.get("provisional") ?? 0,
-    balanceDue: balanceDueCount,
+    // Money pipeline — both counts come off the classified /bookings ledger
+    // (see moneyTiles above), never a lead-status proxy.
+    awaitingDeposit: moneyTiles.awaitingDeposit,
+    balanceDue: moneyTiles.balanceDue,
     // Fleet compliance: active vehicles with any expiry (MOT/tax/insurance/
     // service/lease) due ≤30d or overdue — the full fleet-reminder scope.
     fleetDocsDue: (fleetResult.data ?? []).filter((vehicle) => vehicleHasExpiryDue(vehicle)).length,
