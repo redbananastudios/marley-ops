@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
-import { computeBalanceCredits, createBalanceInvoiceFlow, fetchQuoteById } from "@/lib/quote/accept-flow";
+import {
+  computeBalanceCredits,
+  createBalanceInvoiceFlow,
+  fetchQuoteById,
+  resendBalanceInvoiceFlow,
+} from "@/lib/quote/accept-flow";
 import { moveDateLabel } from "@/lib/quote/payments";
 
 /**
@@ -80,6 +85,28 @@ export async function getBalanceInvoiceInfo(leadId: string): Promise<BalanceInvo
     invoiceAmount: quote.balance_invoice_amount,
     balancePaid: !!lead?.balance_paid_at,
   };
+}
+
+/**
+ * Send an already-raised final invoice again — same number, same figure, same
+ * PDF. For the customer who wants to settle up now rather than wait for the
+ * chase. Creating a second invoice stays impossible; the flow refuses once the
+ * balance is paid.
+ */
+export async function resendBalanceInvoiceAction(quoteId: string) {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not signed in" };
+
+  const res = await resendBalanceInvoiceFlow(sb, quoteId, user.id);
+  if (res.ok) {
+    const quote = await fetchQuoteById(sb, quoteId);
+    if (quote?.lead_id) revalidatePath(`/leads/${quote.lead_id}`);
+    revalidatePath(`/quotes/${quoteId}`);
+  }
+  return res;
 }
 
 /** Create + email the final invoice (idempotent — see accept-flow). */

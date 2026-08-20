@@ -10,7 +10,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { FileText, Loader2, ReceiptText } from "lucide-react";
+import { FileText, Loader2, ReceiptText, Send } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import {
   createBalanceInvoiceAction,
   getBalanceInvoiceInfo,
+  resendBalanceInvoiceAction,
   type BalanceInvoiceInfoResult,
 } from "@/app/(dashboard)/invoicing/actions";
 
@@ -50,12 +51,28 @@ export function BalanceInvoiceButton({
   const [info, setInfo] = useState<BalanceInvoiceInfoResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [sending, startSend] = useTransition();
+  const [resending, startResend] = useTransition();
 
   async function openDialog() {
     setOpen(true);
     setLoading(true);
     setInfo(await getBalanceInvoiceInfo(leadId));
     setLoading(false);
+  }
+
+  function resend() {
+    if (!info || !info.ok) return;
+    startResend(async () => {
+      const res = await resendBalanceInvoiceAction(info.quoteId);
+      if (!res.ok) {
+        toast.error(res.error);
+        setInfo(await getBalanceInvoiceInfo(leadId)); // it may have just been paid
+        return;
+      }
+      toast.success(`Invoice ${res.invoiceNumber} sent again — ${gbp(res.amount)} still due.`);
+      setOpen(false);
+      router.refresh();
+    });
   }
 
   function confirm() {
@@ -111,10 +128,28 @@ export function BalanceInvoiceButton({
                   {info.balancePaid ? "· PAID" : "· awaiting payment"}
                 </p>
                 <p className="mt-1 text-xs">
-                  It will not be created or sent twice. To re-send the email, use the quote&apos;s
-                  comms with an override.
+                  {info.balancePaid
+                    ? "Nothing further to send."
+                    : "It will never be created twice. Send it again if the customer wants to pay now, or has lost the email — same invoice, same figure, with the PDF attached."}
                 </p>
               </div>
+              {!info.balancePaid ? (
+                <Button
+                  variant="outline"
+                  onClick={resend}
+                  disabled={resending || !info.customerEmail}
+                  className="w-full"
+                >
+                  {resending ? (
+                    <Loader2 className="size-4 animate-spin" strokeWidth={1.75} />
+                  ) : (
+                    <Send className="size-4" strokeWidth={1.75} />
+                  )}
+                  {info.customerEmail
+                    ? `Send again to ${info.customerEmail}`
+                    : "No email address on this job"}
+                </Button>
+              ) : null}
               {info.invoiceUrl ? (
                 <a
                   href={info.invoiceUrl}
@@ -163,7 +198,7 @@ export function BalanceInvoiceButton({
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={sending}>
+            <Button variant="outline" onClick={() => setOpen(false)} disabled={sending || resending}>
               {info && info.ok && info.invoiceNumber ? "Close" : "Cancel"}
             </Button>
             {info && info.ok && !info.invoiceNumber ? (

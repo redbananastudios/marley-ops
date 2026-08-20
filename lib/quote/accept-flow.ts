@@ -61,6 +61,7 @@ import {
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
 import { commitmentAmount, commitmentDueDate, requestedDeposit } from "@/lib/payments-policy";
+import { canResendBalanceInvoice } from "@/lib/payments/balance-resend";
 import { legacyLocked } from "@/lib/legacy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -154,7 +155,8 @@ export type AcceptQuoteRow = {
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
-const isRealZohoId = (v: string | null): v is string => !!v && v !== "pending";
+/** A Zoho id that actually exists — 'pending' is the CAS claim, not an invoice. */
+export const isRealZohoId = (v: string | null): v is string => !!v && v !== "pending";
 
 export async function fetchQuoteByToken(sb: Sb, token: string): Promise<AcceptQuoteRow | null> {
   if (!token || token.length < 10) return null;
@@ -1965,6 +1967,146 @@ export async function computeBalanceCredits(sb: Sb, quote: AcceptQuoteRow): Prom
   return { agreed, depositCredit, commitmentCredit, forfeited, amount };
 }
 
+/** The raised balance invoice, as both the create and re-send paths know it. */
+interface RaisedBalanceInvoice {
+  invoiceId: string;
+  invoiceNumber: string;
+  invoiceUrl?: string | null;
+  amount: number;
+}
+
+/**
+ * Compose and send the "your final balance" email — branded body (or its Resend
+ * template twin) plus Zoho's own VAT invoice PDF.
+ *
+ * Extracted so RAISING the invoice and RE-SENDING it are the same email. They
+ * were one inlined block, which meant a re-send could only ever be a hand-typed
+ * message from the comms composer: no PDF, no invoice link, no bank panel — the
+ * customer would get something visibly unlike the original and still have to
+ * ask where to pay. Returns whether the send succeeded; never throws, because a
+ * mail failure must not undo an invoice that exists in Zoho.
+ */
+async function sendBalanceInvoiceEmail(
+  sb: Sb,
+  actorId: string | null,
+  quote: AcceptQuoteRow,
+  inv: RaisedBalanceInvoice,
+  opts: { override?: boolean; overrideReason?: string } = {},
+): Promise<boolean> {
+  if (!quote.customer_email) return false;
+  let pdfBase64: string | undefined;
+  try {
+    pdfBase64 = await getInvoicePdfBase64(inv.invoiceId);
+  } catch {
+    pdfBase64 = undefined; // send without the attachment rather than not at all
+  }
+  const meta: BalanceInvoiceMeta = {
+    firstName: quote.customer_name,
+    quoteRef: quote.quote_ref,
+    amount: inv.amount,
+    moveDateLabel: moveDateLabel(quote.moving_date),
+    invoiceUrl: inv.invoiceUrl,
+    invoiceNumber: inv.invoiceNumber,
+  };
+  const templateId = process.env.RESEND_TEMPLATE_BALANCE_INVOICE;
+  const res = await dispatchComm(sb, actorId, {
+    channel: "email",
+    from: accountsFrom(),
+    to: quote.customer_email,
+    subject: `Your final balance: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`,
+    bodyText: `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
+    ...(templateId
+      ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
+      : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
+    attachmentBase64: pdfBase64,
+    attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
+    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+    leadId: quote.lead_id ?? undefined,
+    quoteId: quote.id,
+    clientId: quote.client_id ?? undefined,
+    ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
+  });
+  return "ok" in res && res.ok;
+}
+
+/**
+ * Send an ALREADY-RAISED final invoice again, unchanged.
+ *
+ * The office needs this whenever a customer asks to settle up before we would
+ * otherwise have chased them (Greig James MMR015, 2026-08-20: invoice raised
+ * 14 Aug, customer replied five days later asking for a link to pay). Creating
+ * a second invoice is forbidden — one job, one VAT document — so this re-sends
+ * the SAME invoice number, figure and PDF, and takes nothing from the caller
+ * that could change them.
+ *
+ * Refuses once the balance is settled. That is Peter's "stop the automated
+ * email if it gets paid" rule, and it belongs on the server rather than on a
+ * hidden button: a paid customer asked to pay again is worse than a silent one.
+ * Sends with the duplicate guard overridden, because a deliberate re-send is
+ * exactly the case that guard exists to catch and the operator has just said
+ * they mean it.
+ */
+export async function resendBalanceInvoiceFlow(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+): Promise<{ ok: true; invoiceNumber: string; amount: number } | { ok: false; error: string }> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+
+  let balancePaid = false;
+  let paidStateUnknown = false;
+  if (quote.lead_id) {
+    const { data: lead, error } = await sb
+      .from("leads")
+      .select("balance_paid_at")
+      .eq("id", quote.lead_id)
+      .maybeSingle();
+    if (error) paidStateUnknown = true;
+    else balancePaid = !!lead?.balance_paid_at;
+  }
+
+  const amount = Number(quote.balance_invoice_amount ?? 0);
+  const verdict = canResendBalanceInvoice({
+    invoiceRaised: isRealZohoId(quote.zoho_balance_invoice_id),
+    invoicedAmount: amount,
+    bookingCancelled: !!quote.booking_cancelled_at,
+    hasCustomerEmail: !!quote.customer_email,
+    balancePaid,
+    paidStateUnknown,
+  });
+  if (!verdict.ok) return { ok: false, error: verdict.reason };
+
+  const invoiceNumber = quote.zoho_balance_invoice_number ?? "";
+
+  const emailed = await sendBalanceInvoiceEmail(
+    sb,
+    actorId,
+    quote,
+    {
+      invoiceId: quote.zoho_balance_invoice_id!,
+      invoiceNumber,
+      invoiceUrl: quote.zoho_balance_invoice_url,
+      amount,
+    },
+    { override: true, overrideReason: "Operator re-sent the final invoice" },
+  );
+  if (!emailed) return { ok: false, error: "The email did not send — check the comms log and try again." };
+
+  if (quote.lead_id) {
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: actorId,
+      type: "note",
+      summary: `Final invoice ${invoiceNumber} sent again to ${quote.customer_email} — £${amount.toFixed(2)} still due`,
+      meta: { quote_id: quoteId, invoice_id: quote.zoho_balance_invoice_id, amount, resend: true },
+    } as never);
+  }
+
+  return { ok: true, invoiceNumber, amount };
+}
+
 /**
  * Raise the pre-move balance invoice exactly once and email it (branded email +
  * Zoho's own VAT invoice PDF attached). Triggered by the manual button in the
@@ -2113,41 +2255,12 @@ export async function createBalanceInvoiceFlow(
     }
 
     // Email the customer: branded balance email + Zoho's VAT invoice PDF.
-    let emailed = false;
-    if (quote.customer_email) {
-      let pdfBase64: string | undefined;
-      try {
-        pdfBase64 = await getInvoicePdfBase64(inv.invoiceId);
-      } catch {
-        pdfBase64 = undefined; // send without the attachment rather than not at all
-      }
-      const meta: BalanceInvoiceMeta = {
-        firstName: quote.customer_name,
-        quoteRef: quote.quote_ref,
-        amount,
-        moveDateLabel: moveDateLabel(quote.moving_date),
-        invoiceUrl: inv.invoiceUrl,
-        invoiceNumber: inv.invoiceNumber,
-      };
-      const templateId = process.env.RESEND_TEMPLATE_BALANCE_INVOICE;
-      const res = await dispatchComm(sb, actorId, {
-        channel: "email",
-        from: accountsFrom(),
-        to: quote.customer_email,
-        subject: `Your final balance: ${quote.quote_ref} (£${amount.toFixed(2)})`,
-        bodyText: `Final balance of £${amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
-        ...(templateId
-          ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
-          : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
-        attachmentBase64: pdfBase64,
-        attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
-        replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
-        leadId: quote.lead_id ?? undefined,
-        quoteId: quote.id,
-        clientId: quote.client_id ?? undefined,
-      });
-      emailed = "ok" in res && res.ok;
-    }
+    const emailed = await sendBalanceInvoiceEmail(sb, actorId, quote, {
+      invoiceId: inv.invoiceId,
+      invoiceNumber: inv.invoiceNumber,
+      invoiceUrl: inv.invoiceUrl,
+      amount,
+    });
 
     return { ok: true, invoiceNumber: inv.invoiceNumber, amount, emailed };
   } catch (err) {

@@ -5,6 +5,7 @@ import {
   ensureCommitmentInvoice,
   ensureDepositInvoice,
   fetchQuoteByToken,
+  isRealZohoId,
   syncZohoPayments,
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
@@ -287,14 +288,18 @@ export default async function AcceptPage({
   if (quote.deposit_paid_at) {
     // Date-confirmation state (Payments Policy v2 §5A) lives on the LEAD —
     // null = deposit still fully refundable, so the confirm card shows.
+    // balance_paid_at rides along: it decides whether the final-balance card
+    // below asks for money or reports the job settled.
     let dateConfirmedAt: string | null = null;
+    let balancePaidAt: string | null = null;
     if (quote.lead_id) {
       const { data: lead } = await sb
         .from("leads")
-        .select("date_confirmed_at")
+        .select("date_confirmed_at, balance_paid_at")
         .eq("id", quote.lead_id)
         .maybeSingle();
       dateConfirmedAt = lead?.date_confirmed_at ?? null;
+      balancePaidAt = lead?.balance_paid_at ?? null;
     }
     if (dateConfirmedAt) {
       // Self-heal a missing commitment invoice (a prior partial failure) and
@@ -309,6 +314,19 @@ export default async function AcceptPage({
     const commitAmt = Number(quote.commitment_invoice_amount ?? 0);
     const commitDueLbl = moveDateLabel(quote.commitment_due_date);
     const showConfirmCard = !dateConfirmedAt && !!moveLbl && !!quote.lead_id;
+
+    // Once the final invoice is raised there IS something to pay, and this page
+    // is where the customer looks for it — the balance email's own copy points
+    // them back to their booking. Until now the page never read the balance at
+    // all, so it went on saying "nothing more to pay right now" while a real
+    // invoice sat unpaid; Greig James (MMR015, 2026-08-20) had to email and ask
+    // where to pay, five days after his £740 invoice went out. Bank transfer,
+    // phone card or cash only, per the pricing decision of 2026-07-09 — no card
+    // button here, and the Zoho invoice itself is raised with online payments
+    // disabled, so linking one would be a dead end.
+    const balanceInvoiced = isRealZohoId(quote.zoho_balance_invoice_id);
+    const balanceAmt = Number(quote.balance_invoice_amount ?? 0);
+    const showBalanceCard = balanceInvoiced && balanceAmt > 0;
 
     return (
       <Shell>
@@ -326,8 +344,18 @@ export default async function AcceptPage({
                   on <strong className="text-ink">{moveLbl}</strong>
                 </>
               ) : null}{" "}
-              is secured. We&apos;ve emailed your confirmation — the remaining balance is due
-              before move day and we&apos;ll send the final invoice nearer the time.
+              is secured. We&apos;ve emailed your confirmation
+              {balancePaidAt ? (
+                <> and your balance is settled in full, so there is nothing left to pay.</>
+              ) : showBalanceCard ? (
+                <> — your final balance is below.</>
+              ) : (
+                <>
+                  {" "}
+                  — the remaining balance is due before move day and we&apos;ll send the final
+                  invoice nearer the time.
+                </>
+              )}
             </p>
           </div>
         </Card>
@@ -395,15 +423,100 @@ export default async function AcceptPage({
                   </>
                 ) : commitAmt > 0 && quote.commitment_paid_at ? (
                   <p className="text-sm leading-relaxed text-mist-500">
-                    Your {gbp(commitAmt)} commitment payment is received — thank you. The
-                    remaining balance is due in full before move day.
+                    Your {gbp(commitAmt)} commitment payment is received — thank you.{" "}
+                    {balancePaidAt
+                      ? "Your balance is settled too, so there is nothing left to pay."
+                      : showBalanceCard
+                        ? "Your final balance is below."
+                        : "The remaining balance is due in full before move day."}
                   </p>
                 ) : (
                   <p className="text-sm leading-relaxed text-mist-500">
-                    Your deposit already covers the commitment for your booking, so there is
-                    nothing more to pay right now. The remaining balance is due in full before
-                    move day.
+                    Your deposit already covers the commitment for your booking
+                    {balancePaidAt
+                      ? ", and your balance is settled in full."
+                      : showBalanceCard
+                        ? ". Your final balance is below."
+                        : ", so there is nothing more to pay right now. The remaining balance is due in full before move day."}
                   </p>
+                )}
+              </div>
+            </Card>
+          </div>
+        ) : null}
+
+        {showBalanceCard ? (
+          <div className="mt-6">
+            <Card>
+              <div className="space-y-5 p-6 sm:p-8">
+                {balancePaidAt ? (
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" strokeWidth={1.75} />
+                    <div>
+                      <h2 className="font-brand text-xl font-semibold text-ink">All settled</h2>
+                      <p className="mt-1 text-sm leading-relaxed text-mist-500">
+                        We have received your final balance of{" "}
+                        <strong className="text-ink">{gbp(balanceAmt)}</strong>, so there is nothing
+                        more to pay
+                        {moveLbl ? (
+                          <>
+                            {" "}
+                            before <strong className="text-ink">{moveLbl}</strong>
+                          </>
+                        ) : null}
+                        . Thank you.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-mist-500">
+                        Final balance
+                        {quote.zoho_balance_invoice_number
+                          ? ` · Invoice ${quote.zoho_balance_invoice_number}`
+                          : ""}
+                      </p>
+                      <p className="mt-1 font-brand text-4xl font-bold text-ink">
+                        {gbp(balanceAmt)}
+                      </p>
+                      <p className="mt-2 text-sm leading-relaxed text-mist-500">
+                        Payment in full is due before your move
+                        {moveLbl ? (
+                          <>
+                            {" "}
+                            on <strong className="text-ink">{moveLbl}</strong>
+                          </>
+                        ) : null}
+                        . Your deposit
+                        {commitAmt > 0 ? " and commitment payment are" : " is"} already accounted
+                        for.
+                      </p>
+                    </div>
+                    <BankPanel reference={quote.quote_ref} />
+                    <p className="text-sm leading-relaxed text-mist-500">
+                      Prefer to pay by card or cash? Call Connor on{" "}
+                      <a
+                        href="tel:01747637070"
+                        className="font-semibold text-mm-red underline underline-offset-2"
+                      >
+                        01747 637070
+                      </a>
+                      .
+                    </p>
+                    {quote.zoho_balance_invoice_url ? (
+                      <p className="text-center text-xs text-mist-400">
+                        Your invoice{" "}
+                        <a
+                          href={quote.zoho_balance_invoice_url}
+                          className="font-semibold text-ink underline underline-offset-2"
+                        >
+                          {quote.zoho_balance_invoice_number ?? "is ready"}
+                        </a>{" "}
+                        is ready to view.
+                      </p>
+                    ) : null}
+                  </>
                 )}
               </div>
             </Card>
