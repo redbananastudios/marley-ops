@@ -166,3 +166,5 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 - Pushes: this commit (state.json ledger + log) — staging only, no PRs, master untouched.
 - Cleanup verification (all zero, by query): leads(QA-SENTINEL / external_lead_id qa-live-% / qa-ingest-%) 0 · clients(QA-SENTINEL) 0. No auth users minted this run. health-watchdog NOT triggered (no operational_issues noise).
 - Time spent: ~35 min (npm ci + gates ~15 min background; migration/route/module live proofs + ledger + log in main loop).
+
+## 2026-08-20 — first-pass repair sweep (scheduled): nothing eligible — both open findings (QA-20260819-01 shared-client contact overwrite, QA-20260820-08 storage-let delete guard) are `class: risky`, never in scope; no `safe-fix` findings open, none left in `status: fixing`. Nothing claimed, no branches, no PRs, no escalations. Time spent: ~3 min.
