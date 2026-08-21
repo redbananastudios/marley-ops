@@ -78,6 +78,9 @@ const SEED = {
   claim: { name: "E2E Claim Lead" },
   followUp: { name: "E2E Follow-up Lead" },
   joinApplicant: { token: "e2e-join-token-0001", name: "E2E Join Applicant" },
+  resendRaceDeposit: { name: "E2E Resend Race Deposit", quoteRef: "E2E-RRACE-DEP-001", invoiceNumber: "E2E-DEP-INV-001", amount: 100 },
+  resendRaceCommitment: { name: "E2E Resend Race Commitment", quoteRef: "E2E-RRACE-COM-001", invoiceNumber: "E2E-COM-INV-001", amount: 450 },
+  resendRaceBalance: { name: "E2E Resend Race Balance", quoteRef: "E2E-RRACE-BAL-001", invoiceNumber: "E2E-BAL-INV-001", amount: 1250 },
 };
 const ESTIMATOR_EMAIL = process.env.E2E_ESTIMATOR_EMAIL || "e2e-estimator@marleymoves.test";
 // Derive the agreement version + ack keys from the app's source of truth so a
@@ -407,6 +410,116 @@ await resetCrewContractorState();
   });
   await makeRemoval(ids, at(-1), crewStaffId, vehicleId, SEED.balanceDue.name);
   console.log(`seeded balance-due: ${SEED.balanceDue.name}`);
+}
+
+// 4b. Invoice RE-SEND race jobs — one per rail (deposit / 25% commitment /
+// balance). Each is an accepted job whose invoice on that rail is already RAISED
+// and still UNPAID, which is exactly the state the "send it again" dialog serves.
+//
+// The Zoho ids are STUBS and `zoho_contact_id` stays NULL on purpose: every paid
+// pipeline gates its Zoho call on a real contact id, so nothing this spec drives
+// can reach a Zoho org even if a guard is broken. The invoice NUMBERS are unique
+// per rail because the spec scopes its assertions to them.
+{
+  const r = SEED.resendRaceDeposit;
+  const ids = await makeLead({ name: r.name, status: "confirmed" });
+  const quoteId = await makeQuote(ids, r, {
+    ref: r.quoteRef,
+    total: 1200,
+    status: "accepted",
+    movingDate: at(21).slice(0, 10),
+    acceptedAt: at(-2),
+    deposit: r.amount,
+  });
+  // Accepting raises the -DEP invoice and stamps deposit_requested_at; both are
+  // what puts the lead's Payments card into "requested · unpaid", the branch
+  // carrying the Deposit-invoice re-send button.
+  const { error: qErr } = await sb
+    .from("quotes")
+    .update({
+      zoho_deposit_invoice_id: "e2e-zoho-dep-0001",
+      zoho_deposit_invoice_number: r.invoiceNumber,
+      accept_token: "e2e-resend-dep-token-0001",
+    })
+    .eq("id", quoteId);
+  if (qErr) die(`${r.name} deposit invoice`, qErr);
+  const { error: lErr } = await sb
+    .from("leads")
+    .update({ deposit_amount: r.amount, deposit_requested_at: at(-2), deposit_paid_at: null })
+    .eq("id", ids.leadId);
+  if (lErr) die(`${r.name} lead deposit state`, lErr);
+  console.log(`seeded resend-race deposit: ${r.name} (${r.invoiceNumber}, £${r.amount} unpaid)`);
+}
+
+{
+  const r = SEED.resendRaceCommitment;
+  const ids = await makeLead({ name: r.name, status: "confirmed" });
+  const quoteId = await makeQuote(ids, r, {
+    ref: r.quoteRef,
+    total: 1800,
+    status: "accepted",
+    movingDate: at(21).slice(0, 10),
+    acceptedAt: at(-5),
+    deposit: 100,
+  });
+  // A date-confirmed job: the deposit is in and the 25% has been invoiced. Only
+  // a raised commitment_invoice_amount puts the 25% cell on the Payments card.
+  const { error: qErr } = await sb
+    .from("quotes")
+    .update({
+      zoho_commitment_invoice_id: "e2e-zoho-com-0001",
+      zoho_commitment_invoice_number: r.invoiceNumber,
+      commitment_invoice_amount: r.amount,
+      commitment_due_date: at(7).slice(0, 10),
+      commitment_paid_at: null,
+      deposit_paid_at: at(-4),
+    })
+    .eq("id", quoteId);
+  if (qErr) die(`${r.name} commitment invoice`, qErr);
+  const { error: lErr } = await sb
+    .from("leads")
+    .update({ deposit_amount: 100, deposit_requested_at: at(-5), deposit_paid_at: at(-4) })
+    .eq("id", ids.leadId);
+  if (lErr) die(`${r.name} lead deposit state`, lErr);
+  console.log(`seeded resend-race commitment: ${r.name} (${r.invoiceNumber}, £${r.amount} unpaid)`);
+}
+
+{
+  const r = SEED.resendRaceBalance;
+  const ids = await makeLead({ name: r.name, status: "completed" });
+  const quoteId = await makeQuote(ids, r, {
+    ref: r.quoteRef,
+    total: 1350,
+    status: "accepted",
+    movingDate: at(-2).slice(0, 10),
+    acceptedAt: at(-20),
+    deposit: 100,
+  });
+  const { error: qErr } = await sb
+    .from("quotes")
+    .update({
+      zoho_balance_invoice_id: "e2e-zoho-bal-0001",
+      zoho_balance_invoice_number: r.invoiceNumber,
+      balance_invoice_amount: r.amount,
+      deposit_paid_at: at(-19),
+    })
+    .eq("id", quoteId);
+  if (qErr) die(`${r.name} balance invoice`, qErr);
+  // Raising the final invoice sets the lead's balance amount + due date, which
+  // is the Payments-card branch carrying the Final-invoice (re-send) button.
+  const { error: lErr } = await sb
+    .from("leads")
+    .update({
+      deposit_amount: 100,
+      deposit_requested_at: at(-20),
+      deposit_paid_at: at(-19),
+      balance_amount: r.amount,
+      balance_due_date: at(-2).slice(0, 10),
+      balance_paid_at: null,
+    })
+    .eq("id", ids.leadId);
+  if (lErr) die(`${r.name} lead balance state`, lErr);
+  console.log(`seeded resend-race balance: ${r.name} (${r.invoiceNumber}, £${r.amount} unpaid)`);
 }
 
 // 5. A SENT quote with a share token — the public customer accept page /q/<token>.

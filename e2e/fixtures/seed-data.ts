@@ -84,6 +84,35 @@ export const SEED = {
   claim: { name: "E2E Claim Lead" },
   /** A lead with a DUE follow-up — the follow-ups queue (snooze / done). */
   followUp: { name: "E2E Follow-up Lead" },
+  /**
+   * Three dedicated jobs for the invoice re-send RACE spec — ONE PER RAIL, so a
+   * rail's mid-test payment can never consume another rail's arrange state.
+   *
+   * Each carries an already-RAISED invoice (a stub Zoho id — the race is refused
+   * before anything reaches Zoho) with that rail's money still outstanding, which
+   * is precisely the state the "send it again" dialog exists for. `zoho_contact_id`
+   * is deliberately left NULL: every paid pipeline gates its Zoho call on a real
+   * contact id, so nothing in this spec can touch a Zoho org even if a guard is
+   * broken. Amounts are per-rail so a figure in the dialog names its rail.
+   */
+  resendRaceDeposit: {
+    name: "E2E Resend Race Deposit",
+    quoteRef: "E2E-RRACE-DEP-001",
+    invoiceNumber: "E2E-DEP-INV-001",
+    amount: 100,
+  },
+  resendRaceCommitment: {
+    name: "E2E Resend Race Commitment",
+    quoteRef: "E2E-RRACE-COM-001",
+    invoiceNumber: "E2E-COM-INV-001",
+    amount: 450,
+  },
+  resendRaceBalance: {
+    name: "E2E Resend Race Balance",
+    quoteRef: "E2E-RRACE-BAL-001",
+    invoiceNumber: "E2E-BAL-INV-001",
+    amount: 1250,
+  },
   /** The crew sign-up link — /join/<token>. Unlike the other public-page
    *  fixtures above (which seed a record for the page to READ), this one is
    *  purely the feature switched ON + a stable token: the spec itself POSTs a
