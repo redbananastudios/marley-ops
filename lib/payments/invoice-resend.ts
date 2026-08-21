@@ -63,9 +63,16 @@ export interface InvoiceResendCopy {
 export function invoiceResendVerdict(f: InvoiceResendFacts, copy: InvoiceResendCopy): InvoiceResend {
   if (!f.invoiceRaised) return { ok: false, reason: copy.notRaised };
   if (f.bookingCancelled) return { ok: false, reason: copy.cancelled };
-  if (f.commsLocked) return { ok: false, reason: copy.commsLocked };
+  // Settled-ness outranks the comms lock, even though BOTH refuse. The rung
+  // that fires picks the WORDS the office reads, and only one of these two is
+  // an end to the conversation. "Turn its standard comms on first" invites a
+  // real state change on a live booking — and on prod today all three
+  // legacy-locked bookings carrying a raised balance invoice are already PAID,
+  // so lock-first would send the office to flip a toggle, lift automation on a
+  // finished job, and only then learn there was nothing to send.
   if (f.paidStateUnknown) return { ok: false, reason: copy.paidUnknown };
   if (f.paid) return { ok: false, reason: copy.paid };
+  if (f.commsLocked) return { ok: false, reason: copy.commsLocked };
   if (!f.hasCustomerEmail) return { ok: false, reason: copy.noEmail };
   // A raised invoice with no recorded figure means our copy of it is broken;
   // sending an email that names £0 (or omits the amount) is worse than saying so.

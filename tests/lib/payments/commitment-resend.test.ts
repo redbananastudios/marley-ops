@@ -93,4 +93,13 @@ describe("canResendCommitmentInvoice", () => {
       reason: "This is a legacy iMVE booking — turn its standard comms on before emailing them.",
     });
   });
+
+  it("a PAID commitment outranks the comms lock — the office is not sent to flip a toggle on settled money", () => {
+    // Both refuse, so this is about the words. "Turn its standard comms on"
+    // invites lifting automation on a live booking; "already paid" ends it.
+    expect(canResendCommitmentInvoice({ ...sendable, commitmentPaid: true, commsLocked: true })).toEqual({
+      ok: false,
+      reason: "The commitment is already paid — nothing to send.",
+    });
+  });
 });

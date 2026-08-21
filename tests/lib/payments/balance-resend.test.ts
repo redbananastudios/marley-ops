@@ -78,4 +78,13 @@ describe("canResendBalanceInvoice", () => {
       { ok: false, reason: "This booking was cancelled — its final invoice will not be sent again." },
     );
   });
+
+  it("a PAID balance outranks the comms lock — on prod every legacy booking with a raised balance is already settled", () => {
+    // Lock-first would tell the office to turn standard comms on, lifting
+    // automation on a finished job, only for them to find nothing to send.
+    expect(canResendBalanceInvoice({ ...sendable, balancePaid: true, commsLocked: true })).toEqual({
+      ok: false,
+      reason: "The balance is already paid — nothing to send.",
+    });
+  });
 });
