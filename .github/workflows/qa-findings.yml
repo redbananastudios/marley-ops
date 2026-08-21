@@ -10,7 +10,11 @@ on:
   push:
     branches: [staging]
     paths:
-      - "qa/findings/open/**"
+      # Both halves of the lifecycle. A finding being VERIFIED is a move from
+      # open/ to closed/, so watching open/ alone would fire on the raise and
+      # never on the close - which is precisely how nine finished findings sat
+      # here as apparent open defects.
+      - "qa/findings/**"
   workflow_dispatch:
 
 concurrency:
@@ -36,10 +40,13 @@ jobs:
           gh label create qa-risky    --color b60205 --description "Peter only - do not auto-fix" --force --repo "$GITHUB_REPOSITORY"
           gh label create qa-repair   --color 5319e7 --description "Repair PR - auto-merge on green" --force --repo "$GITHUB_REPOSITORY"
           shopt -s nullglob
+          seen=0
           for f in qa/findings/open/QA-*.md; do
+            seen=$((seen + 1))
             id=$(basename "$f" .md)
-            existing=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number --jq 'length')
-            if [ "$existing" = "0" ]; then
+            number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number,state --jq '.[0].number // ""')
+            state=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number,state --jq '.[0].state // ""')
+            if [ -z "$number" ]; then
               class=$(grep -m1 '^class:' "$f" | awk '{print $2}' || true)
               summary=$(awk '/^## Summary/{getline; while($0 ~ /^$/){getline}; print; exit}' "$f")
               label="qa-safe-fix"; [ "$class" = "risky" ] && label="qa-risky"
@@ -48,7 +55,60 @@ jobs:
                 --label qa-finding --label "$label" \
                 --body-file "$f"
               echo "raised: $id ($label)"
+            elif [ "$state" = "CLOSED" ]; then
+              # The finding is back in open/ but its issue is closed - a verify
+              # pass failed and reopened it. Without this the defect is real and
+              # invisible, because the lookup above is --state all and would
+              # treat the closed issue as "already raised" forever.
+              gh issue reopen "$number" --repo "$GITHUB_REPOSITORY" \
+                --comment "Reopened: this finding is back in \`qa/findings/open/\`, so a verification pass did not confirm the fix."
+              echo "reopened: $id (#$number)"
             else
-              echo "already raised: $id"
+              echo "already raised: $id (#$number)"
             fi
           done
+          # An empty sweep is a real answer, but it must not read like a clean
+          # one. Say what was actually examined.
+          echo "swept $seen open finding file(s)"
+
+  # Symmetric with `raise`. Same idempotent-sweep shape, so a missed run can
+  # never strand a verified finding as a permanently open issue.
+  close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+      - name: Close the issue for every verified finding
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          seen=0; closed=0
+          for f in qa/findings/closed/QA-*.md; do
+            seen=$((seen + 1))
+            id=$(basename "$f" .md)
+            # Location alone is not the claim. A file can be moved by hand, or
+            # by a half-finished repair; the finding must SAY it is closed.
+            if ! grep -qi '^status: *closed' "$f"; then
+              echo "skipped: $id is in closed/ but does not say status: closed"
+              continue
+            fi
+            number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$id in:title" --json number --jq '.[0].number // ""')
+            if [ -z "$number" ]; then
+              echo "nothing to close for $id"
+              continue
+            fi
+            evidence=$(grep -iE '^verified_by_run:' "$f" | head -1 || true)
+            [ -z "$evidence" ] && evidence="Verified by a later audit run; see the finding file for the assertion that was re-run."
+            gh issue close "$number" --repo "$GITHUB_REPOSITORY" \
+              --comment "Verified and closed by the QA loop. Evidence in \`qa/findings/closed/$id.md\`:
+
+          $evidence"
+            echo "closed: $id (#$number)"
+            closed=$((closed + 1))
+          done
+          echo "swept $seen closed finding file(s), closed $closed issue(s)"
