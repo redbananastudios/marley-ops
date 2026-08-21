@@ -4,6 +4,21 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-21 (overnight deep run) — HIGH role/PII leak on the contract PDF route; clients quotes-card wrong-column date; week-value truth + h6 handoff verified
+
+- sha audited: 0462d2d (origin/staging HEAD). Deployed staging /api/version = ae9edab (HEAD is 2 docs/log-only commits ahead of the deploy, no app-code delta). Base CI green.
+- Verify-first: no-op (correct) — no finding in `fixed-pending-verify`. The two open findings (QA-20260819-01 contact-card two-hats, QA-20260820-08 storage-let delete-guard dead code) are both class:risky, untouched, stay open for Peter.
+- Health gate: lint 0 errors (36-warn baseline) · tsc 0 · vitest 1798 passed/7 skipped · build ok — all four green on the untouched tree.
+- Seed: swept 0 QA-SENTINEL leftovers. Minted 3 throwaway users (admin/estimator/crew, random in-memory pw, marker full_name) + crew & estimator staff rows + one fixture set (client+lead+accepted quote QA-Rbbd43f-1 £1200 + removal appt, crew assigned).
+- Items tested — main loop (deep): truth/schedule_week_values PASS (rendered month rail == from-SQL recompute exactly: 17 Aug £7,800/4, 24 Aug £1,200/1) · io/pdf contract PDF: admin %PDF 64136B PASS **+ QA-20260821-01** · handoffs/h6 admin-survey→estimator-diary PASS end-to-end (estimator saw it in its own cockpit). Admin agent A (handoffs): survey book h6 PASS, change-date h8 PASS (deposit-gate-before-change-date is a defensible product gate, log-only; old appt cancelled + new appt created + moving_date updated + dry-run "date changed" email). Admin agent B (never-tested): storage sites/units/lets full CRUD + start/edit/end let PASS (let is client_id-scoped; archive-site guard verified CORRECT, agent's one failure was a stale-page timing artifact — declined as false positive), clients register PASS + **QA-20260821-02**.
+- Findings filed: **QA-20260821-01** (risky/auth, HIGH — GET /api/documents/contract/[signatureId] serves the office-only signed-contract PDF, customer signature image + IP, to any crew session; role-blind requireApiUser() + RLS-bypassing admin client; only such route, requireOfficeProfile() is the ready fix) · **QA-20260821-02** (safe-fix/low — /clients/[id] Quotes card shows created_at labelled as the status-change date). Peter notified re -01.
+- Specs added: skipped, finding-referenced guard in e2e/crew/access.spec.ts ("cannot fetch the office-only contract PDF (QA-20260821-01)") — un-skips in the repair PR once the fix lands + the E2E seed exposes a signature id. (No runnable e2e shippable: no E2E_* creds in this env to build .auth fixtures; week-value truth is unit-covered + verified live.)
+- Pushes: 9a6aaa8 (QA-20260821-01 + spec) then this commit (QA-20260821-02 + state.json + log) — staging only, no PRs, master untouched.
+- Cleanup verification (all zero, by query): leads 0 · clients 0 · quotes(QA-Rbbd43f) 0 · appointments 0 · storage_sites/units 0 · staff 0 · profiles 0 · auth users(run) 0. FK-safe teardown gotchas hit + resolved: appointments before surveys before leads; the admin user needed its lead-less survey-assigned `communications.sent_by` row AND its `events_log.actor_id` rows cleared before GoTrue would delete it (estimator/crew, which did no money writes, deleted cleanly).
+- Time spent: ~50 min wall clock (npm ci + 4 gates ~13 min background; 2 role agents ~15-17 min parallel; main-loop truth/IO proofs + login-hydration debugging + FK-chase cleanup in the main loop).
+
+---
+
 ## 2026-08-20 (12:09-13:35Z approx) — freshest-code priority run: new lead-delete feature audited same-day it shipped, 3 verify-first closures, 3 new findings
 
 - sha audited: 2df2868 (origin/staging HEAD at checkout; deployed /api/version = 2df2868, exact match — no CI-hang risk this run).
