@@ -4,6 +4,19 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-21 (05:00-05:20Z) — run aborted: CI red on the base predating this run (headline finding filed)
+
+- sha audited: 5aa802e (origin/staging HEAD at checkout — 2 docs-only log commits ahead of `ddd7479`, the sha actually deployed to staging; `git diff --stat ddd7479 5aa802e` touches only `qa/LOG.md`, no app-code delta).
+- Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
+- Health gate: `curl /api/version` = `ddd7479`, matching deployed staging. Local `npm ci` + `npm run lint` + `npx tsc --noEmit` all green on the untouched tree (`npm run build`/`npm test` not reached — aborted before the full gate sequence once CI's own e2e result was checked). **Staging CI on the deployed base is RED**: GitHub Actions `CI + Deploy to Staging` run [32448046368](https://github.com/redbananastudios/marley-ops/actions/runs/32448046368) (workflow_dispatch on `ddd7479`, the currently-deployed sha) — `test` job green, `deploy-staging` green, **`e2e` job failed**: `e2e/office/contractor-pay.spec.ts` "return a submitted invoice to the crew with a reason" — final assertion `getByText('E2E Pay Crew')` expected count 0, got 1 (stayed stuck the full 15s). Confirmed not a one-off: the prior push-triggered run [32447552408](https://github.com/redbananastudios/marley-ops/actions/runs/32447552408) on `bb76bc7e` (8 minutes earlier) failed on the **identical** assertion, and `git diff --stat 1f4a65f bb76bc7e` (last known-good CI run → first failing one) touches zero files under `app/(dashboard)/finance/statements/`, `components/finance/`, or the spec itself — the break isn't explained by a code diff in that window, so it isn't a routine flake to re-run past.
+- Per AUDIT.md abort conditions ("CI red on a base predating this run"): aborted the full rota. Filed the CI failure as this run's headline finding, **QA-20260821-04** (`class: risky` — contractor-pay/statements is a payments-adjacent admin action; the "Return for changes" server action reports success in the UI but a read-only service-role query against live staging (post-failure, no runs since) shows the target `staff_statements` row still `status='submitted'`, `returned_at`/`return_reason` both null — the update never durably landed. Evidence and suspected-cause detail in the finding file.
+- No verify-first attempted on `QA-20260821-03` (`fixed-pending-verify`, PR #38) — re-verifying it needs live browser + marker seeding, which the abort withholds; it stays pending for the next run. No role-agent rota run, no marker rows created (only read-only SQL queries were run, all scratch scripts deleted after), no specs added, `qa/state.json` untouched (nothing tested).
+- Pushes: this commit (finding `QA-20260821-04` + this log entry only) — staging only, no PRs, master untouched.
+- Cleanup verification: nothing to clean up — no marker rows, no auth users, no seeded data created this run.
+- Time spent: ~20 min (CI log retrieval/diff analysis + one read-only diagnostic query + finding write-up).
+
+---
+
 ## 2026-08-21 (04:08-04:36Z) — full role-agent rota, all 4 never-tested/stalest items cleared: 1 finding, 2 permanent specs, 1 regression re-confirmed under real concurrency
 
 - sha audited: 1f4a65f (origin/staging HEAD at checkout; deployed staging /api/version = 1f4a65f, exact match). Staging CI on this sha: success (verified via GitHub Actions API).
