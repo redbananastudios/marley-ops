@@ -20,4 +20,24 @@ test.describe("Crew access", () => {
       await expectBounced(page, path, /\/my-jobs|\/login/);
     });
   }
+
+  // The (dashboard) layout bounces crew off office PAGES, but /api/** has no
+  // layout — an office-only API route must refuse a crew session itself.
+  // QA-20260821-01: GET /api/documents/contract/[id] served the office-only
+  // signed-contract PDF (customer signature image + IP) to a crew session,
+  // because its only guard is requireApiUser() (authentication, no role) and it
+  // reads via the RLS-bypassing admin client. Skipped until the fix lands +
+  // the E2E seed exposes a contract signature id to point at.
+  test.skip("cannot fetch the office-only contract PDF (QA-20260821-01)", async ({ page }) => {
+    // Un-skip in the repair PR: seed a contract signature and read its id here.
+    const signatureId = process.env.E2E_CONTRACT_SIGNATURE_ID ?? "";
+    const res = await page.request.get(`/api/documents/contract/${signatureId}`, { maxRedirects: 0 });
+    // The fix must refuse crew (401/403), never return a PDF body.
+    if (res.status() === 200) {
+      const body = await res.body();
+      if (body.subarray(0, 5).toString("latin1") === "%PDF-") {
+        throw new Error("crew session received the office-only contract PDF");
+      }
+    }
+  });
 });
