@@ -11,6 +11,7 @@ import { BookSurveyButton } from "@/components/clients/book-survey-button";
 import { ClientEditControls } from "@/components/clients/edit-client-dialog";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
+import { quoteStatusDate } from "@/lib/quote/status-date";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
 
@@ -63,7 +64,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       .order("submitted_at", { ascending: false }),
     sb
       .from("quotes")
-      .select("id, quote_ref, grand_total, status, created_at")
+      .select("id, quote_ref, grand_total, status, created_at, email_sent_at, accepted_at, declined_at")
       .eq("client_id", id)
       .order("created_at", { ascending: false }),
   ]);
@@ -240,7 +241,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
                   <Link href={`/quotes/${q.id}`} className="flex items-center justify-between gap-3 px-5 py-3.5 hover:bg-muted">
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium text-foreground">{q.quote_ref}</p>
-                      <p className="text-xs text-mist-400 capitalize">{q.status} · {fmtDate(q.created_at)}</p>
+                      <p className="text-xs text-mist-400 capitalize">{q.status} · {fmtDate(quoteStatusDate(q))}</p>
                     </div>
                     <span className="tabular text-sm font-semibold text-foreground">{gbp(q.grand_total)}</span>
                   </Link>
