@@ -168,3 +168,5 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 - Time spent: ~35 min (npm ci + gates ~15 min background; migration/route/module live proofs + ledger + log in main loop).
 
 ## 2026-08-20 — first-pass repair sweep (scheduled): nothing eligible — both open findings (QA-20260819-01 shared-client contact overwrite, QA-20260820-08 storage-let delete guard) are `class: risky`, never in scope; no `safe-fix` findings open, none left in `status: fixing`. Nothing claimed, no branches, no PRs, no escalations. Time spent: ~3 min.
+
+## 2026-08-21 — escalation repair sweep (scheduled): nothing escalated — no open finding carries `escalate: opus-5`. All three open findings are `class: risky`, never in scope: QA-20260819-01 (shared-client contact overwrite), QA-20260820-08 (storage-let delete guard), QA-20260821-01 (crew can fetch the office-only signed-contract PDF — high, auth; filed 00:26Z this run's window and unfixable by either automated tier, so it needs Peter). No finding left in `status: fixing`. Nothing claimed, no branches, no PRs. Time spent: ~5 min.
