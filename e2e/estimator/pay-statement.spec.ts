@@ -12,15 +12,12 @@ import { submitUntil } from "../fixtures/ui";
  * e2e/crew/invoicing-submit-lines.spec.ts, adapted for the estimator's
  * fixed-fee lines (one amount field; no hours × rate).
  *
- * DEPENDENCY / known gap: unlike the crew equivalent (whose header comment
- * documents scripts/seed-e2e.mjs wiping staff_statements on every seed run),
- * the e2e ESTIMATOR's staff_statements are NOT currently wiped by that script
- * (seed-e2e.mjs block 13 only resets contractor_agreements) — so a second CI
- * run within the same UK week finds "This week" already submitted and the
- * create step blocked. This spec tolerates that by skipping (not failing) with
- * a clear reason rather than reporting a false red. If cross-run repeatability
- * of THIS spec matters going forward, mirror the crew wipe: delete
- * staff_statements for the E2E estimator's staff row in seed-e2e.mjs block 13.
+ * DEPENDENCY: seed-e2e.mjs block 13 now wipes the E2E estimator's
+ * staff_statements on every seed run (mirroring the crew wipe), so a seeded run
+ * always starts statement-free and "This week" is creatable. The skip below is
+ * the local-run courtesy for when the seed has NOT just run — on CI it should
+ * never fire, and a skip there means the reset did not happen, not that the
+ * flow is fine.
  */
 test.describe.serial("Estimator — invoicing: create, add a line, edit, submit", () => {
   test("the contractor agreement is signed and invoicing is unlocked", async ({ page }) => {
@@ -50,11 +47,10 @@ test.describe.serial("Estimator — invoicing: create, add a line, edit, submit"
         created = false;
       }
       if (!created) {
-        // "This week" was already submitted by an earlier run in the same UK
-        // week (see the DEPENDENCY note in the file header) — the create+add-
-        // line+submit flow this test proves was already exercised. Skip rather
-        // than fail: there is no draft left to create against.
-        test.skip(true, "This week's estimator invoice is already submitted (staff_statements isn't wiped per-run for the estimator) — create+submit was already proven by that earlier run.");
+        // "This week" is already submitted, so there is no draft to create
+        // against. After a seed run this cannot happen (block 13 wipes the
+        // estimator's statements) — so on CI this skip is itself the finding.
+        test.skip(true, "This week's estimator invoice is already submitted — no draft left to create against. After a seed run this should be impossible (seed-e2e.mjs block 13 wipes the estimator's staff_statements), so a skip here means the reset did not run.");
       }
       await expect(page.getByRole("heading", { name: "What you're owed", exact: true })).toBeVisible();
     });

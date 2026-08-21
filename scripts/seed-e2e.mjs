@@ -628,6 +628,18 @@ await resetCrewContractorState();
     } else if (estStaff.profile_id !== estProfile.id) {
       await sb.from("staff").update({ profile_id: estProfile.id }).eq("id", estStaff.id);
     }
+    // Clear the estimator's prior statements (lines first — FK), exactly as
+    // resetCrewContractorState() does for the crew. Without this a SUBMITTED
+    // invoice from an earlier run survives into the next one: its period is the
+    // CURRENT week, so it sorts to the TOP of the office "To pay" list and sits
+    // above the seeded review fixture, and /estimator/pay has no draft left to
+    // create for "This week". Both bit us on 2026-08-21.
+    const { data: estStmts } = await sb.from("staff_statements").select("id").eq("staff_id", estStaff.id);
+    const estStmtIds = (estStmts ?? []).map((s) => s.id);
+    if (estStmtIds.length) {
+      await sb.from("staff_statement_lines").delete().in("statement_id", estStmtIds);
+      await sb.from("staff_statements").delete().in("id", estStmtIds);
+    }
     await sb.from("contractor_agreements").delete().eq("profile_id", estProfile.id);
     const { error: aErr } = await sb
       .from("contractor_agreements")
