@@ -2367,6 +2367,16 @@ export async function resendBalanceInvoiceFlow(
     hasCustomerEmail: !!quote.customer_email,
     balancePaid,
     paidStateUnknown,
+    // Deliberately NOT legacyLocked(quote), unlike the deposit and commitment
+    // rails. Since the 2026-08-13 iMVE import the panel owns balance invoicing
+    // for those bookings, and createBalanceInvoiceFlow has no legacy gate
+    // either — so the office raises and emails a final invoice to a legacy
+    // customer on purpose. Locking the RE-send while allowing the original send
+    // would refuse exactly the customers we are trying to collect from, and
+    // would do it in the one state where they have asked where to pay. The lock
+    // governs Marley's AUTOMATED correspondence, not operator-initiated
+    // collection: the T-7 auto final-invoice IS gated on it.
+    commsLocked: false,
   });
   if (!verdict.ok) return { ok: false, error: verdict.reason };
 

@@ -14,6 +14,11 @@ const sendable: BalanceResendFacts = {
   bookingCancelled: false,
   hasCustomerEmail: true,
   balancePaid: false,
+  // resendBalanceInvoiceFlow always passes false here, on purpose — see the
+  // comment where it builds these facts. The lock governs Marley's automated
+  // correspondence; collecting a final invoice from a legacy iMVE customer is
+  // an operator action the office is expected to take.
+  commsLocked: false,
 };
 
 describe("canResendBalanceInvoice", () => {
@@ -79,12 +84,27 @@ describe("canResendBalanceInvoice", () => {
     );
   });
 
-  it("a PAID balance outranks the comms lock — on prod every legacy booking with a raised balance is already settled", () => {
+  it("a PAID balance outranks the comms lock — the money answer ends the conversation", () => {
     // Lock-first would tell the office to turn standard comms on, lifting
     // automation on a finished job, only for them to find nothing to send.
+    // This pins the shared ladder's ORDER. It is not evidence about live data:
+    // the balance flow passes commsLocked: false, so this pairing does not
+    // arise on that rail — it bites on deposit and commitment.
     expect(canResendBalanceInvoice({ ...sendable, balancePaid: true, commsLocked: true })).toEqual({
       ok: false,
       reason: "The balance is already paid — nothing to send.",
+    });
+  });
+
+  it("the lock rung still refuses an UNPAID balance when a caller arms it", () => {
+    // The rung was dead on this rail until 2026-08-21 — commsLocked was an
+    // optional field the balance flow never passed, so `undefined` read as
+    // "not locked" while the copy below sat in the file implying otherwise.
+    // The omission is now deliberate and typed rather than accidental; this
+    // proves the rung itself works, so arming it stays a one-line change.
+    expect(canResendBalanceInvoice({ ...sendable, commsLocked: true })).toEqual({
+      ok: false,
+      reason: "This is a legacy iMVE booking — turn its standard comms on before emailing them.",
     });
   });
 });

@@ -37,8 +37,15 @@ export interface InvoiceResendFacts {
    * customers were sold under the old system's terms and the panel must never
    * send them Marley's standard correspondence until the office has spoken to
    * them (lib/legacy.ts).
+   *
+   * REQUIRED, not optional, and deliberately so: it was optional until
+   * 2026-08-21, and the balance rail simply never passed it. `undefined` is
+   * falsy, so that rail's lock rung could not fire while its copy still carried
+   * the refusal sentence — the code read as though the lock applied and it did
+   * not. Nothing failed: a rail that omits a fact on a money path looks
+   * identical to a rail that has answered "no". Every rail now has to say.
    */
-  commsLocked?: boolean;
+  commsLocked: boolean;
 }
 
 export type InvoiceResend = { ok: true } | { ok: false; reason: string };
@@ -65,11 +72,17 @@ export function invoiceResendVerdict(f: InvoiceResendFacts, copy: InvoiceResendC
   if (f.bookingCancelled) return { ok: false, reason: copy.cancelled };
   // Settled-ness outranks the comms lock, even though BOTH refuse. The rung
   // that fires picks the WORDS the office reads, and only one of these two is
-  // an end to the conversation. "Turn its standard comms on first" invites a
-  // real state change on a live booking — and on prod today all three
-  // legacy-locked bookings carrying a raised balance invoice are already PAID,
-  // so lock-first would send the office to flip a toggle, lift automation on a
-  // finished job, and only then learn there was nothing to send.
+  // an end to the conversation: "turn its standard comms on first" invites a
+  // real state change on a live booking, only to learn there was nothing to
+  // send. It bites on the DEPOSIT and COMMITMENT rails, which are the two that
+  // pass a true commsLocked (canResendInvoiceNow, lib/quote/accept-flow.ts).
+  //
+  // Correction, 2026-08-21: this ordering was originally justified here by the
+  // three legacy-locked prod bookings carrying a raised BALANCE invoice, all of
+  // them already paid. That observation was true but could not have shown the
+  // problem, because the balance rail never passed commsLocked at all — see the
+  // field's note above. The ordering is right; the evidence first cited for it
+  // came from the one rail where the rung is deliberately never armed.
   if (f.paidStateUnknown) return { ok: false, reason: copy.paidUnknown };
   if (f.paid) return { ok: false, reason: copy.paid };
   if (f.commsLocked) return { ok: false, reason: copy.commsLocked };

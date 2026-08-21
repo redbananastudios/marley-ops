@@ -14,6 +14,7 @@ const sendable: CommitmentResendFacts = {
   bookingCancelled: false,
   hasCustomerEmail: true,
   commitmentPaid: false,
+  commsLocked: false,
 };
 
 describe("canResendCommitmentInvoice", () => {

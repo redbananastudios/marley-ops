@@ -14,6 +14,7 @@ const sendable: DepositResendFacts = {
   bookingCancelled: false,
   hasCustomerEmail: true,
   depositPaid: false,
+  commsLocked: false,
 };
 
 describe("canResendDepositInvoice", () => {
