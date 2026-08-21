@@ -4,10 +4,14 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import {
+  canResendInvoiceNow,
   computeBalanceCredits,
   createBalanceInvoiceFlow,
   fetchQuoteById,
   resendBalanceInvoiceFlow,
+  resendCommitmentInvoiceFlow,
+  resendDepositInvoiceFlow,
+  type ResendRail,
 } from "@/lib/quote/accept-flow";
 import { moveDateLabel } from "@/lib/quote/payments";
 
@@ -105,6 +109,99 @@ export async function resendBalanceInvoiceAction(quoteId: string) {
     const quote = await fetchQuoteById(sb, quoteId);
     if (quote?.lead_id) revalidatePath(`/leads/${quote.lead_id}`);
     revalidatePath(`/quotes/${quoteId}`);
+  }
+  return res;
+}
+
+/* ------------------------------------------------ deposit / commitment rails */
+
+/**
+ * What the "send it again" dialog shows for the deposit and commitment rails.
+ * Neither rail has a CREATE action here — the deposit invoice is raised by
+ * acceptance and the commitment by date confirmation — so this is purely
+ * "which invoice, how much, to whom, and may it go".
+ */
+export interface InvoiceResendInfo {
+  ok: true;
+  rail: ResendRail;
+  quoteId: string;
+  quoteRef: string;
+  customerName: string | null;
+  customerEmail: string | null;
+  invoiceNumber: string | null;
+  invoiceUrl: string | null;
+  amount: number;
+  /** Null when the server would send it; the server's own refusal otherwise —
+   *  the SAME verdict the action applies, so the dialog can never offer a send
+   *  the server will reject (or hide one it would allow). */
+  blockedReason: string | null;
+}
+
+export type InvoiceResendInfoResult = InvoiceResendInfo | { ok: false; error: string };
+
+/** Everything the re-send dialog needs, from the lead's latest accepted quote. */
+export async function getInvoiceResendInfo(
+  leadId: string,
+  rail: ResendRail,
+): Promise<InvoiceResendInfoResult> {
+  const sb = await createClient();
+  const { data: q } = await sb
+    .from("quotes")
+    .select("id")
+    .eq("lead_id", leadId)
+    .eq("status", "accepted")
+    .order("accepted_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!q) return { ok: false, error: "No accepted quote on this job yet — accept a quote first." };
+
+  const quote = await fetchQuoteById(sb, q.id);
+  if (!quote) return { ok: false, error: "Quote not found" };
+
+  const verdict = await canResendInvoiceNow(sb, quote, rail);
+
+  return {
+    ok: true,
+    rail,
+    quoteId: quote.id,
+    quoteRef: quote.quote_ref,
+    customerName: quote.customer_name,
+    customerEmail: quote.customer_email,
+    invoiceNumber:
+      rail === "deposit" ? quote.zoho_deposit_invoice_number : quote.zoho_commitment_invoice_number,
+    invoiceUrl: rail === "deposit" ? quote.zoho_deposit_invoice_url : quote.zoho_commitment_invoice_url,
+    // The stored figure, never a settings fallback: the dialog must show the
+    // number the guard judged, so "£100" and "the deposit amount is not
+    // recorded" can never appear side by side.
+    amount:
+      rail === "deposit"
+        ? Number(quote.deposit_amount ?? 0)
+        : Number(quote.commitment_invoice_amount ?? 0),
+    blockedReason: verdict.ok ? null : verdict.reason,
+  };
+}
+
+/**
+ * Send an already-raised deposit or commitment invoice again — same figure,
+ * same invoice, nothing created. The flow re-checks its own guard, so a
+ * customer who pays while the dialog is open is refused by the server.
+ */
+export async function resendInvoiceAction(quoteId: string, rail: ResendRail) {
+  const sb = await createClient();
+  const {
+    data: { user },
+  } = await sb.auth.getUser();
+  if (!user) return { ok: false as const, error: "Not signed in" };
+
+  const res =
+    rail === "deposit"
+      ? await resendDepositInvoiceFlow(sb, quoteId, user.id)
+      : await resendCommitmentInvoiceFlow(sb, quoteId, user.id);
+  if (res.ok) {
+    const quote = await fetchQuoteById(sb, quoteId);
+    if (quote?.lead_id) revalidatePath(`/leads/${quote.lead_id}`);
+    revalidatePath(`/quotes/${quoteId}`);
+    revalidatePath("/bookings");
   }
   return res;
 }
