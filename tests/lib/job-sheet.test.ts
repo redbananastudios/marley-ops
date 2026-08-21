@@ -82,6 +82,10 @@ describe("assembleJobSheetData", () => {
     expect(d.items).toEqual([]);
     expect(d.jobNotes).toBe("Gate code 4321"); // lead notes fill in
     expect(d.to.postcode).toBe("BH1 4DQ");
+    // QA-20260821-03: no quote → no labels. "See quote" as the packing
+    // fallback rendered as the Vehicles card's subtitle on /my-jobs/[id].
+    expect(d.vehicleLabel).toBe("");
+    expect(d.packingLabel).toBe("");
   });
 
   it("quoteNotes is quote-only — never the lead fallback jobNotes carries", () => {
@@ -161,6 +165,15 @@ describe("buildJobSheetDocDef", () => {
     const s = JSON.stringify(buildJobSheetDocDef(bare));
     expect(s).toContain("No crew assigned yet");
     expect(s).toContain("No vehicles assigned yet");
+  });
+
+  it("no-quote job spec line is empty — no placeholder text, no dangling separator", () => {
+    const bare = assembleJobSheetData(appt, lead, null, [], []);
+    const s = JSON.stringify(buildJobSheetDocDef(bare));
+    expect(s).not.toContain("See quote");
+    expect(s).not.toContain("  ·  "); // the spec-line join never leaks half-empty
+    // and with a quote the spec line still reads vehicle · packing
+    expect(JSON.stringify(buildJobSheetDocDef(data))).toContain("2 Luton Vans + 1 × 7.5t Lorry  ·  Full pack service");
   });
 
   it("survey photos render on their own page with category captions", () => {

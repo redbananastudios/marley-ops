@@ -438,7 +438,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
               {
                 text: [
                   { text: "JOB SPEC   ", style: "colHead", color: C.red },
-                  { text: `${d.vehicleLabel}  ·  ${d.packingLabel}`, style: "body", bold: true },
+                  { text: [d.vehicleLabel, d.packingLabel].filter(Boolean).join("  ·  "), style: "body", bold: true },
                 ],
                 fillColor: C.redSoft,
                 margin: [10, 7, 10, 7],

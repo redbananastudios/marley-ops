@@ -98,7 +98,10 @@ export function assembleJobSheetData(
     from: sideAddress(lead?.from_address ?? null, lead?.from_postcode ?? null, q, "collect"),
     to: sideAddress(lead?.to_address ?? null, lead?.to_postcode ?? null, q, "dest"),
     vehicleLabel: q ? vehicleLabelOf(q) : "",
-    packingLabel: q ? (PACK_LABELS[q.packing] ?? q.packing) : "See quote",
+    // No quote → no packing info. Never a placeholder string: surfaces render
+    // this label wherever it lands (the /my-jobs Vehicles card, the day sheet),
+    // and "See quote" points crew at a quote that does not exist.
+    packingLabel: q ? (PACK_LABELS[q.packing] ?? q.packing) : "",
     crew,
     vehicles,
     items: q ? buildOpItems(q.items) : [],
