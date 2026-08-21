@@ -9,6 +9,7 @@ import { windowTierLabel } from "@/lib/bookings/booking-details";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
+import { ResendInvoiceButton } from "@/components/leads/resend-invoice-button";
 import { BookingDetailsButton } from "@/components/bookings/booking-details-dialog";
 import { CopyLinkButton, MarkPaidButton } from "@/components/bookings/booking-actions";
 import { CancelBookingButton, ChangeDateButton } from "@/components/bookings/booking-policy-actions";
@@ -246,6 +247,9 @@ export default async function BookingsPage() {
           {r.commitmentDueDate ? ` due ${dateLabel(r.commitmentDueDate)}` : ""}
         </span>
         {needsCrew(r) ? <AllocateChip day={ukDayOf(r.apptStartsAt!)} /> : null}
+        {/* Both 25% sections are "invoiced and unpaid" by definition, so the
+            invoice can always usefully be sent again from here. */}
+        <ResendInvoiceButton leadId={r.leadId} rail="commitment" />
         <Link
           href={`/leads/${r.leadId}`}
           className="focus-ring inline-flex min-h-9 items-center rounded-md border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted"
@@ -360,6 +364,11 @@ export default async function BookingsPage() {
             ) : null}
             <span className="tabular text-sm font-semibold text-foreground">{gbp(r.deposit)}</span>
             {r.acceptToken ? <CopyLinkButton url={acceptUrlFor(r.acceptToken)} /> : null}
+            {/* This whole section IS "accepted, deposit unpaid", so the customer
+                who says they never got the email can be sent it again from the
+                row that names them — no hand-typed message, same figure, same
+                link. Copying the link only helps if someone is on the phone. */}
+            <ResendInvoiceButton leadId={r.leadId} rail="deposit" />
             <MarkPaidButton
               quoteId={r.quoteId}
               kind="deposit"

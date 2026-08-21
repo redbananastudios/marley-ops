@@ -62,6 +62,11 @@ import {
 } from "@/lib/comms/date-confirm-email";
 import { commitmentAmount, commitmentDueDate, requestedDeposit } from "@/lib/payments-policy";
 import { canResendBalanceInvoice } from "@/lib/payments/balance-resend";
+import {
+  canResendCommitmentInvoice,
+  canResendDepositInvoice,
+  type InvoiceResend,
+} from "@/lib/payments/invoice-resend";
 import { legacyLocked } from "@/lib/legacy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -167,6 +172,75 @@ export async function fetchQuoteByToken(sb: Sb, token: string): Promise<AcceptQu
 export async function fetchQuoteById(sb: Sb, id: string): Promise<AcceptQuoteRow | null> {
   const { data } = await sb.from("quotes").select(QUOTE_COLS).eq("id", id).maybeSingle();
   return (data as AcceptQuoteRow | null) ?? null;
+}
+
+/* ---------------------------------------------------------- invoice re-send */
+
+/** The rails an already-raised invoice can be sent again on. The balance rail
+ *  has its own flow (its paid flag lives on the lead, and its email carries the
+ *  Zoho PDF), so it keeps resendBalanceInvoiceFlow. */
+export type ResendRail = "deposit" | "commitment";
+
+/**
+ * Gather the paid state from the database and answer the pure guard — ONE
+ * decision, used by the flow that sends and by the dialog that offers to, so
+ * the button and the server can never refuse on different grounds.
+ *
+ * Reading the paid flag afresh (rather than trusting the row already fetched)
+ * is the point: a query ERROR must answer "could not check", never "unpaid".
+ * fetchQuoteById swallows its error and returns null, which the callers report
+ * as "Quote not found" — true enough for a missing row, and a lie for a failed
+ * read, so neither rail leans on it for the money answer.
+ */
+export async function canResendInvoiceNow(
+  sb: Sb,
+  quote: AcceptQuoteRow,
+  rail: ResendRail,
+): Promise<InvoiceResend> {
+  const shared = {
+    bookingCancelled: !!quote.booking_cancelled_at,
+    hasCustomerEmail: !!quote.customer_email,
+    commsLocked: legacyLocked(quote),
+  };
+
+  if (rail === "deposit") {
+    // Two copies of "the deposit is paid" exist and can diverge: markDepositPaid
+    // stamps the quote then patches the lead (a failure there only raises an ops
+    // alert), and the lead payments card can stamp the lead alone when no quote
+    // owned the payment. EITHER saying paid is enough to refuse — the safe
+    // direction — and a failed read of the lead copy answers "could not check".
+    let depositPaid = !!quote.deposit_paid_at;
+    let paidStateUnknown = false;
+    if (quote.lead_id) {
+      const { data: lead, error } = await sb
+        .from("leads")
+        .select("deposit_paid_at")
+        .eq("id", quote.lead_id)
+        .maybeSingle();
+      if (error) paidStateUnknown = true;
+      else depositPaid = depositPaid || !!lead?.deposit_paid_at;
+    }
+    return canResendDepositInvoice({
+      ...shared,
+      invoiceRaised: isRealZohoId(quote.zoho_deposit_invoice_id),
+      invoicedAmount: Number(quote.deposit_amount ?? 0),
+      depositPaid,
+      paidStateUnknown,
+    });
+  }
+
+  const { data: fresh, error } = await sb
+    .from("quotes")
+    .select("commitment_paid_at")
+    .eq("id", quote.id)
+    .maybeSingle();
+  return canResendCommitmentInvoice({
+    ...shared,
+    invoiceRaised: isRealZohoId(quote.zoho_commitment_invoice_id),
+    invoicedAmount: Number(quote.commitment_invoice_amount ?? 0),
+    commitmentPaid: !!quote.commitment_paid_at || !!fresh?.commitment_paid_at,
+    paidStateUnknown: !!error,
+  });
 }
 
 /* ------------------------------------------------------------- accept token */
@@ -797,41 +871,8 @@ export async function acceptQuoteByStaff(
   // engine's next touch is day 3.
   let emailed = false;
   if (quote.customer_email && token) {
-    const owner = await ownerIdentity(sb, quote.estimator_id);
-    const email = depositChaseEmail(1, {
-      firstName: quote.customer_name,
-      quoteRef: quote.quote_ref,
-      acceptUrl: acceptUrlFor(token),
-      expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
-      ownerName: owner.name,
-      ownerEmail: owner.email,
-      // The FROZEN ask — a late booking's 25% collapse or an office-set deposit
-      // must read the same here as on /q and the Zoho invoice (/qa 2026-08-05:
-      // a £300 ask whose payment email said £100).
-      depositAmount: depositLabel(deposit),
-    });
-    const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
-    const res = await dispatchComm(sb, actorId, {
-      channel: "email",
-      to: quote.customer_email,
-      subject: email.subject,
-      bodyText: email.text,
-      ...(templateId
-        ? { template: { id: templateId, variables: email.variables }, bodyHtml: chaseTextToHtml(email.text) }
-        : { bodyHtml: chaseTextToHtml(email.text) }),
-      replyTo: replyAddressFor(token),
-      from: email.from,
-      leadId: quote.lead_id ?? undefined,
-      quoteId: quote.id,
-      clientId: quote.client_id ?? undefined,
-    });
-    emailed = "ok" in res && res.ok;
-    if (emailed && quote.lead_id) {
-      await sb
-        .from("leads")
-        .update({ deposit_chase_step: 1, deposit_chase_at: new Date().toISOString() } as never)
-        .eq("id", quote.lead_id);
-    }
+    emailed = await sendDepositRequestEmail(sb, actorId, quote, deposit, token);
+    if (emailed && quote.lead_id) await stampDepositChaseStarted(sb, quote.lead_id);
   }
 
   return { ok: true, alreadyAccepted: false, agreed, deposit, emailed };
@@ -1079,6 +1120,143 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
+}
+
+/**
+ * Compose and send the "here is how to pay your deposit" email — the day-1
+ * reminder copy, the customer's payment page (card or bank transfer) and the
+ * FROZEN ask.
+ *
+ * Extracted so REQUESTING the deposit and RE-SENDING that request are the same
+ * email, for the same reason sendBalanceInvoiceEmail was: a hand-typed message
+ * from the comms composer would carry a different figure, a different link and
+ * a different voice from the one the automation sends. Returns whether the send
+ * succeeded; never throws, because a mail failure must not undo an acceptance.
+ *
+ * The deposit rail deliberately carries NO invoice PDF: the create path has
+ * never attached one, and the whole reason this exists is that two copies of
+ * one email drifted apart. The re-send is what the system already sends.
+ */
+async function sendDepositRequestEmail(
+  sb: Sb,
+  actorId: string | null,
+  quote: AcceptQuoteRow,
+  deposit: number,
+  token: string,
+  opts: { override?: boolean; overrideReason?: string } = {},
+): Promise<boolean> {
+  if (!quote.customer_email) return false;
+  const owner = await ownerIdentity(sb, quote.estimator_id);
+  const email = depositChaseEmail(1, {
+    firstName: quote.customer_name,
+    quoteRef: quote.quote_ref,
+    acceptUrl: acceptUrlFor(token),
+    expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
+    ownerName: owner.name,
+    ownerEmail: owner.email,
+    // The FROZEN ask — a late booking's 25% collapse or an office-set deposit
+    // must read the same here as on /q and the Zoho invoice (/qa 2026-08-05:
+    // a £300 ask whose payment email said £100).
+    depositAmount: depositLabel(deposit),
+  });
+  const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
+  const res = await dispatchComm(sb, actorId, {
+    channel: "email",
+    to: quote.customer_email,
+    subject: email.subject,
+    bodyText: email.text,
+    ...(templateId
+      ? { template: { id: templateId, variables: email.variables }, bodyHtml: chaseTextToHtml(email.text) }
+      : { bodyHtml: chaseTextToHtml(email.text) }),
+    replyTo: replyAddressFor(token),
+    from: email.from,
+    leadId: quote.lead_id ?? undefined,
+    quoteId: quote.id,
+    clientId: quote.client_id ?? undefined,
+    ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
+  });
+  return "ok" in res && res.ok;
+}
+
+/** The day-1 deposit email has gone out by hand, so the chase engine's next
+ *  touch is day 3 rather than a second copy of the same message tomorrow. */
+async function stampDepositChaseStarted(sb: Sb, leadId: string): Promise<void> {
+  await sb
+    .from("leads")
+    .update({ deposit_chase_step: 1, deposit_chase_at: new Date().toISOString() } as never)
+    .eq("id", leadId);
+}
+
+/**
+ * Send an ALREADY-RAISED deposit request again, unchanged.
+ *
+ * The office needs this whenever a customer loses the email that told them how
+ * to pay — the deposit rail's half of the gap Greig James found on the balance
+ * rail (MMR015, 2026-08-20). It creates nothing: the £deposit Zoho invoice
+ * already exists and is left exactly as it is, so the figure, the reference and
+ * the payment page are the ones the customer was originally given.
+ *
+ * Refuses once the deposit is in. That is Peter's "stop the automated email if
+ * it gets paid" rule, and it belongs on the server rather than on a hidden
+ * button: a paid customer asked to pay again is worse than a silent one.
+ * Sends with the duplicate guard overridden, because a deliberate re-send is
+ * exactly the case that guard exists to catch and the operator has just said
+ * they mean it.
+ */
+export async function resendDepositInvoiceFlow(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+): Promise<{ ok: true; invoiceNumber: string; amount: number } | { ok: false; error: string }> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+
+  const verdict = await canResendInvoiceNow(sb, quote, "deposit");
+  if (!verdict.ok) return { ok: false, error: verdict.reason };
+
+  // The payment page IS the deposit's payment surface, so no link means no
+  // email worth sending. Lazily minted, exactly as the staff-accept path does.
+  const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
+  if (!token) return { ok: false, error: "Could not build their payment link — try again in a moment." };
+
+  const amount = Number(quote.deposit_amount ?? 0);
+  const invoiceNumber = quote.zoho_deposit_invoice_number ?? "";
+
+  const emailed = await sendDepositRequestEmail(sb, actorId, quote, amount, token, {
+    override: true,
+    overrideReason: "Operator re-sent the deposit request",
+  });
+  if (!emailed) return { ok: false, error: "The email did not send — check the comms log and try again." };
+
+  if (quote.lead_id) {
+    // Only when the ladder has not started: this IS the day-1 message, so
+    // stamping it stops the cron sending an identical copy tomorrow. A lead
+    // already on step 1 or 2 keeps its place — the cadence runs from
+    // accepted_at, so nothing is delayed either way.
+    const { data: lead } = await sb
+      .from("leads")
+      .select("deposit_chase_step")
+      .eq("id", quote.lead_id)
+      .maybeSingle();
+    if ((lead?.deposit_chase_step ?? 0) === 0) await stampDepositChaseStarted(sb, quote.lead_id);
+
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: actorId,
+      type: "note",
+      summary: `Deposit request sent again to ${quote.customer_email} — £${amount.toFixed(2)} still due${invoiceNumber ? ` (invoice ${invoiceNumber})` : ""}`,
+      meta: {
+        quote_id: quoteId,
+        invoice_id: quote.zoho_deposit_invoice_id,
+        amount,
+        rail: "deposit",
+        resend: true,
+      },
+    } as never);
+  }
+
+  return { ok: true, invoiceNumber, amount };
 }
 
 /* ------------------------------------------------------------- deposit paid */
@@ -1785,48 +1963,14 @@ export async function confirmMoveDate(
 
   // Date-confirmation email — states the held/non-refundable position and the
   // commitment (invoice PDF attached best-effort). Duplicate-guarded.
-  if (quote.customer_email) {
-    let pdfBase64: string | undefined;
-    if (commitAmt > 0 && isRealZohoId(refreshed.zoho_commitment_invoice_id)) {
-      try {
-        pdfBase64 = await getInvoicePdfBase64(refreshed.zoho_commitment_invoice_id);
-      } catch {
-        pdfBase64 = undefined; // send without the attachment rather than not at all
-      }
-    }
-    const meta: DateConfirmationMeta = {
-      firstName: quote.customer_name,
-      quoteRef: quote.quote_ref,
-      moveDateLabel: moveDateLabel(quote.moving_date),
-      depositAmount: deposit,
-      commitmentAmount: commitAmt,
-      commitmentDueLabel: dueLabel,
-      invoiceNumber: refreshed.zoho_commitment_invoice_number,
-      invoiceUrl: refreshed.zoho_commitment_invoice_url,
-    };
-    const templateId = process.env.RESEND_TEMPLATE_DATE_CONFIRMATION;
-    await dispatchComm(sb, input.collectedBy ?? null, {
-      channel: "email",
-      from: accountsFrom(),
-      to: quote.customer_email,
-      subject: `Move date confirmed (${quote.quote_ref})`,
-      bodyText:
-        commitAmt > 0
-          ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${commitAmt.toFixed(2)} commitment payment is ${dueLabel ? `due by ${dueLabel}` : "due now"}.`
-          : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
-      ...(templateId
-        ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) }, bodyHtml: buildDateConfirmationEmailHtml(meta) }
-        : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),
-      attachmentBase64: pdfBase64,
-      attachmentName: pdfBase64
-        ? `MarleyMoves-Invoice-${refreshed.zoho_commitment_invoice_number ?? "commitment"}.pdf`
-        : undefined,
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
-      leadId: quote.lead_id ?? undefined,
-      quoteId: quote.id,
-      clientId: quote.client_id ?? undefined,
-    });
-  }
+  await sendDateConfirmationEmail(sb, input.collectedBy ?? null, quote, {
+    depositAmount: deposit,
+    commitmentAmount: commitAmt,
+    commitmentDueLabel: dueLabel,
+    invoiceId: refreshed.zoho_commitment_invoice_id,
+    invoiceNumber: refreshed.zoho_commitment_invoice_number,
+    invoiceUrl: refreshed.zoho_commitment_invoice_url,
+  });
 
   // Money-state change: timeline + audit, both (fail-soft each).
   await sb.from("activities").insert({
@@ -1893,6 +2037,155 @@ export async function confirmMoveDateOnline(
     ip,
     userAgent: opts?.userAgent ?? null,
   });
+}
+
+/** The raised commitment invoice, as both the confirmation and the re-send
+ *  path know it. A zero-commitment booking (the deposit already covers 25%)
+ *  carries no invoice at all, which is why every field is nullable. */
+interface ConfirmedCommitment {
+  /** The gross deposit already paid. */
+  depositAmount: number;
+  /** The 25% invoice figure. 0 = the deposit covers it, no invoice raised. */
+  commitmentAmount: number;
+  /** Pre-formatted due-date label, null = due now. */
+  commitmentDueLabel: string | null;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
+  invoiceUrl: string | null;
+}
+
+/**
+ * Compose and send the "your date is locked in" email — the held/non-refundable
+ * position, the 25% commitment invoice with its due date and bank details, and
+ * Zoho's own VAT invoice PDF.
+ *
+ * Extracted so CONFIRMING the date and RE-SENDING its invoice are the same
+ * email, exactly as sendBalanceInvoiceEmail is for the balance rail. This IS
+ * the email that carries the commitment invoice to the customer, so a re-send
+ * that composed anything else would hand them a second, different-looking
+ * document for money they have already been invoiced for. Returns whether the
+ * send succeeded; never throws, because a mail failure must not undo a
+ * confirmation (or an invoice that exists in Zoho).
+ */
+async function sendDateConfirmationEmail(
+  sb: Sb,
+  actorId: string | null,
+  quote: AcceptQuoteRow,
+  c: ConfirmedCommitment,
+  opts: { override?: boolean; overrideReason?: string } = {},
+): Promise<boolean> {
+  if (!quote.customer_email) return false;
+  let pdfBase64: string | undefined;
+  if (c.commitmentAmount > 0 && isRealZohoId(c.invoiceId)) {
+    try {
+      pdfBase64 = await getInvoicePdfBase64(c.invoiceId);
+    } catch {
+      pdfBase64 = undefined; // send without the attachment rather than not at all
+    }
+  }
+  const meta: DateConfirmationMeta = {
+    firstName: quote.customer_name,
+    quoteRef: quote.quote_ref,
+    moveDateLabel: moveDateLabel(quote.moving_date),
+    depositAmount: c.depositAmount,
+    commitmentAmount: c.commitmentAmount,
+    commitmentDueLabel: c.commitmentDueLabel,
+    invoiceNumber: c.invoiceNumber,
+    invoiceUrl: c.invoiceUrl,
+  };
+  const templateId = process.env.RESEND_TEMPLATE_DATE_CONFIRMATION;
+  const res = await dispatchComm(sb, actorId, {
+    channel: "email",
+    from: accountsFrom(),
+    to: quote.customer_email,
+    subject: `Move date confirmed (${quote.quote_ref})`,
+    bodyText:
+      c.commitmentAmount > 0
+        ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${c.commitmentAmount.toFixed(2)} commitment payment is ${c.commitmentDueLabel ? `due by ${c.commitmentDueLabel}` : "due now"}.`
+        : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
+    ...(templateId
+      ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) }, bodyHtml: buildDateConfirmationEmailHtml(meta) }
+      : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),
+    attachmentBase64: pdfBase64,
+    attachmentName: pdfBase64
+      ? `MarleyMoves-Invoice-${c.invoiceNumber ?? "commitment"}.pdf`
+      : undefined,
+    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+    leadId: quote.lead_id ?? undefined,
+    quoteId: quote.id,
+    clientId: quote.client_id ?? undefined,
+    ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
+  });
+  return "ok" in res && res.ok;
+}
+
+/**
+ * Send an ALREADY-RAISED commitment (25%) invoice again, unchanged.
+ *
+ * The commitment rail's half of the gap Greig James found on the balance rail
+ * (MMR015, 2026-08-20): the invoice is raised once, at date confirmation, and
+ * a customer who loses that email had no way to be sent it again. This re-sends
+ * the SAME invoice number, figure and PDF, and takes nothing from the caller
+ * that could change them — the frozen commitment_invoice_amount is the figure,
+ * and nothing here can raise an invoice (ensureCommitmentInvoice is not called;
+ * a job with no commitment is refused, not invoiced).
+ *
+ * Refuses once the commitment is in, and refuses a legacy iMVE booking whose
+ * standard comms are switched off: that lock is the whole reason those
+ * customers are not emailed Marley's standard correspondence, and it can be
+ * lifted from the lead page when the office has spoken to them.
+ */
+export async function resendCommitmentInvoiceFlow(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+): Promise<{ ok: true; invoiceNumber: string; amount: number } | { ok: false; error: string }> {
+  const quote = await fetchQuoteById(sb, quoteId);
+  if (!quote) return { ok: false, error: "Quote not found" };
+
+  const verdict = await canResendInvoiceNow(sb, quote, "commitment");
+  if (!verdict.ok) return { ok: false, error: verdict.reason };
+
+  const settings = await getBusinessSettings(sb);
+  const amount = Number(quote.commitment_invoice_amount ?? 0);
+  const invoiceNumber = quote.zoho_commitment_invoice_number ?? "";
+
+  const emailed = await sendDateConfirmationEmail(
+    sb,
+    actorId,
+    quote,
+    {
+      depositAmount: quote.deposit_amount ?? settings.defaultDeposit,
+      commitmentAmount: amount,
+      // The FROZEN due date, not a recomputed one: the customer is looking at
+      // the date printed on the invoice they already hold.
+      commitmentDueLabel: moveDateLabel(quote.commitment_due_date),
+      invoiceId: quote.zoho_commitment_invoice_id,
+      invoiceNumber,
+      invoiceUrl: quote.zoho_commitment_invoice_url,
+    },
+    { override: true, overrideReason: "Operator re-sent the commitment invoice" },
+  );
+  if (!emailed) return { ok: false, error: "The email did not send — check the comms log and try again." };
+
+  if (quote.lead_id) {
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: actorId,
+      type: "note",
+      summary: `Commitment invoice ${invoiceNumber} sent again to ${quote.customer_email} — £${amount.toFixed(2)} still due`,
+      meta: {
+        quote_id: quoteId,
+        invoice_id: quote.zoho_commitment_invoice_id,
+        amount,
+        rail: "commitment",
+        resend: true,
+      },
+    } as never);
+  }
+
+  return { ok: true, invoiceNumber, amount };
 }
 
 /* ------------------------------------------------------------- balance invoice */

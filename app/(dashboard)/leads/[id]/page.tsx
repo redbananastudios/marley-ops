@@ -159,7 +159,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { data: quotes } = await supabase
     .from("quotes")
     .select(
-      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at, source, standard_comms_at",
+      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at, source, standard_comms_at, commitment_invoice_amount, commitment_due_date, commitment_paid_at, zoho_commitment_invoice_number",
     )
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
@@ -278,6 +278,18 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           hasAcceptedQuote: !!acceptedQuote,
           depositPaid: !!lead.deposit_paid_at,
         })
+      : null;
+  // The raised 25%, for the Payments card. Only a real invoice figure counts:
+  // a job whose deposit covered the commitment has none, and the cell hides.
+  const commitmentAmount = Number(acceptedQuote?.commitment_invoice_amount ?? 0);
+  const commitmentState =
+    acceptedQuote && commitmentAmount > 0
+      ? {
+          amount: commitmentAmount,
+          dueDate: acceptedQuote.commitment_due_date ?? null,
+          paidAt: acceptedQuote.commitment_paid_at ?? null,
+          invoiceNumber: acceptedQuote.zoho_commitment_invoice_number ?? null,
+        }
       : null;
   // Payments matter once the job is real (or once any payment state exists).
   const showPayments =
@@ -551,6 +563,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 leadId={lead.id}
                 defaultDeposit={defaultDeposit}
                 agreedPrice={agreedPrice}
+                commitment={commitmentState}
                 state={{
                   depositAmount: lead.deposit_amount != null ? Number(lead.deposit_amount) : null,
                   depositRequestedAt: lead.deposit_requested_at,

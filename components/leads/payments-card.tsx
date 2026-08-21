@@ -27,6 +27,7 @@ import {
   setBalanceAction,
 } from "@/app/(dashboard)/follow-ups/actions";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
+import { ResendInvoiceButton } from "@/components/leads/resend-invoice-button";
 
 export interface PaymentState {
   depositAmount: number | null;
@@ -35,6 +36,21 @@ export interface PaymentState {
   balanceAmount: number | null;
   balanceDueDate: string | null;
   balancePaidAt: string | null;
+}
+
+/**
+ * The 25% commitment, from the lead's accepted quote — the ONLY money on this
+ * card that doesn't live on the lead. It earns a cell because /bookings hides
+ * the commitment queues behind a booked diary slot, so a date-confirmed job
+ * that was never put in the diary had its 25% invoice on no screen at all.
+ * Null when no commitment invoice was raised (the deposit covered it, or the
+ * date isn't confirmed), and the cell disappears entirely.
+ */
+export interface CommitmentState {
+  amount: number;
+  dueDate: string | null;
+  paidAt: string | null;
+  invoiceNumber: string | null;
 }
 
 const gbp = (n: number | null): string =>
@@ -134,6 +150,7 @@ export function PaymentsCard({
   state,
   defaultDeposit,
   agreedPrice,
+  commitment = null,
 }: {
   leadId: string;
   state: PaymentState;
@@ -141,6 +158,8 @@ export function PaymentsCard({
   defaultDeposit: number;
   /** Accepted quote value — suggested balance = agreed − deposit. */
   agreedPrice: number | null;
+  /** The raised 25% commitment, when there is one. */
+  commitment?: CommitmentState | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -183,7 +202,15 @@ export function PaymentsCard({
                 {gbp(state.depositAmount)} requested {fmt(state.depositRequestedAt)}{" "}
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
-              <MarkReceivedButton leadId={leadId} kind="deposit" amount={state.depositAmount} />
+              <div className="flex flex-wrap items-center gap-2">
+                <MarkReceivedButton leadId={leadId} kind="deposit" amount={state.depositAmount} />
+                {/* Requested-and-unpaid is exactly the state that needs the email
+                    sending again, and (unlike the balance rail's old bug) raising
+                    the invoice does not move the job out of this branch — the
+                    same acceptance sets depositRequestedAt and raises the Zoho
+                    invoice, so the button is reachable whenever it is useful. */}
+                <ResendInvoiceButton leadId={leadId} rail="deposit" />
+              </div>
             </div>
           ) : (
             <div className="flex items-center gap-2">
@@ -209,6 +236,30 @@ export function PaymentsCard({
             </div>
           )}
         </div>
+
+        {/* Commitment (25%) — only once one has been invoiced */}
+        {commitment ? (
+          <div>
+            <p className="eyebrow mb-2">Commitment (25%)</p>
+            {commitment.paidAt ? (
+              <p className="text-sm font-semibold text-success">
+                {gbp(commitment.amount)} paid {fmt(commitment.paidAt)}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-sm text-foreground">
+                  {gbp(commitment.amount)}
+                  {commitment.dueDate ? ` due ${fmt(commitment.dueDate)}` : ""}{" "}
+                  <span className="font-medium text-warn">· unpaid</span>
+                </p>
+                {commitment.invoiceNumber ? (
+                  <p className="text-xs text-mist-400">Invoice {commitment.invoiceNumber}</p>
+                ) : null}
+                <ResendInvoiceButton leadId={leadId} rail="commitment" />
+              </div>
+            )}
+          </div>
+        ) : null}
 
         {/* Balance */}
         <div>

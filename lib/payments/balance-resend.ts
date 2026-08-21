@@ -9,46 +9,36 @@
  *
  * Pure so the rule is testable away from Zoho and the mailer, and so the button
  * and the server refuse on identical grounds.
+ *
+ * The ladder itself lives in lib/payments/invoice-resend.ts and is shared with
+ * the deposit and commitment rails; only the WORDS are the balance rail's own.
+ * Every refusal string below is byte-identical to the one this file returned
+ * when it carried its own copy of the ifs, and its tests pin each of them.
  */
-export interface BalanceResendFacts {
-  /** Real Zoho invoice id — 'pending' is a CAS claim, not an invoice. */
-  invoiceRaised: boolean;
-  /** The figure on the raised invoice. */
-  invoicedAmount: number;
-  bookingCancelled: boolean;
-  hasCustomerEmail: boolean;
+import {
+  invoiceResendVerdict,
+  type InvoiceResend,
+  type InvoiceResendFacts,
+} from "@/lib/payments/invoice-resend";
+
+export interface BalanceResendFacts extends Omit<InvoiceResendFacts, "paid"> {
   /** Settled. Never ask a paid customer to pay again. */
   balancePaid: boolean;
-  /**
-   * The paid check could not be READ (a query error), which is not the same
-   * answer as "not paid". Refuse: the cost of a wrong send here is a settled
-   * customer being asked for money they have already handed over.
-   */
-  paidStateUnknown?: boolean;
 }
 
-export type BalanceResend = { ok: true } | { ok: false; reason: string };
+export type BalanceResend = InvoiceResend;
 
 export function canResendBalanceInvoice(f: BalanceResendFacts): BalanceResend {
-  if (!f.invoiceRaised) {
-    return { ok: false, reason: "No final invoice has been raised yet — create it first." };
-  }
-  if (f.bookingCancelled) {
-    return { ok: false, reason: "This booking was cancelled — its final invoice will not be sent again." };
-  }
-  if (f.paidStateUnknown) {
-    return { ok: false, reason: "Could not check whether the balance is already paid." };
-  }
-  if (f.balancePaid) {
-    return { ok: false, reason: "The balance is already paid — nothing to send." };
-  }
-  if (!f.hasCustomerEmail) {
-    return { ok: false, reason: "No email address on this job — add one first." };
-  }
-  // A raised invoice with no recorded figure means our copy of it is broken;
-  // sending an email that names £0 (or omits the amount) is worse than saying so.
-  if (!(f.invoicedAmount > 0)) {
-    return { ok: false, reason: "The invoiced balance is not recorded — check the invoice in Zoho." };
-  }
-  return { ok: true };
+  return invoiceResendVerdict(
+    { ...f, paid: f.balancePaid },
+    {
+      notRaised: "No final invoice has been raised yet — create it first.",
+      cancelled: "This booking was cancelled — its final invoice will not be sent again.",
+      commsLocked: "This is a legacy iMVE booking — turn its standard comms on before emailing them.",
+      paidUnknown: "Could not check whether the balance is already paid.",
+      paid: "The balance is already paid — nothing to send.",
+      noEmail: "No email address on this job — add one first.",
+      noAmount: "The invoiced balance is not recorded — check the invoice in Zoho.",
+    },
+  );
 }
