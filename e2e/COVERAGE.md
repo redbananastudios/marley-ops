@@ -53,6 +53,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Leads scoped to own / Mine preset | ⬜ | estimator/work.spec.ts |
 | Build + send a quote | ⬜ | estimator/quote.spec.ts |
 | My invoices — invoicing unlocked (gates pass) | ✅ | estimator/pay.spec.ts |
+| My invoices — create/add a line by hand/edit/submit | ✅ | estimator/pay-statement.spec.ts |
 
 ## Crew features
 | Flow | Status | Spec |
@@ -63,7 +64,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Job detail — brief + add a private crew note | ✅ | crew/job-detail.spec.ts |
 | Availability — normal week + calendar render | ✅ | crew/availability.spec.ts |
 | Contractor agreement gate → sign → invoicing unlocks | ✅ | crew/contractor.spec.ts |
-| Contractor invoicing — start/add lines/submit | ⬜ | crew/contractor.spec.ts |
+| Contractor invoicing — start/add a line by hand/edit/submit | ✅ | crew/invoicing-submit-lines.spec.ts |
 
 ## Public (no auth)
 | Flow | Status | Spec |
