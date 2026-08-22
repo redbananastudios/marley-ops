@@ -4,6 +4,21 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-22T20:40Z — continuation: live-verified both deferred risky findings, both CLOSED
+
+- sha audited: `ae47fc0` (staging's deploy queue had drained since the prior entry — `curl /api/version` now returned `ae47fc0`, unblocking the verify that entry deferred).
+- Verify-first (deferred from the 2026-08-22T20:30Z entry, now actually run against DEPLOYED staging): **QA-20260819-01** and **QA-20260820-08**, both `fixed-pending-verify`, both closed this pass.
+  - QA-20260819-01: seeded a client with a deliberately stale shared `display_name`/`phone`/`email` + two leads with their own distinct contact details. As admin, edited lead A's contact via the real Edit dialog. Result: toast correctly named the declined write-through ("1 other enquiry shares this customer..."); SQL confirmed the shared client's fields were unchanged; lead A's own row updated; lead B's own row and rendered page both unaffected (shows its own name, not lead A's edit, not the stale client name). All 4 Verify-section assertions held.
+  - QA-20260820-08: seeded a `storage_lets` row matching `startLetAction`'s real insert shape (`client_id` only) on a client with one lead. Sole-lead delete attempt via the real UI → refused, exact new reason text ("it is the last enquiry behind a storage let"). Added a sibling lead on the same client, re-attempted → succeeded, lead confirmed gone by SQL. Both halves of the Verify section held.
+  - Both moved to `qa/findings/closed/`; `qa/findings/open/` is now empty.
+- Items re-scored in `qa/state.json`: `admin.lead_create_edit` (finding → pass), `admin.lead_delete_duplicate_merge` (note updated to record QA-20260820-08's closure).
+- Findings filed: none. Specs added: none (both fixes already carry unit-test + mutation-test coverage from `ae47fc0`; the live verify was the missing half, now done).
+- Pushes: this commit (2 finding files moved + edited, state.json) — `staging` only, master untouched.
+- Cleanup verification (all zero, by query): storage_lets 0 · storage_units 0 · storage_sites 0 · leads 0 (both notes and name columns) · clients 0 (both notes and display_name columns) · auth users matching qa-sentinel 0 (2 minted across both verify passes, both deleted).
+- Time spent: ~12 min (seed ~3 min, two rounds of Playwright-driven verification incl. one login-flakiness retry fix ~6 min, cleanup + finding/state edits ~3 min).
+
+---
+
 ## 2026-08-22T20:30Z — scheduled audit: 4 role agents, 0 new findings, 2 risky fixes deployed mid-run (verify deferred to next audit)
 
 - sha audited: `ae47fc0` (lastAuditSha) — HEAD ended at `ee3e1e5` after 2 QA-only commits (state.json registration, .gitignore); staging's own deploy-staging concurrency queue meant staging was still serving `704653f` at wrap-up, one commit behind `ae47fc0` — CI run 133 for `ae47fc0` was still `pending` when the time box closed.
