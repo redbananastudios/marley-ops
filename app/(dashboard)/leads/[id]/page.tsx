@@ -42,6 +42,7 @@ import { JobMediaList } from "@/components/content/job-media-list";
 import { loadJobMedia } from "@/lib/content/job-media-load";
 import { getBusinessSettings } from "@/lib/settings";
 import { UK_TZ } from "@/lib/uk-time";
+import { leadContact } from "@/lib/leads/shared-client";
 import { ukPhone } from "@/lib/phone";
 import { StatusChanger } from "./status-changer";
 import { ReviewRequestControl } from "./review-request-control";
@@ -122,6 +123,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       supabase.from("profiles").select("id, full_name").eq("active", true).order("full_name", { ascending: true }),
     ]);
   const estimatorList = (estimators ?? []) as { id: string; full_name: string }[];
+
+  // THIS enquiry's contact details. Resolved once, in one place, and used by
+  // every surface on the page — the action bar, the Contact card, the edit
+  // dialog's defaults and the send dialogs. Six hand-written copies of this
+  // precedence is how the page came to disagree with itself (QA-20260819-01).
+  const contact = leadContact(lead, client);
 
   // Estimator is survey-derived: whoever is assigned the booked survey. Read-only
   // here and only shown once a survey exists (no estimator at the enquiry stage).
@@ -391,8 +398,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               leadId={lead.id}
               initial={{
                 name: lead.name ?? "",
-                phone: ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone) ?? "",
-                email: client?.email ?? lead.email ?? "",
+                phone: ukPhone(contact.phone) ?? "",
+                email: contact.email ?? "",
                 from_postcode: lead.from_postcode ?? "",
                 to_postcode: lead.to_postcode ?? "",
                 from_address: lead.from_address ?? "",
@@ -444,8 +451,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         <LeadActionBar
           leadId={lead.id}
           leadName={lead.name}
-          phone={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone)}
-          email={client?.email ?? lead.email}
+          phone={ukPhone(contact.phone)}
+          email={contact.email}
           status={lead.status}
           firstContactedAt={lead.first_contacted_at}
           quotes={quoteRows.map((q) => ({
@@ -494,10 +501,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                 <h2 className="font-display text-lg text-foreground">Contact</h2>
               </div>
               <div className="grid gap-4 p-5 sm:grid-cols-2">
-                <Fact label="Name" value={client?.display_name ?? lead.name} />
-                <Fact label="Phone" value={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone)} />
-                <Fact label="Email" value={client?.email ?? lead.email} />
-                <Fact label="Postcode" value={client?.postcode_home ?? lead.from_postcode} />
+                <Fact label="Name" value={contact.name} />
+                <Fact label="Phone" value={ukPhone(contact.phone)} />
+                <Fact label="Email" value={contact.email} />
+                <Fact label="Postcode" value={contact.postcode} />
               </div>
             </Card>
 
@@ -816,8 +823,8 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
               <MessageButton
                 leadId={lead.id}
                 clientId={lead.client_id ?? undefined}
-                defaultEmail={client?.email ?? lead.email ?? undefined}
-                defaultPhone={ukPhone(client?.phone_raw ?? client?.phone_e164 ?? lead.phone) ?? undefined}
+                defaultEmail={contact.email ?? undefined}
+                defaultPhone={ukPhone(contact.phone) ?? undefined}
               />
             </div>
             {commsRows.length === 0 ? (
