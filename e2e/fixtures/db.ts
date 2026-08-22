@@ -4,8 +4,12 @@ import { createClient } from "@supabase/supabase-js";
  * A service-role handle on the TARGET database, for the one thing a browser
  * cannot do: make something happen to a record WHILE a dialog sits open on it.
  *
- * Every other spec arranges its state through the seed and asserts it through
- * the UI. A concurrency guard cannot be tested that way — the whole point is a
+ * Specs arrange state through the seed and assert it through the UI wherever
+ * they can. Two things do not fit that: a concurrency guard, and TEARING DOWN
+ * state a spec created through the UI so the next spec still meets its
+ * documented preconditions (see deleteCrewStatements below).
+ *
+ * A concurrency guard cannot be tested through the seed — the whole point is a
  * change that lands between the dialog reading the world and the operator acting
  * on it, and the second actor is a customer's payment, not another screen. Two
  * of the three payment rails have no "mark it paid" control anywhere in the app
@@ -143,4 +147,34 @@ export async function clearPayment(job: SeededJob, rail: PayRail): Promise<void>
       .update({ balance_paid_at: null, balance_paid_method: null })
       .eq("id", job.leadId);
   }
+}
+
+/**
+ * Delete a crew member's statements (and their lines).
+ *
+ * The seed wipes these once per CI invocation, which is what
+ * `invoicing-submit-lines.spec.ts` documents relying on — "a fresh suite
+ * invocation always starts unsigned/statement-free". That precondition holds
+ * against the seed but NOT against a sibling spec: once
+ * `hours-to-admin-statements.spec.ts` (alphabetically first) creates and
+ * SUBMITS this week's invoice, "This week" no longer opens an editable draft
+ * and the sibling fails. A spec that submits an invoice has to put it back.
+ */
+export async function deleteCrewStatements(fullName: string): Promise<void> {
+  const sb = db();
+  const { data: staff, error: staffErr } = await sb.from("staff").select("id").eq("full_name", fullName);
+  if (staffErr) throw new Error(`Looking up staff ${fullName} failed: ${staffErr.message}`);
+  const staffIds = (staff ?? []).map((s) => s.id);
+  if (!staffIds.length) return;
+
+  const { data: stmts, error: stmtErr } = await sb.from("staff_statements").select("id").in("staff_id", staffIds);
+  if (stmtErr) throw new Error(`Reading statements for ${fullName} failed: ${stmtErr.message}`);
+  const ids = (stmts ?? []).map((s) => s.id);
+  if (!ids.length) return;
+
+  // Lines first — they reference the statement.
+  const { error: lineErr } = await sb.from("staff_statement_lines").delete().in("statement_id", ids);
+  if (lineErr) throw new Error(`Clearing statement lines for ${fullName} failed: ${lineErr.message}`);
+  const { error: delErr } = await sb.from("staff_statements").delete().in("id", ids);
+  if (delErr) throw new Error(`Clearing statements for ${fullName} failed: ${delErr.message}`);
 }
