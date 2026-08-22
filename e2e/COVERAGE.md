@@ -52,6 +52,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Settings trimmed (no admin money/team controls) | ✅ | estimator/settings.spec.ts |
 | Leads scoped to own / Mine preset | ⬜ | estimator/work.spec.ts |
 | Build + send a quote | ⬜ | estimator/quote.spec.ts |
+| Book survey (past slot, attended) → Create Quote from the visit | 🟡 | estimator/work-quote.spec.ts — proven live 2026-08-22 via a throwaway login + SQL read-back (0 findings), but the spec itself is `test.skip`'d: this env has no `E2E_ESTIMATOR_PASSWORD` so `auth.setup.ts` can't sign in the persistent estimator fixture, so it has never actually executed |
 | My invoices — invoicing unlocked (gates pass) | ✅ | estimator/pay.spec.ts |
 | My invoices — create/add a line by hand/edit/submit | ✅ | estimator/pay-statement.spec.ts |
 
