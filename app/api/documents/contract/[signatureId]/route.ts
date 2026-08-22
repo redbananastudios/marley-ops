@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireApiUser } from "@/lib/api-auth";
+import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildContractDocDef, type ContractDocData } from "@/lib/contract-docdef";
 import { renderPdfBuffer } from "@/lib/pdf/server-pdf";
@@ -19,7 +19,12 @@ import { UK_TZ } from "@/lib/uk-time";
  * would put a PDF render on the customer's accept path — where a failure either
  * blocks the signature or leaves a contract with no document.
  *
- * Office-only. It contains the customer's signature and IP address.
+ * Office-only, and enforced here rather than inherited: it contains the
+ * customer's signature image and IP address. The (dashboard) layout bounces
+ * crew off office PAGES, but /api/** has no layout, and this route reads
+ * through the RLS-bypassing admin client — so nothing behind it would catch a
+ * crew session. requireApiUser() authenticates without checking a role and was
+ * the wrong helper (QA-20260821-01).
  */
 
 export const dynamic = "force-dynamic";
@@ -39,8 +44,11 @@ const money = (n: number | null | undefined): string | null =>
   typeof n === "number" && n > 0 ? `£${n.toFixed(2)}` : null;
 
 export async function GET(_req: Request, ctx: { params: Promise<{ signatureId: string }> }) {
-  const userId = await requireApiUser();
-  if (!userId) return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
+  // Refuse before the signature is looked up, so the reply is identical whether
+  // or not the id exists — a non-office caller learns nothing either way.
+  if (!(await requireOfficeProfile())) {
+    return NextResponse.json({ error: "Unauthorised" }, { status: 403 });
+  }
 
   const { signatureId } = await ctx.params;
   const sb = createAdminClient();
