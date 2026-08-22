@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { step } from "../fixtures/artefacts";
+import { E2E_DB_READY, deleteCrewStatements } from "../fixtures/db";
 import { submitUntil } from "../fixtures/ui";
 
 /**
@@ -13,14 +14,16 @@ import { submitUntil } from "../fixtures/ui";
  * mismatched read here would mean crew invoices office can't see or trust.
  *
  * Proven live against staging 2026-08-22 by a throwaway QA-SENTINEL login pair
- * (0 findings) — ships test.skip'd because this environment has no
- * E2E_CREW_PASSWORD/E2E_OFFICE_PASSWORD, so auth.setup.ts can't sign in the
- * persistent e2e-crew/e2e-office fixtures this spec depends on. Un-skip once
- * those creds are available and confirm green.
+ * (0 findings). It shipped believing it would skip in CI for want of
+ * E2E_CREW_PASSWORD/E2E_OFFICE_PASSWORD — CI has both, so it ran unvalidated on
+ * its very first outing and failed twice over (QA-20260822-03): it looked for
+ * the line description on a collapsed card, and it left a submitted invoice
+ * behind that broke the sibling invoicing spec. Both are fixed below. The guard
+ * stays for LOCAL runs, where those variables genuinely are unset.
  */
 test.skip(
   !process.env.E2E_CREW_PASSWORD || !process.env.E2E_OFFICE_PASSWORD,
-  "needs E2E_CREW_PASSWORD + E2E_OFFICE_PASSWORD to sign in both fixtures — unset in this environment (see qa/state.json handoffs.h2)",
+  "needs E2E_CREW_PASSWORD + E2E_OFFICE_PASSWORD to sign in both fixtures — set in CI, usually unset locally (see qa/state.json handoffs.h2)",
 );
 
 test.describe.serial("Handoff — crew submits an invoice, office sees it on /finance/statements", () => {
@@ -80,14 +83,42 @@ test.describe.serial("Handoff — crew submits an invoice, office sees it on /fi
       await step("office sees the crew's submitted line", officePage, async () => {
         await officePage.goto("/finance/statements");
         await expect(officePage.getByRole("heading", { name: "Contractor pay", exact: true })).toBeVisible();
-        const row = officePage.locator("div.rounded-lg.border.border-border.bg-card").filter({ hasText: description });
+
+        // Find the invoice by what the COLLAPSED card shows — crew name and
+        // total. The first version of this spec filtered on the line
+        // description and always found 0: office-statements-view renders lines
+        // only once a card is expanded ("expand to see the lines", and
+        // `expanded` starts empty), so the description is not in the DOM yet.
+        const row = officePage
+          .locator("div.rounded-lg.border.border-border.bg-card")
+          .filter({ hasText: "E2E Crew" })
+          .filter({ hasText: "£75.00" });
         await expect(row).toHaveCount(1);
-        await expect(row).toContainText("E2E Crew");
-        await expect(row).toContainText("£75.00");
         await expect(row.getByText(/^submitted$/i)).toHaveCount(1);
+
+        // Then open it and assert the line itself. Expanding rather than
+        // dropping the check keeps the actual point of the handoff — that the
+        // office reads back the crew's line IDENTICALLY, not merely that some
+        // invoice for the right money exists.
+        await row.getByRole("button", { expanded: false }).first().click();
+        await expect(row.getByText(description)).toHaveCount(1);
+        await expect(row).toContainText("5 hrs");
       });
     } finally {
       await officeContext.close();
     }
+  });
+
+  /**
+   * Put the invoice back. `invoicing-submit-lines.spec.ts` documents relying on
+   * starting "statement-free", which the seed guarantees against a fresh CI
+   * invocation but NOT against this spec — which runs first (alphabetically) and
+   * SUBMITS this week's invoice, leaving that sibling with no draft "This week"
+   * can open. Leaving submitted state behind is this spec's mess to clear, not
+   * something the sibling should be loosened to tolerate.
+   */
+  test.afterAll(async () => {
+    if (!E2E_DB_READY) return;
+    await deleteCrewStatements("E2E Crew");
   });
 });
