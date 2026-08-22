@@ -5,6 +5,7 @@
  */
 
 import { apptWindow, type ApptLite } from "@/lib/job-board";
+import { ukCalendarDate } from "@/lib/uk-time";
 import { buildOpItems, normalizeQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
 import type { JobSheetAddress, JobSheetData } from "@/lib/job-sheet-docdef";
 
@@ -87,7 +88,16 @@ export function assembleJobSheetData(
   vehicles: string[],
 ): JobSheetData {
   const q = quote ? normalizeQuoteValues(quote.state_blob) : null;
-  const moveDate = quote?.moving_date ?? (appt.starts_at ? appt.starts_at.slice(0, 10) : null);
+  // The appointment's own starts_at is the LIVE diary slot — the thing the office
+  // moves when a date changes. quote.moving_date is a snapshot taken at quoting
+  // time and goes stale independently (a reschedule that rolled only the
+  // appointment, a legacy import whose date was firmed up on the appointment
+  // row). Preferring the quote meant this view, the Job Sheet PDF and the crew
+  // day-sheet could all name a different day from the /my-jobs list, which keys
+  // purely on starts_at — i.e. tell crew the wrong day for their own job.
+  // UK-local to match that list exactly; a UTC slice disagrees with it either
+  // side of midnight through BST.
+  const moveDate = ukCalendarDate(appt.starts_at) ?? quote?.moving_date ?? null;
   return {
     quoteRef: quote?.quote_ref ?? null,
     customerName: lead?.name || q?.customer.name || appt.title || "Customer",

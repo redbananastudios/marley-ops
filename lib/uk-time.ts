@@ -41,6 +41,20 @@ export function ukParts(at: Date = new Date()): UkParts {
   };
 }
 
+/**
+ * The UK calendar day an instant falls on, as `yyyy-mm-dd`. Use wherever a
+ * timestamptz has to answer "which day is this job on": a raw `.slice(0, 10)`
+ * takes the UTC day, which disagrees with the UK one either side of midnight
+ * through BST. Null for a missing or unparseable input.
+ */
+export function ukCalendarDate(at: string | Date | null | undefined): string | null {
+  if (!at) return null;
+  const d = at instanceof Date ? at : new Date(at);
+  if (Number.isNaN(d.getTime())) return null;
+  const { year, month, day } = ukParts(d);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
 /** Millisecond offset of Europe/London from UTC at the given instant (0 in winter, 3 600 000 in BST). */
 export function ukOffsetMs(at: Date = new Date()): number {
   const p = Object.fromEntries(partsFmt.formatToParts(at).map((x) => [x.type, x.value]));
