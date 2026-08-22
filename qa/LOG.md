@@ -4,6 +4,26 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-22T~17:30Z — interactive repair pass (Peter-driven): both open safe-fix findings fixed, CI unblocked, lead-sync verified
+
+- Tier: interactive (Peter asked for a pull + full QA + a check that website enquiries reach ops). Not a scheduled rota run — no role-agent fan-out, no marker rows, no staging DB writes, no browser mutations.
+- Pulled 7 commits onto `staging` (d27d762 → 4acac9d).
+- Health gate on the untouched tree: lint 0 errors (36-warn baseline) · tsc 0 · vitest 1846 passed/7 skipped · build green.
+- **QA-20260822-02 (CI red, self-perpetuating) — FIXED, and verified green in CI.** `scripts/seed-e2e.mjs` `wipe()` deleted `surveys` before the `appointments` referencing them via `appointments.survey_id` (a second FK, NO ACTION), and `die()`'s `process.exit(1)` meant the offending row survived to break every later run. Reordered + the remaining `survey_id` links are released first, so the abort is impossible rather than unlikely. Test `tests/scripts/seed-e2e-wipe-order.test.ts` pins the ordering by reading the script's source (wipe() needs a live DB); **verified to fail 3/3 before, pass 3/3 after**. PR #42, auto-merged. **Verification: staging run 32585752443 — "Seed staging DB: completed/success"**, and the Playwright step executed for the first time instead of being skipped.
+- **QA-20260822-01 (crew told the wrong day) — FIXED, pending live verify.** `lib/job-sheet-data.ts` now prefers the appointment's `starts_at` over the quote's stale `moving_date`. Deliberately **not** a `.slice(0, 10)`: that takes the UTC day while `/my-jobs` buckets by `Europe/London`, so the naive swap would have traded the reported divergence for a quieter BST one. New `ukCalendarDate()` in `lib/uk-time.ts`. Four cases added to `tests/lib/job-sheet.test.ts` (live repro, no-drift, undated fallback, BST midnight edge); **verified to fail 2/4 before, 21/21 pass after**. Gates: lint 0 · tsc 0 · vitest 1850 · build green. PR #43, auto-merged (`115559c`). Live verification of the crew surfaces is the next audit's job — the `## Verify` block is its script.
+- **Live impact of QA-20260822-01, found by a read-only prod sweep**: exactly one real job carries diverged dates — appointment `c38d78fc`, **Janet Jones MMR089**, diary **Thu 27 Aug 09:00** vs accepted quote **28 Aug**, `scheduled`, ~5 days out, **0 crew assigned** so no day-sheet has carried the wrong date to anyone. The code fix makes ops self-consistent but cannot decide which date is TRUE — the customer's quote PDF says the 28th. Filed for Luke/Connor: [ClickUp 869enmbrg](https://app.clickup.com/t/869enmbrg).
+- **Website-enquiry pipeline verified end to end (read-only)** — both rails healthy, nothing missing:
+  - Prod env: `SANITY_SYNC_DISABLED` unset (sync enabled), `LEAD_SYNC_SINCE=2026-07-30T00:00:00Z` (floor intact, fails closed), Sanity token present, cron `0 6 * * * sync/sanity-leads` registered.
+  - `cron_runs`: `sanity-leads-sync` `ok` every day 16–22 Aug, no failures.
+  - **Instant push went live ~21 Aug midday.** Christina (07:47) has a `leadDelivery` audit doc reading `opsIngest: "ops ingest not configured"` and landed via PULL in 130s; Sharon Martin (13:29) has **no `sanity_id`** and landed in **0.4s** — a genuine `/api/ingest/lead` push. Ops endpoint confirmed live (bad-token probe → 401), `LEAD_INGEST_SECRET` 43 chars and present in the running container, auth fails closed.
+  - Correction worth recording: `external_lead_id` is **not** a push marker — the pull carries the Sanity doc's own `leadId` into it too. `sanity_id` absent + sub-second lag is the real push signature.
+  - Pull remains the backstop: observed lag 23s–84min (median ~12 min), driven by the dashboard/leads page-load incremental sync rather than the daily cron.
+  - Completeness: Sanity holds **1** `quoteSubmission` in total and it is in ops. Zero enquiries missing. The site purges synced submissions (`purge-selection.ts`) and is verification-gated — its own tests assert it never purges one marley-ops does not hold.
+- Three `class: risky` findings remain untouched by design (Peter-only): QA-20260819-01, QA-20260820-08, **QA-20260821-01 (high — a crew login can fetch any customer's signed contract PDF incl. signature image + IP)**.
+- Cleanup: no marker rows, no auth users, no seeded data created — every prod/Sanity query this session was read-only. Two throwaway worktrees (`marley-ops-qa-01/02`) left for Peter to remove after the PRs land.
+
+---
+
 ## 2026-08-22T16:08Z — run aborted: CI red on the base predating this run (headline finding filed)
 
 - sha audited: 6ddf711 (origin/staging HEAD at checkout — the prior run's own commit). `curl /api/version` on deployed staging = `6ddf711`, exact match, no lag.
