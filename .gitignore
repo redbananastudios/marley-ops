@@ -19,6 +19,11 @@
 /test-results/
 /playwright-report/
 
+# QA audit — throwaway seed/read-back/storageState scripts written to the repo
+# root (ESM resolution needs node_modules, /tmp doesn't have it); always
+# deleted by whichever agent wrote them, never meant to be committed
+.qa-*
+
 # next.js
 /.next/
 /out/
