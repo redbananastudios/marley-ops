@@ -259,3 +259,40 @@ describe("buildJobSheetDocDef", () => {
     expect(Object.keys(emptyRow[1])).toEqual([]);
   });
 });
+
+/**
+ * QA-20260822-01: moveDate preferred the accepted quote's `moving_date` over the
+ * appointment's own `starts_at` whenever a quote existed, so /my-jobs/[id], the
+ * Job Sheet PDF and the emailed/SMS'd crew day-sheet (all three share
+ * assembleJobSheetData) named a STALE day whenever the two diverged — while the
+ * /my-jobs LIST, a separate path keyed purely on starts_at, showed the real one.
+ * Crew could be told the wrong day for their own job.
+ */
+describe("assembleJobSheetData moveDate — the live diary slot wins", () => {
+  const q = (moving_date: string | null) => ({ quote_ref: "MM-260710-001", moving_date, state_blob: blob() });
+
+  it("uses the appointment's date when the quote's has gone stale", () => {
+    // The exact shape the audit reproduced live: appointment moved, quote not rolled forward.
+    const moved = { ...appt, starts_at: "2026-08-23T09:00:00Z", ends_at: "2026-08-23T17:00:00Z" };
+    const d = assembleJobSheetData(moved, lead, q("2026-09-05"), [], []);
+    expect(d.moveDate).toBe("2026-08-23");
+  });
+
+  it("agrees with the quote when nothing has drifted", () => {
+    const d = assembleJobSheetData(appt, lead, q("2026-07-15"), [], []);
+    expect(d.moveDate).toBe("2026-07-15");
+  });
+
+  it("falls back to the quote only when the appointment has no date at all", () => {
+    const undated = { ...appt, starts_at: null as unknown as string };
+    expect(assembleJobSheetData(undated, lead, q("2026-09-05"), [], []).moveDate).toBe("2026-09-05");
+  });
+
+  it("takes the UK calendar day, not the UTC one, through BST", () => {
+    // 23:30Z on 23 Aug is already 00:30 on the 24th in London. A `.slice(0, 10)`
+    // would say the 23rd and disagree with the /my-jobs list, which buckets by
+    // Europe/London — the very disagreement this finding is about.
+    const lateNight = { ...appt, starts_at: "2026-08-23T23:30:00Z", ends_at: "2026-08-24T03:00:00Z" };
+    expect(assembleJobSheetData(lateNight, lead, q("2026-09-05"), [], []).moveDate).toBe("2026-08-24");
+  });
+});
