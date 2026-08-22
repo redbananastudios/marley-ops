@@ -4,6 +4,30 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-22T20:30Z — scheduled audit: 4 role agents, 0 new findings, 2 risky fixes deployed mid-run (verify deferred to next audit)
+
+- sha audited: `ae47fc0` (lastAuditSha) — HEAD ended at `ee3e1e5` after 2 QA-only commits (state.json registration, .gitignore); staging's own deploy-staging concurrency queue meant staging was still serving `704653f` at wrap-up, one commit behind `ae47fc0` — CI run 133 for `ae47fc0` was still `pending` when the time box closed.
+- Verify-first: both open findings (QA-20260819-01, QA-20260820-08) were `open` at run start; mid-run the repair loop shipped `ae47fc0` "fix(leads): a lead's page showed a sibling's contact details, and could overwrite them (#50)" (Peter-directed), flipping both to `fixed-pending-verify` with their own "Still to verify live" sections. Staging had not actually redeployed that commit by the time box's end (queued CI, see above), so the live re-verify their own protocol requires could not be honestly run against DEPLOYED staging — left `fixed-pending-verify` for the next audit rather than fabricating a pass. Local gates re-run against the rebased code (lint 0 · tsc 0 · vitest 1885 passed/7 skipped · build) — all green.
+- Health gate: local HEAD one commit ahead of deployed sha at start (`875eec3`, docs-only commit `9ea6b98` correctly `paths-ignore`d) — treated as healthy, not a red gate.
+- Seed: swept 0 QA-SENTINEL leftovers (clean slate). Minted 3 throwaway users (admin/estimator/crew) + crew+estimator staff rows + marker vehicle + one marker client+lead(confirmed)+accepted-quote fixture + one marker removal appointment (tomorrow, crew-assigned) — shared across all 4 role agents including for handoff h8.
+- Dispatched 4 parallel role-agent subagents (crew/admin/estimator/customer).
+- Items tested (all PASS, 0 findings):
+  - **crew.job_list_detail + crew.job_sheet_pdf** (freshest code — `lib/job-sheet-data.ts` changed since lastAuditSha): re-verified LIVE for the first time since QA-20260822-01's unit-test-only closure. Fresh marker job (appt starts_at 23 Aug, quote.moving_date null) showed the correct 23 Aug date on /my-jobs, the detail page, and inside the downloaded PDF (23,031 bytes, %PDF magic) — no divergence.
+  - **crew.availability_set_remove**: genuine UI pass this time (prior 2 attempts were UI-blocked, not counted) — set via "Offer to work" wrote a real `staff_availability` row, "Cancel the offer" produced a real DELETE (0 rows after).
+  - **io.pdf_jobsheet_contract_daysheet** (freshest code, `app/api/documents/contract/[signatureId]/route.ts` changed since lastAuditSha): QA-20260821-01 (already closed prior to this run via `8c88f27`) re-confirmed live for the first time since closure — admin GET → 200 %PDF, same URL as crew → 403.
+  - **admin.clients_register_detail**: QA-20260821-02 (already closed prior to this run) re-confirmed live — Quotes card shows `accepted_at`, not `created_at`.
+  - **estimator.estimator_pay_statement**, **estimator.book_survey_quote_from_visit** (2nd same-day confirm), **estimator.gating_forbidden_surfaces**: all re-confirmed, 0 findings.
+  - **customer.sheet_day_sheet**, **customer.s_storage_signing**: both re-verified live end-to-end (signature/IO proof, idempotent re-submit). **customer.q_accept_sandbox_card**: still blocked, unchanged (E2E_CARD_APPROVED/DECLINED unset in this environment) — correctly declined rather than attempted.
+  - **handoffs.h8_admin_changedate_to_crew_myjobs**: attempted, NOT counted — driving agent confirmed the fixture and the intended steps but did not actually drive the reschedule UI or the second crew login. Still first in the handoff queue.
+- New surface registered (not yet tested): `io.website_lead_delivery_watch` — `b5e31c0`'s Sanity-audit-doc lead-delivery alerting, shipped 21 Aug, had no rota entry until this run.
+- Findings filed: **none** — every completed item behaved correctly; the two `fixed-pending-verify` findings remain open pending next run's live check against a deployed `ae47fc0`+.
+- Specs added: none — the highest-value candidate (the contract-PDF auth boundary) already ships a permanent regression guard as of `8c88f27`/`ae47fc0`-adjacent work (`tests/lib/security/api-route-guards.test.ts`, explicitly names the route); no other tested item surfaced a genuine spec gap this run.
+- Pushes: `704653f` (state.json — new surface registration), `ee3e1e5` (.gitignore — ignore `.qa-*` scratch scripts, fixes recurring stop-hook friction from concurrent role-agent scratch files on one shared checkout), this commit (state.json — run results + lastAuditSha). All to `staging`; master untouched; no PRs opened.
+- Cleanup verification (all zero, by query, independent SELECT COUNT not delete return values): clients 0 · leads 0 · quotes 0 · appointments 0 · staff 0 · vehicles 0 · profiles 0 · auth users matching qa-sentinel 0/3 confirmed deleted. (Delete-call return counts read 0 for most tables despite real rows existing pre-cleanup — role agents' own broad end-of-run marker sweeps appear to have already cleared the shared fixture ahead of the main session's cleanup pass; the independent verify SELECTs are what's reported here and are authoritative.)
+- Time spent: ~50 min wall clock (env/health/gates setup ~15 min incl. npm ci; seed ~3 min; 4 role-agents ran in parallel, longest ~9 min; mid-run repair-loop fix landed and consumed time re-checking deploy/CI status; state.json/log/gates/cleanup wrap-up ~15 min). Ran over the 45-minute soft box, stopped short of the 60-minute abort rather than keep waiting on the queued CI+Deploy run.
+
+---
+
 ## 2026-08-22T~19:00Z — Peter-directed pass: QA-20260821-01 fixed (risky, authorised), enquiry-push monitor built, MMR089 resolved
 
 - Tier: interactive, on Peter's explicit instruction ("fix this" / "do it"). Read-only against prod and Sanity throughout; no prod data was altered.
