@@ -4,6 +4,20 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-22T16:08Z — run aborted: CI red on the base predating this run (headline finding filed)
+
+- sha audited: 6ddf711 (origin/staging HEAD at checkout — the prior run's own commit). `curl /api/version` on deployed staging = `6ddf711`, exact match, no lag.
+- Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
+- Verify-first: nothing to close — no finding sits at `fixed-pending-verify`. All four open findings (QA-20260819-01, QA-20260820-08, QA-20260821-01, QA-20260822-01) stay untouched.
+- Health gate: local `npm ci` + `npm run lint` (0 errors, 36-warn baseline) + `npx tsc --noEmit` (0) + `npm test` (1846 passed/7 skipped) + `npm run build` all green on the untouched tree. **Staging CI on the deployed base is RED**: GitHub Actions "CI + Deploy to Staging" run [32573348862](https://github.com/redbananastudios/marley-ops/actions/runs/32573348862) on `6ddf711` (the prior audit's own push) — `test` job green, `deploy-staging` green, **`e2e` job failed** at the "Run node scripts/seed-e2e.mjs" step: `wipe surveys update or delete on table "surveys" violates foreign key constraint "appointments_survey_id_fkey" on table "appointments"`; the Playwright step itself never ran (`skipped`). Confirmed via a read-only service-role query: a leftover E2E lead ("E2E Estimator Work Quote 1787388365086") carries a `survey`-type appointment whose `survey_id` still points at a live `surveys` row, and `wipe()`'s `LEAD_CHILD_TABLES` loop deletes `surveys` before the later `appointments` delete — so the wipe dies on that FK every time, before it can ever clear the row that breaks it. Self-perpetuating: every future push's e2e job will fail identically until fixed, not a flake to re-run past.
+- Per AUDIT.md abort conditions ("CI red on a base predating the run"): aborted the full rota. Filed the CI failure as this run's headline finding, **QA-20260822-02** (`class: safe-fix` — test tooling/seed-script ordering bug, no money/RLS/schema/comms/auth surface). Evidence, exact query results and suspected fix location in the finding file.
+- No role-agent rota run, no marker rows created (only read-only SQL queries were run via throwaway scratch scripts, deleted immediately after each use), no specs added, `qa/state.json` updated only for `lastAuditSha` (6ddf711, no item entries touched — nothing was tested).
+- Pushes: this commit (finding `QA-20260822-02` + `qa/state.json` + this log entry only) — staging only, no PRs, master untouched.
+- Cleanup verification: nothing to clean up — no marker rows, no auth users, no seeded data created this run. Pre-existing QA-SENTINEL sweep across leads/clients/appointments/communications/staff (read-only): all 0.
+- Time spent: ~25 min (health gate incl. local build/test + CI log retrieval/diff analysis + one read-only diagnostic query + finding write-up).
+
+---
+
 ## 2026-08-22T12:09Z — scheduled audit: stalest/never-tested items across all 4 roles + h2 handoff, 0 findings
 
 - sha audited: 7b5af97 (origin/staging HEAD at run start; deployed staging /api/version = 7b5af97, exact match, no lag). CI on 7b5af97 confirmed green ("CI + Deploy to Staging" run #123, conclusion success) via the GitHub MCP tools.
