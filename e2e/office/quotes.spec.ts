@@ -9,7 +9,13 @@ test.describe("Office — Quotes", () => {
   test("list: presets, search, open a quote", async ({ page }) => {
     await page.goto("/quotes");
     await expect(page.getByRole("heading", { name: "Quotes", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /New quote/i })).toBeVisible();
+    // `exact` matters. This list renders one link per quote whose accessible
+    // name BEGINS with the customer's name, so the loose /New quote/i matched
+    // the page's own action button AND two customers literally called "New
+    // quote" — a strict-mode violation that turned the suite red and blocked
+    // promotion. A page's primary action must not be identifiable only by
+    // customer data, which we do not control.
+    await expect(page.getByRole("link", { name: "New quote", exact: true })).toBeVisible();
 
     // Preset chips.
     await expect(page.getByRole("button", { name: /^Accepted/ })).toBeVisible();
