@@ -44,8 +44,23 @@ jobs:
           for f in qa/findings/open/QA-*.md; do
             seen=$((seen + 1))
             id=$(basename "$f" .md)
-            number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number,state --jq '.[0].number // ""')
-            state=$(gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --json number,state --jq '.[0].state // ""')
+            # Match the id EXACTLY; never trust search ranking. GitHub scores
+            # `$id in:title` across every title CONTAINING that string, and a
+            # finding whose summary cites another finding carries the cited id
+            # in its own title - so `.[0]` can be a different finding entirely.
+            # Not hypothetical: [QA-20260822-03]'s title contains the literal
+            # "QA-20260822-02", outranked the real #41, and the close job below
+            # shut #44 while the fixed finding stayed open. In `raise` the same
+            # collision is worse than cosmetic - a hit means "already raised",
+            # so a genuine new finding would be silently never filed at all.
+            # The id goes in via `env` rather than being spliced into the jq
+            # string: it keeps the filter single-quoted, so there is no shell
+            # escaping to get wrong.
+            hit=$(FINDING_ID="$id" gh issue list --repo "$GITHUB_REPOSITORY" --state all --search "$id in:title" --limit 100 \
+              --json number,title,state \
+              --jq 'map(select(.title | startswith("[" + env.FINDING_ID + "]"))) | .[0] // {} | "\(.number // "") \(.state // "")"')
+            number=${hit%% *}
+            state=${hit##* }
             if [ -z "$number" ]; then
               class=$(grep -m1 '^class:' "$f" | awk '{print $2}' || true)
               summary=$(awk '/^## Summary/{getline; while($0 ~ /^$/){getline}; print; exit}' "$f")
@@ -97,7 +112,11 @@ jobs:
               echo "skipped: $id is in closed/ but does not say status: closed"
               continue
             fi
-            number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$id in:title" --json number --jq '.[0].number // ""')
+            # Exact-match, for the same reason as `raise` above: closing by
+            # search rank shut #44 instead of #41 on 2026-08-22.
+            number=$(FINDING_ID="$id" gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "$id in:title" --limit 100 \
+              --json number,title \
+              --jq 'map(select(.title | startswith("[" + env.FINDING_ID + "]"))) | .[0].number // ""')
             if [ -z "$number" ]; then
               echo "nothing to close for $id"
               continue
