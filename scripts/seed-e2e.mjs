@@ -118,7 +118,11 @@ const LEAD_CHILD_TABLES = [
   "card_payments",
   "communications",
   "activities",
-  "surveys",
+  // NOTE: the surveys table is deliberately NOT in this list. appointments.survey_id is a
+  // second, deeper FK into surveys (NO ACTION — see 0001_init.sql), so a survey can
+  // only go once its appointments have. Deleting it here dies on that FK *before*
+  // the appointment delete below, and because die() exits, the row that broke the
+  // run survives to break every later run identically. Cleared post-appointments.
   "storage_lets",
   "signatures",
   "job_notes",
@@ -143,6 +147,17 @@ async function wipe() {
       await sb.from("appointment_assignments").delete().in("appointment_id", apptIds);
     }
     await sb.from("appointments").delete().in("lead_id", leadIds);
+    // Surveys come out only now that the appointments referencing them are gone.
+    // Belt and braces: an appointment whose own lead_id fell outside the sweep
+    // above can still hold a survey_id, so release those links first rather than
+    // letting the FK abort the whole wipe.
+    const { data: surveyRows } = await sb.from("surveys").select("id").in("lead_id", leadIds);
+    const surveyIds = (surveyRows ?? []).map((s) => s.id);
+    if (surveyIds.length) {
+      await sb.from("appointments").update({ survey_id: null }).in("survey_id", surveyIds);
+      const { error } = await sb.from("surveys").delete().in("id", surveyIds);
+      if (error) die("wipe surveys", error);
+    }
     await sb.from("quotes").delete().in("lead_id", leadIds);
     await sb.from("leads").delete().in("id", leadIds);
   }
