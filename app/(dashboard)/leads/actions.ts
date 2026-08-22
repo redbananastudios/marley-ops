@@ -14,7 +14,8 @@ import { ukDayOf } from "@/lib/sales-report";
 import { voidInvoice } from "@/lib/zoho";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { isBackwardMove } from "@/lib/leads/funnel";
-import { canDeleteLead } from "@/lib/leads/deletable";
+import { canDeleteLead, storageLetsBlockingDelete } from "@/lib/leads/deletable";
+import { clientWriteThrough } from "@/lib/leads/shared-client";
 import { normalizePhone } from "@/lib/leads/phone";
 import {
   editLeadSchema,
@@ -306,10 +307,11 @@ export async function markLeadUncontactedAction(leadId: string) {
 }
 
 /**
- * Edit a lead's customer + move details. Writes the lead row AND keeps the linked
- * client's core contact in step (the detail page reads client-first), so a correction
- * shows everywhere. A phone/email change that collides with another live client is
- * surfaced as a friendly error rather than a raw unique-violation.
+ * Edit a lead's customer + move details. Writes the lead row, and keeps the linked
+ * client's core contact in step ONLY when this lead is the sole enquiry on that
+ * client — see the write-through block below for why. A phone/email change that
+ * collides with another live client is surfaced as a friendly error rather than a
+ * raw unique-violation.
  */
 export async function updateLeadDetailsAction(leadId: string, input: EditLeadInput) {
   const parsed = editLeadSchema.safeParse(input);
@@ -372,8 +374,33 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
     revalidatePath("/bookings");
   }
 
-  // Keep the linked client's core contact aligned with the correction.
+  // Keep the linked client's core contact aligned with the correction — but ONLY
+  // when this lead is the sole enquiry on that client.
+  //
+  // Dedup attaches several enquiries to one client, and this write used to run
+  // unconditionally: editing lead A rewrote the shared record, which every
+  // sibling lead's page then displayed as its OWN contact details. Two customers
+  // could not be told apart on their own pages (QA-20260819-01).
+  //
+  // Skipping the write is not harmless, so it is not silent. `clients.email` is a
+  // real sending surface — storage invoices are addressed from it
+  // (lib/storage/raise-storage-invoices.ts) — so a correction that stops here has
+  // to be reported, or the office believes an address was fixed everywhere when it
+  // was fixed in one place.
+  let otherLeadCount: number | null = null;
   if (lead?.client_id) {
+    const { count, error: sErr } = await sb
+      .from("leads")
+      .select("id", { count: "exact", head: true })
+      .eq("client_id", lead.client_id)
+      .neq("id", leadId);
+    // A failed count stays null — `clientWriteThrough` reads that as "could not
+    // check", which declines the write AND says so. Coercing it to 0 here would
+    // turn a failed read into a licence to rewrite the shared record.
+    otherLeadCount = sErr ? null : (count ?? 0);
+  }
+  const shared = clientWriteThrough({ clientId: lead?.client_id, otherLeadCount });
+  if (shared.write && lead?.client_id) {
     const { error: cErr } = await sb
       .from("clients")
       .update({
@@ -424,7 +451,9 @@ export async function updateLeadDetailsAction(leadId: string, input: EditLeadInp
 
   revalidatePath(`/leads/${leadId}`);
   revalidatePath("/leads");
-  return { ok: true as const };
+  // `warning` is a SUCCESSFUL save that did less than the office would assume —
+  // the lead is written, the shared customer record deliberately is not.
+  return { ok: true as const, warning: shared.warning };
 }
 
 /** Assign (or clear) the estimator who owns this lead. */
@@ -946,13 +975,31 @@ export async function deleteLeadAction(
     .maybeSingle();
   if (!lead) return { ok: false, error: "Lead not found." };
 
+  // Hoisted above the guard: whether a sibling lead survives on the same client
+  // decides BOTH how the storage check reads and where history is merged, so it
+  // must be known before the verdict rather than after it.
+  let siblings: { id: string }[] = [];
+  if (lead.client_id) {
+    const { data, error } = await admin
+      .from("leads")
+      .select("id")
+      .eq("client_id", lead.client_id)
+      .neq("id", id.data);
+    // Same rule as the counts below: a failed read must not pass as "no
+    // siblings", which would both skip the storage guard and lose the history
+    // this delete is supposed to merge.
+    if (error) return { ok: false, error: `could not check sibling leads: ${error.message}` };
+    siblings = (data ?? []) as { id: string }[];
+  }
+
+  // storage_lets is deliberately absent: it is client-scoped, so it cannot be
+  // counted by lead_id like the rest. See storageLetsBlockingDelete.
   const COUNTED = [
     ["quotes", "quotes"],
     ["appointments", "appointments"],
     ["signatures", "signatures"],
     ["cardPayments", "card_payments"],
     ["cubicSurveys", "cubic_surveys"],
-    ["storageLets", "storage_lets"],
     ["claims", "claims"],
     ["jobCompletions", "job_completions"],
   ] as const;
@@ -970,7 +1017,28 @@ export async function deleteLeadAction(
       if (error) throw new Error(`could not check ${table}: ${error.message}`);
       facts[key] = n ?? 0;
     }
-    verdict = canDeleteLead(facts);
+
+    // Only worth asking when this is the last lead on the client — with a
+    // sibling surviving, the answer cannot block the delete anyway, so the
+    // query is skipped rather than run and discarded.
+    let letsOnClient = 0;
+    if (lead.client_id && siblings.length === 0) {
+      const { count: n, error } = await admin
+        .from("storage_lets")
+        .select("id", { count: "exact", head: true })
+        .eq("client_id", lead.client_id);
+      if (error) throw new Error(`could not check storage_lets: ${error.message}`);
+      letsOnClient = n ?? 0;
+    }
+
+    verdict = canDeleteLead({
+      ...facts,
+      orphanedStorageLets: storageLetsBlockingDelete({
+        clientId: lead.client_id,
+        siblingLeadCount: siblings.length,
+        letsOnClient,
+      }),
+    });
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Could not check the lead." };
   }
@@ -980,15 +1048,7 @@ export async function deleteLeadAction(
 
   // Exactly one sibling on the same client = a duplicate being merged; keep the
   // history on the survivor. Two or more and we cannot know which it belongs to.
-  let mergedInto: string | null = null;
-  if (lead.client_id) {
-    const { data: siblings } = await admin
-      .from("leads")
-      .select("id")
-      .eq("client_id", lead.client_id)
-      .neq("id", id.data);
-    if (siblings?.length === 1) mergedInto = siblings[0].id as string;
-  }
+  const mergedInto: string | null = siblings.length === 1 ? siblings[0].id : null;
   if (mergedInto) {
     for (const table of ["activities", "communications", "follow_ups"] as const) {
       await admin.from(table).update({ lead_id: mergedInto }).eq("lead_id", id.data);

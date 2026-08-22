@@ -139,7 +139,12 @@ export function EditLeadDialog({ leadId, initial }: { leadId: string; initial: E
         toast.error(res.error || "Could not save.");
         return;
       }
-      toast.success("Lead updated.");
+      // A save can succeed while deliberately doing less than the office would
+      // assume — when other enquiries share this customer, the shared customer
+      // record is left alone. That has to read differently from a plain success,
+      // and stay up long enough to be read.
+      if (res.warning) toast.warning(res.warning, { duration: 12000 });
+      else toast.success("Lead updated.");
       setOpen(false);
       router.refresh();
     } catch {
