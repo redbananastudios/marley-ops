@@ -20,6 +20,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { refundCardPayment } from "@/lib/payments/card-payments";
 import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
 import { planRailVatReversals } from "@/lib/refunds/vat-reversal-plan";
+import {
+  customerNoticeOutcome,
+  type CustomerNotice,
+  type DispatchOutcome,
+} from "@/lib/refunds/customer-notice";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
 import { replyAddressFor } from "@/lib/quote/chase";
@@ -52,6 +57,9 @@ export type RefundActionResult =
   | {
       ok: true;
       already?: boolean;
+      /** What the customer was ACTUALLY told, so the dialog can stop claiming
+       *  "customer emailed." on a branch that emailed nobody (QA-20260823-03). */
+      customerNotice?: CustomerNotice;
       /** On `already`: what is ACTUALLY recorded on the row, so a stale tab's
        *  conflicting answer can be surfaced truthfully instead of echoing the
        *  click that lost. */
@@ -642,6 +650,7 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
 
   // ONE itemised customer email (duplicate-guarded by dispatchComm). Fail-soft:
   // the row is settled either way; a send failure alerts accounts to follow up.
+  let dispatched: DispatchOutcome = null;
   if (quote?.customer_email && lines.length) {
     const meta = {
       firstName: quote.customer_name,
@@ -664,6 +673,7 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
     });
+    dispatched = sent;
     if ("ok" in sent && !sent.ok) {
       await sendOpsAlert(
         `Refund completed but the customer email FAILED — ${quote.quote_ref}`,
@@ -680,7 +690,22 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
       [`refund_queue ${row.id} is settled (${gbpPence(totalPence)} refunded) but there is no email address to confirm it to.`],
       "money",
     );
+  } else {
+    // An email on file but nothing to itemise used to fall between the two
+    // branches above: no customer email AND no ops alert, so the row settled
+    // with nobody told anything. Found while reading QA-20260823-03.
+    await sendOpsAlert(
+      `Refund completed with nothing to itemise — ${quote.quote_ref}`,
+      [`refund_queue ${row.id} is settled but produced no refund lines, so no confirmation email went to ${quote.customer_email}.`],
+      "money",
+    );
   }
+
+  const customerNotice = customerNoticeOutcome({
+    hasEmail: !!quote?.customer_email,
+    hasLines: lines.length > 0,
+    dispatch: dispatched,
+  });
 
   await writeQueueTrail(admin, row, quote, prof.id, {
     activityType: "note",
@@ -690,7 +715,7 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
   });
 
   revalidateQueueSurfaces();
-  return { ok: true };
+  return { ok: true, customerNotice };
 }
 
 /* ---------------------------------------------------------------- retain */
@@ -773,6 +798,7 @@ export async function retainRefundQueueAction(
 
   const { lines, totalPence: refundedPence } = refundLinesFor(rails, cardStates);
 
+  let retainDispatched: DispatchOutcome = null;
   if (quote?.customer_email) {
     const meta = {
       firstName: quote.customer_name,
@@ -797,6 +823,7 @@ export async function retainRefundQueueAction(
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
     });
+    retainDispatched = sent;
     if ("ok" in sent && !sent.ok) {
       await sendOpsAlert(
         `Retained outcome recorded but the customer email FAILED — ${quote.quote_ref}`,
@@ -815,6 +842,14 @@ export async function retainRefundQueueAction(
     );
   }
 
+  // Retain always has something to say (the retained amount itself), so hasLines
+  // is true here — unlike Complete, there is no "nothing to itemise" case.
+  const customerNotice = customerNoticeOutcome({
+    hasEmail: !!quote?.customer_email,
+    hasLines: true,
+    dispatch: retainDispatched,
+  });
+
   await writeQueueTrail(admin, row, quote, prof.id, {
     activityType: "note",
     summary: `Held money retained — ${gbpPence(retainPence)} held against ${ukDateLabel(row.original_move_date) ?? "the original date"}${refundedPence > 0 ? `; ${gbpPence(refundedPence)} refunded above the held amount` : ""}`,
@@ -823,5 +858,5 @@ export async function retainRefundQueueAction(
   });
 
   revalidateQueueSurfaces();
-  return { ok: true };
+  return { ok: true, customerNotice };
 }

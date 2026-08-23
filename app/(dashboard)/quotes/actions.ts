@@ -247,6 +247,21 @@ export async function createQuoteWithLeadAndOpenAction(input: NewLeadInput) {
 /** Persist wizard state + the computed breakdown. Money columns always come from computeQuote(). */
 export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
   const { sb } = await ctx();
+
+  // An accepted quote's price is an agreement, not a draft. Recomputing it
+  // against today's pricing settings would silently move what the customer is
+  // charged at accept (accept-flow reads agreed_price ?? grand_total), so this
+  // refuses rather than writes. Autosave never reaches here on an accepted
+  // quote (the builder is read-only), but the send path calls this too and the
+  // guard belongs on the server, not on a client flag.
+  const { data: existing } = await sb.from("quotes").select("status").eq("id", id).single();
+  if (existing?.status === "accepted") {
+    return {
+      ok: false as const,
+      error: "This quote is accepted — its price is agreed and can't be recalculated. Supersede it with a new quote instead.",
+    };
+  }
+
   const pricing = await getPricingConfig(sb);
   const b = computeQuote(deriveInputs(values), pricing);
 
@@ -276,7 +291,9 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
   if (error) return { ok: false as const, error: error.message };
   revalidatePath(`/quotes/${id}`);
   revalidatePath("/quotes");
-  return { ok: true as const };
+  // The breakdown goes back so the send path can prove that what it is about to
+  // email matches what was just written to the money columns (QA-20260823-02).
+  return { ok: true as const, breakdown: b };
 }
 
 /**
