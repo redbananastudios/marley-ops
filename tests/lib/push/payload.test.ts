@@ -15,7 +15,7 @@ describe("isAllowedPushRoute (deep-link allowlist)", () => {
       "/quotes/xyz",
       "/my-jobs/123",
       "/settings",
-      "/schedule/board",
+      "/schedule",
     ]) {
       expect(isAllowedPushRoute(url), url).toBe(true);
     }

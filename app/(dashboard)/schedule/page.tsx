@@ -27,7 +27,8 @@ export const dynamic = "force-dynamic";
 /**
  * Schedule & Allocation — one page, two views of the same day (design doc
  * docs/schedule-allocation-design.md). ADDITIVE: the existing /schedule/removals
- * diary and /schedule/board Job Board are untouched. Availability answers "can we
+ * diary is untouched; the board itself is embedded here now that the
+ * standalone /schedule/board page is gone. Availability answers "can we
  * sell this day?" (capacity from the confirmed removals' required vans/crew vs the
  * live fleet); Day Allocation reuses the Job Board for dispatch, surveys hidden.
  */

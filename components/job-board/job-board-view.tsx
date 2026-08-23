@@ -61,7 +61,7 @@ import {
   assignResourceAction,
   setAssignmentsAction,
   unassignAction,
-} from "@/app/(dashboard)/schedule/board/actions";
+} from "@/app/actions/board-allocation";
 
 export interface BoardAppt extends ApptLite {
   title: string | null;

@@ -3,26 +3,22 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Camera,
   Banknote,
   BarChart3,
   BellRing,
   BookOpen,
   CalendarCheck,
   CalendarClock,
-  CalendarRange,
   ClipboardCheck,
   Compass,
   Contact,
   FileCheck2,
   FileText,
-  Gauge,
   HandCoins,
   History,
   KanbanSquare,
   LayoutDashboard,
   LogOut,
-  Megaphone,
   Radio,
   ReceiptText,
   Settings,
@@ -49,7 +45,9 @@ type NavGroup = { group: string; items: NavItem[] };
  *  hang off it. Regrouped 2026-07-15/16 (pre-go-live review): Sales = pure
  *  quoting; Finance = money in (Payments) + money billed (Invoices & VAT);
  *  Completed Jobs sits with the job lifecycle; Clients + Documents form
- *  Customers; Growth renamed Marketing (Growth). */
+ *  Customers. Job Board, Content and Marketing (Growth) were removed
+ *  2026-08-23 — the board's data lives in Schedule & Allocation, and Content
+ *  plus Marketing move to a separate app. */
 const OFFICE_NAV: NavGroup[] = [
   {
     group: "Pipeline",
@@ -84,7 +82,6 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/schedule", label: "Schedule & Allocation", icon: CalendarClock },
       { href: "/schedule/surveys", label: "Surveys", icon: CalendarCheck },
       { href: "/schedule/removals", label: "Removals", icon: Truck },
-      { href: "/schedule/board", label: "Job Board", icon: CalendarRange },
       { href: "/jobs", label: "Completed Jobs", icon: History },
     ],
   },
@@ -94,7 +91,6 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/clients", label: "Clients", icon: Contact },
       { href: "/documents", label: "Documents", icon: FileCheck2 },
       { href: "/claims", label: "Claims", icon: ShieldAlert },
-      { href: "/content", label: "Content", icon: Camera },
     ],
   },
   {
@@ -105,15 +101,6 @@ const OFFICE_NAV: NavGroup[] = [
     ],
   },
   { group: "Reports", items: [{ href: "/performance", label: "Performance", icon: BarChart3 }] },
-  {
-    // "(Growth)" marks these as fed by the growth engine's nightly artifact
-    // push, not by panel data (Peter, 2026-07-16).
-    group: "Marketing (Growth)",
-    items: [
-      { href: "/growth", label: "Website & Tracking", icon: Gauge },
-      { href: "/growth/ads", label: "Ads", icon: Megaphone },
-    ],
-  },
   {
     group: "System",
     items: [

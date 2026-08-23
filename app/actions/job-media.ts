@@ -213,7 +213,6 @@ export async function recordJobMediaAction(
     });
     revalidatePath(`/leads/${resolved.leadId}`);
     if (resolved.appointmentId) revalidatePath(`/my-jobs/${resolved.appointmentId}`);
-    revalidatePath("/content");
   }
   return { ok: true, count: newItems.length };
 }
@@ -281,7 +280,6 @@ export async function updateJobMediaAction(
   const { error } = await admin.from("job_media").update(update as never).eq("id", id);
   if (error) return { ok: false, error: "Could not save the change." };
   revalidatePath(`/leads/${row.lead_id}`);
-  revalidatePath("/content");
   return { ok: true };
 }
 
@@ -357,7 +355,6 @@ export async function approveJobMediaAction(
     .eq("id", id);
   if (error) return { ok: false, error: "Could not update." };
   revalidatePath(`/leads/${row.lead_id}`);
-  revalidatePath("/content");
   return { ok: true };
 }
 
@@ -385,7 +382,6 @@ export async function deleteJobMediaAction(
   const { error } = await admin.from("job_media").delete().eq("id", id);
   if (error) return { ok: false, error: "Could not remove it — try again." };
   revalidatePath(`/leads/${row.lead_id}`);
-  revalidatePath("/content");
   return { ok: true };
 }
 

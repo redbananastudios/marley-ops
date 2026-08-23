@@ -21,11 +21,4 @@ test.describe("Office — Documents / Claims / Content", () => {
     await expect(page).toHaveURL(/tab=/);
   });
 
-  test("Content — review-state tabs", async ({ page }) => {
-    await page.goto("/content");
-    await expect(page.getByRole("heading", { name: "Content", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Needs review/i })).toBeVisible();
-    await page.getByRole("link", { name: /Approved/i }).click();
-    await expect(page).toHaveURL(/tab=/);
-  });
 });

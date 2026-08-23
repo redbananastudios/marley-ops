@@ -12,7 +12,7 @@
  *
  * Tour-fatigue rule: keep each tour a "two-minute tour" — when the app grows,
  * reword or merge steps before adding new ones (refreshed 2026-07-16 to cover
- * Payments/Finance, Customers incl. Content, Claims, and the crew capture +
+ * Payments/Finance, Customers, Claims, and the crew capture +
  * device steps).
  */
 
@@ -85,10 +85,10 @@ const OFFICE: TourStep[] = [
     align: "start",
   },
   {
-    selector: '[data-tour="nav-/schedule/board"]',
+    selector: '[data-tour="nav-/schedule"]',
     title: "7. Assign the crew",
     description:
-      "On the Job Board you assign crew and vans per day. The capacity strip shows who's free; a clash warns you but never blocks — a van can still do two half-day jobs.",
+      "Schedule & Allocation is where you put crew and vans on each day. The capacity strip shows who's free; a clash warns you but never blocks — a van can still do two half-day jobs.",
     side: "right",
     align: "start",
   },
@@ -96,7 +96,7 @@ const OFFICE: TourStep[] = [
     selector: '[data-tour="nav-/clients"]',
     title: "8. Customers",
     description:
-      "The customer's whole file: Clients, their signed paperwork in Documents, and Content — the photos, videos and voice notes crew capture on jobs, waiting for your review before marketing can touch them.",
+      "The customer's whole file: Clients, and their signed paperwork in Documents. The photos, videos and voice notes crew capture on a job appear on that customer's own record, waiting for your review before marketing can touch them.",
     side: "right",
     align: "start",
   },

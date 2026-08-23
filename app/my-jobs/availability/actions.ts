@@ -61,7 +61,7 @@ export async function setMyAvailabilityAction(input: SetMyAvailabilityInput) {
   }
 
   revalidatePath("/my-jobs/availability");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -105,7 +105,7 @@ export async function setMyWorkingDaysAction(input: SetMyWorkingDaysInput) {
   if (error) return { ok: false as const, error: error.message };
 
   revalidatePath("/my-jobs/availability");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   revalidatePath("/resources");
   return { ok: true as const };
 }
