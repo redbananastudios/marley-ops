@@ -458,7 +458,7 @@ export default async function MyJobsPage() {
           <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your device</h2>
           <InstallPrompt />
           <QuickSigninRow />
-          <NotificationsRow />
+          <NotificationsRow role={profile.role} />
           <Link
             href="/my-jobs/manual"
             className="focus-ring mt-3 flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-3 text-sm font-medium text-mist-500 hover:text-foreground"

@@ -88,6 +88,17 @@ export function isPushCategoryId(value: string): value is PushCategoryId {
   return value in PUSH_CATEGORIES;
 }
 
+/** The categories a role can actually receive — the single source of truth for
+ *  both the preference list and whether to offer the opt-in at all. Offering
+ *  push to someone whose role receives nothing spends the browser's one-shot
+ *  permission prompt for zero notifications, and a "denied" answer is close to
+ *  unrecoverable, so every opt-in surface must gate on this being non-empty. */
+export function pushCategoriesForRole(role: string): PushCategoryId[] {
+  return PUSH_CATEGORY_IDS.filter((id) =>
+    (PUSH_CATEGORIES[id].audience as readonly string[]).includes(role),
+  );
+}
+
 /** What the sender fans out — everything a payload + delivery needs. */
 export interface PushEvent {
   category: PushCategoryId;
