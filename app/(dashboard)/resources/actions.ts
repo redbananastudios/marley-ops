@@ -162,7 +162,7 @@ export async function saveVehicleUnavailabilityAction(input: VehicleUnavailabili
   if (error) return { ok: false as const, error: error.message };
 
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -173,7 +173,7 @@ export async function deleteVehicleUnavailabilityAction(id: string) {
   const { error } = await sb.from("vehicle_unavailability").delete().eq("id", id);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -262,7 +262,7 @@ export async function saveStaffAction(input: StaffInput) {
   }
 
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -332,7 +332,7 @@ export async function saveStaffAvailabilityAction(input: StaffAvailabilityInput)
   if (error) return { ok: false as const, error: error.message };
 
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -346,7 +346,7 @@ export async function deleteStaffAvailabilityAction(ids: string[]) {
   const { error } = await sb.from("staff_availability").delete().in("id", clean);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -387,7 +387,7 @@ export async function setStaffAvailabilityCellAction(input: SetStaffAvailability
   }
 
   revalidatePath("/resources");
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 

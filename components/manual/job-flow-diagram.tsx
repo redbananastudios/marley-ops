@@ -17,7 +17,7 @@ const ROW1: FlowNode[] = [
 
 const ROW2: FlowNode[] = [
   { lines: ["Deposit paid", "= Confirmed"] },
-  { lines: ["Job Board:", "crew + van assigned"] },
+  { lines: ["Allocation:", "crew + van assigned"] },
   { lines: ["Balance invoice", "due 24h before"] },
   { lines: ["Move day: job sheet,", "sign-off, certificate"] },
   { lines: ["Review request"] },
@@ -84,7 +84,7 @@ export function JobFlowDiagram() {
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
         className="mx-auto block w-full min-w-[760px] max-w-[1100px]"
         role="img"
-        aria-label="Job pipeline: enquiry to lead, survey booked, quote sent, customer accepts and pays a deposit to confirm, then Job Board assigns crew and a van, a balance invoice is due 24 hours before the move, the crew complete the job sheet and sign-off on move day, and a review request follows."
+        aria-label="Job pipeline: enquiry to lead, survey booked, quote sent, customer accepts and pays a deposit to confirm, then crew and a van are allocated in Schedule and Allocation, a balance invoice is due 24 hours before the move, the crew complete the job sheet and sign-off on move day, and a review request follows."
       >
         <defs>
           <marker id="manual-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -118,7 +118,7 @@ export function JobFlowDiagram() {
         />
       </svg>
       <p className="mt-3 text-center text-xs text-mist-400">
-        Deposit paid is what moves a lead to <strong>Confirmed</strong> — nothing lands on the Job Board until then.
+        Deposit paid is what moves a lead to <strong>Confirmed</strong> — nothing lands in Schedule &amp; Allocation until then.
       </p>
     </div>
   );

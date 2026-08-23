@@ -12,7 +12,7 @@ export function FaqSection() {
           </>,
           <>
             <strong>Does a deposit invoice mean the job is booked?</strong> Not yet — <strong>deposit paid</strong>{" "}
-            is what confirms the booking and puts the job on the Job Board. A raised-but-unpaid deposit invoice
+            is what confirms the booking and puts the job into Schedule &amp; Allocation. A raised-but-unpaid deposit invoice
             just means the customer accepted the quote.
           </>,
           <>
