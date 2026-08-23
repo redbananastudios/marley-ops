@@ -180,16 +180,17 @@ export function OfficeGuide() {
         />
       </GuideCard>
 
-      <GuideCard id="content" title="Job content — crew photos, video &amp; voice notes" lead="On the customer's own lead page.">
+      <GuideCard id="content" title="Job content — crew photos, video & voice notes" lead="Sidebar → Customers → Content.">
         <Bullets
           items={[
             "Crew capture photos, video and voice notes on jobs with the red camera button — damage, access issues, and good moments worth keeping. Voice notes are transcribed automatically.",
             <>
-              Everything captured on a job appears on that customer&apos;s lead page, so the office sees problems the
-              moment crew record them. Approving an item there is what clears it for marketing use — anything left
-              unapproved never leaves the panel.
+              The review queue has three tabs: <strong>needs review</strong>, <strong>approved</strong> and{" "}
+              <strong>internal</strong>. Approving an item is what clears it for marketing use — internal-only items
+              never leave the panel.
             </>,
             "Customer consent lives on the lead (the media-consent toggle) — an item can't be approved without it.",
+            "Everything captured on a job also shows on its lead page, so the office sees problems the moment crew record them.",
           ]}
         />
       </GuideCard>

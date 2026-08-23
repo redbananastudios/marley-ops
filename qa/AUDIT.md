@@ -43,7 +43,7 @@ The test bed is the DEPLOYED staging site: https://staging.ops.marleymoves.co.uk
 
 **Crew agent** (`/my-jobs`, crew login): set/remove availability override · log hours (add → edit → clear a day) · add expense + receipt photo (object-in-bucket proof) · view job list/detail · add job note + photo · complete a job · sign contractor agreement · create/seed/edit/submit weekly invoice · open the job-sheet PDF.
 
-**Admin agent** (office portal, admin login): lead create/edit/status-change/mark-lost/no-reply/follow-up snooze+complete · quote build (wizard) → send (dry-run) → supersede · survey book/reschedule/cancel · removal book/change-date/cancel · mark deposit/balance paid · bank-feed attach/link/unlink (marker rows only) · refunds queue actions (marker rows only) · storage site/unit CRUD + start/end let · staff add/edit, vehicle add/edit, approve join submission · claims open/update/settle · documents review · job-media review on a lead page · cubic-survey review · settings edit (safe display fields only — never payment, comms or AI toggles) · finance statements amend/return-to-crew.
+**Admin agent** (office portal, admin login): lead create/edit/status-change/mark-lost/no-reply/follow-up snooze+complete · quote build (wizard) → send (dry-run) → supersede · survey book/reschedule/cancel · removal book/change-date/cancel · mark deposit/balance paid · bank-feed attach/link/unlink (marker rows only) · refunds queue actions (marker rows only) · storage site/unit CRUD + start/end let · staff add/edit, vehicle add/edit, approve join submission · claims open/update/settle · documents/content review · cubic-survey review · settings edit (safe display fields only — never payment, comms or AI toggles) · finance statements amend/return-to-crew.
 
 **Estimator agent** (estimator login): cockpit · diary → book survey → create quote from visit · estimator pay statement create/submit · gating asserts: /finance, /finance/statements, /refunds must bounce; every `CREW_FORBIDDEN`-style boundary for estimators holds.
 
@@ -57,7 +57,7 @@ The test bed is the DEPLOYED staging site: https://staging.ops.marleymoves.co.uk
 4. Customer submits `/cv` survey → Admin reviews it in cubic review; media playable.
 5. `/join` sign-up → Admin approves in Staff & Fleet → the new crew login works → clean up both.
 6. Admin books survey → Estimator sees it in their diary; reschedule → estimator's view updates.
-7. Crew completes job + note → Admin sees it on the lead page's job-media review + the job record.
+7. Crew completes job + note → Admin sees it in /content review + the job record.
 8. Admin changes a booking date → Crew's /my-jobs + day sheet reflect it.
 
 ### Always-on lenses while driving (any agent)

@@ -7,6 +7,7 @@ import {
   BarChart3,
   BellRing,
   BookOpen,
+  Camera,
   CalendarCheck,
   CalendarClock,
   ClipboardCheck,
@@ -45,9 +46,9 @@ type NavGroup = { group: string; items: NavItem[] };
  *  hang off it. Regrouped 2026-07-15/16 (pre-go-live review): Sales = pure
  *  quoting; Finance = money in (Payments) + money billed (Invoices & VAT);
  *  Completed Jobs sits with the job lifecycle; Clients + Documents form
- *  Customers. Job Board, Content and Marketing (Growth) were removed
- *  2026-08-23 — the board's data lives in Schedule & Allocation, and Content
- *  plus Marketing move to a separate app. */
+ *  Customers. The Job Board page and Marketing (Growth) were removed
+ *  2026-08-23 — the board's data lives in Schedule & Allocation, and Marketing
+ *  moves to a separate app. Content stays. */
 const OFFICE_NAV: NavGroup[] = [
   {
     group: "Pipeline",
@@ -91,6 +92,7 @@ const OFFICE_NAV: NavGroup[] = [
       { href: "/clients", label: "Clients", icon: Contact },
       { href: "/documents", label: "Documents", icon: FileCheck2 },
       { href: "/claims", label: "Claims", icon: ShieldAlert },
+      { href: "/content", label: "Content", icon: Camera },
     ],
   },
   {

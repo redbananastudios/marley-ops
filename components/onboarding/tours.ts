@@ -12,7 +12,7 @@
  *
  * Tour-fatigue rule: keep each tour a "two-minute tour" — when the app grows,
  * reword or merge steps before adding new ones (refreshed 2026-07-16 to cover
- * Payments/Finance, Customers, Claims, and the crew capture +
+ * Payments/Finance, Customers incl. Content, Claims, and the crew capture +
  * device steps).
  */
 
@@ -96,7 +96,7 @@ const OFFICE: TourStep[] = [
     selector: '[data-tour="nav-/clients"]',
     title: "8. Customers",
     description:
-      "The customer's whole file: Clients, and their signed paperwork in Documents. The photos, videos and voice notes crew capture on a job appear on that customer's own record, waiting for your review before marketing can touch them.",
+      "The customer's whole file: Clients, their signed paperwork in Documents, and Content — the photos, videos and voice notes crew capture on jobs, waiting for your review before marketing can touch them.",
     side: "right",
     align: "start",
   },

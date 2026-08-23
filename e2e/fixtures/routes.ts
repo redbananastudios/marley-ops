@@ -24,6 +24,7 @@ export const OFFICE_ROUTES = [
   "/clients",
   "/documents",
   "/claims",
+  "/content",
   "/resources",
   "/storage",
   "/performance",
