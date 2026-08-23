@@ -30,7 +30,7 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
 
 ## Current State (2026-08-23 pm — seven PRs merged, staging GREEN, zero open QA findings; prod still on 67d8f37)
 
-Last touched: 2026-08-23 on i9 — **staging `89fab87` is GREEN (1879 unit + 130 e2e). Production is UNCHANGED on `67d8f37`, now 15 commits behind, and is clear to promote.**
+Last touched: 2026-08-23 on i9 — **staging `89fab87` is GREEN (1879 unit + 130 e2e). Production is UNCHANGED on `67d8f37` and is clear to promote (`git rev-list --count origin/master..origin/staging` for the live gap).**
 
 - **All four 2026-08-23 QA findings are closed on real evidence.** QA-01 (crew silently dropped on an in-window date change → a "Called off" card, #54/#61), QA-02 (quote sent a total the DB would not charge → persist-then-send with a recompute guard, #62), QA-03 (refunds toast claimed "customer emailed" when nobody was told, #62/#65), QA-04 (crew offered a push opt-in that can deliver nothing, #66/#67). `qa/findings/open/` is empty and no GitHub finding issues are open. Evidence per finding is in `qa/LOG.md` — **the closure notes are the record, not the commit subjects**: a prior run closed three findings citing a log entry it never wrote (corrected in #63).
 - **Realtime crew-allocation pushes retired (#56, Peter's call)** — crew learn the day from the night-before job sheet. Fallout fixed in #66: every remaining push category is office-only, so `NotificationsRow` now gates on `pushCategoriesForRole(role)` and shows crew nothing rather than spending their one-shot permission prompt for zero notifications. `business_settings.push_crew_job_enabled` survives but is unread.
