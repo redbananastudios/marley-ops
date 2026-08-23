@@ -387,6 +387,13 @@ export async function changeBookingDateAction(
     .update({ reminded_at: null } as never)
     .eq("appointment_id", newAppt.id);
 
+  // The crew member who WAS on the old date is told by the Job Board's own
+  // rail — the night-before job sheet, which re-sends as "Updated job sheet"
+  // whenever the day's content changes and sends a "you're now clear" sheet
+  // to anyone whose jobs all went away. Realtime allocation pushes were
+  // retired (Peter, 2026-08-23) so crew have ONE authoritative channel rather
+  // than two that can disagree. /my-jobs also shows a "Called off" card.
+
   // The packing day travels with its move (same rule as the free-reschedule
   // path): shift the lead's scheduled packs by the same day delta. Fail-soft —
   // shiftPackDays alerts the office itself if a pack could not be moved.
