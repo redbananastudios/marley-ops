@@ -15,14 +15,15 @@ import { step } from "../fixtures/artefacts";
  * to you yet" with no cancellation notice of any kind — the office side is
  * told (a "No crew — allocate" chip appears), the crew side is not.
  *
- * Ships SKIPPED, blocked by QA-20260823-01 — un-skip once that finding is
- * fixed (the fix direction — carry the assignment forward vs. notify the
- * dropped crew member — decides which assertion below needs updating).
+ * FIXED 2026-08-23, direction (b): the assignment still deliberately does not
+ * carry over (the office re-allocates on the Job Board — that decision is
+ * documented in changeBookingDateAction and was not reversed), but the crew
+ * member is now told. Two signals, because one of them is not enough on its
+ * own: the same "taken off the job" push the Job Board already sends, plus a
+ * "Called off" card on /my-jobs. The card is what this spec asserts — a push
+ * only reaches a device with a live subscription, so it cannot be the only
+ * notice, and it cannot be observed from a Playwright context.
  */
-test.skip(
-  true,
-  "blocked by QA-20260823-01 — crew assignment does not carry over on a within-7-day change-date rebook, and the dropped crew member gets no notice; un-skip once fixed",
-);
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
@@ -148,14 +149,16 @@ test.describe.serial("Handoff h8 — admin change-date rebook vs. crew /my-jobs"
     const crewContext = await browser.newContext({ storageState: "e2e/fixtures/.auth/crew.json" });
     const crewPage = await crewContext.newPage();
     try {
-      await step("crew /my-jobs reflects the change (fix TBD — carry-over or explicit notice)", crewPage, async () => {
+      await step("crew /my-jobs shows the job was called off, not just silence", crewPage, async () => {
         await crewPage.goto("/my-jobs");
-        // The bug this spec guards: today this reads "Nothing assigned to you
-        // yet" with zero indication the old job was cancelled. Once fixed,
-        // replace this assertion with whichever the real fix does:
-        //   (a) the NEW date appears here directly (assignment carried over), or
-        //   (b) an explicit "this job was moved/cancelled" notice is shown.
-        await expect(crewPage.getByText(quoteRef)).toBeVisible();
+        // The bug this spec guards (QA-20260823-01): this page used to read
+        // "Nothing assigned to you yet" with zero indication the job had gone.
+        const calledOff = crewPage.getByTestId("called-off-job");
+        await expect(calledOff.first()).toBeVisible();
+        await expect(calledOff.filter({ hasText: MARKER }).first()).toBeVisible();
+        await expect(crewPage.getByRole("heading", { name: /called off/i })).toBeVisible();
+        // And the silence itself must be gone.
+        await expect(crewPage.getByText(/nothing assigned to you yet/i)).toHaveCount(0);
       });
     } finally {
       await crewContext.close();

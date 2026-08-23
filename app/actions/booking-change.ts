@@ -40,6 +40,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { dayDelta } from "@/lib/schedule/pack-days";
 import { shiftPackDays } from "@/lib/schedule/pack-days-io";
+import { notifyCrewAssignmentChange } from "@/lib/push/crew";
 import { accountsFrom } from "@/lib/comms/sender";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
 import { voidInvoice } from "@/lib/zoho";
@@ -386,6 +387,38 @@ export async function changeBookingDateAction(
     .from("appointment_assignments")
     .update({ reminded_at: null } as never)
     .eq("appointment_id", newAppt.id);
+
+  // ...but the crew member who WAS on the old date has to hear that it is
+  // gone. Dropping the assignment is deliberate; dropping it in silence is
+  // not — without this the job simply vanishes from /my-jobs with no signal
+  // of any kind, while the office side correctly shows "No crew — allocate"
+  // (QA-20260823-01). Same push the Job Board sends when someone is taken off
+  // a job by hand, so crew see one consistent message however it happened.
+  // The assignment rows survive on the cancelled appointment, so this reads
+  // them after the fact rather than racing the cancel.
+  const { data: oldCrewRows, error: oldCrewError } = await admin
+    .from("appointment_assignments")
+    .select("staff_id")
+    .eq("appointment_id", appointmentId)
+    .not("staff_id", "is", null);
+  if (oldCrewError) {
+    // A failed read must not read as "nobody was assigned" — say so.
+    sideEffectFailures.push(
+      `crew notice: could not read who was on the old date (${oldCrewError.message}) — tell them manually`,
+    );
+  } else {
+    const removedStaffIds = [...new Set((oldCrewRows ?? []).map((r) => r.staff_id as string))];
+    if (removedStaffIds.length) {
+      await notifyCrewAssignmentChange({
+        appointmentId,
+        removedStaffIds,
+        actorUserId: office.id,
+        // The old row is already cancelled by step 1 above; without this the
+        // notifier's housekeeping guard drops the message on the floor.
+        notifyThoughCancelled: true,
+      });
+    }
+  }
 
   // The packing day travels with its move (same rule as the free-reschedule
   // path): shift the lead's scheduled packs by the same day delta. Fail-soft —

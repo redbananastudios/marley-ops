@@ -84,6 +84,11 @@ export default async function MyJobsPage() {
   };
 
   let jobs: Job[] = [];
+  /** Jobs this crew member was on that the office has since called off. The
+   *  assignment row survives on the cancelled appointment, so the only reason
+   *  these ever disappeared was the status filter below (QA-20260823-01: an
+   *  inside-7-day date change cancel+rebooks, and the job simply vanished). */
+  let calledOff: { id: string; title: string | null; starts_at: string | null; lead_name: string | null }[] = [];
   if (staffRow) {
     // 0069 deliberately removes direct crew reads from the CRM/resource tables.
     // This server render has already authenticated the session and resolved the
@@ -102,7 +107,6 @@ export default async function MyJobsPage() {
           .from("appointments")
           .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id")
           .in("id", apptIds)
-          .neq("status", "cancelled")
           .order("starts_at"),
         admin.from("appointment_assignments").select("appointment_id, staff_id, vehicle_id").in("appointment_id", apptIds),
       ]);
@@ -129,7 +133,18 @@ export default async function MyJobsPage() {
       const cutoff = new Date(`${today}T00:00:00Z`);
       cutoff.setUTCDate(cutoff.getUTCDate() - 1);
 
+      calledOff = (appts ?? [])
+        .filter((a) => a.status === "cancelled")
+        .filter((a) => a.starts_at && new Date(a.starts_at).getTime() >= cutoff.getTime())
+        .map((a) => ({
+          id: a.id,
+          title: a.title,
+          starts_at: a.starts_at,
+          lead_name: (a.lead_id ? leadById.get(a.lead_id)?.name : null) ?? null,
+        }));
+
       jobs = (appts ?? [])
+        .filter((a) => a.status !== "cancelled")
         .filter((a) => a.starts_at && new Date(a.starts_at).getTime() >= cutoff.getTime())
         .map((a) => {
           const lead = a.lead_id ? leadById.get(a.lead_id) : null;
@@ -407,6 +422,34 @@ export default async function MyJobsPage() {
           ))}
           </div>
         )}
+
+        {/* Called off: the office took this crew member off a job, or moved the
+            move date (which cancel+rebooks the appointment and drops the
+            assignment on purpose). A push goes out too, but a push only
+            reaches a subscribed device — this is the signal everyone sees.
+            Ages out on its own: same yesterday-onwards window as live jobs. */}
+        {calledOff.length > 0 ? (
+          <section data-tour="crew-called-off" className="mt-8">
+            <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-mist-400">Called off</h2>
+            <div className="space-y-2">
+              {calledOff.map((c) => (
+                <div
+                  key={c.id}
+                  data-testid="called-off-job"
+                  className="rounded-xl border border-border bg-card p-4 text-sm text-mist-500 opacity-80"
+                >
+                  <div className="font-medium text-mist-400 line-through">
+                    {c.lead_name ?? c.title ?? "Job"}
+                  </div>
+                  <div className="mt-1">
+                    {c.starts_at ? dayHeading(new Date(c.starts_at).toLocaleDateString("en-CA", { timeZone: UK }), today) : "Date unknown"} — this job is no longer
+                    yours. If the move was rebooked the office will put someone on the new date.
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         {/* Device settings — crew have no Settings page, so passkey sign-in,
             job alerts, the install prompt and the manual live here under one
