@@ -45,27 +45,28 @@ describe("resolvePushRecipients", () => {
     expect(ids).toContain("admin-1");
   });
 
-  it("crew_job is delivered per-person: only the targeted profile survives resolution", () => {
-    // The sender ONLY ever calls crew_job with recipientUserIds, which
-    // restricts the profile set BEFORE this function — simulate that here.
-    const targeted = OFFICE.filter((p) => p.id === "crew-1");
-    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual(["crew-1"]);
+  // These used to be written against crew_job, retired 2026-08-23. The
+  // behaviour they cover — per-person targeting — is not crew-specific, so
+  // they now run against survey_assigned rather than being deleted.
+  it("a targeted category is delivered per-person: only the targeted profile survives resolution", () => {
+    const targeted = OFFICE.filter((p) => p.id === "est-1");
+    expect(resolvePushRecipients("survey_assigned", targeted, noPrefs, null)).toEqual(["est-1"]);
   });
 
-  it("crew_job also reaches a staff member whose login is an office role (Connor on the van)", () => {
+  it("a targeted category also reaches an admin login (Connor surveys jobs himself)", () => {
     const targeted = OFFICE.filter((p) => p.id === "admin-1");
-    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual(["admin-1"]);
+    expect(resolvePushRecipients("survey_assigned", targeted, noPrefs, null)).toEqual(["admin-1"]);
   });
 
   it("inactive targets never receive, even when explicitly targeted", () => {
     const targeted = OFFICE.filter((p) => p.id === "admin-2"); // inactive
-    expect(resolvePushRecipients("crew_job", targeted, noPrefs, null)).toEqual([]);
+    expect(resolvePushRecipients("survey_assigned", targeted, noPrefs, null)).toEqual([]);
   });
 
-  it("crew can opt out of job alerts", () => {
-    const targeted = OFFICE.filter((p) => p.id === "crew-1");
-    const prefs = new Map<string, Record<string, unknown>>([["crew-1", { crew_job: false }]]);
-    expect(resolvePushRecipients("crew_job", targeted, prefs, null)).toEqual([]);
+  it("a targeted recipient can still opt out of the category", () => {
+    const targeted = OFFICE.filter((p) => p.id === "est-1");
+    const prefs = new Map<string, Record<string, unknown>>([["est-1", { survey_assigned: false }]]);
+    expect(resolvePushRecipients("survey_assigned", targeted, prefs, null)).toEqual([]);
   });
 });
 
