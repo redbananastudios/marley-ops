@@ -84,7 +84,7 @@ export function OfficeGuide() {
               needs a diary slot) → <strong>Booked</strong>.
             </>,
             "A bank-transfer or cash deposit is recorded with one tap from this page (pick the method).",
-            "Deposit paid is what flips the lead to Confirmed — nothing appears on the Job Board until then.",
+            "Deposit paid is what flips the lead to Confirmed — nothing appears in Schedule & Allocation until then.",
           ]}
         />
       </GuideCard>
@@ -99,7 +99,7 @@ export function OfficeGuide() {
         />
       </GuideCard>
 
-      <GuideCard id="job-board" title="Job Board — assigning crew & vans" lead="Sidebar → Schedule → Job Board.">
+      <GuideCard id="job-board" title="Assigning crew &amp; vans" lead="Sidebar → Schedule → Schedule &amp; Allocation, the Day Allocation tab.">
         <Steps
           items={[
             "A Mon–Sun week grid of every removal and survey, with a per-day capacity strip showing which crew and vans are free.",
@@ -180,17 +180,16 @@ export function OfficeGuide() {
         />
       </GuideCard>
 
-      <GuideCard id="content" title="Job content — crew photos, video & voice notes" lead="Sidebar → Customers → Content.">
+      <GuideCard id="content" title="Job content — crew photos, video &amp; voice notes" lead="On the customer's own lead page.">
         <Bullets
           items={[
             "Crew capture photos, video and voice notes on jobs with the red camera button — damage, access issues, and good moments worth keeping. Voice notes are transcribed automatically.",
             <>
-              The review queue has three tabs: <strong>needs review</strong>, <strong>approved</strong> and{" "}
-              <strong>internal</strong>. Approving an item is what clears it for marketing use — internal-only items
-              never leave the panel.
+              Everything captured on a job appears on that customer&apos;s lead page, so the office sees problems the
+              moment crew record them. Approving an item there is what clears it for marketing use — anything left
+              unapproved never leaves the panel.
             </>,
             "Customer consent lives on the lead (the media-consent toggle) — an item can't be approved without it.",
-            "Everything captured on a job also shows on its lead page, so the office sees problems the moment crew record them.",
           ]}
         />
       </GuideCard>
