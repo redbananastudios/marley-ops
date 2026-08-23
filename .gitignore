@@ -21,8 +21,11 @@
 
 # QA audit — throwaway seed/read-back/storageState scripts written to the repo
 # root (ESM resolution needs node_modules, /tmp doesn't have it); always
-# deleted by whichever agent wrote them, never meant to be committed
+# deleted by whichever agent wrote them, never meant to be committed. Role
+# agents have used both a leading-dot prefix and a leading-underscore prefix
+# for these — ignore both rather than chase every naming variant.
 .qa-*
+_qa_*
 
 # next.js
 /.next/
