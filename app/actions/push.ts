@@ -21,8 +21,8 @@ import type { Database } from "@/lib/supabase/database.types";
 import { log, errorContext } from "@/lib/log";
 import {
   PUSH_CATEGORIES,
-  PUSH_CATEGORY_IDS,
   isPushCategoryId,
+  pushCategoriesForRole,
   type PushCategoryId,
 } from "@/lib/push/categories";
 import { endpointHash, getPushFlags, sendPushForEvent } from "@/lib/push/send";
@@ -72,11 +72,10 @@ export async function getPushConfigAction(): Promise<PushConfig | null> {
     enabled: vapidConfigured() && flags.enabled,
     configured: vapidConfigured(),
     vapidPublicKey: vapidPublicKey(),
-    // Only the categories this role can actually receive — crew see job
-    // assignments, office see enquiries + payments.
-    categories: PUSH_CATEGORY_IDS.filter((id) =>
-      (PUSH_CATEGORIES[id].audience as readonly string[]).includes(prof.role),
-    ).map((id) => ({
+    // Only the categories this role can actually receive. Office roles see
+    // enquiries, payments, surveys and fleet reminders; crew see nothing since
+    // bd58fa0 retired crew_job — the job sheet is their channel.
+    categories: pushCategoriesForRole(prof.role).map((id) => ({
       id,
       label: PUSH_CATEGORIES[id].label,
       description: PUSH_CATEGORIES[id].description,

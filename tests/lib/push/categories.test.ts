@@ -12,6 +12,7 @@ import {
   newEnquiryDigestPush,
   newEnquiryPush,
   paymentPush,
+  pushCategoriesForRole,
   ukJobDayLabel,
   type BankFeedArrival,
 } from "@/lib/push/categories";
@@ -41,6 +42,29 @@ describe("push category registry", () => {
     expect(isPushCategoryId("new_enquiry")).toBe(true);
     expect(isPushCategoryId("payment_event")).toBe(true);
     expect(isPushCategoryId("marketing_blast")).toBe(false);
+  });
+});
+
+describe("pushCategoriesForRole", () => {
+  it("office roles receive every category the system sends", () => {
+    const office = ["new_enquiry", "payment_event", "survey_assigned", "fleet_expiry"];
+    expect(pushCategoriesForRole("admin")).toEqual(office);
+    expect(pushCategoriesForRole("estimator")).toEqual(office);
+  });
+
+  it("crew receive NOTHING — so no crew surface may offer a push opt-in", () => {
+    // Since bd58fa0 retired crew_job (2026-08-23) every remaining category is
+    // office-only, which makes the crew opt-in on /my-jobs a promise the system
+    // cannot keep: enabling it spends the browser's one-shot permission prompt
+    // and then delivers zero notifications, forever, silently. NotificationsRow
+    // gates on this function rather than on a hardcoded role, so the entry point
+    // comes back by itself the day a crew-audience category is added.
+    expect(pushCategoriesForRole("crew")).toEqual([]);
+  });
+
+  it("an unknown role receives nothing rather than defaulting to the office set", () => {
+    expect(pushCategoriesForRole("")).toEqual([]);
+    expect(pushCategoriesForRole("contractor")).toEqual([]);
   });
 });
 
