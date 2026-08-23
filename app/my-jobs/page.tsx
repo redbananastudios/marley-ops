@@ -452,8 +452,10 @@ export default async function MyJobsPage() {
         ) : null}
 
         {/* Device settings — crew have no Settings page, so passkey sign-in,
-            job alerts, the install prompt and the manual live here under one
-            heading. data-tour anchors the crew tour's alerts/sign-in step. */}
+            the install prompt and the manual live here under one heading.
+            NotificationsRow joins them only for a role that can actually
+            receive a push (QA-20260823-04); crew currently cannot.
+            data-tour anchors the crew tour's alerts/sign-in step. */}
         <section data-tour="crew-device">
           <h2 className="mb-1 mt-8 text-sm font-semibold uppercase tracking-wide text-mist-400">Your device</h2>
           <InstallPrompt />
