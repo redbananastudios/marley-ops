@@ -21,16 +21,6 @@ export interface CrewAssignmentChange {
   assignedStaffIds?: string[];
   removedStaffIds?: string[];
   actorUserId: string | null;
-  /**
-   * Notify even though the appointment row now reads `cancelled`.
-   *
-   * The cancelled guard below exists so that admin housekeeping on dead rows
-   * never pings a phone. The inside-7-day date change is the exact inverse:
-   * it cancels the old appointment FIRST and the crew member's job then just
-   * disappears from /my-jobs, so the cancellation IS the news. Only set this
-   * where the caller itself just cancelled the row deliberately.
-   */
-  notifyThoughCancelled?: boolean;
 }
 
 /** UK calendar date (YYYY-MM-DD) for "is this job still ahead of us". */
@@ -51,8 +41,7 @@ export async function notifyCrewAssignmentChange(change: CrewAssignmentChange): 
       .select("id, starts_at, status")
       .eq("id", change.appointmentId)
       .maybeSingle();
-    if (!appt) return;
-    if (appt.status === "cancelled" && !change.notifyThoughCancelled) return;
+    if (!appt || appt.status === "cancelled") return;
     // Past jobs: reshuffling yesterday's board must not ping anyone's phone.
     if (appt.starts_at && ukDay(new Date(appt.starts_at)) < ukDay(new Date())) return;
 

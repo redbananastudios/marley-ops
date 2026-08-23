@@ -18,11 +18,13 @@ import { step } from "../fixtures/artefacts";
  * FIXED 2026-08-23, direction (b): the assignment still deliberately does not
  * carry over (the office re-allocates on the Job Board — that decision is
  * documented in changeBookingDateAction and was not reversed), but the crew
- * member is now told. Two signals, because one of them is not enough on its
- * own: the same "taken off the job" push the Job Board already sends, plus a
- * "Called off" card on /my-jobs. The card is what this spec asserts — a push
- * only reaches a device with a live subscription, so it cannot be the only
- * notice, and it cannot be observed from a Playwright context.
+ * member is now told. Two channels, neither of them a realtime push:
+ *   - the night-before job sheet, which re-sends as "Updated job sheet" on any
+ *     content change and sends a "you're now clear" sheet to a crew member
+ *     whose jobs all went away;
+ *   - a "Called off" card on /my-jobs, which is what this spec asserts.
+ * Realtime crew-allocation pushes were retired the same day (Peter) so crew
+ * have ONE authoritative channel instead of two that can disagree.
  */
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
