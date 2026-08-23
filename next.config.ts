@@ -21,6 +21,22 @@ const nextConfig: NextConfig = {
   // origin is allow-listed — without this, the LAN login hangs / 403s.
   allowedDevOrigins: ["i9", "i9.local", "localhost", "127.0.0.1"],
 
+  // Retired routes that have a genuine replacement. /schedule/board was removed
+  // 2026-08-23 (#60) because the board component now renders inside /schedule —
+  // so an old bookmark should LAND on the thing it wanted, not a 404.
+  //
+  // Deliberately NOT permanent: a 308 is cached hard by the browser and would
+  // outlive any decision to bring the route back. The panel is noindex, so
+  // there is no SEO reason to prefer 308.
+  //
+  // /growth and /growth/ads get NO redirect on purpose — that feature moved to a
+  // separate app rather than to another page here, so sending someone to an
+  // unrelated screen would misrepresent where their data went. They fall through
+  // to app/not-found.tsx, which says so.
+  async redirects() {
+    return [{ source: "/schedule/board", destination: "/schedule", permanent: false }];
+  },
+
   // Internal admin panel — must never be indexed (the login page is public).
   async headers() {
     // Resource-restricting CSP built from the app's actual browser origins.
