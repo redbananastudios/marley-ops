@@ -39,22 +39,6 @@ export const PUSH_CATEGORIES = {
     urgency: "normal" as const,
     suppressWhenFocused: false,
   },
-  crew_job: {
-    id: "crew_job" as const,
-    label: "Job assignments",
-    description: "You're put on a job, or taken off one.",
-    /** Targeted at the SPECIFIC assigned member, never broadcast (the sender
-     *  only ever passes recipientUserIds for this category). All roles are in
-     *  the audience because a staff record can link to an office login —
-     *  Connor works jobs himself and still needs the ping. */
-    audience: ["crew", "admin", "estimator"] as const,
-    defaultEnabled: true,
-    /** A day's shelf life — a crew member should still hear about yesterday's
-     *  late-evening allocation when their phone wakes up in the morning. */
-    ttlSeconds: 24 * 3600,
-    urgency: "high" as const,
-    suppressWhenFocused: false,
-  },
   survey_assigned: {
     id: "survey_assigned" as const,
     label: "Your surveys",
@@ -255,34 +239,6 @@ export function ukJobDayLabel(startsAt: string | null | undefined): string | nul
     month: "short",
     timeZone: "Europe/London",
   });
-}
-
-export function crewJobPush(opts: {
-  kind: "assigned" | "removed";
-  appointmentId: string;
-  staffUserId: string;
-  startsAt: string | null;
-}): PushEvent {
-  const day = ukJobDayLabel(opts.startsAt);
-  return {
-    category: "crew_job",
-    // One tag per (job, person): a removal REPLACES the assignment
-    // notification still sitting on the phone, so stale "you're on this job"
-    // alerts can't outlive a change of plan.
-    eventKey: `crew-job-${opts.appointmentId}-${opts.staffUserId}`,
-    title: opts.kind === "assigned" ? "New job for you" : "Job change",
-    body:
-      opts.kind === "assigned"
-        ? day
-          ? `You've been put on a job on ${day}.`
-          : "You've been put on a job."
-        : day
-          ? `You've been taken off the job on ${day}.`
-          : "You've been taken off a job.",
-    // A removed crew member no longer passes the job page's assignment gate —
-    // send them to their list instead.
-    url: opts.kind === "assigned" ? `/my-jobs/${opts.appointmentId}` : "/my-jobs",
-  };
 }
 
 /** The estimator's own survey ping. Lock-screen safe: first name only, never

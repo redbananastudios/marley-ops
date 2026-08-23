@@ -223,7 +223,7 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
     }
   }
 
-  async function toggleFlag(key: "enabled" | "new_enquiry" | "payment_event" | "crew_job", value: boolean) {
+  async function toggleFlag(key: "enabled" | "new_enquiry" | "payment_event", value: boolean) {
     const res = await setPushFlagsAction({ [key]: value });
     if (!res.ok) toast.error(res.error);
     void refresh();
@@ -374,16 +374,6 @@ export function NotificationsSetup({ isAdmin }: { isAdmin: boolean }) {
               className="size-5 accent-mm-red"
             />
             Payments
-          </label>
-          <label className="ml-6 flex items-center gap-2.5 text-sm">
-            <input
-              type="checkbox"
-              checked={config.flags?.categories.crew_job ?? true}
-              onChange={(e) => toggleFlag("crew_job", e.target.checked)}
-              disabled={!config.flags?.enabled}
-              className="size-5 accent-mm-red"
-            />
-            Crew job assignments
           </label>
           <p className="text-xs text-mist-400">
             Turning a switch off stops those notifications for everyone, instantly, without a deploy.

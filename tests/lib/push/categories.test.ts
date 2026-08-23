@@ -3,7 +3,6 @@ import {
   BANK_FEED_DIGEST_THRESHOLD,
   PUSH_CATEGORIES,
   bankPaymentPush,
-  crewJobPush,
   decideBankFeedPushes,
   decideEnquiryPushes,
   ENQUIRY_DIGEST_THRESHOLD,
@@ -19,22 +18,28 @@ import {
 import { isAllowedPushRoute } from "@/lib/push/payload";
 
 describe("push category registry", () => {
-  it("office categories go to office; crew_job admits any role (targeted-only, incl. office logins working jobs)", () => {
+  it("office categories go to office", () => {
     expect(PUSH_CATEGORIES.new_enquiry.audience).toEqual(["admin", "estimator"]);
     expect(PUSH_CATEGORIES.payment_event.audience).toEqual(["admin", "estimator"]);
-    expect(PUSH_CATEGORIES.crew_job.audience).toEqual(["crew", "admin", "estimator"]);
+  });
+
+  it("crew_job is retired — crew learn the day's work from the job sheet, not a live ping", () => {
+    // Peter, 2026-08-23. Realtime allocation pushes competed with the
+    // night-before job sheet; the sheet is now the single authoritative
+    // channel. Re-adding the category should be a deliberate act, so this
+    // asserts its absence rather than leaving a silent gap.
+    expect("crew_job" in PUSH_CATEGORIES).toBe(false);
+    expect(isPushCategoryId("crew_job")).toBe(false);
   });
 
   it("only new_enquiry suppresses when the app is focused (the chime conflict rule)", () => {
     expect(PUSH_CATEGORIES.new_enquiry.suppressWhenFocused).toBe(true);
     expect(PUSH_CATEGORIES.payment_event.suppressWhenFocused).toBe(false);
-    expect(PUSH_CATEGORIES.crew_job.suppressWhenFocused).toBe(false);
   });
 
   it("validates category ids", () => {
     expect(isPushCategoryId("new_enquiry")).toBe(true);
     expect(isPushCategoryId("payment_event")).toBe(true);
-    expect(isPushCategoryId("crew_job")).toBe(true);
     expect(isPushCategoryId("marketing_blast")).toBe(false);
   });
 });
@@ -140,41 +145,6 @@ describe("bank-feed arrival pushes", () => {
 
     expect(decideBankFeedPushes(many.slice(0, 2))).toHaveLength(2);
     expect(decideBankFeedPushes([])).toEqual([]);
-  });
-});
-
-describe("crewJobPush", () => {
-  const base = { appointmentId: "appt-1", staffUserId: "user-1", startsAt: "2026-07-18T08:00:00Z" };
-
-  it("assigned: day-only copy, deep link to the crew job page", () => {
-    const e = crewJobPush({ ...base, kind: "assigned" });
-    expect(e.title).toBe("New job for you");
-    expect(e.body).toBe("You've been put on a job on Sat 18 Jul.");
-    expect(e.url).toBe("/my-jobs/appt-1");
-    expect(isAllowedPushRoute(e.url)).toBe(true);
-  });
-
-  it("removed: links to the job LIST (the job page would refuse them now)", () => {
-    const e = crewJobPush({ ...base, kind: "removed" });
-    expect(e.body).toBe("You've been taken off the job on Sat 18 Jul.");
-    expect(e.url).toBe("/my-jobs");
-  });
-
-  it("assigned + removed share one tag so a removal replaces the stale alert", () => {
-    const a = crewJobPush({ ...base, kind: "assigned" });
-    const r = crewJobPush({ ...base, kind: "removed" });
-    expect(a.eventKey).toBe(r.eventKey);
-  });
-
-  it("copy never leaks names, addresses or money", () => {
-    const e = crewJobPush({ ...base, kind: "assigned" });
-    expect(e.body).not.toMatch(/£/);
-    expect(e.body).toMatch(/^You've been/);
-  });
-
-  it("copes with a missing date", () => {
-    const e = crewJobPush({ ...base, startsAt: null, kind: "assigned" });
-    expect(e.body).toBe("You've been put on a job.");
   });
 });
 

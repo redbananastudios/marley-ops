@@ -273,7 +273,6 @@ const flagsSchema = z.object({
   enabled: z.boolean().optional(),
   new_enquiry: z.boolean().optional(),
   payment_event: z.boolean().optional(),
-  crew_job: z.boolean().optional(),
   survey_assigned: z.boolean().optional(),
 });
 
@@ -290,7 +289,6 @@ export async function setPushFlagsAction(
   if (typeof parsed.data.enabled === "boolean") patch.push_enabled = parsed.data.enabled;
   if (typeof parsed.data.new_enquiry === "boolean") patch.push_new_enquiry_enabled = parsed.data.new_enquiry;
   if (typeof parsed.data.payment_event === "boolean") patch.push_payment_event_enabled = parsed.data.payment_event;
-  if (typeof parsed.data.crew_job === "boolean") patch.push_crew_job_enabled = parsed.data.crew_job;
   if (typeof parsed.data.survey_assigned === "boolean")
     patch.push_survey_assigned_enabled = parsed.data.survey_assigned;
   if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to change." };

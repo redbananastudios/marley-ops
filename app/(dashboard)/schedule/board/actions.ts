@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { notifyCrewAssignmentChange } from "@/lib/push/crew";
 
 // Office gate, not just signed-in: crew are only UI-redirected off the board,
 // so without this a crew login could invoke these actions directly and
@@ -49,46 +48,31 @@ export async function setAssignmentsAction(input: SetAssignmentsInput) {
   const wantStaff = new Set(v.staff_ids);
   const wantVehicles = new Set(v.vehicle_ids);
   const removeIds: string[] = [];
-  const removedStaffIds: string[] = [];
   for (const row of current ?? []) {
     if (row.staff_id) {
       if (wantStaff.has(row.staff_id)) wantStaff.delete(row.staff_id);
-      else {
-        removeIds.push(row.id);
-        removedStaffIds.push(row.staff_id);
-      }
+      else removeIds.push(row.id);
     } else if (row.vehicle_id) {
       if (wantVehicles.has(row.vehicle_id)) wantVehicles.delete(row.vehicle_id);
       else removeIds.push(row.id);
     }
   }
-  // wantStaff is about to be consumed by the insert list — snapshot the adds.
-  const assignedStaffIds = [...wantStaff];
   const inserts = [
     ...[...wantStaff].map((id) => ({ appointment_id: v.appointment_id, staff_id: id })),
     ...[...wantVehicles].map((id) => ({ appointment_id: v.appointment_id, vehicle_id: id })),
   ];
 
-  // Notify each half right after ITS write commits — if the insert fails
-  // after the delete succeeded, the removed crew were still genuinely taken
-  // off and must still hear about it.
+  // Crew are NOT pinged on assign/unassign (Peter, 2026-08-23). They learn the
+  // day's work from the night-before job sheet, which re-sends as "Updated job
+  // sheet" whenever the day's content changes — one authoritative channel
+  // instead of two that can disagree.
   if (removeIds.length) {
     const { error } = await sb.from("appointment_assignments").delete().in("id", removeIds);
     if (error) return { ok: false as const, error: error.message };
-    await notifyCrewAssignmentChange({
-      appointmentId: v.appointment_id,
-      removedStaffIds,
-      actorUserId: userId,
-    });
   }
   if (inserts.length) {
     const { error } = await sb.from("appointment_assignments").insert(inserts);
     if (error) return { ok: false as const, error: error.message };
-    await notifyCrewAssignmentChange({
-      appointmentId: v.appointment_id,
-      assignedStaffIds,
-      actorUserId: userId,
-    });
   }
 
   revalidatePath("/schedule/board");
@@ -116,13 +100,6 @@ export async function assignResourceAction(
       return { ok: true as const, already: true };
     return { ok: false as const, error: error.message };
   }
-  if (resource.kind === "staff") {
-    await notifyCrewAssignmentChange({
-      appointmentId,
-      assignedStaffIds: [resource.id],
-      actorUserId: userId,
-    });
-  }
   revalidatePath("/schedule/board");
   return { ok: true as const };
 }
@@ -131,28 +108,8 @@ export async function unassignAction(assignmentId: string) {
   if (!z.string().uuid().safeParse(assignmentId).success) return { ok: false as const, error: "Invalid input" };
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
-  // Read before delete — the row is the only record of WHO was unassigned.
-  const { data: row } = await sb
-    .from("appointment_assignments")
-    .select("staff_id, appointment_id")
-    .eq("id", assignmentId)
-    .maybeSingle();
-  const { data: deleted, error } = await sb
-    .from("appointment_assignments")
-    .delete()
-    .eq("id", assignmentId)
-    .select("id");
+  const { error } = await sb.from("appointment_assignments").delete().eq("id", assignmentId);
   if (error) return { ok: false as const, error: error.message };
-  // Only notify when THIS call actually deleted the row — a concurrent
-  // save may have already replaced it, and a false "taken off" would
-  // overwrite a live "you're on this job" alert (shared tag).
-  if (deleted?.length && row?.staff_id) {
-    await notifyCrewAssignmentChange({
-      appointmentId: row.appointment_id,
-      removedStaffIds: [row.staff_id],
-      actorUserId: userId,
-    });
-  }
   revalidatePath("/schedule/board");
   return { ok: true as const };
 }
