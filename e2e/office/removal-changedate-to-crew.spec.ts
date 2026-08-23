@@ -95,6 +95,12 @@ test.describe.serial("Handoff h8 — admin change-date rebook vs. crew /my-jobs"
       status: "accepted",
       moving_date: at(1).slice(0, 10),
       deposit_amount: 100,
+      // The Change date button only renders on a DEPOSIT-PAID booked row —
+      // classifyBooking returns "deposit_outstanding" without this, which is a
+      // bucket with no policy strip, so the admin half of this spec timed out
+      // looking for a button that was never on the page (first CI run, 2026-08-23).
+      // The finding's own repro says "deposit paid"; the seed just never did it.
+      deposit_paid_at: at(-1),
       accepted_at: at(-1),
       agreed_price: 1500,
       breakdown: { vehicle: "1luton", totalMiles: 20 },
