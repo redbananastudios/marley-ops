@@ -67,6 +67,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Contractor agreement gate → sign → invoicing unlocks | ✅ | crew/contractor.spec.ts |
 | Contractor invoicing — start/add a line by hand/edit/submit | ✅ | crew/invoicing-submit-lines.spec.ts |
 | Handoff h2: crew submits an invoice → office sees it on /finance/statements | 🟡 | crew/hours-to-admin-statements.spec.ts — proven live 2026-08-22 via a throwaway crew+office login pair + SQL read-back (0 findings), but `test.skip`'d: this env has no `E2E_CREW_PASSWORD`/`E2E_OFFICE_PASSWORD` so `auth.setup.ts` can't sign in either persistent fixture, so it has never actually executed |
+| Handoff h8: admin changes a booking date on /bookings → crew's /my-jobs reflects it | 🟡 | office/removal-changedate-to-crew.spec.ts — proven live 2026-08-23 via a throwaway admin+crew login pair + SQL read-back, and found a real bug (QA-20260823-01): inside the 7-day window "Change date" is a cancel+rebook, `appointment_assignments` never carries to the new appointment row, and the dropped crew member's /my-jobs silently shows nothing assigned with no cancellation notice. `test.skip`'d, blocked by QA-20260823-01 — un-skip once fixed |
 
 ## Public (no auth)
 | Flow | Status | Spec |
