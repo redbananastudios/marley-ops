@@ -30,6 +30,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { customerNoticeLabel, type CustomerNotice } from "@/lib/refunds/customer-notice";
 import {
   completeRefundQueueAction,
   executeCardRefundAction,
@@ -72,8 +73,11 @@ function useRun() {
   const [refreshing, startRefresh] = useTransition();
   const processing = busy || refreshing;
   async function run(
-    fn: () => Promise<{ ok: boolean; error?: string; already?: boolean }>,
-    successMsg: string,
+    fn: () => Promise<{ ok: boolean; error?: string; already?: boolean; customerNotice?: CustomerNotice }>,
+    /** A function when the wording depends on what the server actually did —
+     *  the Complete and Retain dialogs used to assert "customer emailed." on
+     *  every branch, including ones that emailed nobody (QA-20260823-03). */
+    successMsg: string | ((res: { customerNotice?: CustomerNotice }) => string),
     onDone: () => void,
   ) {
     setBusy(true);
@@ -83,7 +87,13 @@ function useRun() {
         toast.error(res.error || "That didn't go through.");
         return;
       }
-      toast.success(res.already ? "Already recorded — refreshing." : successMsg);
+      const msg = typeof successMsg === "function" ? successMsg(res) : successMsg;
+      // A notice that is anything other than a clean send is the office's
+      // problem to act on, so it gets a warning toast and time to read it.
+      const clean = !res.customerNotice || res.customerNotice === "sent" || res.customerNotice === "already_sent";
+      if (res.already) toast.success("Already recorded — refreshing.");
+      else if (clean) toast.success(msg);
+      else toast.warning(msg, { duration: 12000 });
       onDone();
       startRefresh(() => router.refresh());
     } catch {
@@ -342,7 +352,7 @@ function CompleteDialog({ item, isDateChange }: { item: QueueItemView; isDateCha
           ) : isDateChange ? (
             "Close — money stays on the booking"
           ) : (
-            "Complete — send the refund email"
+            "Complete the refund"
           )}
         </Button>
       </DialogTrigger>
@@ -377,7 +387,7 @@ function CompleteDialog({ item, isDateChange }: { item: QueueItemView; isDateCha
                 () => completeRefundQueueAction(item.id),
                 isDateChange
                   ? "Entry closed — held money keeps counting toward the new booking."
-                  : "Refund completed — customer emailed.",
+                  : (res) => customerNoticeLabel(res.customerNotice, "Refund completed"),
                 () => setOpen(false),
               )
             }
@@ -457,7 +467,13 @@ function RetainDialog({ item, isDateChange }: { item: QueueItemView; isDateChang
           </Button>
           <Button
             disabled={processing || !armed}
-            onClick={() => run(() => retainRefundQueueAction(item.id, typed), "Outcome recorded — customer emailed.", () => setOpen(false))}
+            onClick={() =>
+              run(
+                () => retainRefundQueueAction(item.id, typed),
+                (res) => customerNoticeLabel(res.customerNotice, "Outcome recorded"),
+                () => setOpen(false),
+              )
+            }
             className="bg-mm-red text-white hover:bg-mm-red-deep"
           >
             {processing ? (

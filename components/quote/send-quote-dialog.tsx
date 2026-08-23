@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
-import { setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
+import { saveQuoteDraft, setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
 import { buildQuoteEmailHtml, quoteEmailTemplateVars } from "@/lib/comms/quote-email";
 import { quotePdfBase64 } from "@/lib/quote/pdf-client";
 import { PdfLoader } from "@/components/quote/pdf-loader";
@@ -114,6 +114,38 @@ export function SendQuoteDialog({
     }
     setSending(true);
     try {
+      // Persist BEFORE emailing. The wizard's total is a live client-side
+      // recompute, while quotes.subtotal/grand_total are only written by the
+      // debounced autosave — which deliberately skips first render. Opening a
+      // draft and sending it without touching a field therefore emailed one
+      // price while the database (and accept-flow, which charges the deposit
+      // from grand_total) held another (QA-20260823-02).
+      //
+      // A re-send is excluded on purpose: that quote's price is already what
+      // the customer was sent, and recomputing it against today's pricing
+      // settings would move it underneath them.
+      if (!resend) {
+        const saved = await saveQuoteDraft(quoteId, values);
+        if (!saved.ok) {
+          toast.error("Could not save this quote before sending: " + saved.error);
+          setSending(false);
+          return;
+        }
+        const shownPence = Math.round(breakdown.grandTotal * 100);
+        const savedPence = Math.round(saved.breakdown.grandTotal * 100);
+        if (shownPence !== savedPence) {
+          // Pricing settings moved since this page loaded. Emailing now would
+          // send a number the office never saw, so refuse rather than guess
+          // which of the two is the one they meant.
+          toast.error(
+            `This quote now prices at ${gbp(saved.breakdown.grandTotal)}, not the ${gbp(breakdown.grandTotal)} on screen — pricing settings changed since this page loaded. Reload and review before sending.`,
+            { duration: 15000 },
+          );
+          setSending(false);
+          return;
+        }
+      }
+
       const emailMeta = { quoteRef, acceptUrl, depositAmount };
       const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
       // Server prefers the published Resend template (dashboard-editable copy)
