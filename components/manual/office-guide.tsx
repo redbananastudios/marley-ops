@@ -84,7 +84,7 @@ export function OfficeGuide() {
               needs a diary slot) → <strong>Booked</strong>.
             </>,
             "A bank-transfer or cash deposit is recorded with one tap from this page (pick the method).",
-            "Deposit paid is what flips the lead to Confirmed — nothing appears on the Job Board until then.",
+            "Deposit paid is what flips the lead to Confirmed — nothing appears in Schedule & Allocation until then.",
           ]}
         />
       </GuideCard>
@@ -99,7 +99,7 @@ export function OfficeGuide() {
         />
       </GuideCard>
 
-      <GuideCard id="job-board" title="Job Board — assigning crew & vans" lead="Sidebar → Schedule → Job Board.">
+      <GuideCard id="job-board" title="Assigning crew &amp; vans" lead="Sidebar → Schedule → Schedule &amp; Allocation, the Day Allocation tab.">
         <Steps
           items={[
             "A Mon–Sun week grid of every removal and survey, with a per-day capacity strip showing which crew and vans are free.",

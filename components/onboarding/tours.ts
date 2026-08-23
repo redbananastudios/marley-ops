@@ -85,10 +85,10 @@ const OFFICE: TourStep[] = [
     align: "start",
   },
   {
-    selector: '[data-tour="nav-/schedule/board"]',
+    selector: '[data-tour="nav-/schedule"]',
     title: "7. Assign the crew",
     description:
-      "On the Job Board you assign crew and vans per day. The capacity strip shows who's free; a clash warns you but never blocks — a van can still do two half-day jobs.",
+      "Schedule & Allocation is where you put crew and vans on each day. The capacity strip shows who's free; a clash warns you but never blocks — a van can still do two half-day jobs.",
     side: "right",
     align: "start",
   },

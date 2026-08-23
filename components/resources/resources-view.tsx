@@ -693,7 +693,7 @@ function StaffDialog({
           <div className="flex items-center justify-between gap-4 rounded-md border border-input bg-card px-3 py-2.5">
             <div>
               <p className="text-sm font-medium text-foreground">Is a driver (can take a van out)</p>
-              <p className="text-xs text-mist-400">Shows a driver mark on the Job Board and flags moves with no driver assigned.</p>
+              <p className="text-xs text-mist-400">Shows a driver mark in Schedule &amp; Allocation and flags moves with no driver assigned.</p>
             </div>
             <label className="relative inline-flex cursor-pointer items-center">
               <input
@@ -1126,7 +1126,7 @@ function OffRoadManager({ vehicleId, windows }: { vehicleId: string; windows: Un
         <p className="text-sm font-semibold text-foreground">Off-road / garage</p>
       </div>
       <p className="mt-0.5 text-xs text-mist-400">
-        Days the van is in the garage or off the road. It drops out of Job Board capacity across these dates.
+        Days the van is in the garage or off the road. It drops out of allocation capacity across these dates.
       </p>
 
       {sorted.length > 0 ? (
@@ -1249,7 +1249,7 @@ function StaffAvailabilityManager({ staffId, segments }: { staffId: string; segm
         <p className="text-sm font-semibold text-foreground">Availability</p>
       </div>
       <p className="mt-0.5 text-xs text-mist-400">
-        Crew work Mon–Fri by default. Book a day off / holiday, or mark a weekend they can work. Feeds the Job Board.
+        Crew work Mon–Fri by default. Book a day off / holiday, or mark a weekend they can work. Feeds Schedule &amp; Allocation.
       </p>
 
       {segments.length > 0 ? (

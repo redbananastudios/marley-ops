@@ -73,7 +73,7 @@ export function MarkPaidButton({
       const next =
         kind === "deposit" && leadId
           ? moveDay
-            ? { label: "Assign crew", href: `/schedule/board?week=${moveDay}` }
+            ? { label: "Assign crew", href: `/schedule?date=${moveDay}` }
             : { label: "Book removal", href: `/schedule/removals?leadId=${leadId}` }
           : null;
       toast.success(

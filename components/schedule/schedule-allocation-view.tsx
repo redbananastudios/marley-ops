@@ -3,7 +3,8 @@
 /**
  * Schedule & Allocation — one page, two views of the same day (design doc
  * docs/schedule-allocation-design.md). ADDITIVE: the existing /schedule/removals
- * diary and /schedule/board Job Board are untouched.
+ * diary is untouched. This view embeds JobBoardView, which is why removing
+ * the standalone /schedule/board page cost nothing — the board is right here.
  *
  *  - Availability (default) answers "can we sell this day?" — a Mon-first month
  *    grid graded by the confirmed removals' REQUIRED vans/crew vs the live fleet

@@ -75,7 +75,7 @@ export async function setAssignmentsAction(input: SetAssignmentsInput) {
     if (error) return { ok: false as const, error: error.message };
   }
 
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -100,7 +100,7 @@ export async function assignResourceAction(
       return { ok: true as const, already: true };
     return { ok: false as const, error: error.message };
   }
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }
 
@@ -110,6 +110,6 @@ export async function unassignAction(assignmentId: string) {
   if (!userId) return { ok: false as const, error: "Not signed in." };
   const { error } = await sb.from("appointment_assignments").delete().eq("id", assignmentId);
   if (error) return { ok: false as const, error: error.message };
-  revalidatePath("/schedule/board");
+  revalidatePath("/schedule");
   return { ok: true as const };
 }

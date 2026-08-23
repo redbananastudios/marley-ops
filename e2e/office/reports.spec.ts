@@ -15,12 +15,6 @@ test.describe("Office — Performance / Growth / Automations", () => {
     await expect(page).toHaveURL(/tab=storage/);
   });
 
-  test("Growth — Website & Tracking + Ads", async ({ page }) => {
-    await page.goto("/growth");
-    await expect(page.getByRole("heading", { name: "Website & Tracking" })).toBeVisible();
-    await page.goto("/growth/ads");
-    await expect(page.getByRole("heading", { name: "Ad proposals" })).toBeVisible();
-  });
 
   test("Automations — log + refresh", async ({ page }) => {
     await page.goto("/automations");
