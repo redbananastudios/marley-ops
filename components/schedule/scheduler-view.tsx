@@ -38,6 +38,7 @@ import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { rescheduleAppointment } from "@/app/(dashboard)/schedule/actions";
+import { slotRangeFor } from "@/lib/schedule/slot-range";
 import {
   AppointmentDialog,
   type ApptType,
@@ -209,6 +210,14 @@ export function SchedulerView({
       }),
     [shown],
   );
+
+  // The time-grid window. Fixed at 07:00-20:00 this SILENTLY dropped anything
+  // outside it from Week/Day view — no "+N more", no scroll cue (QA-20260823-06).
+  // Derived from what is actually on the calendar so an out-of-hours job pulls the
+  // grid open instead of falling off it, while a normal day keeps the tight range.
+  // Uses `shown`, not `events`: a survey hidden by the removals filter must not
+  // stretch the grid for a job you cannot see.
+  const { slotMinTime, slotMaxTime } = useMemo(() => slotRangeFor(shown), [shown]);
 
   // Custom event card — {time} / bold {full name} / {address}, plus WHO is doing
   // the visit as a contrasting initial-avatar pill on the time row.
@@ -506,8 +515,8 @@ export function SchedulerView({
           nowIndicator
           firstDay={1}
           weekends
-          slotMinTime="07:00:00"
-          slotMaxTime="20:00:00"
+          slotMinTime={slotMinTime}
+          slotMaxTime={slotMaxTime}
           allDaySlot
           // No cap: a month row grows to fit its busiest day rather than
           // collapsing the 4th job into a "+1 more" link. Hiding work on the

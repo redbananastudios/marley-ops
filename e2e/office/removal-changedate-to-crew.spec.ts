@@ -173,18 +173,56 @@ test.describe.serial("Handoff h8 — admin change-date rebook vs. crew /my-jobs"
     }
   });
 
+  /**
+   * QA-20260823-05. This teardown used to delete `leads` while `communications`
+   * and `activities` rows still pointed at it — those FKs have no ON DELETE
+   * action, so Postgres refused with 23503, the `clients` delete behind it never
+   * ran, and NONE of it was noticed because no call checked `error`. Every CI run
+   * left a full marker set in the staging database, forever.
+   *
+   * Two changes: delete the children the tested flow actually creates (the
+   * "your move date has changed" email is a `communications` row; the note logged
+   * against the lead is an `activities` row), and FAIL LOUDLY if anything is left.
+   * A silent leak that grows every run is worse than a red pipeline — and the
+   * thrown message carries Postgres's own constraint name, so the next table to
+   * appear here names itself instead of needing this diagnosis again.
+   */
   test.afterAll(async () => {
     if (!dbReady || !leadId) return;
     const sb = db();
+    const problems: string[] = [];
+    const check = (table: string, error: { message: string } | null) => {
+      if (error) problems.push(`${table}: ${error.message}`);
+    };
+
     const { data: appts } = await sb.from("appointments").select("id").eq("lead_id", leadId);
     const apptIds = (appts ?? []).map((a) => a.id);
     if (apptIds.length) {
-      await sb.from("appointment_assignments").delete().in("appointment_id", apptIds);
-      await sb.from("appointments").delete().in("id", apptIds);
+      check("appointment_assignments", (await sb.from("appointment_assignments").delete().in("appointment_id", apptIds)).error);
+      check("appointments", (await sb.from("appointments").delete().in("id", apptIds)).error);
     }
-    await sb.from("quotes").delete().eq("lead_id", leadId);
+    check("quotes", (await sb.from("quotes").delete().eq("lead_id", leadId)).error);
+    check("surveys", (await sb.from("surveys").delete().eq("lead_id", leadId)).error);
+    // The two the old teardown missed.
+    check("communications", (await sb.from("communications").delete().eq("lead_id", leadId)).error);
+    check("activities", (await sb.from("activities").delete().eq("lead_id", leadId)).error);
+    check("follow_ups", (await sb.from("follow_ups").delete().eq("lead_id", leadId)).error);
+
     const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).single();
-    await sb.from("leads").delete().eq("id", leadId);
-    if (lead?.client_id) await sb.from("clients").delete().eq("id", lead.client_id);
+    check("leads", (await sb.from("leads").delete().eq("id", leadId)).error);
+    if (lead?.client_id) check("clients", (await sb.from("clients").delete().eq("id", lead.client_id)).error);
+
+    // Prove it rather than assume it: a delete that removed nothing returns no
+    // error, so the only honest confirmation is reading the row back.
+    const { count, error: countError } = await sb
+      .from("leads")
+      .select("*", { count: "exact", head: true })
+      .eq("id", leadId);
+    if (countError) problems.push(`leads read-back: ${countError.message}`);
+    else if (count) problems.push(`leads: ${count} row(s) still present after delete`);
+
+    if (problems.length) {
+      throw new Error(`h8 teardown left marker rows in staging (QA-20260823-05): ${problems.join(" | ")}`);
+    }
   });
 });
