@@ -341,7 +341,21 @@ export async function linkRecordedBankTransactionAction(input: {
     .eq("status", tx.status)
     .eq("amount", tx.amount)
     .select("id");
-  if (claimErr) return { ok: false as const, error: claimErr.message };
+  if (claimErr) {
+    // Whole-job links need migration 0103 (the match_kind CHECK must accept
+    // 'full'). Deploys and migrations are separate steps here, so the code can
+    // legitimately reach an environment the migration has not, and a raw
+    // Postgres constraint string on a money screen tells the office nothing.
+    // Fails closed with something actionable instead; nothing is written.
+    if (wholeQuote && claimErr.code === "23514") {
+      return {
+        ok: false as const,
+        error:
+          "This database hasn't been migrated for whole-job links yet (0103). Nothing was changed — link the deposit and balance separately, or ask for the migration to be applied.",
+      };
+    }
+    return { ok: false as const, error: claimErr.message };
+  }
   if (!claimed?.length) {
     return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
   }
