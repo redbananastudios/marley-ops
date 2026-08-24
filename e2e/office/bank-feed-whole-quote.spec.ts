@@ -135,7 +135,14 @@ test.describe("Office — bank-feed whole-quote link", () => {
 
     await step("open the unmatched transfer's Attach dialog on /payments", page, async () => {
       await page.goto("/payments");
-      const row = page.locator("div.flex.flex-wrap", { hasText: counterpartyText });
+      // The counterparty name appears TWICE on this page — once on the alert row
+      // and once in the day feed — and both are `div.flex.flex-wrap`, so matching
+      // on text alone is a strict-mode violation. Only the alert row carries an
+      // Attach control, so that is what identifies it.
+      const row = page
+        .locator("div.flex.flex-wrap")
+        .filter({ hasText: counterpartyText })
+        .filter({ has: page.getByRole("button", { name: "Attach" }) });
       await expect(row).toBeVisible();
       await row.getByRole("button", { name: "Attach" }).click();
     });
