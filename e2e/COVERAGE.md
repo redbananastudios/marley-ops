@@ -28,6 +28,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
 | Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
+| Bank feed — whole-quote link (deposit+balance settled in one transfer) | ✅ | office/bank-feed-whole-quote.spec.ts |
 | Contractor pay — return a submitted invoice | ✅ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
 | Job Board (now embedded in /schedule as JobBoardView) — resources, week nav, assign modal | ⬜ | none — office/job-board.spec.ts was deleted by PR #60 (Job Board page removal, component kept) and never replaced; office/schedule.spec.ts only covers the survey/removal diary, not the allocation board embedded alongside it. Found stale (still listed ✅) by the 2026-08-24 QA audit — corrected here, not re-written this run |

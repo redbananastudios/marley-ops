@@ -50,6 +50,13 @@ function db() {
   return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
+/** A service-role handle for a spec's OWN ad-hoc seed/teardown (marker rows it
+ *  creates and deletes itself), carrying the same prod-host refusal as every
+ *  other use of this file. Prefer the named helpers above where one exists. */
+export function adminClient() {
+  return db();
+}
+
 export interface SeededJob {
   leadId: string;
   quoteId: string;
