@@ -223,7 +223,7 @@ export async function healMissingPaidMethods(sb: SupabaseClient): Promise<number
     .from("bank_transactions")
     .select("matched_quote_id, match_kind")
     .in("status", ["confirmed", "reconciled"])
-    .in("match_kind", ["deposit", "commitment", "balance"])
+    .in("match_kind", ["deposit", "commitment", "balance", "full"])
     .not("matched_quote_id", "is", null);
   if (error) {
     log.error("bank-feed.method-heal.read_failed", { error: error.message });
@@ -232,8 +232,12 @@ export async function healMissingPaidMethods(sb: SupabaseClient): Promise<number
   const wanted = new Map<string, { quoteId: string; kind: "deposit" | "commitment" | "balance" }>();
   for (const r of data ?? []) {
     const quoteId = r.matched_quote_id as string;
-    const kind = r.match_kind as "deposit" | "commitment" | "balance";
-    wanted.set(claimKey(quoteId, kind), { quoteId, kind });
+    // A 'full' link is proof for every recorded payment on that quote, not one.
+    const kinds =
+      r.match_kind === "full"
+        ? (["deposit", "commitment", "balance"] as const)
+        : ([r.match_kind as "deposit" | "commitment" | "balance"] as const);
+    for (const kind of kinds) wanted.set(claimKey(quoteId, kind), { quoteId, kind });
   }
   if (!wanted.size) return 0;
 

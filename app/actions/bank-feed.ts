@@ -9,6 +9,7 @@ import {
   markQuoteDepositPaidAction,
 } from "@/app/(dashboard)/bookings/actions";
 import { backfillPaidMethod, loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
+import { wholeQuoteLinks } from "@/lib/bank-feed/whole-quote";
 import type { OpenItem } from "@/lib/bank-feed/match";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { log } from "@/lib/log";
@@ -37,6 +38,11 @@ import { log } from "@/lib/log";
 
 type PayKind = "deposit" | "commitment" | "balance";
 const PAY_KINDS = new Set<string>(["deposit", "commitment", "balance"]);
+/** A link that explains EVERY recorded payment on one quote (see
+ *  lib/bank-feed/whole-quote.ts). Never an open-money target: there is
+ *  nothing to record, only an already-recorded set to point the bank row at. */
+const WHOLE_QUOTE = "full" as const;
+type LinkKind = PayKind | typeof WHOLE_QUOTE;
 
 const pennies = (n: number): number => Math.round(n * 100);
 
@@ -152,7 +158,10 @@ export interface AttachTarget {
   quoteId: string;
   quoteRef: string;
   customer: string | null;
-  kind: PayKind;
+  kind: LinkKind;
+  /** For a whole-quote link, the recorded payments it covers ("deposit",
+   *  "balance") so the office sees what it is settling, not just a total. */
+  kinds?: PayKind[];
   amount: number;
   /** Equals the transfer to the penny — only these are attachable. */
   amountMatches: boolean;
@@ -197,11 +206,28 @@ export async function searchAttachTargetsAction(input: { txId: string; query: st
     settled: isSettled,
   });
 
+  // A job paid off in ONE transfer matches no single settled item — its money is
+  // split across deposit/balance rows. Offer the set, still only on an exact
+  // penny match of the sum (QA: IMV012's real £660 vs recorded £100 + £560).
+  const wholeQuote: AttachTarget[] = wholeQuoteLinks(settled, txPennies)
+    .filter((w) => matchesQuery(w))
+    .map((w) => ({
+      quoteId: w.quoteId,
+      quoteRef: w.quoteRef,
+      customer: w.customer,
+      kind: WHOLE_QUOTE,
+      kinds: w.kinds,
+      amount: w.amount,
+      amountMatches: true,
+      settled: true,
+    }));
+
   const targets: AttachTarget[] = [
     ...open.filter((o) => (q ? matchesQuery(o) : pennies(o.amount) === txPennies)).map((o) => toTarget(o, false)),
     // Settled items only ever link on an EXACT amount (a link binds "this
     // transfer IS that payment" with no human-readable delta to reason about).
     ...settled.filter((s) => pennies(s.amount) === txPennies && matchesQuery(s)).map((s) => toTarget(s, true)),
+    ...wholeQuote,
   ]
     .sort((a, b) => {
       if (a.settled !== b.settled) return a.settled ? 1 : -1; // open money first
@@ -220,11 +246,12 @@ export async function searchAttachTargetsAction(input: { txId: string; query: st
 export async function linkRecordedBankTransactionAction(input: {
   txId: string;
   quoteId: string;
-  kind: PayKind;
+  kind: LinkKind;
 }) {
   const userId = await officeActor();
   if (!userId) return { ok: false as const, error: "Office access required." };
-  if (!PAY_KINDS.has(input.kind)) {
+  const wholeQuote = input.kind === WHOLE_QUOTE;
+  if (!wholeQuote && !PAY_KINDS.has(input.kind)) {
     return { ok: false as const, error: "Storage payments are recorded from the Storage page." };
   }
 
@@ -243,33 +270,62 @@ export async function linkRecordedBankTransactionAction(input: {
   // amount. (An open item here means the office picked the wrong row — the
   // attach path records open money, this one only explains recorded money.)
   const { settled } = await loadLedgerItems(admin);
-  const item = settled.find((s) => s.quoteId === input.quoteId && s.kind === input.kind);
-  if (!item) {
-    return { ok: false as const, error: "That payment isn't recorded on that quote — use Attach to record open money." };
+
+  // The set this link will settle. For a whole-quote link that is every recorded
+  // payment on the quote, re-derived here and re-checked against the sum — the
+  // client's word for which payments it covers is never trusted.
+  let items: typeof settled;
+  if (wholeQuote) {
+    const link = wholeQuoteLinks(settled, pennies(Number(tx.amount))).find(
+      (w) => w.quoteId === input.quoteId,
+    );
+    if (!link) {
+      return {
+        ok: false as const,
+        error:
+          "This transfer no longer matches that quote's recorded payments exactly — refresh and check it again.",
+      };
+    }
+    items = settled.filter((s) => s.quoteId === input.quoteId && link.kinds.includes(s.kind));
+  } else {
+    const item = settled.find((s) => s.quoteId === input.quoteId && s.kind === input.kind);
+    if (!item) {
+      return { ok: false as const, error: "That payment isn't recorded on that quote — use Attach to record open money." };
+    }
+    if (pennies(item.amount) !== pennies(Number(tx.amount))) {
+      return {
+        ok: false as const,
+        error: `Amount differs — the recorded ${input.kind} on ${item.quoteRef} is £${item.amount.toFixed(2)}. If this transfer is part of it, clear it instead.`,
+      };
+    }
+    items = [item];
   }
-  if (pennies(item.amount) !== pennies(Number(tx.amount))) {
-    return {
-      ok: false as const,
-      error: `Amount differs — the recorded ${input.kind} on ${item.quoteRef} is £${item.amount.toFixed(2)}. If this transfer is part of it, clear it instead.`,
-    };
-  }
+  const item = items[0];
 
   // One recorded payment, one bank row. If another transfer already explains
   // this payment then THIS one is a second payment for it — linking would file
   // money we probably owe back as "explained" and it would leave every queue.
+  // A whole-quote link claims EVERY payment on the quote, so any existing match
+  // on that quote collides with it; a single-kind link collides with its own kind
+  // AND with a whole-quote row that already covers it. Getting this wrong files a
+  // second payment as "explained" and it leaves every queue.
+  const collidesWith = wholeQuote
+    ? ["deposit", "commitment", "balance", WHOLE_QUOTE]
+    : [input.kind, WHOLE_QUOTE];
   const { data: already, error: alreadyErr } = await admin
     .from("bank_transactions")
     .select("id")
     .eq("matched_quote_id", input.quoteId)
-    .eq("match_kind", input.kind)
+    .in("match_kind", collidesWith)
     .in("status", ["confirmed", "reconciled"])
     .neq("id", input.txId)
     .limit(1);
   if (alreadyErr) return { ok: false as const, error: alreadyErr.message };
   if (already?.length) {
+    const what = wholeQuote ? "this job" : `${item.quoteRef}'s ${input.kind}`;
     return {
       ok: false as const,
-      error: `Another transfer is already matched to ${item.quoteRef}'s ${input.kind}, so this looks like a SECOND payment for it. Check the bank and refund or credit the customer before clearing this row.`,
+      error: `Another transfer is already matched to ${what}, so this looks like a SECOND payment for it. Check the bank and refund or credit the customer before clearing this row.`,
     };
   }
 
@@ -292,7 +348,7 @@ export async function linkRecordedBankTransactionAction(input: {
 
   // The link proves the payment arrived by bank — fill a missing method so the
   // received ledger stops saying "Method not recorded". Fill-only, best-effort.
-  await backfillPaidMethod(admin, item);
+  for (const covered of items) await backfillPaidMethod(admin, covered);
 
   revalidatePath("/payments");
   return { ok: true as const, quoteRef: item.quoteRef };

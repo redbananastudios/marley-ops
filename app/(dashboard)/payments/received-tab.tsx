@@ -229,7 +229,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         .from("bank_transactions")
         .select(M_COLS)
         .in("status", ["confirmed", "reconciled"])
-        .in("match_kind", ["deposit", "commitment", "balance"])
+        .in("match_kind", ["deposit", "commitment", "balance", "full"])
         .not("matched_quote_id", "is", null)
         .gte("tx_date", window.startDay)
         .lte("tx_date", window.endDay),
@@ -252,22 +252,32 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         .from("bank_transactions")
         .select(M_COLS)
         .in("status", ["confirmed", "reconciled"])
-        .in("match_kind", ["deposit", "commitment", "balance"])
+        .in("match_kind", ["deposit", "commitment", "balance", "full"])
         .in("matched_quote_id", stampQuoteIds.slice(i, i + 100));
       matchRows.push(...(data ?? []));
     }
     const seenQk = new Set<string>();
     for (const r of matchRows) {
       if (!r.matched_quote_id || !r.match_kind) continue;
-      const qk = `${r.matched_quote_id}:${r.match_kind}`;
-      if (seenQk.has(qk)) continue;
-      seenQk.add(qk);
-      bankMatches.push({
-        quoteId: r.matched_quote_id,
-        kind: r.match_kind as BankMatchIn["kind"],
-        txDate: r.tx_date,
-        txTime: r.tx_time,
-      });
+      // 'full' is one transfer that paid the whole job, so it is the arrival-day
+      // truth for EVERY payment on that quote — expanding it here keeps those
+      // lines from reading "Method not recorded" with no bank date. Stamps for a
+      // kind the quote does not have are inert: nothing ever looks them up.
+      const kinds =
+        r.match_kind === "full"
+          ? (["deposit", "commitment", "balance"] as const)
+          : ([r.match_kind] as const);
+      for (const kind of kinds) {
+        const qk = `${r.matched_quote_id}:${kind}`;
+        if (seenQk.has(qk)) continue;
+        seenQk.add(qk);
+        bankMatches.push({
+          quoteId: r.matched_quote_id,
+          kind: kind as BankMatchIn["kind"],
+          txDate: r.tx_date,
+          txTime: r.tx_time,
+        });
+      }
     }
     // These lookups decide whether a bank-matched payment can be EMITTED, while
     // its stamp twin is already suppressed on the strength of `bankMatches`.

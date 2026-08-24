@@ -36,7 +36,15 @@ const KIND_LABEL: Record<AttachTarget["kind"], string> = {
   deposit: "Deposit",
   commitment: "Commitment",
   balance: "Balance",
+  full: "Whole job",
 };
+
+/** "Whole job (deposit + balance)" — the office must see WHICH payments a
+ *  single transfer is about to settle, not just that it settles "everything". */
+function targetLabel(t: AttachTarget): string {
+  const base = KIND_LABEL[t.kind];
+  return t.kind === "full" && t.kinds?.length ? `${base} (${t.kinds.join(" + ")})` : base;
+}
 
 export function AttachDialog({
   txId,
@@ -77,18 +85,25 @@ export function AttachDialog({
       try {
         // Settled targets LINK (arrival-day truth, no pipeline); open targets
         // RECORD through the normal paid pipeline.
-        const res = target.settled
-          ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind })
-          : await attachBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind });
+        // A whole-job target is ALWAYS a link: there is no open money to record,
+        // only an already-recorded set to point this transfer at. Narrowed
+        // explicitly so the attach path can never be handed kind "full".
+        const res =
+          target.kind === "full"
+            ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: "full" })
+            : target.settled
+              ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind })
+              : await attachBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind });
         if (!res.ok) {
           toast.error(res.error ?? "Could not record the payment.");
           router.refresh();
           return;
         }
+        const what = target.kind === "full" ? (target.kinds ?? []).join(" + ") : target.kind;
         toast.success(
           target.settled
-            ? `Linked — this transfer is ${target.quoteRef}'s ${target.kind}, already recorded.`
-            : `Recorded — ${target.quoteRef} ${target.kind} marked paid (bank transfer).`,
+            ? `Linked — this transfer is ${target.quoteRef}'s ${what}, already recorded.`
+            : `Recorded — ${target.quoteRef} ${what} marked paid (bank transfer).`,
         );
         setOpen(false);
         router.refresh();
@@ -167,7 +182,7 @@ export function AttachDialog({
                       {t.customer ? ` · ${t.customer}` : ""}
                     </p>
                     <p className="text-xs text-mist-400">
-                      {KIND_LABEL[t.kind]}
+                      {targetLabel(t)}
                       {t.settled
                         ? " — already recorded, tap to link this transfer to it"
                         : t.amountMatches
