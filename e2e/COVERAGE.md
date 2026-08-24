@@ -30,7 +30,8 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
 | Contractor pay — return a submitted invoice | ✅ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
-| Job Board — resources, week nav, assign modal | ✅ | office/job-board.spec.ts |
+| Job Board (now embedded in /schedule as JobBoardView) — resources, week nav, assign modal | ⬜ | none — office/job-board.spec.ts was deleted by PR #60 (Job Board page removal, component kept) and never replaced; office/schedule.spec.ts only covers the survey/removal diary, not the allocation board embedded alongside it. Found stale (still listed ✅) by the 2026-08-24 QA audit — corrected here, not re-written this run |
+| Board (/board) — pipeline kanban by stage | ⬜ | none — proven live 2026-08-24 by the QA audit (admin.board_kanban_jobs_list in qa/state.json) via a throwaway login + independent SQL recompute of all 6 columns (0 findings), but has never had a permanent spec |
 | Completed Jobs — ledger renders, search by ref, empty-state | ✅ | office/jobs.spec.ts |
 | Clients — toggle/search, detail, add-client dialog | ✅ | office/clients.spec.ts |
 | Documents — tabs + search | ✅ | office/records.spec.ts |
@@ -64,6 +65,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | P0 #7 offline completion, #8 double-submit sign-off | ✅ | crew/p0.spec.ts |
 | Job detail — brief + add a private crew note | ✅ | crew/job-detail.spec.ts |
 | Availability — normal week + calendar render | ✅ | crew/availability.spec.ts |
+| Hours log — add, edit, clear a day | 🟡 | crew/hours.spec.ts — proven live 2026-08-24 via a throwaway crew login + SQL read-back (0 findings), but `test.skip`'d: this env has no `E2E_CREW_PASSWORD` so `auth.setup.ts` can't sign in the persistent crew fixture, so it has never actually executed |
 | Push opt-in is NOT offered to crew (QA-20260823-04) | ✅ | crew/push-optin.spec.ts |
 | Contractor agreement gate → sign → invoicing unlocks | ✅ | crew/contractor.spec.ts |
 | Contractor invoicing — start/add a line by hand/edit/submit | ✅ | crew/invoicing-submit-lines.spec.ts |
