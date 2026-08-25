@@ -52,6 +52,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LEAD_STATUSES, LEAD_STATUS_META } from "@/components/lead-status-badge";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Pager, usePager } from "@/components/ui/pager";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
@@ -61,6 +63,8 @@ import {
 
 export interface LeadCard {
   id: string;
+  /** Brand slug (leads.brand) — resolved to chip data via the page's active-brand list. */
+  brand: string;
   name: string | null;
   status: string;
   entry_channel: string;
@@ -105,12 +109,17 @@ const SOURCE_LABEL: Record<SourceKey, string> = Object.fromEntries(
 const CLOSED = new Set(["completed", "declined"]);
 const DAY = 86_400_000;
 
+/* Hex→token cleanup (multi-brand PRD §4 cross-cutting): only `confirmed`'s
+   border has a byte-equal token (--color-mm-red = #c03838). Every other
+   literal here has NO token with an identical value (the success/warn/danger
+   tokens all differ), so they stay hex — swapping to a near-miss token would
+   shift the rendered colour. */
 const BOARD_STATUS_STYLE: Record<string, { border: string; badge: string }> = {
   website_enquiry: { border: "#E58A19", badge: "bg-[#FFF4E5] text-[#B56300]" },
   survey_booked: { border: "#8B5CF6", badge: "bg-[#F2ECFF] text-[#6D3DD1]" },
   quoted: { border: "#27A862", badge: "bg-[#EAF8F0] text-[#187944]" },
   provisional: { border: "#2F80ED", badge: "bg-[#EAF3FF] text-[#1D5FBF]" },
-  confirmed: { border: "#C03838", badge: "bg-[#FBECEC] text-[#A8221C]" },
+  confirmed: { border: "var(--color-mm-red)", badge: "bg-[#FBECEC] text-[#A8221C]" },
   completed: { border: "#27A862", badge: "bg-[#EAF8F0] text-[#187944]" },
   declined: { border: "#697386", badge: "bg-[#F1F3F5] text-[#475467]" },
 };
@@ -175,10 +184,18 @@ export function LeadsBoard({
   leads,
   meId,
   initialStatus,
+  brands = [],
+  showBrandChips = false,
 }: {
   leads: LeadCard[];
   meId: string | null;
   initialStatus?: string;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. Empty or
+   *  single-entry → no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip is
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
 }) {
   const [tab, setTab] = useState<"all" | "web">("all");
   // No URL status → default to the "Enquiry" preset (Peter, 2026-08-14): the
@@ -268,6 +285,8 @@ export function LeadsBoard({
   }, [base, preset, status, search, sort]);
 
   const pager = usePager(visible, 24);
+
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
 
   const PRESETS: { key: PresetKey; label: string }[] = [
     { key: "all", label: "All" },
@@ -367,6 +386,11 @@ export function LeadsBoard({
             ))}
           </SelectContent>
         </Select>
+        {/* Brand filter (multi-brand PRD §4 Leads) — joins the search/status/sort
+            row, left of the Board/Table toggle. Renders nothing below 2 brands.
+            Composes with the preset chips above: presets filter client-side
+            within the server-side ?brand= narrowed set. */}
+        {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
         <span className="tabular text-xs text-mist-400">{visible.length} shown</span>
         <div role="group" className="ml-auto inline-flex rounded-md border border-[#E2E6EC] bg-[#F1F3F5] p-0.5" aria-label="Lead view">
           <button
@@ -406,11 +430,15 @@ export function LeadsBoard({
           {view === "board" ? (
             <div data-testid="leads-board" className="mt-3 grid items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {pager.paged.map((l) => (
-                <LeadCardItem key={l.id} lead={l} />
+                <LeadCardItem
+                  key={l.id}
+                  lead={l}
+                  brand={showBrandChips ? (brandBySlug.get(l.brand) ?? null) : null}
+                />
               ))}
             </div>
           ) : (
-            <LeadTable leads={pager.paged} />
+            <LeadTable leads={pager.paged} brandBySlug={brandBySlug} showBrand={showBrandChips} />
           )}
           <Pager
             page={pager.page}
@@ -525,13 +553,24 @@ function LeadActionsMenu({ lead, className }: { lead: LeadCard; className?: stri
   );
 }
 
-function LeadTable({ leads }: { leads: LeadCard[] }) {
+function LeadTable({
+  leads,
+  brandBySlug,
+  showBrand,
+}: {
+  leads: LeadCard[];
+  brandBySlug: Map<string, BrandChipData>;
+  /** Brand column renders only in multi-brand mode with the filter on All
+   *  (multi-brand PRD §4 Leads: inserted between Customer and Move). */
+  showBrand: boolean;
+}) {
   return (
     <div data-testid="leads-table" className="mt-3 overflow-x-auto rounded-[10px] border border-[#E2E6EC] bg-white">
       <table className="w-full min-w-[920px] border-collapse text-left">
         <thead className="bg-[#F7F8FA] text-[11px] font-bold uppercase tracking-[0.04em] text-[#667085]">
           <tr>
             <th scope="col" className="px-4 py-2.5">Customer</th>
+            {showBrand ? <th scope="col" className="px-4 py-2.5">Brand</th> : null}
             <th scope="col" className="px-4 py-2.5">Move</th>
             <th scope="col" className="px-4 py-2.5">Status</th>
             <th scope="col" className="px-4 py-2.5">Quote</th>
@@ -557,6 +596,14 @@ function LeadTable({ leads }: { leads: LeadCard[] }) {
                     {lead.reference ? ` · ${lead.reference}` : ""}
                   </p>
                 </td>
+                {showBrand ? (
+                  <td className="px-4 py-3 align-middle">
+                    {(() => {
+                      const b = brandBySlug.get(lead.brand);
+                      return b ? <BrandChip brand={b} /> : <span className="text-[#98A2B3]">—</span>;
+                    })()}
+                  </td>
+                ) : null}
                 <td className="px-4 py-3 align-middle">
                   <p className="text-[13px] font-semibold text-[#344054]">{route}</p>
                   {lead.property_size ? <p className="mt-0.5 text-[11px] text-[#667085]">{lead.property_size}</p> : null}
@@ -653,7 +700,15 @@ function ResponseChip({ lead }: { lead: LeadCard }) {
   );
 }
 
-function LeadCardItem({ lead }: { lead: LeadCard }) {
+function LeadCardItem({
+  lead,
+  brand = null,
+}: {
+  lead: LeadCard;
+  /** Resolved chip data — null hides the chip (single-brand mode, or the
+   *  ?brand= filter already names one brand; multi-brand PRD §4 Leads). */
+  brand?: BrandChipData | null;
+}) {
   const route =
     lead.from_postcode || lead.to_postcode
       ? `${lead.from_postcode ?? "?"} → ${lead.to_postcode ?? "?"}`
@@ -685,6 +740,9 @@ function LeadCardItem({ lead }: { lead: LeadCard }) {
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
             <span className="tabular min-w-0 truncate text-[13px] font-semibold text-[#344054]">{route}</span>
             <span className="inline-flex min-w-0 items-center gap-1.5 truncate text-[11px] text-[#667085]">
+              {/* Brand chip beside the source dot, under the customer name
+                  (multi-brand PRD §4 Leads). 16px — the tight sub-line size. */}
+              {brand ? <BrandChip brand={brand} size={16} /> : null}
               <span
                 aria-hidden
                 className="size-1.5 shrink-0 rounded-full"

@@ -6,25 +6,36 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { QuotesView, type QuoteRow } from "@/components/quotes/quotes-view";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
 
 const QUOTE_COLUMNS =
-  "id, quote_ref, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, lead_id, created_at, updated_at, deposit_paid_at";
+  "id, quote_ref, brand, customer_name, collect_addr, dest_addr, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, lead_id, created_at, updated_at, deposit_paid_at";
 
 export default async function QuotesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; brand?: string }>;
 }) {
-  const { q } = await searchParams;
-  const query = (q ?? "").trim();
+  const sp = await searchParams;
+  const query = (sp.q ?? "").trim();
   // Strip the characters that would break the PostgREST or()/ilike filter grammar
   // (commas + parens delimit conditions; %/* are wildcards). Refs, names and
   // postcodes never legitimately contain these.
   const term = query.replace(/[,()%*\\"]/g, "").trim();
 
   const supabase = await createClient();
+
+  // Brand layer (multi-brand PRD §4 Quotes): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1). The ?brand= filter narrows the quotes query itself, so the 4
+  // summary tiles recompute for the filtered brand — "Win rate" means that
+  // brand's win rate — not just the visible list.
+  const activeBrands = await listActiveBrands(supabase);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
 
   // Server-side search across the WHOLE table (not just the visible page). Ref
   // and address text match directly on quotes; name/postcode go through the lead
@@ -65,10 +76,24 @@ export default async function QuotesPage({
         if (leadIds.length) orParts.push(`lead_id.in.(${leadIds.join(",")})`);
         q = q.or(orParts.join(","));
       }
+      q = applyBrandFilter(q, brandFilter);
       return q.order("created_at", { ascending: false }).order("id").range(f, t);
     }),
     getBusinessSettings(supabase),
   ]);
+
+  // Minimal serialisable brand shape for the client view — satisfies both
+  // BrandChipData and BrandFilterOption; keeps brand config (emails, phone
+  // numbers, template ids) out of the client payload. Same pattern as /leads.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -85,6 +110,8 @@ export default async function QuotesPage({
         quotes={quotes as QuoteRow[]}
         defaultDeposit={settings.defaultDeposit}
         query={query}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
       />
     </main>
   );

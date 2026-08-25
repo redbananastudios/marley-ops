@@ -11,18 +11,25 @@
  * just the visible page.
  */
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { FileDown, History, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { UK_TZ } from "@/lib/uk-time";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Pager, usePager } from "@/components/ui/pager";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import type { CompletedJobRow } from "@/lib/completed-jobs";
 
-export type CompletedJobRowView = CompletedJobRow & { certificateUrl: string | null };
+export type CompletedJobRowView = CompletedJobRow & {
+  certificateUrl: string | null;
+  /** Brand slug (leads.brand) — resolved to chip data via the page's
+   *  active-brand list. Optional so the view stays safe without it. */
+  brand?: string | null;
+};
 
 const gbp = (n: number | null): string =>
   n == null || Number.isNaN(n)
@@ -64,15 +71,26 @@ function reviewChip(row: CompletedJobRowView) {
 export function CompletedJobsView({
   rows,
   query = "",
+  brands = [],
+  showBrandChips = false,
 }: {
   rows: CompletedJobRowView[];
   /** Active server-side search term (URL `q`) — seeds the input and empty state. */
   query?: string;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. Empty or
+   *  single-entry → no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip is
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [search, setSearch] = useState(query);
+
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
 
   // Push the debounced term into the URL so the server re-filters the whole
   // history. Only navigate when it actually differs from what the server has.
@@ -81,11 +99,17 @@ export function CompletedJobsView({
       const next = search.trim();
       if (next === query) return;
       startTransition(() => {
-        router.replace(next ? `${pathname}?q=${encodeURIComponent(next)}` : pathname, { scroll: false });
+        // Rebuild from the live params so the ?brand= filter (and anything
+        // else on the URL) survives a search — multi-brand PRD §4.
+        const params = new URLSearchParams(searchParams.toString());
+        if (next) params.set("q", next);
+        else params.delete("q");
+        const qs = params.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
       });
     }, 300);
     return () => clearTimeout(id);
-  }, [search, query, pathname, router]);
+  }, [search, query, pathname, router, searchParams]);
 
   const pager = usePager(rows, 25);
 
@@ -95,6 +119,9 @@ export function CompletedJobsView({
         <p className="tabular text-sm text-mist-400">
           {rows.length} {rows.length === 1 ? "completed job" : "completed jobs"}
         </p>
+        {/* Brand filter (multi-brand PRD §4 Pipeline and jobs) — joins the
+            existing search form row. Renders nothing below 2 brands. */}
+        {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
         <div className="relative ml-auto min-w-0 flex-1 sm:max-w-xs">
           <Search strokeWidth={1.75} className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-mist-400" />
           <Input
@@ -144,8 +171,26 @@ export function CompletedJobsView({
                     <span className="truncate text-sm font-semibold text-foreground">{r.customer}</span>
                     {r.quoteRef ? <span className="tabular shrink-0 text-xs text-mist-400">{r.quoteRef}</span> : null}
                   </span>
-                  <span className="block truncate text-xs text-mist-400 sm:hidden">Moved {moveDate(r.moveAt)}</span>
-                  {r.route ? <span className="hidden truncate text-xs text-mist-400 sm:block">{r.route}</span> : null}
+                  {/* Brand chip — in the customer column beneath the quote ref,
+                      leading the subline; hidden when the ?brand= filter already
+                      names one brand (multi-brand PRD §4 Pipeline and jobs).
+                      16px — the tight sub-line size. Without a chip the markup
+                      is exactly today's (the single-brand invariant, PRD §1). */}
+                  {(() => {
+                    const b = showBrandChips && r.brand ? brandBySlug.get(r.brand) : undefined;
+                    return b ? (
+                      <span className="flex items-center gap-1.5">
+                        <BrandChip brand={b} size={16} />
+                        <span className="min-w-0 truncate text-xs text-mist-400 sm:hidden">Moved {moveDate(r.moveAt)}</span>
+                        {r.route ? <span className="hidden min-w-0 truncate text-xs text-mist-400 sm:block">{r.route}</span> : null}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="block truncate text-xs text-mist-400 sm:hidden">Moved {moveDate(r.moveAt)}</span>
+                        {r.route ? <span className="hidden truncate text-xs text-mist-400 sm:block">{r.route}</span> : null}
+                      </>
+                    );
+                  })()}
                 </span>
               </Link>
 

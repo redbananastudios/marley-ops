@@ -4,23 +4,37 @@ import { StatusBoard, type BoardLead } from "@/components/board/status-board";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
 
-export default async function BoardPage() {
+type SearchParams = { brand?: string };
+
+export default async function BoardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
+  const sp = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Brand layer (multi-brand PRD §4): with a single active brand no brand UI
+  // renders and the page is unchanged (the single-brand invariant, PRD §1).
+  const activeBrands = await listActiveBrands(supabase);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+
   // Unbounded tables page through fetchAllRows (PostgREST truncates at 1000 rows).
   const [leads, quoteData, apptData] = await Promise.all([
     fetchAllRows((f, t) =>
-      supabase
-        .from("leads")
-        .select(
-          "id, name, status, entry_channel, from_postcode, to_postcode, preferred_date, property_size, first_contacted_at, phone, estimator_id, submitted_at, created_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
-        )
+      applyBrandFilter(
+        supabase
+          .from("leads")
+          .select(
+            "id, brand, name, status, entry_channel, from_postcode, to_postcode, preferred_date, property_size, first_contacted_at, phone, estimator_id, submitted_at, created_at, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+          ),
+        brandFilter,
+      )
         .order("submitted_at", { ascending: false })
         .order("id")
         .range(f, t),
@@ -58,6 +72,7 @@ export default async function BoardPage() {
     const v = valueMap.get(l.id);
     return {
       id: l.id,
+      brand: l.brand,
       name: l.name,
       status: l.status,
       source: classifySource(l as LeadLite),
@@ -80,11 +95,30 @@ export default async function BoardPage() {
   t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7));
   const thisWeekStart = t.toISOString().slice(0, 10);
 
+  // Minimal serialisable brand shape for the client components — satisfies
+  // both BrandChipData and BrandFilterOption; keeps brand config (emails,
+  // phone numbers, template ids) out of the client payload.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
+
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
       {/* Same name as the sidebar item — "Board" alone collides with Job Board. */}
       <PageHeader eyebrow="Pipeline" title="Pipeline Board" />
-      <StatusBoard leads={cards} meId={user?.id ?? null} thisWeekStart={thisWeekStart} />
+      <StatusBoard
+        leads={cards}
+        meId={user?.id ?? null}
+        thisWeekStart={thisWeekStart}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
+      />
     </main>
   );
 }

@@ -6,7 +6,11 @@ import { moveDateLabel } from "@/lib/quote/payments";
 import { daysBetweenUk, type BookingBucket } from "@/lib/bookings/queue";
 import { loadBookingRows, ukDayOfInstant as ukDayOf, type BookingRow as Row } from "@/lib/bookings/load-signals";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 import { ResendInvoiceButton } from "@/components/leads/resend-invoice-button";
@@ -134,10 +138,62 @@ function AllocateChip({ day }: { day: string }) {
   );
 }
 
-export default async function BookingsPage() {
+export default async function BookingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ brand?: string }>;
+}) {
   const sb = await createClient();
   // Shared with the /payments Due + Upcoming tabs — one ledger, one classifier.
-  const { rows, todayUk } = await loadBookingRows(sb);
+  const { rows: allRows, todayUk } = await loadBookingRows(sb);
+
+  // Brand layer (multi-brand PRD §4 Bookings): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1). loadBookingRows is shared verbatim with /payments, so the brand
+  // and import signals ride a supplementary batched read of the rows' leads
+  // here rather than widening the shared loader; the ?brand= narrowing is
+  // applied in the DB on that read, and the row set filters to its result —
+  // so all 8 money-lifecycle sections, their count pills and the summary
+  // tiles follow the filter.
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(await searchParams, activeBrands);
+
+  const brandByLead = new Map<string, string>();
+  const importedLeads = new Set<string>();
+  if (multi && allRows.length) {
+    const leadIds = [...new Set(allRows.map((r) => r.leadId))];
+    // CHUNKED on purpose: PostgREST caps unpaged reads at 1000 rows, and this
+    // is the one place where truncation would DROP rows rather than degrade
+    // enrichment — a brand-filtered /bookings keeps only rows this read
+    // returns, so a silent cap would understate the money tiles. 500 ids per
+    // batch also keeps the `in` filter comfortably inside URL limits.
+    for (let i = 0; i < leadIds.length; i += 500) {
+      const batch = leadIds.slice(i, i + 500);
+      const { data: leadBrands, error: leadBrandsErr } = await applyBrandFilter(
+        sb.from("leads").select("id, brand, source_system").in("id", batch),
+        brandFilter,
+      );
+      // Fail loud, not narrow: a failed batch under a brand filter would
+      // silently drop every booking in it (the "I could not check" rule).
+      if (leadBrandsErr) throw new Error(`bookings brand read failed: ${leadBrandsErr.message}`);
+      for (const l of leadBrands ?? []) {
+        brandByLead.set(l.id, l.brand);
+        // Imported bookings carry an "Imported" pill until the job completes —
+        // same lifecycle as the legacy pill: completed leads never reach this
+        // page (loadBookingRows drops them), so the pill retires with the row.
+        if (l.source_system === "pitmans") importedLeads.add(l.id);
+      }
+    }
+  }
+  const rows =
+    multi && brandFilter !== "all" ? allRows.filter((r) => brandByLead.has(r.leadId)) : allRows;
+
+  // Chip data comes straight off the active-brand rows (server component — no
+  // client payload to slim). Hidden when the segmented control already names
+  // a single brand (multi-brand PRD §4 opening rules).
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
 
   const by = (b: BookingBucket) => rows.filter((r) => r.bucket === b);
   const awaiting = by("deposit_outstanding").sort((a, b) => (a.acceptedAt ?? "").localeCompare(b.acceptedAt ?? ""));
@@ -164,22 +220,36 @@ export default async function BookingsPage() {
 
   /* ---------- shared row fragments ---------- */
 
-  const nameAndRef = (r: Row, detail: string) => (
-    <div className="min-w-0 flex-1">
-      <Link href={`/leads/${r.leadId}`} className="font-medium text-foreground hover:underline">
-        {r.customer}
-      </Link>
-      {r.legacy ? (
-        <span
-          className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500"
-          title="Imported from iMVE — old-terms booking, payments handled manually"
-        >
-          Legacy (iMVE)
-        </span>
-      ) : null}
-      <p className="text-xs text-mist-400">{detail}</p>
-    </div>
-  );
+  const nameAndRef = (r: Row, detail: string) => {
+    // Brand chip — beside the customer name, in the pills' position; hidden
+    // when the ?brand= filter already names one brand (multi-brand PRD §4).
+    const chipBrand = showBrandChips ? chipBySlug.get(brandByLead.get(r.leadId) ?? "") : undefined;
+    return (
+      <div className="min-w-0 flex-1">
+        <Link href={`/leads/${r.leadId}`} className="font-medium text-foreground hover:underline">
+          {r.customer}
+        </Link>
+        {chipBrand ? <BrandChip brand={chipBrand} className="ml-2 align-middle" /> : null}
+        {r.legacy ? (
+          <span
+            className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500"
+            title="Imported from iMVE — old-terms booking, payments handled manually"
+          >
+            Legacy (iMVE)
+          </span>
+        ) : null}
+        {importedLeads.has(r.leadId) ? (
+          <span
+            className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500"
+            title="Imported booking — carried across mid-flight from the previous diary"
+          >
+            Imported
+          </span>
+        ) : null}
+        <p className="text-xs text-mist-400">{detail}</p>
+      </div>
+    );
+  };
 
   const policyStrip = (r: Row) => (
     <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -303,6 +373,13 @@ export default async function BookingsPage() {
     <main className="flex-1 space-y-5 p-6 md:p-8">
       <PageHeader eyebrow="Sales" title="Bookings">
         <p className="text-sm text-mist-400">The money queue — accepted quotes, from deposit to move day</p>
+        {/* Brand filter (multi-brand PRD §4 Bookings) — this page has no search
+            bar, so the segmented control lives in the PageHeader. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
       </PageHeader>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
