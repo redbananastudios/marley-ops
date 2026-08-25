@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
 import { CheckCircle2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { listActiveBrands } from "@/lib/brand";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip } from "@/components/brand/brand-chip";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
@@ -59,7 +61,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id, brand",
     )
     .eq("id", id)
     .maybeSingle();
@@ -98,7 +100,13 @@ export default async function QuoteDetailPage({
           job: { ...blobValues.job, moveDate: authoritativeMoveDate, moveDateEstimated: false },
         }
       : blobValues;
-  const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
+  const [pricing, settings, activeBrands] = await Promise.all([
+    getPricingConfig(sb),
+    getBusinessSettings(sb),
+    // Multi-brand only: the header chip renders when a second brand row is
+    // active (the single-brand invariant, PRD §1).
+    listActiveBrands(sb),
+  ]);
   const emailedCount = quote.email_send_count ?? 0;
 
   // Every quote gets its accept token here (lazily, idempotent) so the PDF QR
@@ -238,9 +246,15 @@ export default async function QuoteDetailPage({
   }
 
   const isLegacyImve = quote.source === "imve";
+  const chipBrand =
+    activeBrands.length > 1 ? activeBrands.find((b) => b.slug === quote.brand) : undefined;
   const headerMeta = (
     <>
       <QuoteStatusPill status={statusStr} />
+      {/* Detail-page eyebrows have room, so the chip carries the short name
+          (multi-brand PRD §4 opening rules). Reads the quote's own
+          denormalised brand column — no lead join. */}
+      {chipBrand ? <BrandChip brand={chipBrand} variant="eyebrow" /> : null}
       {isLegacyImve ? (
         <QuoteMetaChip>
           Legacy (iMVE{quote.imve_ref && quote.imve_ref !== quote.quote_ref ? ` ${quote.imve_ref}` : ""})
