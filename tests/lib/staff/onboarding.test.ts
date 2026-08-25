@@ -98,6 +98,18 @@ describe("staffSubmissionSchema", () => {
     if (res.success) expect(res.data.address_postcode).toBe("SP7 8AA");
   });
 
+  it("re-spaces a postcode typed without the internal space (QA-20260825-01)", () => {
+    for (const [typed, stored] of [
+      ["sp71ab", "SP7 1AB"], // no space at all
+      ["SW1A1AA", "SW1A 1AA"], // longest outward code, no space
+      ["m11ae", "M1 1AE"], // shortest outward code, no space
+    ] as const) {
+      const res = staffSubmissionSchema.safeParse({ ...valid, address_postcode: typed });
+      expect(res.success).toBe(true);
+      if (res.success) expect(res.data.address_postcode).toBe(stored);
+    }
+  });
+
   it("requires a street address; town is optional", () => {
     expect(staffSubmissionSchema.safeParse({ ...valid, address_line1: "  " }).success).toBe(false);
     expect(staffSubmissionSchema.safeParse({ ...valid, address_town: "" }).success).toBe(true);

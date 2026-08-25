@@ -69,7 +69,11 @@ export const staffSubmissionSchema = z.object({
     .trim()
     .min(1, "Enter your postcode")
     .refine((s) => UK_POSTCODE_RE.test(s), "Enter a valid UK postcode")
-    .transform((s) => s.toUpperCase().slice(0, 10)),
+    // Canonical UK form: uppercase, single space before the 3-char inward code
+    // ("sp71ab" stores as "SP7 1AB").
+    .transform((s) =>
+      s.toUpperCase().replace(/\s+/g, "").replace(/^(.+)(\d[A-Z]{2})$/, "$1 $2").slice(0, 10),
+    ),
   email: z
     .string()
     .trim()
