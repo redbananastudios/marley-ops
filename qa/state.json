@@ -1,5 +1,6 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
+  "buildInProgress": "Pitmans multi-brand build under way (docs/multi-brand-prd.md, one PR per gate, label pitmans-gate). Gates merged so far: 0 (PRD + auto-merge label); gate 1 (brand foundation) in flight. Staging is deliberately multi-brand (brands.pitmans active=true) but the brand UI is UNBUILT until gates 3+ land - partially-built or absent brand surfaces are EXPECTED and are not findings; the standing contract is single-brand parity (e2e/parity/single-brand.spec.ts). Repair tier: leave safe-fix findings on surfaces a pitmans-gate PR is touching to the build session (PRD SS6/SS8).",
   "lastAuditSha": "2936c01",
   "crew": {
     "availability_set_remove": {
