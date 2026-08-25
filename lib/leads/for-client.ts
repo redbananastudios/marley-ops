@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import { DEFAULT_BRAND } from "@/lib/brand";
 
 type Sb = SupabaseClient<Database>;
 
@@ -16,12 +17,19 @@ export type EnsureLeadResult =
  * live) — but phone customers often start life as a bare client record. This
  * finds the client's open enquiry, or opens one from their stored contact +
  * address details, so "book a survey for this client" always has a lead.
+ *
+ * `brand` (GATE 11, multi-brand PRD §3.2) is stamped on the lead INSERT only —
+ * callers resolve and validate it server-side (the appointment dialog's picker,
+ * mirroring /leads/new). When the client already has an open enquiry that lead
+ * is reused with the brand it already carries; the argument never rebrands an
+ * existing lead.
  */
 export async function ensureLeadForClient(
   sb: Sb,
   clientId: string,
   actorId: string | null,
   entryChannel: string = "manual",
+  brand: string = DEFAULT_BRAND,
 ): Promise<EnsureLeadResult> {
   const { data: client } = await sb
     .from("clients")
@@ -46,6 +54,7 @@ export async function ensureLeadForClient(
     .from("leads")
     .insert({
       client_id: clientId,
+      brand,
       status: "website_enquiry",
       entry_channel: entryChannel as never,
       source_system: "marley_ops",

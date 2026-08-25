@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
-import { DEFAULT_BRAND } from "@/lib/brand";
+import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 import { balanceDueDate } from "@/lib/quote/payments";
 import { commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
@@ -48,6 +48,11 @@ export interface CreateAppointmentInput {
   leadId?: string | null;
   /** A bare client picked in the diary (no enquiry yet) — we open one first. */
   clientId?: string | null;
+  /** GATE 11 (multi-brand PRD §4): which brand the enquiry a BARE-CLIENT booking
+   *  opens belongs to. Only read when `clientId` is set with no `leadId` —
+   *  bookings from a lead take the lead's brand and ignore this entirely.
+   *  Resolved server-side against active brands, mirroring createLeadAction. */
+  brand?: string | null;
   estimatorId?: string | null;
   startsAt: string; // ISO
   endsAt: string; // ISO
@@ -211,7 +216,20 @@ export async function createAppointment(input: CreateAppointmentInput) {
   // Booked against a bare client: open (or reuse) their enquiry first — every
   // booking hangs off a lead so the funnel/chase/quote layers all work.
   if (!input.leadId && input.clientId) {
-    const ensured = await ensureLeadForClient(sb, input.clientId, userId, "manual");
+    // GATE 11 — the new enquiry's brand, resolved SERVER-SIDE and never trusted
+    // from the client (mirrors createLeadAction, gate 5). Single-brand mode: the
+    // dialog's picker never rendered, so whatever arrived is ignored and
+    // DEFAULT_BRAND is written. Multi-brand mode: required with NO default —
+    // nothing can be inferred about which brand a phone customer rang.
+    // Validated against listActiveBrands (data, not a constant list).
+    const activeBrands = await listActiveBrands(sb);
+    let brand: string = DEFAULT_BRAND;
+    if (activeBrands.length > 1) {
+      const picked = input.brand && activeBrands.some((b) => b.slug === input.brand) ? input.brand : null;
+      if (!picked) return { ok: false as const, error: "Choose which brand this enquiry is for." };
+      brand = picked;
+    }
+    const ensured = await ensureLeadForClient(sb, input.clientId, userId, "manual", brand);
     if (!ensured.ok) return { ok: false as const, error: ensured.error };
     input = { ...input, leadId: ensured.leadId };
   }

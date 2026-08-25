@@ -176,7 +176,11 @@ export default async function ClientsPage({
   return (
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Customers" title="Clients">
-        <AddClientDialog />
+        {/* GATE 11: the dialog's post-save "book survey" step opens an enquiry,
+            so in multi-brand mode it needs the brand picker's options. The same
+            slim rows the view uses (empty in single-brand mode — the picker
+            never renders and the dialog stays byte-identical to today). */}
+        <AddClientDialog brands={brandOptions} />
       </PageHeader>
       <ClientsView
         clients={rows}

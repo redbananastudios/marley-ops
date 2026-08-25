@@ -21,6 +21,20 @@
  * green — fix the leak (PRD §10: leak hits in existing code are findings to
  * fix in the same gate).
  *
+ * SHARED-SURFACE ENTRIES: some brand-resolved files are shared surfaces —
+ * both brands' records render through them — that deliberately keep Marley
+ * APP CHROME (PRD §2 "App chrome — unchanged": the mm-red toolbar, today
+ * ring, now-indicator and control tints belong to the frame, not the
+ * records). A blanket literal ban would flag chrome the PRD mandates, so a
+ * manifest entry may be `{ pattern, allow, reason }`: the named literals are
+ * exempt IN THAT ENTRY'S FILES ONLY, everything else stays forbidden both
+ * directions. The exemption is evidence-disciplined, mirroring the
+ * dead-pattern rule: an allow literal that is not in FORBIDDEN is an ERROR
+ * (a typo would otherwise suppress nothing, silently, forever), and an allow
+ * literal that no longer occurs under its pattern is an ERROR — so fixing
+ * the underlying literal forces the allow's removal in the same change, and
+ * an exemption can never outlive its justification.
+ *
  * THE SPLIT (PRD §10): this script is the source grep. The RENDERED-PAGE half
  * — a Playwright assertion over the second brand's pages on staging, catching
  * what a grep can't see through a token — lands with gate 16 as an e2e spec.
@@ -73,6 +87,8 @@ export const FORBIDDEN = [
  * Brand-resolved source globs, repo-relative with forward slashes. Grows gate
  * by gate — see THE MANIFEST GROWTH CONTRACT above. Supported forms: an exact
  * file path, `dir/**` (every file beneath), and `*` single-segment wildcards.
+ * An entry is either a bare pattern string or a shared-surface object
+ * `{ pattern, allow, reason }` — see SHARED-SURFACE ENTRIES above.
  */
 export const MANIFEST = [
   "components/brand/**",
@@ -80,6 +96,45 @@ export const MANIFEST = [
   // Gate 5: the lead page's change-brand control — fully data-driven (names
   // and colours arrive as brands-table rows via props).
   "app/(dashboard)/leads/[id]/brand-changer.tsx",
+  // Gate 11: the diary surfaces. Event styling is brand-resolved (styleFor()
+  // over the slim brands prop; the brand picker and chips are data-driven),
+  // but each keeps deliberate mm-red APP CHROME per PRD §2, plus comments
+  // naming brands to document the parity contract — hence the allows.
+  // Domains, phone numbers, Connor and mailboxes stay forbidden here, as
+  // does every literal not named in `allow`.
+  {
+    pattern: "components/schedule/scheduler-view.tsx",
+    allow: ["mm-red", "Marley", "Pitmans"],
+    reason:
+      "mm-red toolbar/today-ring/now-indicator/FAB app chrome (PRD §2); Marley + Pitmans appear only in comments documenting the parity contract and the accent-colour data rule",
+  },
+  {
+    pattern: "components/schedule/schedule-allocation-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red tab/board/day-strip app chrome (PRD §2). (The soft-demand copy's hardcoded 'Marley' was the §10 leak this gate fixed — now brand-neutral, so no 'Marley' allow.)",
+  },
+  {
+    pattern: "components/schedule/appointment-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): icon tints, required-field marker, radio accent, destructive-action button",
+  },
+  // Gate 11 residual: the client-record "Book survey" flows. Their brand
+  // picker is data-driven (slim brands-table rows via props); only deliberate
+  // mm-red APP CHROME remains per PRD §2 — everything else stays forbidden
+  // both directions.
+  {
+    pattern: "components/clients/book-survey-button.tsx",
+    allow: ["mm-red"],
+    reason: "mm-red app chrome (PRD §2): the Book survey button fill and the required-field marker",
+  },
+  {
+    pattern: "components/clients/add-client-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): checkbox accent, required-field markers, address section tint",
+  },
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);
@@ -141,13 +196,28 @@ function rel(root, file) {
 
 /**
  * Expand MANIFEST-style patterns to concrete files.
- * Returns { files, errors } — a pattern matching nothing is an error, never a
- * silent skip (a renamed directory must not quietly blind the scan).
+ * Returns { files, errors, entries } — `files` is the deduplicated union,
+ * `entries` keeps the per-entry breakdown ({ pattern, allow, files }) so
+ * shared-surface allows can be checked against exactly the files they cover.
+ * A pattern matching nothing is an error, never a silent skip (a renamed
+ * directory must not quietly blind the scan); an allow literal that is not
+ * in FORBIDDEN is an error too (a typo must not suppress nothing, silently).
  */
 export function expandManifest(manifest = MANIFEST, root = ROOT) {
   const files = new Set();
   const errors = [];
-  for (const pattern of manifest) {
+  const entries = [];
+  const knownLiterals = new Set(FORBIDDEN.map((f) => f.literal));
+  for (const entry of manifest) {
+    const pattern = typeof entry === "string" ? entry : entry.pattern;
+    const allow = typeof entry === "string" ? [] : (entry.allow ?? []);
+    for (const literal of allow) {
+      if (!knownLiterals.has(literal)) {
+        errors.push(
+          `allow literal is not in FORBIDDEN (typo? exact case matters): "${literal}" under ${pattern}`,
+        );
+      }
+    }
     const magicIndex = pattern.indexOf("*");
     let matched = [];
     if (magicIndex === -1) {
@@ -168,8 +238,9 @@ export function expandManifest(manifest = MANIFEST, root = ROOT) {
       errors.push(`manifest pattern matched no files: ${pattern}`);
     }
     for (const f of matched) files.add(f);
+    entries.push({ pattern, allow, files: matched });
   }
-  return { files: [...files].sort(), errors };
+  return { files: [...files].sort(), errors, entries };
 }
 
 /**
@@ -195,19 +266,47 @@ export function findLeaksInContent(content, file = "<content>") {
 
 /**
  * Scan every manifest-matched file. Returns { files, findings, errors };
- * clean means files.length > 0, findings empty AND errors empty.
+ * clean means files.length > 0, findings empty AND errors empty. Findings
+ * for a shared-surface entry's allowed literals are suppressed — but a dead
+ * allow (a literal with zero suppressed hits under its own pattern) is an
+ * ERROR, so the exemption disappears in the same change as the literal.
  */
 export function scanRepo({ manifest = MANIFEST, root = ROOT } = {}) {
-  const { files, errors } = expandManifest(manifest, root);
+  const { files, errors, entries } = expandManifest(manifest, root);
   if (files.length === 0) {
     errors.push(
       "brand-leak scan matched no files at all — a scan that scanned nothing must fail, not pass",
     );
   }
+  const allowByFile = new Map();
+  for (const { allow, files: entryFiles } of entries) {
+    for (const f of entryFiles) {
+      if (allow.length === 0) continue;
+      const set = allowByFile.get(f) ?? new Set();
+      for (const literal of allow) set.add(literal);
+      allowByFile.set(f, set);
+    }
+  }
   const findings = [];
+  const rawByFile = new Map();
   for (const file of files) {
     const content = readFileSync(path.join(root, file), "utf8");
-    findings.push(...findLeaksInContent(content, file));
+    const raw = findLeaksInContent(content, file);
+    rawByFile.set(file, raw);
+    const allowed = allowByFile.get(file);
+    findings.push(...(allowed ? raw.filter((f) => !allowed.has(f.literal)) : raw));
+  }
+  for (const { pattern, allow, files: entryFiles } of entries) {
+    for (const literal of allow) {
+      const occurs = entryFiles.some((f) =>
+        (rawByFile.get(f) ?? []).some((hit) => hit.literal === literal),
+      );
+      if (!occurs) {
+        errors.push(
+          `dead allow: "${literal}" never occurs under ${pattern} — the exemption has outlived its justification, remove it`,
+        );
+      }
+    }
   }
   return { files, findings, errors };
 }

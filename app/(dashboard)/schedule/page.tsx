@@ -6,6 +6,8 @@ import { packRequirement } from "@/lib/schedule/pack-days";
 import { MIN_BOOKED_REQUIREMENT } from "@/lib/schedule/capacity";
 import { jobValueOf, pickCurrentQuotes } from "@/lib/schedule/week-value";
 import { getBusinessSettings } from "@/lib/settings";
+import { listActiveBrands } from "@/lib/brand";
+import { parseBrandParam } from "@/lib/brand-filter";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import {
@@ -35,13 +37,24 @@ export const dynamic = "force-dynamic";
 export default async function SchedulePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string }>;
+  searchParams: Promise<{ date?: string; brand?: string }>;
 }) {
-  const { date } = await searchParams;
+  const sp = await searchParams;
+  const { date } = sp;
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // Brand layer (multi-brand PRD §4 /schedule): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1). The ?brand= filter narrows the DAY ALLOCATION job cards only —
+  // the Availability month grid is NEVER brand-filtered, because crew and vans
+  // are one shared pool and per-brand capacity would show headroom another
+  // brand's job has already taken.
+  const activeBrands = await listActiveBrands(supabase);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
   // Job values are admin-only, matching /payments Due + Upcoming — /schedule is
   // an estimator surface too, and it has never shown money before.
   const { data: viewerProfile } = user
@@ -51,13 +64,22 @@ export default async function SchedulePage({
 
   const [appts, leads, quotes, { data: staff }, { data: vehicles }, assignments, unavailability, staffAvailability, bookingDetails, { data: estimators }] =
     await Promise.all([
-      fetchAllRows((f, t) =>
-        supabase
-          .from("appointments")
-          .select("id, title, starts_at, ends_at, all_day, appt_type, status, location, lead_id, estimator_id, notes")
-          .neq("status", "cancelled")
-          .order("id")
-          .range(f, t),
+      fetchAllRows(
+        (f, t) =>
+          supabase
+            .from("appointments")
+            // `brand` is denormalised from the lead (PRD §3.2) — the board
+            // chips and the allocation narrowing read it without a join.
+            .select("id, title, brand, starts_at, ends_at, all_day, appt_type, status, location, lead_id, estimator_id, notes")
+            .neq("status", "cancelled")
+            .order("id")
+            .range(f, t),
+        // This read always fetches EVERY brand (capacity/clash need the full
+        // pool); a named ?brand= filter narrows the visible cards downstream
+        // in JobBoardView. But with a filter active a partial window here
+        // would render a wrong-narrowed board that LOOKS complete, so the
+        // read fails LOUD then. Unfiltered keeps today's fail-soft.
+        { strict: brandFilter !== "all" },
       ),
       fetchAllRows((f, t) =>
         supabase
@@ -185,6 +207,7 @@ export default async function SchedulePage({
     return {
       id: a.id,
       title: a.title,
+      brand: a.brand,
       starts_at: a.starts_at,
       ends_at: a.ends_at,
       all_day: a.all_day,
@@ -287,6 +310,21 @@ export default async function SchedulePage({
   };
   const selectedDate = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : ukToday;
 
+  // Minimal serialisable brand shape for the client components — the segmented
+  // filter, the board's chips and the booking dialog's brand picker; keeps
+  // brand config (emails, phone numbers, template ids) out of the client
+  // payload. Mirrors the /board (gate 3) wiring.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+        colourAccent: b.colourAccent,
+      }))
+    : [];
+
   return (
     <main className="flex flex-1 flex-col p-6 md:p-8">
       <PageHeader eyebrow="Schedule" title="Schedule & Allocation" />
@@ -301,6 +339,12 @@ export default async function SchedulePage({
         defaultEstimatorId={user?.id ?? null}
         baseLocation={baseLocation}
         events={appts}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
+        // The board gets the FULL set — narrowing to ?brand= happens on the
+        // VISIBLE cards inside JobBoardView, so its capacity strips and clash
+        // warnings still count the other brand's jobs (one crew/van pool).
+        brandFilter={brandFilter}
         board={{
           appts: boardCards,
           staff: (staff ?? []) as BoardStaff[],

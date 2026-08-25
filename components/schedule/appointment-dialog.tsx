@@ -30,6 +30,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { LeadCombobox } from "@/components/schedule/lead-combobox";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
@@ -68,6 +69,15 @@ export interface LeadOption {
   surveyEstimatorId?: string | null;
   /** A bare client (no enquiry yet) — picking them opens the enquiry server-side. */
   isClient?: boolean;
+}
+
+/** The brand picker's option shape — `listActiveBrands()` rows satisfy it.
+ *  Entirely data-driven: labels come from the brands table, never from code
+ *  (mirrors AddLeadBrandOption on /leads/new, gate 5). */
+export interface ApptBrandOption {
+  slug: string;
+  name: string;
+  shortName?: string | null;
 }
 
 /** Surveys are a fixed 1-hour visit. */
@@ -351,6 +361,7 @@ export function AppointmentDialog({
   // presetLocation is part of the public prop type (callers pass it) but the
   // location is derived from the selected lead here, so it isn't read.
   edit,
+  brands = [],
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -369,6 +380,13 @@ export function AppointmentDialog({
   presetLocation?: string;
   /** when set, the dialog is in edit mode */
   edit?: EditTarget | null;
+  /** GATE 11: active brands (multi-brand PRD §4 /schedule). Two or more → a
+   *  REQUIRED segmented brand picker (no default) renders when a BARE CLIENT is
+   *  selected — their booking opens a new enquiry, and nothing says which brand
+   *  a phone customer rang. Fewer (the single-brand invariant, PRD §1) → nothing
+   *  renders and the server writes DEFAULT_BRAND silently, today's behaviour.
+   *  Bookings from a LEAD never show it — brand comes from the lead. */
+  brands?: ApptBrandOption[];
 }) {
   const router = useRouter();
   const isEdit = !!edit;
@@ -399,6 +417,11 @@ export function AppointmentDialog({
   // before you press the button, so sending is a visible choice rather than a
   // side effect you find out about afterwards.
   const [notifyCustomer, setNotifyCustomer] = useState(true);
+  // GATE 11: brand for a bare-client booking's new enquiry. Deliberately NO
+  // default in multi-brand mode (mirrors /leads/new) — the office must say
+  // which brand the customer rang. Empty string = not picked yet.
+  const [brand, setBrand] = useState("");
+  const [brandError, setBrandError] = useState<string | null>(null);
 
   // (Re)seed the form whenever the dialog opens or its target changes.
   useEffect(() => {
@@ -435,6 +458,8 @@ export function AppointmentDialog({
       setPackDate("");
       setNotifyCustomer(true);
     }
+    setBrand("");
+    setBrandError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, edit?.id]);
 
@@ -483,7 +508,15 @@ export function AppointmentDialog({
     setLeadId(id);
     // A removal inherits the chosen lead's survey estimator (read-only).
     if (apptType === "removal" && !isEdit) inheritSurveyEstimator(id);
+    // A brand pick belongs to the bare client it was made for — never carry it
+    // (or its error) onto a different selection.
+    setBrand("");
+    setBrandError(null);
   }
+
+  // GATE 11: the picker exists only when this booking will OPEN an enquiry —
+  // a bare client, in multi-brand mode. A lead already carries its brand.
+  const requireBrand = !isEdit && !!selectedLead?.isClient && brands.length > 1;
 
   async function onSubmit() {
     if (!start) {
@@ -493,6 +526,12 @@ export function AppointmentDialog({
     const endLocal = effectiveEnd;
     if (!endLocal || new Date(endLocal) <= new Date(start)) {
       toast.error("End must be after start.");
+      return;
+    }
+    // GATE 11: a bare-client booking cannot submit until a brand is picked
+    // (multi-brand only — the server re-validates regardless).
+    if (requireBrand && !brand) {
+      setBrandError("Choose which brand this enquiry is for.");
       return;
     }
     setBusy(true);
@@ -567,6 +606,9 @@ export function AppointmentDialog({
           apptType: apptType as "survey" | "removal",
           leadId: lead,
           clientId,
+          // Only meaningful for a bare client (the booking opens an enquiry);
+          // from a lead the server takes the lead's brand and ignores this.
+          brand: clientId ? brand || null : undefined,
           estimatorId: estimatorId === NO_EST ? null : estimatorId,
           startsAt,
           endsAt,
@@ -660,6 +702,37 @@ export function AppointmentDialog({
                 Lead / customer <span className="text-mist-400 font-normal">(optional)</span>
               </Label>
               <LeadCombobox leads={leads} value={leadId} onChange={selectLead} />
+            </div>
+          ) : null}
+
+          {/* GATE 11: booking a BARE CLIENT opens a new enquiry, and in
+              multi-brand mode nothing says which brand they rang — so the pick
+              is REQUIRED, with deliberately NO default (mirrors /leads/new,
+              gate 5). Options are data-driven from the brands table; renders
+              only in multi-brand mode (see the `brands` prop). */}
+          {requireBrand ? (
+            <div className="grid gap-2">
+              <Label>
+                Brand <span className="text-mm-red">*</span>
+              </Label>
+              <div role="group" aria-label="Brand" data-testid="brand-picker" className={segmentedTrackClass}>
+                {brands.map((b) => (
+                  <button
+                    key={b.slug}
+                    type="button"
+                    onClick={() => {
+                      setBrand(b.slug);
+                      setBrandError(null);
+                    }}
+                    aria-pressed={brand === b.slug}
+                    data-brand={b.slug}
+                    className={segmentedItemClass(brand === b.slug)}
+                  >
+                    {b.shortName ?? b.name}
+                  </button>
+                ))}
+              </div>
+              {brandError ? <p className="text-xs text-destructive">{brandError}</p> : null}
             </div>
           ) : null}
 
