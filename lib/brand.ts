@@ -146,6 +146,67 @@ export async function listActiveBrands(sb: SupabaseClient): Promise<Brand[]> {
   return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
 }
 
+/* ------------------------------------------------------------------ colour */
+
+/** "#RRGGBB" → [r, g, b], or null for anything else (null, "", bad format). */
+const parseHex = (v: string | null): [number, number, number] | null => {
+  if (!v) return null;
+  const m = /^#?([0-9a-f]{6})$/i.exec(v.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+
+const srgbChannel = (c: number): number => {
+  const s = c / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+
+/** WCAG contrast of white text on `rgb` meets the 3:1 large-text/UI bar. */
+const whiteTextLegible = ([r, g, b]: [number, number, number]): boolean => {
+  const luminance = 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b);
+  return 1.05 / (luminance + 0.05) >= 3;
+};
+
+/**
+ * The brand's INTERACTIVE accent — the colour for CTAs, icon tiles and
+ * highlight borders that carry white text/icons (first consumer: the lead
+ * page's AI-survey promo card, PRD §4 /leads/[id]).
+ *
+ * A data rule, not a per-brand switch (this module may not name brands):
+ * prefer `colourAccent`, but only when white text is actually legible on it —
+ * a light accent (e.g. a yellow reserved for large flat areas, which per PRD
+ * §11.4 takes dark text) falls back to `colourPrimary`. With the seeded rows
+ * this yields Marley red #C03838 (byte-equal to the --color-mm-red token, so
+ * Marley surfaces are unchanged) and Pitmans blue #2B2B76. Null when the row
+ * carries no usable colour — callers keep their existing mm-red rendering.
+ */
+export function brandCtaColour(
+  brand: Pick<Brand, "colourPrimary" | "colourAccent"> | null | undefined,
+): string | null {
+  if (!brand) return null;
+  const accent = parseHex(brand.colourAccent);
+  if (accent && whiteTextLegible(accent)) return brand.colourAccent;
+  const primary = parseHex(brand.colourPrimary);
+  if (primary && whiteTextLegible(primary)) return brand.colourPrimary;
+  return null;
+}
+
+/** `hex` darkened for hover states (mirrors mm-red → mm-red-deep, ≈ ×0.78). */
+export function brandCtaColourDeep(hex: string): string {
+  const rgb = parseHex(hex);
+  if (!rgb) return hex;
+  const shade = rgb.map((c) => Math.round(c * 0.78));
+  return "#" + shade.map((c) => c.toString(16).padStart(2, "0")).join("");
+}
+
+/** `rgba()` of `hex` at `alpha` — translucent borders and glows. */
+export function hexWithAlpha(hex: string, alpha: number): string {
+  const rgb = parseHex(hex);
+  if (!rgb) return hex;
+  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;
+}
+
 /**
  * THE single-brand invariant switch (docs/multi-brand-prd.md §1): every brand
  * UI gate hangs off this. With one active brand it returns false and the app

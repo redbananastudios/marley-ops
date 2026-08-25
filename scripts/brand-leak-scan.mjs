@@ -77,6 +77,9 @@ export const FORBIDDEN = [
 export const MANIFEST = [
   "components/brand/**",
   "lib/brand-filter.ts",
+  // Gate 5: the lead page's change-brand control — fully data-driven (names
+  // and colours arrive as brands-table rows via props).
+  "app/(dashboard)/leads/[id]/brand-changer.tsx",
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);

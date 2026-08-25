@@ -204,7 +204,7 @@ export async function changeBookingDateAction(
   const { data: appt } = await admin
     .from("appointments")
     .select(
-      "id, appt_type, status, lead_id, client_id, estimator_id, starts_at, ends_at, title, location, notes, all_day",
+      "id, appt_type, status, lead_id, client_id, estimator_id, starts_at, ends_at, title, location, notes, all_day, brand",
     )
     .eq("id", appointmentId)
     .maybeSingle();
@@ -321,6 +321,10 @@ export async function changeBookingDateAction(
     .from("appointments")
     .insert({
       appt_type: "removal",
+      // Same booking, same brand — carried from the appointment being
+      // replaced (itself denormalised from the parent lead at insert,
+      // PRD §3.2), so a re-dated job keeps its diary colour.
+      brand: appt.brand,
       lead_id: leadId,
       client_id: appt.client_id ?? lead.client_id,
       estimator_id: appt.estimator_id,

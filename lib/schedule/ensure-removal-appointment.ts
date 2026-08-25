@@ -19,6 +19,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { ukInstant } from "@/lib/uk-time";
 import { log } from "@/lib/log";
 
@@ -86,7 +87,7 @@ export async function ensureRemovalAppointment(
     // booking dialog, so an auto-booked slot reads identically on the board.
     const { data: lead } = await sb
       .from("leads")
-      .select("name, from_address, from_postcode, client_id")
+      .select("name, from_address, from_postcode, client_id, brand")
       .eq("id", quote.lead_id)
       .maybeSingle();
     const name = lead?.name ?? quote.customer_name ?? null;
@@ -95,6 +96,9 @@ export async function ensureRemovalAppointment(
       .from("appointments")
       .insert({
         appt_type: "removal",
+        // Denormalised from the parent lead at insert (PRD §3.2) — the diary
+        // colours the auto-booked slot without a join.
+        brand: lead?.brand ?? DEFAULT_BRAND,
         lead_id: quote.lead_id,
         client_id: quote.client_id ?? lead?.client_id ?? null,
         estimator_id: quote.estimator_id,

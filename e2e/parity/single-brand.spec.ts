@@ -22,6 +22,9 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  *   - `data-testid="brand-settings-card"` → the Settings › Brands card root
  *     (gate 2) — renders only in multi-brand mode, so /settings must show it
  *     never here.
+ *   - `data-testid="brand-picker"` → the add-lead form's REQUIRED brand
+ *     selector (gate 5 — /leads/new, and the same form reused on
+ *     /quotes/new). Renders only in multi-brand mode.
  * Plus: the literal brand name ("Pitmans") must reach a page ONLY through
  * brand UI — never hardcoded, and never embedded in seeded customer/test data
  * (name seed rows "E2E …", not "Pitmans …", or assertion (d) below breaks on
@@ -92,6 +95,10 @@ async function expectNoBrandUi(page: Page, path: string, heading: string): Promi
   // (d) The second brand's name appears nowhere — not in a chip, a tooltip, a
   // select option, an eyebrow, or a stray hardcode.
   await expect(page.getByText(/Pitmans/i), `${path} must not contain the text "Pitmans"`).toHaveCount(0);
+  // (e) No brand picker (gate 5 — the add-lead form's required brand selector
+  // renders only in multi-brand mode; /leads/new is in PARITY_ROUTES, so this
+  // has teeth on the exact page that would leak it).
+  await expect(page.getByTestId("brand-picker"), `${path} must render zero brand pickers`).toHaveCount(0);
 }
 
 test.describe("Single-brand parity — with only Marley active, no brand UI renders", () => {

@@ -2,9 +2,10 @@ import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { listActiveBrands } from "@/lib/brand";
 import { ukPhone } from "@/lib/phone";
 import { createDraftQuote } from "@/app/(dashboard)/quotes/actions";
-import { AddLeadForm } from "@/app/(dashboard)/leads/new/add-lead-form";
+import { AddLeadForm, type AddLeadBrandOption } from "@/app/(dashboard)/leads/new/add-lead-form";
 import type { ClientOption } from "@/components/clients/client-combobox";
 
 /**
@@ -36,6 +37,14 @@ export default async function NewQuotePage({
   }
 
   const sb = await createClient();
+  // GATE 5: the reused AddLeadForm carries the same required brand selector
+  // as /leads/new when no ?leadId= is present (PRD §4 /quotes/new). Empty in
+  // single-brand mode — the invariant keeps this page byte-identical.
+  const activeBrands = await listActiveBrands(sb);
+  const brandOptions: AddLeadBrandOption[] =
+    activeBrands.length > 1
+      ? activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))
+      : [];
   const { data: clients } = await sb
     .from("clients")
     .select("id, display_name, email, phone_e164, phone_raw, postcode_home")
@@ -68,6 +77,7 @@ export default async function NewQuotePage({
           clients={clientOptions}
           mode="quote"
           initialClientId={clientId && clientOptions.some((c) => c.id === clientId) ? clientId : undefined}
+          brands={brandOptions}
         />
       </Card>
     </main>

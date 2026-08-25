@@ -1,13 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 
-import { newLeadSchema, MANUAL_ENTRY_CHANNELS, PROPERTY_SIZES, type NewLeadInput } from "@/lib/leads/schema";
+import {
+  newLeadSchema,
+  newLeadSchemaWithBrand,
+  MANUAL_ENTRY_CHANNELS,
+  PROPERTY_SIZES,
+  type NewLeadInput,
+} from "@/lib/leads/schema";
 import { checkDuplicateAction, createLeadAndOpenAction } from "@/app/(dashboard)/leads/actions";
 import { createQuoteWithLeadAndOpenAction } from "@/app/(dashboard)/quotes/actions";
 import { Button } from "@/components/ui/button";
@@ -29,7 +35,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
+
+/** The brand picker's option shape — `listActiveBrands()` rows satisfy it.
+ *  Entirely data-driven: labels come from the brands table, never from code. */
+export interface AddLeadBrandOption {
+  slug: string;
+  name: string;
+  shortName?: string | null;
+}
 
 type Duplicate = {
   clientName: string;
@@ -72,6 +87,7 @@ export function AddLeadForm({
   clients,
   mode = "lead",
   initialClientId,
+  brands = [],
 }: {
   clients: ClientOption[];
   /** "lead" → save + go to the lead. "quote" → create the lead AND a draft
@@ -81,6 +97,13 @@ export function AddLeadForm({
    *  entry points) — their contact details seed the form exactly as if they
    *  were picked in the combobox. */
   initialClientId?: string;
+  /** GATE 5: active brands. Two or more → a REQUIRED brand picker (no
+   *  default) renders at the top of the form and the resolver refuses to
+   *  submit without a pick. Fewer (the single-brand invariant, PRD §1) →
+   *  nothing renders and the server writes DEFAULT_BRAND silently. Pages
+   *  pass [] in single-brand mode so this form stays byte-identical to
+   *  today there (parity CI asserts /leads/new). */
+  brands?: AddLeadBrandOption[];
 }) {
   const initialClient = initialClientId ? (clients.find((c) => c.id === initialClientId) ?? null) : null;
   const [duplicate, setDuplicate] = useState<Duplicate | null>(null);
@@ -93,6 +116,15 @@ export function AddLeadForm({
   const [toAddr, setToAddr] = useState<AddressValue>(BLANK_ADDRESS);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Multi-brand renders the picker AND swaps to the brand-required resolver,
+  // so "form cannot submit until a brand is picked" is enforced by validation
+  // (the error surfaces with the other field errors), not a bolted-on check.
+  const requireBrand = brands.length > 1;
+  const resolver = useMemo(
+    () => (requireBrand ? zodResolver(newLeadSchemaWithBrand) : zodResolver(newLeadSchema)),
+    [requireBrand],
+  );
+
   const {
     register,
     handleSubmit,
@@ -101,8 +133,9 @@ export function AddLeadForm({
     getValues,
     formState: { errors, isSubmitting },
   } = useForm<NewLeadInput>({
-    resolver: zodResolver(newLeadSchema),
+    resolver,
     defaultValues: {
+      brand: "",
       name: initialClient?.display_name ?? "",
       phone: initialClient?.phone ?? "",
       email: initialClient?.email ?? "",
@@ -187,9 +220,40 @@ export function AddLeadForm({
 
   const phoneReg = register("phone");
   const emailReg = register("email");
+  const pickedBrand = watch("brand") || "";
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6" noValidate>
+      {/* GATE 5: the brand is the FIRST choice, above the customer fields,
+          because everything else — quote ref prefix, emails, branding —
+          inherits from it (PRD §4 /leads/new). Segmented, REQUIRED, and
+          deliberately with NO default: both phone lines ring the same office,
+          so nothing can be inferred. Options are data-driven from the brands
+          table; renders only in multi-brand mode (see the `brands` prop). */}
+      {requireBrand ? (
+        <div className="space-y-1.5">
+          <Label className="text-sm">
+            Brand
+            <Required />
+          </Label>
+          <div role="group" aria-label="Brand" data-testid="brand-picker" className={segmentedTrackClass}>
+            {brands.map((b) => (
+              <button
+                key={b.slug}
+                type="button"
+                onClick={() => setValue("brand", b.slug, { shouldValidate: true })}
+                aria-pressed={pickedBrand === b.slug}
+                data-brand={b.slug}
+                className={segmentedItemClass(pickedBrand === b.slug)}
+              >
+                {b.shortName ?? b.name}
+              </button>
+            ))}
+          </div>
+          {errors.brand ? <p className="text-xs text-destructive">{errors.brand.message}</p> : null}
+        </div>
+      ) : null}
+
       <Field htmlFor="customer" label="Customer">
         <ClientCombobox clients={clients} value={clientId} onChange={onClientChange} />
         <p className="mt-1.5 text-xs text-mist-400">

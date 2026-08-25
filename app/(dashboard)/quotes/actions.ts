@@ -20,6 +20,7 @@ import { recommendVans } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { quoteRefKind } from "@/lib/quote/ref";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { planSupersede, refList, type SiblingQuote } from "@/lib/quote/supersede";
 
 async function ctx() {
@@ -158,6 +159,10 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
       .from("quotes")
       .insert({
         quote_ref,
+        // Denormalised from the parent lead at insert (PRD §3.2) — lists and
+        // the diary colour a quote without a join. A lead-less draft (no
+        // leadId seed) falls back to DEFAULT_BRAND, matching the DB default.
+        brand: lead?.brand ?? DEFAULT_BRAND,
         // New quotes start UNASSIGNED — NOT owned by whoever clicked "New quote".
         // The estimator is set deliberately on the review step (EstimatorPicker),
         // so an un-triaged quote emails from the Accounts money desk rather than
