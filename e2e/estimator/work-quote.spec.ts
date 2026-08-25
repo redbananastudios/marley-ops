@@ -72,8 +72,17 @@ test.describe.serial("Estimator — book survey (past slot) then Create Quote fr
       const phone = page.getByLabel(/Phone/i).first();
       if (await phone.count()) await phone.fill("07700900999");
 
+      // Multi-brand staging renders the REQUIRED brand picker (gate 5) — pick
+      // the first brand when present (hidden in single-brand mode). Re-picked
+      // inside the retry loop below via this locator if a reload clears it.
+      const brandPick = page.getByTestId("brand-picker").locator('[data-brand="marley"]');
+      if (await brandPick.count()) await brandPick.click();
+
       let created = false;
       for (let attempt = 1; attempt <= 3 && !created; attempt++) {
+        // Re-pick on each attempt in case a pre-hydration reload cleared the
+        // selection (clicking an already-selected segment is a no-op).
+        if (await brandPick.count()) await brandPick.click();
         await page.getByRole("button", { name: "Add lead", exact: true }).click();
         try {
           await page.waitForURL(/\/leads\/[0-9a-f-]{36}/, { timeout: 15000 });

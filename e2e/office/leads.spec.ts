@@ -72,6 +72,12 @@ test.describe("Office — Leads", () => {
       // submitUntil re-fills through the pre-hydration native-submit reload.
       await submitUntil(page, {
         prepare: async () => {
+          // Multi-brand staging renders the REQUIRED brand picker (gate 5) at
+          // the top of the form — pick the first brand when present (hidden in
+          // single-brand mode, where this is a no-op). Inside prepare so
+          // submitUntil re-picks through the pre-hydration reload.
+          const brandPick = page.getByTestId("brand-picker").locator('[data-brand="marley"]');
+          if (await brandPick.count()) await brandPick.click();
           await page.getByPlaceholder("Customer name").fill(name);
           await page.getByPlaceholder("07…").fill("07700900123");
           await page.getByLabel(/3rd-party commission/i).fill("45");
