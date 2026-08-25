@@ -30,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
 import { MANUAL_ENTRY_CHANNELS } from "@/lib/leads/schema";
 import {
@@ -64,7 +65,26 @@ const EMPTY: Values = {
 
 const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 
-export function AddClientDialog() {
+/** The brand picker's option shape — `listActiveBrands()` rows satisfy it.
+ *  Entirely data-driven: labels come from the brands table, never from code
+ *  (mirrors ApptBrandOption on the diary dialog, gate 11). */
+export interface AddClientBrandOption {
+  slug: string;
+  name: string;
+  shortName?: string | null;
+}
+
+export function AddClientDialog({
+  brands = [],
+}: {
+  /** GATE 11: active brands (multi-brand PRD §2 "Manual leads: brand required").
+   *  Two or more → a REQUIRED segmented brand picker (no default) renders on the
+   *  post-save "book survey" step — it opens an enquiry, and nothing says which
+   *  brand a phone customer rang. Fewer (the single-brand invariant, PRD §1) →
+   *  nothing renders, no brand is sent and the server writes DEFAULT_BRAND
+   *  silently. */
+  brands?: AddClientBrandOption[];
+} = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,6 +97,12 @@ export function AddClientDialog() {
   // usual next move) instead of dumping the user on the client page.
   const [saved, setSaved] = useState<{ clientId: string; matched: boolean } | null>(null);
   const [channel, setChannel] = useState("phone_google");
+  // GATE 11: brand for the enquiry the post-save step opens. Deliberately NO
+  // default in multi-brand mode (mirrors /leads/new, gate 5) — the office must
+  // say which brand the customer rang. Empty string = not picked yet.
+  const [brand, setBrand] = useState("");
+  const [brandError, setBrandError] = useState<string | null>(null);
+  const requireBrand = brands.length > 1;
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const set = (k: keyof Values) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -90,6 +116,8 @@ export function AddClientDialog() {
     setDupe(null);
     setSaved(null);
     setChannel("phone_google");
+    setBrand("");
+    setBrandError(null);
   }
 
   function commitSecondaryEmail() {
@@ -165,9 +193,15 @@ export function AddClientDialog() {
 
   async function bookSurvey() {
     if (!saved) return;
+    // GATE 11: cannot submit until a brand is picked (multi-brand only — the
+    // server re-validates regardless). Single-brand sends no brand at all.
+    if (requireBrand && !brand) {
+      setBrandError("Choose which brand this enquiry is for.");
+      return;
+    }
     setBusy(true);
     try {
-      const res = await createLeadForClientAction(saved.clientId, channel);
+      const res = await createLeadForClientAction(saved.clientId, channel, requireBrand ? brand : undefined);
       if (!res.ok) {
         toast.error(res.error || "Could not open an enquiry.");
         return;
@@ -229,6 +263,36 @@ export function AddClientDialog() {
                 </SelectContent>
               </Select>
             </div>
+            {/* GATE 11: booking from here OPENS an enquiry, and in multi-brand
+                mode nothing says which brand the customer rang — so the pick is
+                REQUIRED, with deliberately NO default (mirrors /leads/new,
+                gate 5). Options are data-driven from the brands table; renders
+                only in multi-brand mode (see the `brands` prop). */}
+            {requireBrand ? (
+              <div className="grid gap-2 pb-4">
+                <Label>
+                  Brand <span className="text-mm-red">*</span>
+                </Label>
+                <div role="group" aria-label="Brand" data-testid="brand-picker" className={segmentedTrackClass}>
+                  {brands.map((b) => (
+                    <button
+                      key={b.slug}
+                      type="button"
+                      onClick={() => {
+                        setBrand(b.slug);
+                        setBrandError(null);
+                      }}
+                      aria-pressed={brand === b.slug}
+                      data-brand={b.slug}
+                      className={segmentedItemClass(brand === b.slug)}
+                    >
+                      {b.shortName ?? b.name}
+                    </button>
+                  ))}
+                </div>
+                {brandError ? <p className="text-xs text-destructive">{brandError}</p> : null}
+              </div>
+            ) : null}
             <DialogFooter>
               <Button variant="outline" onClick={goToClient} disabled={busy} className="h-11">
                 Not now — open client

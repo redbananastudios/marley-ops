@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { FORBIDDEN, expandManifest, findLeaksInContent, scanRepo } from "../scripts/brand-leak-scan.mjs";
+import { FORBIDDEN, MANIFEST, expandManifest, findLeaksInContent, scanRepo } from "../scripts/brand-leak-scan.mjs";
 
 /**
  * Vitest twin of scripts/brand-leak-scan.mjs — the SOURCE half of the
@@ -78,6 +78,63 @@ describe("brand-leak scan — the manifest is alive", () => {
     const { errors, files } = scanRepo({ manifest: [] });
     expect(files).toEqual([]);
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  it("expands the gate-11 shared-surface entries to their diary files", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "components/schedule/scheduler-view.tsx",
+      "components/schedule/schedule-allocation-view.tsx",
+      "components/schedule/appointment-dialog.tsx",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+  });
+});
+
+describe("brand-leak scan — shared-surface allows are evidence-disciplined", () => {
+  // The gate-11 dialog entry, read from the real manifest so this file still
+  // contains no brand literal of its own (see the header note).
+  const dialogEntry = MANIFEST.find(
+    (e): e is { pattern: string; allow: string[]; reason: string } =>
+      typeof e === "object" && e.pattern.endsWith("appointment-dialog.tsx"),
+  );
+
+  it("suppresses exactly the allowed literals, nothing else", () => {
+    expect(dialogEntry, "the gate-11 dialog entry must exist").toBeDefined();
+    const { pattern, allow } = dialogEntry!;
+    // Bare entry: the detector demonstrably fires on the real chrome token —
+    // a suppression test on a file the detector can't see would be hollow.
+    const bare = scanRepo({ manifest: [pattern] });
+    expect(bare.errors).toEqual([]);
+    for (const literal of allow) {
+      expect(
+        bare.findings.some((f) => f.literal === literal),
+        `bare scan must find "${literal}" in ${pattern} (else the allow below is untested)`,
+      ).toBe(true);
+    }
+    // Shared-surface entry: those hits are suppressed AND nothing else hides
+    // behind them — zero findings proves the file is otherwise clean.
+    const allowed = scanRepo({ manifest: [{ pattern, allow, reason: "test: the real gate-11 entry, re-stated" }] });
+    expect(allowed.errors).toEqual([]);
+    expect(allowed.findings).toEqual([]);
+  });
+
+  it("reports a dead allow as an error, never a silent no-op", () => {
+    // lib/brand-filter.ts is fully brand-resolved — the chrome token never
+    // occurs there, so allowing it must ERROR (the exemption is unjustified).
+    const literal = dialogEntry!.allow[0];
+    const { errors } = scanRepo({
+      manifest: [{ pattern: "lib/brand-filter.ts", allow: [literal], reason: "test: unjustified allow" }],
+    });
+    expect(errors.some((e) => e.includes("dead allow")), "dead allow must be an error").toBe(true);
+  });
+
+  it("rejects an allow literal that is not in FORBIDDEN (typo guard)", () => {
+    const { errors } = expandManifest([
+      { pattern: "lib/brand-filter.ts", allow: ["not-a-forbidden-literal"], reason: "test: typo'd allow" },
+    ]);
+    expect(errors.some((e) => e.includes("not in FORBIDDEN"))).toBe(true);
   });
 });
 

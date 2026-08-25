@@ -46,11 +46,17 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * suspect. The fix is never to loosen this spec.
  */
 
-/** Thirteen routes: the five highest-traffic office surfaces — this spec's
+/** Sixteen routes: the five highest-traffic office surfaces — this spec's
  *  own choice of coverage (PRD §6 addition 1 mandates the parity assertion but
  *  names no routes) — plus /settings, where gate 2's Brands card lives, plus
  *  the seven gate-4 list surfaces (clients, follow-ups, documents, claims,
- *  content, payments, refunds). */
+ *  content, payments, refunds), plus the three gate-11 diary surfaces
+ *  (schedule, removals, surveys). NOTE on the diaries: the hollow-unconfirmed
+ *  removal rendering (dashed outline while `date_confirmed_at` is null) is
+ *  deliberately NOT multi-brand-gated — Marley gets it too — so it must and
+ *  does render here. It carries no brand testid and no brand text (classes
+ *  `mm-evt--hollow` / `mm-evt-brand` only, and the initial span is
+ *  multi-brand-only), so assertions (a)–(e) are blind to it by design. */
 const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/", heading: "Dashboard" },
   { path: "/leads", heading: "Leads" },
@@ -65,6 +71,12 @@ const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/content", heading: "Content" },
   { path: "/payments", heading: "Payments" },
   { path: "/refunds", heading: "Refunds" },
+  // Gate 11: the diary surfaces — brand × type event colours, brand filter,
+  // legend and the dialog's brand picker are all multi-brand-gated, so none
+  // of them may render here.
+  { path: "/schedule", heading: "Schedule & Allocation" },
+  { path: "/schedule/removals", heading: "Removals" },
+  { path: "/schedule/surveys", heading: "Surveys" },
 ];
 
 /**

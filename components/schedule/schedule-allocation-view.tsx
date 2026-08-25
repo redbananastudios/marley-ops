@@ -50,6 +50,20 @@ import {
   type BoardUnavailability,
   type BoardVehicle,
 } from "@/components/job-board/job-board-view";
+import { BrandFilter } from "@/components/brand/brand-filter";
+
+/** Slim brand shape the server page passes down (multi-brand PRD §4) — enough
+ *  for the segmented filter, the board's chips and the booking dialog's picker,
+ *  keeping brand config (emails, phone numbers, template ids) out of the
+ *  client payload. `listActiveBrands()` rows satisfy it. */
+export interface ScheduleBrandOption {
+  slug: string;
+  name: string;
+  shortName?: string | null;
+  initial: string | null;
+  colourPrimary: string | null;
+  colourAccent?: string | null;
+}
 
 export interface AvailAppt {
   id: string;
@@ -303,8 +317,18 @@ export function ScheduleAllocationView(props: {
     thisWeekStart: string;
     today: string;
   };
+  /** Active brands (multi-brand PRD §4 /schedule). Empty or single-entry →
+   *  no brand UI renders anywhere here (the single-brand invariant, PRD §1).
+   *  The Availability month grid NEVER takes the filter — see the alloc tab. */
+  brands?: ScheduleBrandOption[];
+  /** True only in multi-brand mode with the ?brand= filter on All (the chip is
+   *  hidden when the segmented control already names a single brand). */
+  showBrandChips?: boolean;
+  /** `'all'` or an active brand slug (parseBrandParam, server-side). Narrows the
+   *  Day Allocation CARDS only — capacity and clash maths keep every brand. */
+  brandFilter?: string;
 }): React.JSX.Element {
-  const { availAppts, showWeekValue = false, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board } = props;
+  const { availAppts, showWeekValue = false, softDemand, selectedDate, today, leads, estimators, defaultEstimatorId, baseLocation, events, board, brands = [], showBrandChips = false, brandFilter = "all" } = props;
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -1085,7 +1109,7 @@ export function ScheduleAllocationView(props: {
                 </span>
               </div>
               <p className="px-4 pt-1 text-[11px] text-mist-400">
-                £100 secures Marley, not a date. Off the diary until the 25% earns the day.
+                £100 secures the move, not a date. Off the diary until the 25% earns the day.
               </p>
               <div className="flex flex-col gap-3 p-3">
                 {softDemand.length === 0 ? (
@@ -1142,7 +1166,24 @@ export function ScheduleAllocationView(props: {
       {/* ============ DAY ALLOCATION ============ */}
       {tab === "alloc" ? (
         <div className="flex flex-1 flex-col">
-          <JobBoardView {...board} initialWeekStart={mondayOf(selectedDate)} hideSurveys />
+          {/* Brand filter (multi-brand PRD §4 /schedule) — DAY ALLOCATION ONLY.
+              The Availability month grid is deliberately never brand-filtered:
+              crew and vans are one shared pool, so per-brand capacity would
+              show headroom another brand's job has already taken. Renders
+              nothing below 2 brands. */}
+          {brands.length > 1 ? (
+            <div className="mb-3 flex items-center">
+              <BrandFilter brands={brands} />
+            </div>
+          ) : null}
+          <JobBoardView
+            {...board}
+            initialWeekStart={mondayOf(selectedDate)}
+            hideSurveys
+            brands={brands}
+            showBrandChips={showBrandChips}
+            brandFilter={brandFilter}
+          />
         </div>
       ) : null}
 
@@ -1215,6 +1256,7 @@ export function ScheduleAllocationView(props: {
         defaultType="removal"
         presetStart={editTarget ? undefined : `${selectedDate}T09:00`}
         edit={editTarget}
+        brands={brands}
       />
     </div>
   );
