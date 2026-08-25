@@ -308,6 +308,7 @@ export type Database = {
         Row: {
           all_day: boolean
           appt_type: Database["public"]["Enums"]["appt_type"]
+          brand: string
           client_id: string | null
           created_at: string
           ends_at: string
@@ -326,6 +327,7 @@ export type Database = {
         Insert: {
           all_day?: boolean
           appt_type: Database["public"]["Enums"]["appt_type"]
+          brand?: string
           client_id?: string | null
           created_at?: string
           ends_at: string
@@ -344,6 +346,7 @@ export type Database = {
         Update: {
           all_day?: boolean
           appt_type?: Database["public"]["Enums"]["appt_type"]
+          brand?: string
           client_id?: string | null
           created_at?: string
           ends_at?: string
@@ -360,6 +363,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "appointments_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
           {
             foreignKeyName: "appointments_client_id_fkey"
             columns: ["client_id"]
@@ -579,6 +589,122 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      brand_ref_counters: {
+        Row: {
+          brand: string
+          kind: string
+          n: number
+        }
+        Insert: {
+          brand: string
+          kind: string
+          n?: number
+        }
+        Update: {
+          brand?: string
+          kind?: string
+          n?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "brand_ref_counters_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
+        ]
+      }
+      brands: {
+        Row: {
+          accounts_from: string | null
+          active: boolean
+          address: string | null
+          base_location: string | null
+          card_payments_enabled: boolean
+          colour_accent: string | null
+          colour_primary: string | null
+          email_domain: string | null
+          group_line: string
+          group_logo_url: string | null
+          hello_from: string | null
+          initial: string | null
+          ledger_branding_id: string | null
+          legal_line: string
+          logo_url: string | null
+          name: string
+          phone: string | null
+          ref_prefix: string | null
+          reply_domain: string | null
+          resend_template_ids: Json
+          review_url: string | null
+          short_name: string
+          slug: string
+          sms_sender: string | null
+          sort_order: number
+          terms_url: string | null
+          website_url: string | null
+        }
+        Insert: {
+          accounts_from?: string | null
+          active?: boolean
+          address?: string | null
+          base_location?: string | null
+          card_payments_enabled?: boolean
+          colour_accent?: string | null
+          colour_primary?: string | null
+          email_domain?: string | null
+          group_line: string
+          group_logo_url?: string | null
+          hello_from?: string | null
+          initial?: string | null
+          ledger_branding_id?: string | null
+          legal_line: string
+          logo_url?: string | null
+          name: string
+          phone?: string | null
+          ref_prefix?: string | null
+          reply_domain?: string | null
+          resend_template_ids?: Json
+          review_url?: string | null
+          short_name: string
+          slug: string
+          sms_sender?: string | null
+          sort_order?: number
+          terms_url?: string | null
+          website_url?: string | null
+        }
+        Update: {
+          accounts_from?: string | null
+          active?: boolean
+          address?: string | null
+          base_location?: string | null
+          card_payments_enabled?: boolean
+          colour_accent?: string | null
+          colour_primary?: string | null
+          email_domain?: string | null
+          group_line?: string
+          group_logo_url?: string | null
+          hello_from?: string | null
+          initial?: string | null
+          ledger_branding_id?: string | null
+          legal_line?: string
+          logo_url?: string | null
+          name?: string
+          phone?: string | null
+          ref_prefix?: string | null
+          reply_domain?: string | null
+          resend_template_ids?: Json
+          review_url?: string | null
+          short_name?: string
+          slug?: string
+          sms_sender?: string | null
+          sort_order?: number
+          terms_url?: string | null
+          website_url?: string | null
+        }
+        Relationships: []
       }
       business_settings: {
         Row: {
@@ -2356,6 +2482,7 @@ export type Database = {
           balance_due_date: string | null
           balance_paid_at: string | null
           balance_paid_method: string | null
+          brand: string
           campaign: string | null
           chase_paused: boolean
           client_id: string
@@ -2428,6 +2555,7 @@ export type Database = {
           balance_due_date?: string | null
           balance_paid_at?: string | null
           balance_paid_method?: string | null
+          brand?: string
           campaign?: string | null
           chase_paused?: boolean
           client_id: string
@@ -2500,6 +2628,7 @@ export type Database = {
           balance_due_date?: string | null
           balance_paid_at?: string | null
           balance_paid_method?: string | null
+          brand?: string
           campaign?: string | null
           chase_paused?: boolean
           client_id?: string
@@ -2568,6 +2697,13 @@ export type Database = {
           web_alert_ack_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "leads_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
           {
             foreignKeyName: "leads_client_id_fkey"
             columns: ["client_id"]
@@ -2852,6 +2988,7 @@ export type Database = {
           balance_invoice_amount: number | null
           balance_invoice_created_at: string | null
           booking_cancelled_at: string | null
+          brand: string
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
@@ -2924,6 +3061,7 @@ export type Database = {
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null
           booking_cancelled_at?: string | null
+          brand?: string
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -2996,6 +3134,7 @@ export type Database = {
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null
           booking_cancelled_at?: string | null
+          brand?: string
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
@@ -3060,6 +3199,13 @@ export type Database = {
           zoho_deposit_invoice_url?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "quotes_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
           {
             foreignKeyName: "quotes_client_id_fkey"
             columns: ["client_id"]
@@ -3882,6 +4028,7 @@ export type Database = {
         Row: {
           billing_model: string
           billing_paused: boolean
+          brand: string
           client_id: string
           created_at: string
           end_date: string | null
@@ -3900,6 +4047,7 @@ export type Database = {
         Insert: {
           billing_model?: string
           billing_paused?: boolean
+          brand?: string
           client_id: string
           created_at?: string
           end_date?: string | null
@@ -3918,6 +4066,7 @@ export type Database = {
         Update: {
           billing_model?: string
           billing_paused?: boolean
+          brand?: string
           client_id?: string
           created_at?: string
           end_date?: string | null
@@ -3934,6 +4083,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "storage_lets_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
           {
             foreignKeyName: "storage_lets_client_id_fkey"
             columns: ["client_id"]
@@ -3960,6 +4116,7 @@ export type Database = {
       storage_sites: {
         Row: {
           address: string
+          brand: string
           created_at: string
           id: string
           is_active: boolean
@@ -3969,6 +4126,7 @@ export type Database = {
         }
         Insert: {
           address?: string
+          brand?: string
           created_at?: string
           id?: string
           is_active?: boolean
@@ -3978,6 +4136,7 @@ export type Database = {
         }
         Update: {
           address?: string
+          brand?: string
           created_at?: string
           id?: string
           is_active?: boolean
@@ -3985,7 +4144,15 @@ export type Database = {
           notes?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "storage_sites_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
+        ]
       }
       storage_supplier_rates: {
         Row: {
@@ -4240,6 +4407,7 @@ export type Database = {
       }
       vehicles: {
         Row: {
+          brand: string | null
           cost_per_month: number | null
           created_at: string
           end_of_term: string | null
@@ -4258,6 +4426,7 @@ export type Database = {
           vehicle_type: string
         }
         Insert: {
+          brand?: string | null
           cost_per_month?: number | null
           created_at?: string
           end_of_term?: string | null
@@ -4276,6 +4445,7 @@ export type Database = {
           vehicle_type?: string
         }
         Update: {
+          brand?: string | null
           cost_per_month?: number | null
           created_at?: string
           end_of_term?: string | null
@@ -4293,7 +4463,15 @@ export type Database = {
           updated_at?: string
           vehicle_type?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "vehicles_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
+        ]
       }
       webhook_delivery_steps: {
         Row: {
@@ -4729,7 +4907,7 @@ export type Database = {
       is_office: { Args: never; Returns: boolean }
       is_staff: { Args: never; Returns: boolean }
       my_email: { Args: never; Returns: string }
-      next_quote_ref: { Args: { kind: string }; Returns: string }
+      next_quote_ref: { Args: { kind: string; brand?: string }; Returns: string }
       next_statement_ref: { Args: never; Returns: string }
       reclaim_communication_send: {
         Args: {

@@ -87,6 +87,11 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
 | /join crew sign-up (submit → success state + bad-token dead-link card) | ✅ | public/join.spec.ts |
 
+## Single-brand parity (multi-brand PRD §6.1 / §11.10 — `parity` project, runs LAST)
+| Flow | Status | Spec |
+|---|---|---|
+| With only Marley active, no brand UI renders on `/`, `/leads`, `/quotes`, `/bookings`, `/leads/new` — zero `brand-chip` testids, zero `brand-filter` testids, no "Pitmans" text. Deactivates Pitmans via service role in beforeAll (staging seeds it active); afterAll reactivates AND reads the row back, throwing on failure. The project sits last in playwright.config.ts on purpose: it mutates global brand state and must never run alongside brand specs | 🟡 | parity/single-brand.spec.ts — written at gate 1 (asserting the pre-brand-UI baseline; the testids are the contract later gates must use). 🟡 until its first green CI run: three consecutive audit-written specs broke on first CI run in Aug 2026, so a spec is "done" when CI proves it, not when it's written |
+
 ## Bugs this suite surfaced
 - **`/sheet/<token>` was 307'd to /login** — the crew day-sheet page (designed to
   open from an SMS with no login, same token-as-credential model as /q /s /cv) was

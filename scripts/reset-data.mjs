@@ -3,16 +3,21 @@
  * in Supabase Storage AND Cloudflare R2) but KEEPS the identity/config layer:
  * users/roles/passkeys/push devices, business settings (rates, pricing, VAT,
  * deposit, base location), staff + pay rates + working-day patterns, vehicles,
- * storage sites/units, the automation log (cron_runs) and growth_artifacts.
+ * storage sites/units, the automation log (cron_runs), growth_artifacts, and
+ * the brand layer (brands + brand_ref_counters).
  *
  * This is the go-live "flush down" (Peter, 2026-07-21): full reset, NO backfill —
  * pair it with LEAD_SYNC_SINCE (see lib/sync/sanity-leads.ts) so historical
  * website leads never re-import. Zoho is NEVER touched by this script — it is
  * Connor's live books.
  *
- * Deliberately NOT reset: the next_quote_ref sequences (MMR/MMC counters).
- * Reusing a quote ref would let the Zoho orphan-adoption path (-DEP/-BAL
- * reference matching) adopt a stale test invoice for a new real quote.
+ * Deliberately NOT reset: the quote-ref counters — brand_ref_counters (the
+ * live per-brand MMR/MMC/PMR/PMC counters, migration 0104) and the retired
+ * next_quote_ref sequences they replaced. Reusing a quote ref would let the
+ * ledger orphan-adoption path (-DEP/-BAL reference matching) adopt a stale
+ * test invoice for a new real quote — and a go-live flush that reset Pitmans'
+ * counter would reissue PMR001 over a reference already sent to a customer.
+ * The brands table is config (like business_settings) and is kept too.
  *
  * Guarded: refuses without RESET_CONFIRM=yes. Prints the target and row counts.
  * Dry run: RESET_DRY_RUN=yes counts everything but deletes nothing.
@@ -185,5 +190,5 @@ if (process.env.MARLEY_R2_ENDPOINT && process.env.MARLEY_R2_BUCKET && process.en
 console.log(
   dryRun
     ? "\nDry run complete. Nothing was deleted."
-    : "\nFlush complete. Kept: users/passkeys/push devices, settings, staff + pay, vehicles, storage sites/units, cron_runs, growth_artifacts. Quote-ref counters NOT reset (Zoho ref-adoption safety). Zoho untouched.\nRemember: set LEAD_SYNC_SINCE before removing SANITY_SYNC_DISABLED so history never re-imports.",
+    : "\nFlush complete. Kept: users/passkeys/push devices, settings, staff + pay, vehicles, storage sites/units, cron_runs, growth_artifacts, brands + brand_ref_counters. Quote-ref counters NOT reset (ledger ref-adoption safety — a reset would reissue PMR001/MMR001 over refs already sent). Zoho untouched.\nRemember: set LEAD_SYNC_SINCE before removing SANITY_SYNC_DISABLED so history never re-imports.",
 );

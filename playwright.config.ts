@@ -85,5 +85,21 @@ export default defineConfig({
       testMatch: /[\\/]public[\\/].*\.spec\.ts$/,
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
     },
+
+    {
+      // Single-brand parity (multi-brand PRD §6 addition 1, §11.10). Staging
+      // seeds Pitmans active=true so parity can NOT hold in the default state:
+      // these specs deactivate Pitmans via the service role in beforeAll, assert
+      // no brand UI renders, and reactivate (with a proven read-back) in
+      // afterAll. THE POSITION OF THIS PROJECT IS LOAD-BEARING: it mutates
+      // GLOBAL brand state, and with workers:1 + fullyParallel:false projects
+      // run in declaration order — parity sitting LAST means the mutation
+      // happens only after every brand-dependent spec has finished, never
+      // alongside one. Keep it last; never raise workers while it exists.
+      name: "parity",
+      dependencies: ["setup"],
+      testMatch: /[\\/]parity[\\/].*\.spec\.ts$/,
+      use: { storageState: `${authDir}/office.json`, viewport: { width: 1280, height: 900 } },
+    },
   ],
 });

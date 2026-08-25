@@ -122,7 +122,7 @@ brands(
 
 RLS mirrors `business_settings` — read by `is_staff()`, write by `is_admin()`.
 
-`lib/brand.ts`: `getBrand(slug)` cached like `getBusinessSettings()`, `listActiveBrands()` (excludes `group`), **`isMultiBrand()`** — the single-brand invariant — `GROUP_BRAND`, `DEFAULT_BRAND = 'marley'`.
+`lib/brand.ts`: `getBrand(slug)` with per-request reads and **no caching layer**, exactly like `getBusinessSettings()` (corrected at gate 1 — the earlier "cached" wording was wrong on both counts: settings has no cache either, and a cached brand surviving an activation flip is precisely the failure the parity spec exists to catch); `listActiveBrands()` (excludes `group`), **`isMultiBrand()`** — the single-brand invariant — `GROUP_BRAND`, `DEFAULT_BRAND = 'marley'`.
 
 **Pitmans seed** (from their live site): `Pitmans Removals & Storage`, initial `P`, phone `01258 858564`, `Uplands Business Park, Blandford Heights, Shaftesbury Road, Blandford Forum, Dorset DT11 7UZ`, `pitmansremovals.co.uk`, Google review URL. Legal line: `Pitmans Removals & Storage is a trading name of MarleyMoves Ltd. Company No. 15914266. VAT 520 2213 58.`
 
@@ -140,7 +140,7 @@ RLS mirrors `business_settings` — read by `is_staff()`, write by `is_admin()`.
 
 ### 3.3 Reference counters
 
-Replace the two fixed sequences with `brand_ref_counters(brand, kind, n)`. `next_quote_ref(kind, brand)` does an atomic `update … returning n` under the row lock → `PMR001`, `MMC042`. Keep the one-arg signature as a wrapper defaulting to `marley`; migrate current sequence values in.
+Replace the two fixed sequences with `brand_ref_counters(brand, kind, n)`. `next_quote_ref(kind, brand)` does an atomic `update … returning n` under the row lock → `PMR001`, `MMC042`. **The one-arg signature is DROPPED, not kept as a wrapper** (corrected at gate 1 — the code wins per §10): a wrapper beside the two-arg would make PostgREST's named-argument resolution of `rpc('next_quote_ref', { kind })` ambiguous (300 Multiple Choices), breaking every existing call site. Instead the second argument is `brand text default 'marley'`, which keeps those call sites working entirely unchanged. Current sequence values migrate in.
 
 The quote ref **is** the bank-transfer reference `lib/bank-feed/` reconciles against, so a distinct prefix gives per-brand revenue attribution for free.
 
@@ -559,7 +559,7 @@ None blocking:
 
 1. **Pitmans brand assets** — Peter obtaining; placeholder tokens until then
 2. **Pitmans mailbox list** — pending Mark
-3. **WordPress form stack** — pending a look at the live site
+3. **WordPress form stack** — RESOLVED (sampled live 2026-08-25): Contact Form 7 + wpcf7-redirect on the The7 theme (dt-the7 14.4.8). The gate-19 plugin hooks `wpcf7_mail_sent`, with the CF7 form id as config
 4. **Part-load scheduling** — pending Mark. Current expectation is one appointment per customer sharing a van across the run, which works today. Their **weekly recurring England & Wales run** has no recurring-appointment concept in Ops and would be created manually each week
 5. **Blandford depot** — deferred, built either way
 6. **Forward-bookings CSV shape** — template to Mark closer to 21 September
@@ -576,7 +576,7 @@ Pre-answered so the build doesn't stop. Where these conflict with something disc
 
 **Identifiers.** Brand slugs `marley`, `pitmans`, `group`. Ref prefixes `MM`, `PM`, none for group. Initials `M`, `P`. Filter param `?brand=all|marley|pitmans`, absent means `all`. **Migrations continue from `0104`** — `0103` was taken by the whole-quote match kind (2026-08-25) and is already applied to staging and prod. Invoice suffixes stay `-DEP` / `-COM` / `-BAL`, all live for both brands — **no new suffix**: pay-in-full and the late-booking rule raise the standard `-BAL` early.
 
-**Colours.** Sample `pitmansremovals.co.uk` during gate 1; record the sampled values as migration seed data *and* write them back into this document. Blue is the UI colour; yellow only for large flat areas — diary survey and pack blocks, and the email header band. Yellow blocks take blue text, blue blocks white. If sampling returns an obvious theme colour rather than a brand colour, flag it and use a considered default rather than shipping something wrong.
+**Colours.** Sampled live from `pitmansremovals.co.uk` 2026-08-25 (computed styles, not theme guesswork): **primary blue `#2B2B76`** (submit buttons and headings — the dominant brand colour), **yellow `#FFCC00`** (the "Request Free Quote" CTA). A deeper navy `#170277` appears on some headings; `#2B2B76` is the UI primary. These are the migration seed values. Blue is the UI colour; yellow only for large flat areas — diary survey and pack blocks, and the email header band. Yellow blocks take blue text, blue blocks white.
 
 **Stubs for blocked gates** — build the full code path, log a blocked-gate note, continue:
 - **Mailboxes:** `info@pitmansremovals.co.uk` (confirmed live on their site) as `hello_from`; `accounts@pitmansremovals.co.uk` as `accounts_from`, flagged provisional.
