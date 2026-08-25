@@ -24,6 +24,7 @@ import {
   type NewLeadInput,
 } from "@/lib/leads/schema";
 import { cleanApproxWindow, normaliseApproxMonth } from "@/lib/bookings/booking-details";
+import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 
 async function actor() {
   const sb = await createClient();
@@ -105,6 +106,21 @@ export async function createLeadAction(input: NewLeadInput) {
   const v = parsed.data;
   const { sb, userId } = await actor();
 
+  // GATE 5 — the lead's brand, resolved SERVER-SIDE and never trusted from
+  // the client. Single-brand mode: the picker never rendered, so whatever
+  // arrived is ignored and DEFAULT_BRAND is written. Multi-brand mode: the
+  // value must name an ACTIVE brand slug — required with NO default, because
+  // both phone lines ring the same office so nothing can be inferred.
+  // Validated against listActiveBrands (data, not a constant list), so a
+  // third brand needs no code change here.
+  const activeBrands = await listActiveBrands(sb);
+  let brand: string = DEFAULT_BRAND;
+  if (activeBrands.length > 1) {
+    const picked = v.brand && activeBrands.some((b) => b.slug === v.brand) ? v.brand : null;
+    if (!picked) return { ok: false as const, error: "Choose which brand this enquiry is for." };
+    brand = picked;
+  }
+
   // An explicit customer pick attaches straight to that client; otherwise dedupe on
   // contact details (attach to a match, or create a new client).
   let clientId: string;
@@ -131,6 +147,9 @@ export async function createLeadAction(input: NewLeadInput) {
     .from("leads")
     .insert({
       client_id: clientId,
+      // Source of truth for the record's brand (PRD §3.2) — resolved above,
+      // never the raw client value.
+      brand,
       // No estimator at the lead stage — the estimator is assigned when a survey is
       // booked (it lives on the survey/appointment). Leaving this null keeps the
       // lead's "estimator" honest: empty until there's actually a survey to do.
@@ -196,6 +215,84 @@ export async function createLeadAndOpenAction(input: NewLeadInput) {
   const res = await createLeadAction(input);
   if (!res.ok) return res;
   redirect(`/leads/${res.leadId}`);
+}
+
+/**
+ * GATE 5 — change which brand a lead belongs to, PRE-QUOTE ONLY (the lead
+ * page's eyebrow chip control, PRD §4 /leads/[id]).
+ *
+ * Once ANY quote reference exists for the lead the brand is fixed — the ref
+ * prefix is minted from it, and a ref the customer has seen cannot change
+ * meaning. Refs are minted at DRAFT creation (nextQuoteRef in
+ * createDraftQuote), so in practice "a ref exists" means "any quotes row at
+ * all"; the not-null filter keeps the check honest against any legacy
+ * ref-less row. The client hides the control in that state, but the check
+ * here is the one that counts.
+ */
+export async function updateLeadBrandAction(leadId: string, brandSlug: string) {
+  if (!z.string().uuid().safeParse(leadId).success) return { ok: false as const, error: "Invalid lead" };
+  const { sb, userId } = await actor();
+
+  // Only meaningful in multi-brand mode, and only to an ACTIVE brand slug —
+  // the control never renders otherwise, so anything else is a stale tab or a
+  // forged call. Reject rather than guess.
+  const activeBrands = await listActiveBrands(sb);
+  if (activeBrands.length < 2) {
+    return { ok: false as const, error: "Brand changes need more than one active brand." };
+  }
+  const target = activeBrands.find((b) => b.slug === brandSlug);
+  if (!target) return { ok: false as const, error: "Pick an active brand." };
+
+  const { data: lead } = await sb.from("leads").select("id, client_id, brand").eq("id", leadId).single();
+  if (!lead) return { ok: false as const, error: "Lead not found" };
+  if (lead.brand === target.slug) return { ok: true as const };
+
+  // Server-side re-check of the client-side gate. A failed COUNT is a refusal
+  // too — "could not check" must never act like "no refs" (the evidence bar).
+  const { count: refCount, error: refError } = await sb
+    .from("quotes")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", leadId)
+    .not("quote_ref", "is", null);
+  if (refError) {
+    return { ok: false as const, error: `Could not verify this lead's quotes: ${refError.message}` };
+  }
+  if ((refCount ?? 0) > 0) {
+    return {
+      ok: false as const,
+      error:
+        "A quote reference has already been issued for this lead — its brand (and the ref prefix) is fixed.",
+    };
+  }
+
+  const { error } = await sb.from("leads").update({ brand: target.slug }).eq("id", leadId);
+  if (error) return { ok: false as const, error: error.message };
+
+  // Keep the denormalised copies in step (PRD §3.2: quotes.brand and
+  // appointments.brand are set from the parent lead at insert). Pre-quote a
+  // lead can still carry appointments — a booked survey colours the diary
+  // from appointments.brand — plus belt-and-braces any ref-less quote row.
+  // Fail-soft: the lead write is the source of truth and has already landed.
+  await sb.from("appointments").update({ brand: target.slug }).eq("lead_id", leadId);
+  await sb.from("quotes").update({ brand: target.slug }).eq("lead_id", leadId).is("quote_ref", null);
+
+  // Audit — the SAME mechanism as every other edit on the lead page (the
+  // activities timeline). The PRD names events_log, but this codebase's real
+  // lead-edit audit surface is `activities` — the code wins (PRD §10);
+  // events_log stays the money/webhook audit rail.
+  await sb.from("activities").insert({
+    client_id: lead.client_id ?? null,
+    lead_id: leadId,
+    actor_id: userId,
+    type: "note",
+    summary: `Brand changed to ${target.name}`,
+    meta: { brand_from: lead.brand ?? null, brand_to: target.slug },
+  });
+
+  revalidatePath(`/leads/${leadId}`);
+  revalidatePath("/leads");
+  revalidatePath("/");
+  return { ok: true as const };
 }
 
 /**

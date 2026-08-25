@@ -41,10 +41,13 @@ import type { ClaimChannel, ClaimStatus } from "@/lib/claims";
 import { JobMediaList } from "@/components/content/job-media-list";
 import { loadJobMedia } from "@/lib/content/job-media-load";
 import { getBusinessSettings } from "@/lib/settings";
+import { brandCtaColour, brandCtaColourDeep, hexWithAlpha, listActiveBrands } from "@/lib/brand";
 import { UK_TZ } from "@/lib/uk-time";
 import { leadContact } from "@/lib/leads/shared-client";
 import { ukPhone } from "@/lib/phone";
+import { cn } from "@/lib/utils";
 import { StatusChanger } from "./status-changer";
+import { BrandChanger } from "./brand-changer";
 import { ReviewRequestControl } from "./review-request-control";
 
 const gbp = (n: number | null | undefined): string =>
@@ -267,6 +270,27 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // Payments context: standard deposit from Settings + the accepted quote's value.
   const settings = await getBusinessSettings(supabase);
   const { defaultDeposit } = settings;
+
+  // GATE 5 brand surface. The chip + change control render in MULTI-BRAND
+  // mode only (single-brand invariant, PRD §1); the lead's brand row is also
+  // read in single-brand mode because it drives the AI-survey promo card's
+  // accent — where it resolves to the Marley row and the card renders exactly
+  // as today.
+  const activeBrands = await listActiveBrands(supabase);
+  const multiBrand = activeBrands.length > 1;
+  const leadBrandRow = activeBrands.find((b) => b.slug === lead.brand);
+  // A quote REFERENCE fixes the brand — its prefix is minted from it. Refs
+  // are minted at draft creation (createDraftQuote), so any quotes row with a
+  // non-null ref pins it; updateLeadBrandAction re-checks this server-side.
+  const brandLocked = quoteRows.some((q) => q.quote_ref != null);
+  // The AI-survey promo card's accent, brand-token driven (PRD §4: a Pitmans
+  // lead shows a blue card). When the resolved colour IS mm-red — Marley's
+  // seeded accent is the byte-equal hex behind --color-mm-red (#c03838, same
+  // trick as leads-board.tsx) — or the brands row can't supply a usable
+  // colour, keep today's token classes so the Marley render stays
+  // byte-identical.
+  const resolvedCta = brandCtaColour(leadBrandRow);
+  const surveyCta = resolvedCta && resolvedCta.toLowerCase() !== "#c03838" ? resolvedCta : null;
   const acceptedQuote = quoteRows.find((q) => q.status === "accepted");
   const agreedPrice = acceptedQuote
     ? Number(acceptedQuote.agreed_price ?? acceptedQuote.grand_total ?? 0) || null
@@ -377,6 +401,31 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
             <div className="mt-1 flex flex-wrap items-center gap-3">
               <h1 className="font-display text-2xl text-foreground">{lead.name ?? "Unnamed lead"}</h1>
               <LeadStatusBadge status={lead.status} />
+              {/* GATE 5: brand chip beside the status badge (this page's
+                  header card is its PageHeader-equivalent eyebrow row) —
+                  clickable to change brand until a quote ref is issued, then
+                  static with the why-tooltip. Multi-brand only, and only
+                  when the lead's brand is a live brands row. */}
+              {multiBrand && leadBrandRow ? (
+                <BrandChanger
+                  leadId={lead.id}
+                  current={{
+                    slug: leadBrandRow.slug,
+                    name: leadBrandRow.name,
+                    initial: leadBrandRow.initial,
+                    colourPrimary: leadBrandRow.colourPrimary,
+                    shortName: leadBrandRow.shortName,
+                  }}
+                  options={activeBrands.map((b) => ({
+                    slug: b.slug,
+                    name: b.name,
+                    initial: b.initial,
+                    colourPrimary: b.colourPrimary,
+                    shortName: b.shortName,
+                  }))}
+                  locked={brandLocked}
+                />
+              ) : null}
               {lead.source_system === "imve" ? (
                 <span
                   className="inline-flex items-center rounded-pill bg-muted px-2.5 py-1 text-xs font-semibold text-mist-500"
@@ -717,10 +766,40 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         {/* Survey */}
         <TabsContent value="survey" className="mt-5">
           {settings.aiSurveyEnabled ? (
-            <Card className="mb-5 overflow-hidden border-mm-red/25 bg-[#111719] p-0 text-white shadow-lg">
+            /* The card's accent is brand-token driven (gate 5): `surveyCta`
+               is null for Marley (its resolved colour IS the mm-red token, so
+               the classes below render byte-identically to today) and a hex
+               from the brands row otherwise — e.g. Pitmans blue. The dark
+               #111719 shell and the cyan "Estimator tool" pill are app
+               chrome, not record branding, and stay. */
+            <Card
+              className={cn(
+                "mb-5 overflow-hidden bg-[#111719] p-0 text-white shadow-lg",
+                surveyCta ? undefined : "border-mm-red/25",
+              )}
+              style={
+                surveyCta
+                  ? ({
+                      borderColor: hexWithAlpha(surveyCta, 0.25),
+                      "--survey-cta": surveyCta,
+                      "--survey-cta-deep": brandCtaColourDeep(surveyCta),
+                    } as React.CSSProperties)
+                  : undefined
+              }
+            >
               <div className="grid gap-5 p-5 sm:grid-cols-[1fr_auto] sm:items-center md:p-6">
                 <div className="flex min-w-0 items-start gap-4">
-                  <div className="grid size-12 shrink-0 place-items-center rounded-xl bg-mm-red text-white shadow-[0_0_24px_rgba(192,56,56,.3)]">
+                  <div
+                    className={cn(
+                      "grid size-12 shrink-0 place-items-center rounded-xl text-white",
+                      surveyCta ? undefined : "bg-mm-red shadow-[0_0_24px_rgba(192,56,56,.3)]",
+                    )}
+                    style={
+                      surveyCta
+                        ? { backgroundColor: surveyCta, boxShadow: `0 0 24px ${hexWithAlpha(surveyCta, 0.3)}` }
+                        : undefined
+                    }
+                  >
                     <ScanLine className="size-6" strokeWidth={1.8} />
                   </div>
                   <div>
@@ -733,7 +812,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                     </p>
                   </div>
                 </div>
-                <Button asChild className="min-h-12 bg-mm-red px-5 text-white hover:bg-mm-red-deep">
+                <Button
+                  asChild
+                  className={cn(
+                    "min-h-12 px-5 text-white",
+                    surveyCta
+                      ? "bg-(--survey-cta) hover:bg-(--survey-cta-deep)"
+                      : "bg-mm-red hover:bg-mm-red-deep",
+                  )}
+                >
                   <Link href={`/leads/${lead.id}/cubic`}>
                     <ScanLine strokeWidth={1.75} />
                     Open AI survey

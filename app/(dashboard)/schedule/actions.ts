@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { balanceDueDate } from "@/lib/quote/payments";
 import { commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
@@ -225,11 +226,12 @@ export async function createAppointment(input: CreateAppointmentInput) {
     email: string | null;
     from_address: string | null;
     from_postcode: string | null;
+    brand: string;
   } | null = null;
   if (input.leadId) {
     const { data } = await sb
       .from("leads")
-      .select("id, client_id, status, name, phone, email, from_address, from_postcode")
+      .select("id, client_id, status, name, phone, email, from_address, from_postcode, brand")
       .eq("id", input.leadId)
       .single();
     lead = data;
@@ -279,6 +281,9 @@ export async function createAppointment(input: CreateAppointmentInput) {
     .from("appointments")
     .insert({
       appt_type: input.apptType,
+      // Denormalised from the parent lead at insert (PRD §3.2) — the diary
+      // colours an appointment without a join.
+      brand: lead?.brand ?? DEFAULT_BRAND,
       lead_id: input.leadId ?? null,
       client_id: lead?.client_id ?? null,
       survey_id: surveyId,
@@ -498,7 +503,7 @@ async function upsertPackDay(
   // nothing would ever clean up.
   const { data: removal } = await sb
     .from("appointments")
-    .select("id")
+    .select("id, brand")
     .eq("lead_id", input.leadId)
     .eq("appt_type", "removal")
     .eq("status", "scheduled")
@@ -508,6 +513,10 @@ async function upsertPackDay(
 
   const { error } = await sb.from("appointments").insert({
     appt_type: "pack" as never,
+    // Denormalised brand, copied from the sibling removal (itself set from
+    // the parent lead at insert, PRD §3.2) — a pack day must colour like its
+    // move on the diary.
+    brand: removal.brand ?? DEFAULT_BRAND,
     lead_id: input.leadId,
     client_id: input.clientId,
     title: input.leadName ? `Packing — ${input.leadName}` : "Packing",

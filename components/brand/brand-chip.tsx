@@ -42,6 +42,7 @@ export function BrandChip({
   size = 20,
   variant = "chip",
   className,
+  title,
 }: {
   /** A full `Brand` (lib/brand.ts) satisfies this shape — pass the row down. */
   brand: BrandChipData;
@@ -50,6 +51,9 @@ export function BrandChip({
   /** `"eyebrow"` renders monogram + short name for detail-page eyebrows. */
   variant?: "chip" | "eyebrow";
   className?: string;
+  /** Tooltip override (default: the full brand name). The lead page's locked
+   *  chip uses it to explain WHY the chip is static (gate 5). */
+  title?: string;
 }) {
   if (!brand.initial || !brand.colourPrimary) return null;
 
@@ -73,7 +77,7 @@ export function BrandChip({
       <span
         data-testid="brand-chip"
         data-brand={brand.slug}
-        title={brand.name}
+        title={title ?? brand.name}
         className={cn(
           "inline-flex shrink-0 items-center gap-1.5 text-xs font-semibold text-foreground",
           className,
@@ -89,7 +93,7 @@ export function BrandChip({
     <span
       data-testid="brand-chip"
       data-brand={brand.slug}
-      title={brand.name}
+      title={title ?? brand.name}
       role="img"
       aria-label={brand.name}
       className={cn("inline-flex shrink-0", className)}

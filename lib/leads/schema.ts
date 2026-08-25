@@ -35,6 +35,12 @@ export const PROPERTY_SIZES = [
 ] as const;
 
 export const newLeadSchema = z.object({
+  /** Which brand this enquiry is for (gate 5). Optional HERE because the
+   *  schema is shared with single-brand mode, where the picker never renders
+   *  and the server writes DEFAULT_BRAND without trusting any client value.
+   *  Multi-brand requiredness lives in `newLeadSchemaWithBrand` (client) and
+   *  in createLeadAction's active-slug check (server). */
+  brand: z.string().trim().optional().or(z.literal("")),
   // Names and postcodes are normalised at the schema so EVERY save path gets
   // it ("Paul betty" → "Paul Betty", "bh218nb" → "BH21 8NB"). String→string
   // transforms, so the resolver's input/output types stay identical.
@@ -76,6 +82,24 @@ export const newLeadSchema = z.object({
   });
 
 export type NewLeadInput = z.infer<typeof newLeadSchema>;
+
+/**
+ * GATE 5, multi-brand only: `newLeadSchema` plus a REQUIRED brand pick. The
+ * add-lead form swaps its resolver to this when it renders the brand picker
+ * (two or more active brands), so the brand error surfaces alongside the
+ * other field errors and the form cannot submit until a brand is picked —
+ * deliberately NO default, since both phone lines ring the same office. The
+ * server re-validates the slug against active brands regardless.
+ */
+export const newLeadSchemaWithBrand = newLeadSchema.superRefine((v, ctx) => {
+  if (!v.brand) {
+    ctx.addIssue({
+      code: "custom",
+      path: ["brand"],
+      message: "Choose which brand this enquiry is for.",
+    });
+  }
+});
 
 /** Editable lead/customer detail fields (name + contact + move + the phone estimate). */
 export const editLeadSchema = z.object({
