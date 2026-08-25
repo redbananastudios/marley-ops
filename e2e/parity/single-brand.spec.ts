@@ -43,9 +43,11 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * suspect. The fix is never to loosen this spec.
  */
 
-/** Six routes: the five highest-traffic office surfaces — this spec's own
- *  choice of coverage (PRD §6 addition 1 mandates the parity assertion but
- *  names no routes) — plus /settings, where gate 2's Brands card lives. */
+/** Thirteen routes: the five highest-traffic office surfaces — this spec's
+ *  own choice of coverage (PRD §6 addition 1 mandates the parity assertion but
+ *  names no routes) — plus /settings, where gate 2's Brands card lives, plus
+ *  the seven gate-4 list surfaces (clients, follow-ups, documents, claims,
+ *  content, payments, refunds). */
 const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/", heading: "Dashboard" },
   { path: "/leads", heading: "Leads" },
@@ -53,6 +55,13 @@ const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/bookings", heading: "Bookings" },
   { path: "/leads/new", heading: "Add lead" },
   { path: "/settings", heading: "Settings" },
+  { path: "/clients", heading: "Clients" },
+  { path: "/follow-ups", heading: "Follow-ups" },
+  { path: "/documents", heading: "Documents" },
+  { path: "/claims", heading: "Claims" },
+  { path: "/content", heading: "Content" },
+  { path: "/payments", heading: "Payments" },
+  { path: "/refunds", heading: "Refunds" },
 ];
 
 /**

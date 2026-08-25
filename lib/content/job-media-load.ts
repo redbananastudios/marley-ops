@@ -11,22 +11,41 @@ export async function loadJobMedia(opts: {
   leadId?: string;
   filter?: "needs-review" | "approved" | "internal";
   limit?: number;
+  /** Active-brand slug to narrow to (multi-brand PRD §4 Content). ADDITIVE:
+   *  omitted = off, and the query is byte-identical to before the param
+   *  existed — existing callers see zero behaviour change. When set, the
+   *  narrowing runs IN the DB so the newest-N window is computed WITHIN the
+   *  brand, not sliced out of a brand-blind window afterwards. */
+  brand?: string;
 }): Promise<JobMediaView[]> {
   const admin = createAdminClient();
+  // A named brand flips the leads embed to an INNER join in the query string:
+  // filtering an ordinary left-join embed (.eq("leads.brand", …) over
+  // leads(name)) narrows the embedded row, not the job_media parent, so the
+  // window would stay brand-blind. The embed variant is chosen at runtime; the
+  // cast pins the static row type to the un-narrowed shape — the fields this
+  // function reads are identical in both variants.
+  const embed: string = opts.brand ? "leads!inner(name, brand)" : "leads(name)";
   let q = admin
     .from("job_media")
     .select(
-      "id, lead_id, kind, storage_path, caption, tag, consent_state, transcript, transcript_status, captured_by_name, created_at, marketing_approved_at, leads(name)",
+      `id, lead_id, kind, storage_path, caption, tag, consent_state, transcript, transcript_status, captured_by_name, created_at, marketing_approved_at, ${embed}` as "id, lead_id, kind, storage_path, caption, tag, consent_state, transcript, transcript_status, captured_by_name, created_at, marketing_approved_at, leads(name)",
     )
     .order("created_at", { ascending: false })
     .limit(opts.limit ?? 100);
   if (opts.leadId) q = q.eq("lead_id", opts.leadId);
+  if (opts.brand) q = q.eq("leads.brand", opts.brand);
   if (opts.filter === "approved") q = q.not("marketing_approved_at", "is", null);
   if (opts.filter === "needs-review")
     q = q.is("marketing_approved_at", null).neq("consent_state", "internal_only");
   if (opts.filter === "internal") q = q.eq("consent_state", "internal_only");
 
-  const { data } = await q;
+  const { data, error } = await q;
+  // A brand-narrowed load must fail LOUD: the caller renders that brand's
+  // filtered view from exactly this result, so a swallowed error would render
+  // "no content" for the brand (the "I could not check" rule). Un-narrowed
+  // callers keep the previous fail-soft empty result.
+  if (error && opts.brand) throw new Error(`job media brand read failed: ${error.message}`);
   const rows = data ?? [];
   if (rows.length === 0) return [];
 

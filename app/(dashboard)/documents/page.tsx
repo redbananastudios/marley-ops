@@ -12,6 +12,10 @@ import { PageHeader } from "@/components/page-header";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BrandChip } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { UK_TZ } from "@/lib/uk-time";
 
 /**
@@ -50,6 +54,9 @@ const fmtDay = (d: string | null): string =>
 type DocRow = {
   key: string;
   kind: DocumentKind;
+  /** Brand slug riding the row's lead (falling back to its quote — same value,
+   *  denormalised); null when neither is attributable. Multi-brand PRD §4. */
+  brand: string | null;
   signedAt: string;
   customer: string;
   clientId: string | null;
@@ -87,13 +94,26 @@ function evidenceHrefFor(
 export default async function DocumentsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; tab?: string }>;
+  searchParams: Promise<{ q?: string; tab?: string; brand?: string }>;
 }) {
   const sp = await searchParams;
   const q = (sp.q ?? "").trim().toLowerCase();
   const tab =
     sp.tab === "unsigned" ? "unsigned" : sp.tab === "contractors" ? "contractors" : "all";
   const sb = await createClient();
+
+  // Brand layer (multi-brand PRD §4 Documents): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1). Signatures and completions carry no brand column — brand rides
+  // the page's existing lead/quote lookups below, with the ?brand= narrowing
+  // applied IN the DB on those reads. The filter composes with all three tabs;
+  // contractor agreements are a `group` surface (crew are engaged by the legal
+  // entity, not a brand) so that tab is never chipped and never narrowed.
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
 
   // Contractor agreements (office reads all via RLS) — filed here as the
   // record that each self-employed worker signed their one-time agreement.
@@ -124,12 +144,17 @@ export default async function DocumentsPage({
     // as "Signature needed — crew collect on arrival" sends crew after a
     // signature that no one will ever collect, sorted to the TOP of the list
     // because cancelled and past jobs have the earliest move dates.
-    sb
-      .from("quotes")
-      .select("id, quote_ref, customer_name, lead_id, client_id, moving_date, deposit_paid_at, status")
-      .eq("status", "accepted")
-      .neq("source", "imve")
-      .is("booking_cancelled_at", null)
+    // ?brand= narrows this in the DB (quotes.brand is denormalised from the
+    // lead) so the Unsigned tab follows the filter like the All tab does.
+    applyBrandFilter(
+      sb
+        .from("quotes")
+        .select("id, quote_ref, customer_name, lead_id, client_id, moving_date, deposit_paid_at, status")
+        .eq("status", "accepted")
+        .neq("source", "imve")
+        .is("booking_cancelled_at", null),
+      brandFilter,
+    )
       .order("moving_date", { ascending: true, nullsFirst: false })
       .limit(400),
   ]);
@@ -141,16 +166,45 @@ export default async function DocumentsPage({
     ),
   ];
   const quoteIds = [...new Set((sigs ?? []).map((s) => s.quote_id).filter(Boolean) as string[])];
-  const [{ data: leadRows }, { data: quoteRows }] = await Promise.all([
-    leadIds.length
-      ? sb.from("leads").select("id, name").in("id", leadIds)
-      : Promise.resolve({ data: [] as { id: string; name: string | null }[] }),
-    quoteIds.length
-      ? sb.from("quotes").select("id, quote_ref, customer_name").in("id", quoteIds)
-      : Promise.resolve({ data: [] as { id: string; quote_ref: string; customer_name: string | null }[] }),
-  ]);
-  const leadName = new Map((leadRows ?? []).map((l) => [l.id, l.name]));
-  const quoteById = new Map((quoteRows ?? []).map((qr) => [qr.id, qr]));
+  // Brand rides these lookups (multi-brand PRD §4): the ?brand= narrowing is
+  // applied IN the DB, so under a named filter only that brand's leads/quotes
+  // come back and the rows below drop out by attribution. CHUNKED at 100 ids —
+  // up to 800 lead ids and 400 quote ids feed these, and PostgREST .in() rides
+  // the GET query string: past ~200 UUIDs it 414s and the join silently
+  // returns nothing (lib/bank-feed/sync.ts chunks at 100 for exactly this).
+  // Error handling splits on the filter: under a NAMED brand these reads
+  // decide row MEMBERSHIP, so a failed or truncated batch must THROW — a
+  // swallowed error would silently drop documents from the register (the
+  // "I could not check" rule). On "all" they only resolve display names, so a
+  // failed batch keeps the previous fail-soft behaviour (a name degrades to
+  // its fallback, the row stays).
+  const leadName = new Map<string, string | null>();
+  const leadBrand = new Map<string, string>();
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const { data: leadRows, error: leadErr } = await applyBrandFilter(
+      sb.from("leads").select("id, name, brand").in("id", leadIds.slice(i, i + 100)),
+      brandFilter,
+    );
+    if (leadErr && brandFilter !== "all")
+      throw new Error(`documents brand read failed: ${leadErr.message}`);
+    for (const l of leadRows ?? []) {
+      leadName.set(l.id, l.name);
+      leadBrand.set(l.id, l.brand);
+    }
+  }
+  const fetchQuoteBatch = (ids: string[]) =>
+    applyBrandFilter(
+      sb.from("quotes").select("id, quote_ref, customer_name, brand").in("id", ids),
+      brandFilter,
+    );
+  type QuoteLookupRow = NonNullable<Awaited<ReturnType<typeof fetchQuoteBatch>>["data"]>[number];
+  const quoteById = new Map<string, QuoteLookupRow>();
+  for (let i = 0; i < quoteIds.length; i += 100) {
+    const { data: quoteRows, error: quoteErr } = await fetchQuoteBatch(quoteIds.slice(i, i + 100));
+    if (quoteErr && brandFilter !== "all")
+      throw new Error(`documents brand read failed: ${quoteErr.message}`);
+    for (const qr of quoteRows ?? []) quoteById.set(qr.id, qr);
+  }
 
   // Certificate links (short-lived) in one batch.
   const certPaths = (comps ?? []).map((c) => c.certificate_path).filter(Boolean) as string[];
@@ -175,6 +229,9 @@ export default async function DocumentsPage({
       return {
         key: `s-${s.id}`,
         kind,
+        // Lead first (source of truth), quote as fallback for lead-less rows —
+        // denormalised to the same value, so never contradictory.
+        brand: (s.lead_id ? leadBrand.get(s.lead_id) : null) ?? qr?.brand ?? null,
         // The signed document itself, when we captured the terms it was taken
         // under. Rows predating that capture keep the link to their evidence
         // panel rather than offering a PDF we cannot honestly produce. Keyed on
@@ -196,6 +253,7 @@ export default async function DocumentsPage({
       (c): DocRow => ({
         key: `c-${c.id}`,
         kind: "completion",
+        brand: (c.lead_id ? leadBrand.get(c.lead_id) : null) ?? null,
         // Completions carry the real thing (a stored PDF), so the row's action
         // is that download rather than a link to a panel.
         viewHref: c.lead_id ? `/leads/${c.lead_id}` : null,
@@ -220,7 +278,10 @@ export default async function DocumentsPage({
         r.customer.toLowerCase().includes(q) ||
         (r.quoteRef ?? "").toLowerCase().includes(q) ||
         r.detail.toLowerCase().includes(q),
-    );
+    )
+    // A named ?brand= keeps only rows attributed to that brand; the lookups
+    // above were DB-narrowed, so anything else derived brand=null and drops.
+    .filter((r) => brandFilter === "all" || r.brand === brandFilter);
 
   // Unsigned tab: accepted quotes with no contract signature, soonest move first.
   // The `kind` filter is load-bearing: a date confirmation also carries the
@@ -236,7 +297,14 @@ export default async function DocumentsPage({
     .filter((aq) => !signedQuoteIds.has(aq.id))
     .filter((aq) => !q || (aq.customer_name ?? "").toLowerCase().includes(q) || aq.quote_ref.toLowerCase().includes(q));
 
-  const tabLink = (t: string) => `/documents?${new URLSearchParams({ ...(sp.q ? { q: sp.q } : {}), ...(t !== "all" ? { tab: t } : {}) })}`;
+  // Tab links carry ?brand= (and q) so the filter survives switching tabs —
+  // the server-rendered analogue of gate 3's rebuild-from-useSearchParams rule.
+  const tabLink = (t: string) =>
+    `/documents?${new URLSearchParams({
+      ...(sp.q ? { q: sp.q } : {}),
+      ...(t !== "all" ? { tab: t } : {}),
+      ...(brandFilter !== "all" ? { brand: brandFilter } : {}),
+    })}`;
 
   return (
     <main className="flex-1 p-6 md:p-8">
@@ -258,6 +326,10 @@ export default async function DocumentsPage({
         </div>
         <form method="GET" className="flex items-center gap-2">
           {tab !== "all" ? <input type="hidden" name="tab" value={tab} /> : null}
+          {/* A GET submit replaces the whole query string, so ?brand= must ride
+              along — the server-form analogue of gate 3's rebuild-from-
+              useSearchParams rule for client search inputs. */}
+          {brandFilter !== "all" ? <input type="hidden" name="brand" value={brandFilter} /> : null}
           <input
             type="search"
             name="q"
@@ -266,6 +338,13 @@ export default async function DocumentsPage({
             className="focus-ring h-10 w-64 rounded-md border border-input bg-card px-3 text-sm"
           />
         </form>
+        {/* Brand filter (multi-brand PRD §4 Documents) — joins the existing GET
+            search form row and composes with the three tabs. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
       </div>
 
       {tab === "unsigned" ? (
@@ -327,6 +406,12 @@ export default async function DocumentsPage({
             <ul className="divide-y">
               {agreementRows.map((a) => (
                 <li key={a.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
+                  {/* NO brand chip here, deliberately: contractor agreements
+                      are a `group` document (multi-brand PRD §3.6/§4) — crew
+                      are engaged by the legal entity and work both brands, so
+                      the agreement belongs to no brand. This page tells the
+                      kinds apart by tab: only the sigs/comps rows on the All
+                      tab (DocumentKindPill rows) are brand-attributable. */}
                   <span className="shrink-0 rounded-pill border border-mm-red/45 bg-card px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-mm-red-deep">
                     Contractor agreement
                   </span>
@@ -359,6 +444,12 @@ export default async function DocumentsPage({
               {rows.map((r) => (
                 <li key={r.key} className="flex flex-wrap items-center gap-3 px-5 py-3.5">
                   <DocumentKindPill kind={r.kind} />
+                  {/* Brand chip beside the kind pill (multi-brand PRD §4
+                      Documents) — hidden when the filter names one brand. */}
+                  {(() => {
+                    const b = showBrandChips && r.brand ? chipBySlug.get(r.brand) : undefined;
+                    return b ? <BrandChip brand={b} /> : null;
+                  })()}
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-foreground">
                       {r.clientId ? (

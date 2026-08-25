@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 import { determineRefundQueueAction } from "@/app/actions/refunds";
 import { gbpPence, RAIL_LABELS, type QueueItemView } from "@/lib/refunds/queue-view";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 
 function dateLabel(day: string | null): string {
   if (!day) return "the original date";
@@ -32,7 +33,15 @@ function dateLabel(day: string | null): string {
     : d.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
 }
 
-export function DecisionCard({ item }: { item: QueueItemView }) {
+export function DecisionCard({
+  item,
+  brandChip,
+}: {
+  item: QueueItemView;
+  /** Slim chip data (multi-brand PRD §4 Refunds) — absent in single-brand
+   *  mode / when the ?brand= filter names one brand, so nothing renders. */
+  brandChip?: BrandChipData;
+}) {
   const router = useRouter();
   const [confirming, setConfirming] = useState<"filled" | "not_filled" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -93,6 +102,7 @@ export function DecisionCard({ item }: { item: QueueItemView }) {
           ) : (
             <span className="font-medium text-foreground">{item.customer}</span>
           )}
+          {brandChip ? <BrandChip brand={brandChip} className="ml-2 align-middle" /> : null}
           <p className="text-xs text-mist-400">
             {item.quoteRef ?? "—"} · {item.triggerLabel}
           </p>

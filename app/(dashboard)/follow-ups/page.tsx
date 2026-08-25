@@ -1,6 +1,9 @@
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { FollowUpsQueue, type FollowUpRow } from "@/components/followups/followups-queue";
+import { BrandFilter } from "@/components/brand/brand-filter";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
 
@@ -47,8 +50,20 @@ export function pickBestQuoteByLead(
   return out;
 }
 
-export default async function FollowUpsPage() {
+export default async function FollowUpsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ brand?: string }>;
+}) {
   const sb = await createClient();
+
+  // Brand layer (multi-brand PRD §4 Follow-ups): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1). Follow-ups key on leads, so brand rides the page's existing lead
+  // join below — no follow_ups column, no extra read.
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(await searchParams, activeBrands);
 
   const [{ data: fus }, { data: profiles }] = await Promise.all([
     sb
@@ -62,24 +77,49 @@ export default async function FollowUpsPage() {
   const nameOf = new Map((profiles ?? []).map((p) => [p.id, p.full_name]));
 
   const leadIds = [...new Set(open.map((f) => f.lead_id))];
-  const [{ data: leads }, { data: quotes }] = await Promise.all([
-    leadIds.length
-      ? sb
-          .from("leads")
-          .select("id, name, phone, email, preferred_date, property_size, from_postcode, deposit_amount, balance_amount, deposit_paid_at, balance_paid_at")
-          .in("id", leadIds)
-      : Promise.resolve({ data: [] }),
-    leadIds.length
-      ? sb
-          .from("quotes")
-          .select("id, lead_id, quote_ref, status, agreed_price, grand_total, created_at, moving_date")
-          .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] }),
-  ]);
-  const leadOf = new Map((leads ?? []).map((l) => [l.id, l]));
+
+  // Lead join (multi-brand PRD §4): the ?brand= narrowing is applied IN the DB
+  // — under a named filter only that brand's leads come back, and the row set
+  // below keeps only follow-ups whose lead did. CHUNKED at 100 ids: PostgREST
+  // .in() rides the GET query string and past ~200 UUIDs it 414s, silently
+  // returning nothing (lib/bank-feed/sync.ts chunks at 100 for exactly this).
+  // Error handling splits on the filter: under a NAMED brand this read decides
+  // row MEMBERSHIP, so a failed or truncated batch must THROW — rendering
+  // "no follow-ups" off a failed read silently empties the chase queue (the
+  // "I could not check" rule). On "all" the read only enriches rows (name,
+  // phone, chip), so it keeps the page's previous fail-soft display behaviour.
+  const fetchLeadBatch = (ids: string[]) =>
+    applyBrandFilter(
+      sb
+        .from("leads")
+        .select("id, brand, name, phone, email, preferred_date, property_size, from_postcode, deposit_amount, balance_amount, deposit_paid_at, balance_paid_at")
+        .in("id", ids),
+      brandFilter,
+    );
+  type LeadJoinRow = NonNullable<Awaited<ReturnType<typeof fetchLeadBatch>>["data"]>[number];
+  const leadOf = new Map<string, LeadJoinRow>();
+  for (let i = 0; i < leadIds.length; i += 100) {
+    const { data: leads, error: leadErr } = await fetchLeadBatch(leadIds.slice(i, i + 100));
+    if (leadErr && brandFilter !== "all")
+      throw new Error(`follow-ups brand read failed: ${leadErr.message}`);
+    for (const l of leads ?? []) leadOf.set(l.id, l);
+  }
+
+  const { data: quotes } = leadIds.length
+    ? await sb
+        .from("quotes")
+        .select("id, lead_id, quote_ref, status, agreed_price, grand_total, created_at, moving_date")
+        .in("lead_id", leadIds)
+    : { data: [] };
   const quoteOf = pickBestQuoteByLead((quotes ?? []) as QuoteContextRow[]);
 
-  const rows: FollowUpRow[] = open.map((f) => {
+  // Under a named ?brand= the lead read above only returned that brand's
+  // leads, so membership in leadOf IS the filter. Only applied when a brand is
+  // named: on "all" every open follow-up renders exactly as today (including
+  // any row whose lead record is missing).
+  const visible = brandFilter === "all" ? open : open.filter((f) => leadOf.has(f.lead_id));
+
+  const rows: FollowUpRow[] = visible.map((f) => {
     const lead = leadOf.get(f.lead_id);
     const quote = quoteOf.get(f.lead_id) ?? null;
     const meta = (f.metadata ?? {}) as { amount?: number };
@@ -94,6 +134,9 @@ export default async function FollowUpsPage() {
     return {
       id: f.id,
       leadId: f.lead_id,
+      // Brand rides the lead join (multi-brand PRD §4 Follow-ups); null when
+      // the lead record is missing — the chip simply doesn't render.
+      brand: lead?.brand ?? null,
       reason: f.reason,
       source: f.source ?? null,
       kind: (meta as { kind?: string }).kind ?? null,
@@ -118,10 +161,37 @@ export default async function FollowUpsPage() {
     };
   });
 
+  // Minimal serialisable brand shape for the client component — satisfies both
+  // BrandChipData and BrandFilterOption; keeps brand config (emails, phone
+  // numbers, template ids) out of the client payload.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
+
   return (
     <main className="flex-1 p-6 md:p-8">
-      <PageHeader eyebrow="Pipeline" title="Follow-ups" />
-      <FollowUpsQueue rows={rows} />
+      <PageHeader eyebrow="Pipeline" title="Follow-ups">
+        {/* Brand filter (multi-brand PRD §4 Follow-ups) — this page has no
+            search or filter bar, so the segmented control lives in the
+            PageHeader: the first filter this page has had. The three sections
+            (Overdue / Due today / Upcoming) and their tones are unchanged. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
+      </PageHeader>
+      <FollowUpsQueue
+        rows={rows}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
+      />
     </main>
   );
 }

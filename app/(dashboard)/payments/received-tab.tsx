@@ -14,6 +14,10 @@ import {
 } from "@/lib/payments/received";
 import { ukParts } from "@/lib/uk-time";
 import { errorContext, log } from "@/lib/log";
+import type { Brand } from "@/lib/brand";
+import { applyBrandFilter, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { bankFeedConfigured, loadLedgerItems } from "@/lib/bank-feed/sync";
 import { suggestSettledLink, type SettledItem } from "@/lib/bank-feed/match";
@@ -83,7 +87,7 @@ const METHOD_CHIP: Record<string, { label: string; cls: string }> = {
   cash: { label: "Cash", cls: "bg-success-bg text-success" },
 };
 
-function ItemRow({ item }: { item: ReceivedItem }) {
+function ItemRow({ item, chip }: { item: ReceivedItem; chip?: BrandChipData }) {
   const badge = item.cardStatus ? CARD_BADGE[item.cardStatus] : null;
   const method = item.method
     ? METHOD_CHIP[item.method]
@@ -99,6 +103,9 @@ function ItemRow({ item }: { item: ReceivedItem }) {
         ) : (
           <span className="font-medium text-foreground">{item.customer}</span>
         )}
+        {/* Brand chip — the customer column (multi-brand PRD §4 Payments);
+            hidden when ?brand= already names one brand. */}
+        {chip ? <BrandChip brand={chip} className="ml-2 align-middle" /> : null}
         <p className="text-xs text-mist-400">
           {item.quoteRef ?? "—"}
           {" · "}
@@ -134,7 +141,19 @@ function syncAgeLabel(finishedAt: string | null | undefined, ok: boolean): strin
   return `${mins} min ago${ok ? "" : " · last run FAILED"}`;
 }
 
-export async function ReceivedTab({ params }: { params: ReceivedParams }) {
+export async function ReceivedTab({
+  params,
+  activeBrands,
+  multi,
+  brandFilter,
+}: {
+  params: ReceivedParams;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. */
+  activeBrands: Brand[];
+  multi: boolean;
+  /** `'all'` or an active brand slug (already validated by parseBrandParam). */
+  brandFilter: string;
+}) {
   // Explicit range beats everything; a bare search sweeps all history; the
   // legacy ?date= deep link is a single-day custom range.
   const q = (params.q ?? "").trim();
@@ -149,7 +168,11 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
   const endIso = window.end.toISOString();
 
   const sb = await createClient();
-  const [{ data: cardRows }, { data: depositQuotes }, { data: commitmentQuotes }, { data: balanceLeads }] =
+  // Brand narrowing (multi-brand PRD §4 Payments) happens IN THE DB on the
+  // stamp reads — quotes and leads both carry a denormalised `brand` column.
+  // applyBrandFilter is a no-op at 'all', so the single-brand path is
+  // byte-identical to today (the single-brand invariant, PRD §1).
+  const [{ data: allCardRows }, { data: depositQuotes }, { data: commitmentQuotes }, { data: balanceLeads }] =
     await Promise.all([
       sb
         .from("card_payments")
@@ -165,30 +188,59 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
       // excluded on every other money surface (sales-report, dashboard) — here
       // too. `superseded` is the live shape; `draft`/`rejected` can't hold a
       // real payment but cost nothing to exclude.
-      sb
-        .from("quotes")
-        .select(QUOTE_COLS)
-        .in("status", ["accepted", "sent"])
+      applyBrandFilter(
+        sb
+          .from("quotes")
+          .select(QUOTE_COLS)
+          .in("status", ["accepted", "sent"]),
+        brandFilter,
+      )
         .gte("deposit_paid_at", startIso)
         .lt("deposit_paid_at", endIso),
-      sb
-        .from("quotes")
-        .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
-        .in("status", ["accepted", "sent"])
+      applyBrandFilter(
+        sb
+          .from("quotes")
+          .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
+          .in("status", ["accepted", "sent"]),
+        brandFilter,
+      )
         .gte("commitment_paid_at", startIso)
         .lt("commitment_paid_at", endIso),
-      sb
-        .from("leads")
-        .select("id, name, balance_paid_at, balance_amount, balance_paid_method")
+      applyBrandFilter(
+        sb.from("leads").select("id, name, balance_paid_at, balance_amount, balance_paid_method"),
+        brandFilter,
+      )
         .gte("balance_paid_at", startIso)
         .lt("balance_paid_at", endIso),
     ]);
+
+  // card_payments carries no brand column, so a named filter narrows card rows
+  // through a supplementary CHUNKED fail-loud leads read (the /bookings
+  // precedent — a silent cap or failed read here would DROP payments, not
+  // degrade them). A card row with no lead can't be attributed to a brand and
+  // drops from a named-brand view; the default All view remains the full truth.
+  let cardRows = allCardRows ?? [];
+  if (brandFilter !== "all" && cardRows.length) {
+    const cardLeadIds = [...new Set(cardRows.map((r) => r.lead_id).filter(Boolean) as string[])];
+    const brandLeads = new Set<string>();
+    // 100-id batches: PostgREST .in() rides the GET query string and the
+    // gateway 414s past ~200 UUIDs (lib/bank-feed/sync.ts measured the limit).
+    for (let i = 0; i < cardLeadIds.length; i += 100) {
+      const { data: leadRows, error: leadErr } = await applyBrandFilter(
+        sb.from("leads").select("id").in("id", cardLeadIds.slice(i, i + 100)),
+        brandFilter,
+      );
+      if (leadErr) throw new Error(`payments: card brand read failed: ${leadErr.message}`);
+      for (const l of leadRows ?? []) brandLeads.add(l.id);
+    }
+    cardRows = cardRows.filter((r) => r.lead_id && brandLeads.has(r.lead_id));
+  }
 
   // Names/refs for card + balance rows come from the lead's accepted quote.
   const leadIds = [
     ...new Set(
       [
-        ...(cardRows ?? []).map((r) => r.lead_id),
+        ...cardRows.map((r) => r.lead_id),
         ...(balanceLeads ?? []).map((l) => l.id),
       ].filter(Boolean) as string[],
     ),
@@ -287,10 +339,16 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     // lookup already learned) and throw rather than under-report money.
     const matchQuoteIds = [...new Set(bankMatches.map((m) => m.quoteId))];
     for (let i = 0; i < matchQuoteIds.length; i += 100) {
-      const { data: mq, error: mqErr } = await sb
-        .from("quotes")
-        .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
-        .in("id", matchQuoteIds.slice(i, i + 100));
+      // Brand-narrowed in the DB too: buildReceivedDay skips a bank match whose
+      // quote is missing from this map, so filtering here keeps another brand's
+      // in-range arrivals from emitting items under a named ?brand= view.
+      const { data: mq, error: mqErr } = await applyBrandFilter(
+        sb
+          .from("quotes")
+          .select(`${QUOTE_COLS}, commitment_paid_at, commitment_paid_method`)
+          .in("id", matchQuoteIds.slice(i, i + 100)),
+        brandFilter,
+      );
       if (mqErr) throw new Error(`payments: bank-matched quote lookup failed: ${mqErr.message}`);
       for (const quote of mq ?? []) bankQuoteById.set(quote.id as string, quote);
     }
@@ -307,7 +365,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
 
   const assembled = buildReceivedDay({
     window,
-    cardRows: cardRows ?? [],
+    cardRows,
     depositQuotes: depositQuotes ?? [],
     commitmentQuotes: commitmentQuotes ?? [],
     balanceLeads: balanceLeads ?? [],
@@ -341,12 +399,40 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
   for (const group of dayGroups)
     group.totalPence = group.items.filter((i) => !i.isTest).reduce((s, i) => s + i.amountPence, 0);
 
+  // Brand chips on the rendered rows — hidden when the segmented control
+  // already names one brand (multi-brand PRD §4 opening rules). ReceivedItem
+  // carries no brand (lib/payments is shared), so the on-screen page's leads
+  // resolve it in one batched read. Fail SOFT: this read only decorates rows
+  // with a chip — losing a chip is a lost convenience; losing the money page
+  // is a lost money page (the link-hints precedent below). Row NARROWING never
+  // rides this read — that happened in the DB above.
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
+  const brandByLead = new Map<string, string>();
+  if (showBrandChips && pageItems.length) {
+    const pageLeadIds = [...new Set(pageItems.map((i) => i.leadId).filter(Boolean) as string[])];
+    for (let i = 0; i < pageLeadIds.length; i += 100) {
+      const { data: leadRows, error: leadErr } = await sb
+        .from("leads")
+        .select("id, brand")
+        .in("id", pageLeadIds.slice(i, i + 100));
+      if (leadErr) {
+        log.error("payments.brand-chips.read_failed", { error: leadErr.message });
+        break;
+      }
+      for (const l of leadRows ?? []) brandByLead.set(l.id, l.brand);
+    }
+  }
+  const chipFor = (item: ReceivedItem): BrandChipData | undefined =>
+    showBrandChips && item.leadId ? chipBySlug.get(brandByLead.get(item.leadId) ?? "") : undefined;
+
   const pageHref = (over: Partial<Record<string, string>>): string =>
     tabHref({
       range: params.range,
       from: params.from,
       to: params.to,
       q: q || undefined,
+      [BRAND_FILTER_PARAM]: brandFilter !== "all" ? brandFilter : undefined,
       ...over,
     });
 
@@ -573,17 +659,33 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
     }`;
   const activePreset = q && !params.range ? null : window.preset;
 
+  const brandParam = brandFilter !== "all" ? brandFilter : undefined;
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-2">
+        {/* Brand filter (multi-brand PRD §4 Payments) — the segmented control
+            joins the Received tab's search row. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
         {PRESETS.map(({ key, label }) => (
-          <Link key={key} href={tabHref({ range: key, q: q || undefined })} className={chip(activePreset === key)}>
+          <Link
+            key={key}
+            href={tabHref({ range: key, q: q || undefined, [BRAND_FILTER_PARAM]: brandParam })}
+            className={chip(activePreset === key)}
+          >
             {label}
           </Link>
         ))}
         <form action="/payments" className="flex flex-wrap items-center gap-2">
           <input type="hidden" name="range" value="custom" />
           {q ? <input type="hidden" name="q" value={q} /> : null}
+          {/* GET forms rebuild the URL from their inputs, so ?brand= must ride
+              a hidden field to survive the submit (the gate-3 search rule). */}
+          {brandParam ? <input type="hidden" name={BRAND_FILTER_PARAM} value={brandParam} /> : null}
           <input
             type="date"
             name="from"
@@ -609,6 +711,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
           {params.range ? <input type="hidden" name="range" value={params.range} /> : null}
           {params.from ? <input type="hidden" name="from" value={params.from} /> : null}
           {params.to ? <input type="hidden" name="to" value={params.to} /> : null}
+          {brandParam ? <input type="hidden" name={BRAND_FILTER_PARAM} value={brandParam} /> : null}
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-mist-400" strokeWidth={1.75} />
             <input
@@ -625,7 +728,10 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
       {q && !params.range ? (
         <p className="text-xs text-mist-400">
           Showing every payment matching “{q}” across all history.{" "}
-          <Link href="/payments" className="font-medium text-mm-red hover:underline">
+          <Link
+            href={tabHref({ [BRAND_FILTER_PARAM]: brandParam })}
+            className="font-medium text-mm-red hover:underline"
+          >
             Clear search
           </Link>
         </p>
@@ -680,7 +786,7 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
               </div>
               <div className="divide-y divide-mist-150">
                 {group.items.map((i) => (
-                  <ItemRow key={i.key} item={i} />
+                  <ItemRow key={i.key} item={i} chip={chipFor(i)} />
                 ))}
               </div>
             </div>
@@ -709,6 +815,13 @@ export async function ReceivedTab({ params }: { params: ReceivedParams }) {
         ) : null}
       </Card>
 
+      {/* The bank-feed queues below are BUSINESS-WIDE and unfiltered by design,
+          like the ExceptionsStrip (multi-brand PRD §4 Payments): unmatched and
+          suggested transfers are money we haven't attributed yet, so a brand
+          filter cannot apply to them — unexplained money is unexplained
+          regardless of brand, and hiding it on a filtered view would silence
+          the one surface whose job is to surface it. Same for the
+          "more arrived in this range" honesty line above. */}
       {bank ? (
         <BankFeedSection
           suggested={bank.suggested}

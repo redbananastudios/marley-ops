@@ -2,7 +2,10 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { bankFeedConfigured } from "@/lib/bank-feed/sync";
+import { listActiveBrands } from "@/lib/brand";
+import { parseBrandParam, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { RefreshButton } from "@/components/payments/refresh-button";
 import { ReceivedTab, type ReceivedParams } from "./received-tab";
@@ -27,6 +30,11 @@ type Tab = "received" | "due" | "upcoming";
  * every tab. Missing money becomes something the page TELLS you, not
  * something you hunt for: unmatched transfers, transfers a human must
  * record, and card attempts stuck mid-flight.
+ *
+ * BUSINESS-WIDE AND UNFILTERED BY DESIGN (multi-brand PRD §4 Payments):
+ * unexplained money is unexplained regardless of brand, so the ?brand=
+ * segmented control never narrows these counts — an unmatched Pitmans
+ * transfer must still alarm on a Marley-filtered view.
  */
 async function loadExceptions(sb: Awaited<ReturnType<typeof createClient>>): Promise<{
   unmatched: number;
@@ -128,13 +136,22 @@ function ExceptionsStrip({
 export default async function PaymentsPage({
   searchParams,
 }: {
-  searchParams: Promise<ReceivedParams & { tab?: string }>;
+  searchParams: Promise<ReceivedParams & { tab?: string; brand?: string }>;
 }) {
   const params = await searchParams;
   const sb = await createClient();
   // Started before the auth chain (it depends on neither) so the exceptions
   // counts overlap it instead of adding a round trip to every page load.
   const exceptionsPromise = loadExceptions(sb);
+  // Brand layer (multi-brand PRD §4 Payments): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  // Fresh literal, not `params`: ReceivedParams is an interface, so the
+  // intersection has no implicit index signature and won't satisfy
+  // parseBrandParam's Record arm — a literal with the one key it reads does.
+  const brandFilter = parseBrandParam({ brand: params.brand }, activeBrands);
   const {
     data: { user },
   } = await sb.auth.getUser();
@@ -160,9 +177,27 @@ export default async function PaymentsPage({
 
   const exceptions = await exceptionsPromise;
 
+  // Tab switches keep the brand filter — the segmented control's param must
+  // survive the move between Received/Due/Upcoming.
+  const tabHref = (key: Tab): string => {
+    const qs = new URLSearchParams();
+    if (key !== "received") qs.set("tab", key);
+    if (brandFilter !== "all") qs.set(BRAND_FILTER_PARAM, brandFilter);
+    const s = qs.toString();
+    return s ? `/payments?${s}` : "/payments";
+  };
+
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
       <PageHeader eyebrow="Finance" title="Payments">
+        {/* Brand filter (multi-brand PRD §4 Payments): on Due/Upcoming the
+            segmented control lives in the PageHeader; the Received tab hosts
+            it in its own search row instead. */}
+        {multi && tab !== "received" ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
         <RefreshButton />
       </PageHeader>
 
@@ -173,7 +208,7 @@ export default async function PaymentsPage({
           {tabs.map(({ key, label }) => (
             <Link
               key={key}
-              href={key === "received" ? "/payments" : `/payments?tab=${key}`}
+              href={tabHref(key)}
               aria-current={tab === key ? "page" : undefined}
               className={`focus-ring -mb-px inline-flex min-h-10 items-center border-b-2 px-4 text-sm font-semibold transition-colors ${
                 tab === key
@@ -187,7 +222,18 @@ export default async function PaymentsPage({
         </div>
       ) : null}
 
-      {tab === "due" ? <DueTab /> : tab === "upcoming" ? <UpcomingTab /> : <ReceivedTab params={params} />}
+      {tab === "due" ? (
+        <DueTab brandFilter={brandFilter} />
+      ) : tab === "upcoming" ? (
+        <UpcomingTab brandFilter={brandFilter} />
+      ) : (
+        <ReceivedTab
+          params={params}
+          activeBrands={activeBrands}
+          multi={multi}
+          brandFilter={brandFilter}
+        />
+      )}
     </main>
   );
 }
