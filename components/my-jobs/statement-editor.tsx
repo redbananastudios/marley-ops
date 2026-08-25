@@ -8,7 +8,7 @@
  * confirm — both the timesheet and the contractor's own act of invoicing.
  */
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Loader2, Pencil, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -298,6 +298,7 @@ function LineSheet({
   );
   const [workDate, setWorkDate] = useState(line?.work_date ?? "");
   const [busy, setBusy] = useState(false);
+  const fieldId = useId();
 
   const hoursNum = hours === "" ? null : Number(hours);
   const rateNum = rate === "" ? null : Number(rate);
@@ -350,8 +351,11 @@ function LineSheet({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
         <h3 className="font-display text-xl font-semibold text-foreground">{line ? "Edit line" : "Add a line"}</h3>
 
-        <label className="mt-4 block text-xs font-medium text-mist-500">Description</label>
+        <label htmlFor={`${fieldId}-description`} className="mt-4 block text-xs font-medium text-mist-500">
+          Description
+        </label>
         <input
+          id={`${fieldId}-description`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="e.g. Worked Tue, extra load, worked Sat…"
@@ -360,8 +364,11 @@ function LineSheet({
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-mist-500">Hours</label>
+            <label htmlFor={`${fieldId}-hours`} className="block text-xs font-medium text-mist-500">
+              Hours
+            </label>
             <input
+              id={`${fieldId}-hours`}
               value={hours}
               onChange={(e) => setHours(e.target.value)}
               type="number"
@@ -373,8 +380,11 @@ function LineSheet({
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-mist-500">Rate (£/hr)</label>
+            <label htmlFor={`${fieldId}-rate`} className="block text-xs font-medium text-mist-500">
+              Rate (£/hr)
+            </label>
             <input
+              id={`${fieldId}-rate`}
               value={rate}
               onChange={(e) => setRate(e.target.value)}
               type="number"
@@ -389,8 +399,11 @@ function LineSheet({
 
         <div className="mt-3 grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-mist-500">Date (optional)</label>
+            <label htmlFor={`${fieldId}-date`} className="block text-xs font-medium text-mist-500">
+              Date (optional)
+            </label>
             <input
+              id={`${fieldId}-date`}
               value={workDate}
               onChange={(e) => setWorkDate(e.target.value)}
               type="date"
