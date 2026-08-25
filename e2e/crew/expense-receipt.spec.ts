@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { step } from "../fixtures/artefacts";
+import { E2E_DB_READY, clearCrewExpenseEntries } from "../fixtures/db";
 
 /**
  * Crew hours log (/my-jobs/hours) — the expense + receipt-photo half of the day
@@ -25,7 +26,22 @@ test.skip(
 const TINY_JPEG_BASE64 =
   "/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAj/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=";
 
+const EXPENSE_NOTE = "QA e2e receipt";
+
 test.describe("Crew — hours log: expense + receipt photo", () => {
+  /**
+   * This spec logs a real expense against the SHARED crew fixture, and
+   * `submitMyStatementAction` refuses to submit any invoice while an unbilled
+   * expense exists. Leaving it behind therefore breaks every sibling that builds
+   * an invoice by hand — it took the suite red on 2026-08-24 and stayed red until
+   * this teardown existed. It also frees the day tile again, since this spec
+   * fills "whichever day is currently open" and would otherwise consume one per run.
+   */
+  test.afterAll(async () => {
+    if (!E2E_DB_READY) return;
+    await clearCrewExpenseEntries("E2E Crew", EXPENSE_NOTE);
+  });
+
   test("logs an expense and attaches a receipt photo", async ({ page }) => {
     let dayLabelText = "";
 
@@ -47,7 +63,7 @@ test.describe("Crew — hours log: expense + receipt photo", () => {
       await inputs.nth(0).fill("08:00");
       await inputs.nth(1).fill("16:30");
       await dialog().locator('input[type="number"]').fill("23.45");
-      await dialog().getByPlaceholder("Fuel, parking…").fill("QA e2e receipt");
+      await dialog().getByPlaceholder("Fuel, parking…").fill(EXPENSE_NOTE);
 
       const fileChooserPromise = page.waitForEvent("filechooser").catch(() => null);
       await dialog()

@@ -185,3 +185,57 @@ export async function deleteCrewStatements(fullName: string): Promise<void> {
   const { error: delErr } = await sb.from("staff_statements").delete().in("id", ids);
   if (delErr) throw new Error(`Clearing statements for ${fullName} failed: ${delErr.message}`);
 }
+
+/**
+ * Remove the hours+expense entry the expense-receipt spec logs.
+ *
+ * Not optional housekeeping: `submitMyStatementAction` REFUSES to submit while
+ * the crew has a logged expense that is not on the invoice ("You've logged an
+ * expense that isn't on this invoice yet"). So an expense left behind by one
+ * spec makes every sibling that builds an invoice BY HAND unable to submit —
+ * which is exactly what took the suite red on 2026-08-24, deterministically, in
+ * `invoicing-submit-lines` and `hours-to-admin-statements`.
+ *
+ * Same contract as deleteCrewStatements above: a spec that writes crew state has
+ * to put it back. Scoped by the marker note so it can never touch another spec's
+ * row, and it reads back to prove the delete happened rather than assuming it.
+ */
+export async function clearCrewExpenseEntries(fullName: string, expenseNote: string): Promise<void> {
+  const sb = db();
+  const { data: staff, error: staffErr } = await sb.from("staff").select("id").eq("full_name", fullName);
+  if (staffErr) throw new Error(`Looking up staff ${fullName} failed: ${staffErr.message}`);
+  const staffIds = (staff ?? []).map((s) => s.id);
+  if (!staffIds.length) return;
+
+  const { data: rows, error: readErr } = await sb
+    .from("staff_time_entries")
+    .select("id, receipt_key")
+    .in("staff_id", staffIds)
+    .eq("expense_note", expenseNote);
+  if (readErr) throw new Error(`Reading expense entries for ${fullName} failed: ${readErr.message}`);
+  if (!rows?.length) return;
+
+  // The bucket object first — deleting the row loses the key that finds it.
+  const keys = rows.map((r) => r.receipt_key).filter(Boolean) as string[];
+  if (keys.length) {
+    const { error: objErr } = await sb.storage.from("expense-receipts").remove(keys);
+    // A missing object is fine (a prior sweep got it); anything else is not.
+    if (objErr && !/not found/i.test(objErr.message)) {
+      throw new Error(`Clearing receipt objects for ${fullName} failed: ${objErr.message}`);
+    }
+  }
+
+  const { error: delErr } = await sb
+    .from("staff_time_entries")
+    .delete()
+    .in("id", rows.map((r) => r.id));
+  if (delErr) throw new Error(`Clearing expense entries for ${fullName} failed: ${delErr.message}`);
+
+  const { count, error: countErr } = await sb
+    .from("staff_time_entries")
+    .select("*", { count: "exact", head: true })
+    .in("staff_id", staffIds)
+    .eq("expense_note", expenseNote);
+  if (countErr) throw new Error(`Verifying expense cleanup for ${fullName} failed: ${countErr.message}`);
+  if (count) throw new Error(`${count} expense entr(ies) for ${fullName} survived the delete`);
+}
