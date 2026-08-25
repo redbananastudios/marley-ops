@@ -31,6 +31,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Bank feed — whole-quote link (deposit+balance settled in one transfer) | ✅ | office/bank-feed-whole-quote.spec.ts |
 | Contractor pay — return a submitted invoice | ✅ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
+| Schedule — existing-appointment VIEW dialog (crew/vans, job notes two-hats, price-free) | ✅ | office/appointment-view-dialog.spec.ts |
 | Job Board (now embedded in /schedule as JobBoardView) — resources, week nav, assign modal | ⬜ | none — office/job-board.spec.ts was deleted by PR #60 (Job Board page removal, component kept) and never replaced; office/schedule.spec.ts only covers the survey/removal diary, not the allocation board embedded alongside it. Found stale (still listed ✅) by the 2026-08-24 QA audit — corrected here, not re-written this run |
 | Board (/board) — pipeline kanban by stage | ⬜ | none — proven live 2026-08-24 by the QA audit (admin.board_kanban_jobs_list in qa/state.json) via a throwaway login + independent SQL recompute of all 6 columns (0 findings), but has never had a permanent spec |
 | Completed Jobs — ledger renders, search by ref, empty-state | ✅ | office/jobs.spec.ts |
