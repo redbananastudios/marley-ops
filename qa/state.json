@@ -1,12 +1,12 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
   "buildInProgress": "Pitmans multi-brand build under way (docs/multi-brand-prd.md, one PR per gate, label pitmans-gate). Gates merged so far: 0 (PRD + auto-merge label); gate 1 (brand foundation) in flight. Staging is deliberately multi-brand (brands.pitmans active=true) but the brand UI is UNBUILT until gates 3+ land - partially-built or absent brand surfaces are EXPECTED and are not findings; the standing contract is single-brand parity (e2e/parity/single-brand.spec.ts). Repair tier: leave safe-fix findings on surfaces a pitmans-gate PR is touching to the build session (PRD SS6/SS8).",
-  "lastAuditSha": "2936c01",
+  "lastAuditSha": "0cf7a7a",
   "crew": {
     "availability_set_remove": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet tier): 'Offer to work' on a non-pattern day (2026-08-29, Sat, outside working_days=[1-5]) -> staff_availability row (status=available, created_by=own auth id) exact match; 'Cancel the offer' -> real DELETE (0 rows after). 0 findings.",
+      "note": "Re-verified live by a role-agent subagent (Sonnet): 'Offer to work' on 2026-08-29 (Sat, outside working_days=[1-5]) -> staff_availability row (status=available, created_by=own auth id) exact match, held across a reload AND a second fresh browser context (re-login). 'Cancel the offer' -> real DELETE (0 rows after), re-confirmed after reload. Two-hats held (app/my-jobs/availability/actions.ts write path == page.tsx read path). 0 findings.",
       "watch": [
         "app/my-jobs/availability/**",
         "components/my-jobs/availability-editor.tsx"
@@ -43,9 +43,9 @@
       ]
     },
     "push_notification_opt_in": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: lib/push/categories.ts still has all 4 categories audience admin/estimator only (pushCategoriesForRole('crew')=[]) -- independently re-grepped by the main loop as a spot-check, matches. Crew /my-jobs shows 0 opt-in UI, 'Your device' section (quick sign-in + user manual) intact. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: lib/push/categories.ts still has all 4 categories audience admin/estimator only (pushCategoriesForRole('crew')=[]), confirmed by source inspection. components/my-jobs/notifications-row.tsx returns null when the list is empty -- live /my-jobs (crew session) shows 'YOUR DEVICE' (quick sign-in, user manual) but 0 'Get alerts on this phone' opt-in UI, held after reload. 0 findings.",
       "watch": [
         "components/my-jobs/notifications-row.tsx",
         "components/push/notifications-setup.tsx",
@@ -191,9 +191,9 @@
       ]
     },
     "mark_deposit_balance_paid": {
-      "lastTestedAt": "2026-08-23T04:20:55Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: deposit marked paid via bank transfer on /bookings -> quotes.deposit_paid_at == leads.deposit_paid_at exactly, deposit_paid_method=bank_transfer, /payments today-total agreed exactly (see truth.payments_tabs_totals same run). Dry-run confirmation email row confirmed (provider_id dryrun-*, not a real send). 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: seeded accepted quote (agreed £500, deposit £100, moving_date set) -> Deposit received -> Bank transfer on /bookings. SQL exact match (deposit_paid_at/deposit_paid_method), leads.status funnel-advanced quoted->confirmed, and the paid-deposit flow auto-created the removal appointment since moving_date was already set (expected markDepositPaid behavior, not a defect -- row correctly landed in 'Booked - all set' not 'no date'). Dry-run confirmation email confirmed (provider_id=dryrun-...). /payments Received/today cross-check matched the same £100/bank-transfer exactly. Held after reload. 0 findings.",
       "watch": [
         "app/(dashboard)/bookings/**",
         "app/(dashboard)/invoicing/**"
@@ -235,9 +235,9 @@
       ]
     },
     "storage_sites_units_lets": {
-      "lastTestedAt": "2026-08-23T04:20:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: create site -> add unit (learned/confirmed UI gotcha: the header 'Add unit' button defaults to the FIRST site on the page, must scope by clicking the target site's own card first) -> start let against a marker client -> unit shows Occupied, site availability count correct -> end let ('Release & raise final invoice', crate-type copy) -> unit back to Available, storage_lets.end_date set, a real storage_invoices row raised in staging Zoho sandbox (\u00a3228, INV-000301; emailed_at null at read time, not chased -- likely the documented async retry sweep). 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: create site -> add unit (20ft container, code re-scoped via the site card per the known 'Add unit defaults to first site' quirk) -> start let against a marker client (Occupied) -> end let (unit back to Available, storage_lets.end_date set, settlement invoice INV-000372 raised in staging's Zoho DEMO org -- host confirmed zohoinvoicepay.eu/.../demoremovals, not Connor's live books). Held after reload. NOTE for the record: for a non-crate (period-billed) unit the action button reads 'End let', not the crate-only literal 'Release & raise final invoice' -- both still raise a settlement invoice via billNow; not a defect, just a label divergence by unit type worth knowing if a future spec asserts the literal string. 0 findings.",
       "watch": [
         "app/(dashboard)/storage/**",
         "components/storage/**"
@@ -346,12 +346,15 @@
       ]
     },
     "book_survey_quote_from_visit": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "UNBLOCKED and fully verified live now that QA-20260825-02 is fixed+closed: main loop first confirmed the dialog-guard fix directly (Book click on an open survey dialog, held open 2s past the tour's 1.2s autostart, not intercepted -- tour correctly deferred the whole time). Role-agent subagent then ran the FULL flow: book survey (self-assigned) -> reschedule (appointments.starts_at/ends_at moved correctly, 1hr duration preserved) -> mark attended via Create Quote (surveys.status=completed) -> quote wizard steps 1-7 -> save draft. Quote row matched wizard's own read-back exactly (customer fields, addresses, £1,122 total) -- two-hats held throughout. driver-overlay count = 0 at the Create Quote click (no regression). 0 findings.",
+      "note": "FRESH CODE this run (6ae3ba3/#82 bounded the tour's dialog-wait to a 12s give-up, AUTO_START_MAX_WAIT_MS in components/onboarding/tour.tsx) -- the give-up path itself had never been live-verified before (prior runs only proved the dialog isn't swallowed within the wait window, not what happens if the wait window expires). Role-agent subagent: fresh first-timer estimator (tour_seen_at left null on purpose), seeded survey appointment for today, navigated /schedule/surveys?leadId=... (auto-opens 'Book survey'). Polled every ~1s for 14.2s (past the 12s cap): .driver-overlay/.driver-popover count = 0 at EVERY sample, dialog stayed genuinely interactive (clicked/focused a field inside it at t+7060ms, succeeded), 0 console errors. profiles.tour_seen_at stayed null through the whole window (no premature stamp -- matches the code's 'stamp happens when the tour actually renders' comment). Closed the dialog, reloaded a clean page (/schedule): tour DID auto-render this time (t+2620ms), tourDoneKey/tour_seen_at stamped only then -- confirms the give-up left the tour still eligible for a genuine first-timer. 0 findings. Side observation (not filed, not part of this item): the same agent's diagnostic saw the dialog's own Book/Cancel footer buttons resist a normal Playwright click at a 1280x720 viewport (button rect partly below the fold, 'dialog-overlay intercepts pointer events') -- DialogContent is max-h-[90vh] overflow-y-auto with the footer as a plain (non-sticky) child of that scroll area, so nothing in the markup itself looks broken; most likely a Playwright auto-scroll/actionability timing artifact specific to the test harness rather than a real reachability bug, but not independently reproduced outside the agent's session -- flagged in this run's log for Peter to eyeball on a real small laptop screen if it recurs.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
+        "components/schedule/appointment-dialog.tsx",
+        "components/onboarding/tour.tsx",
+        "components/onboarding/dialog-guard.ts",
         "app/(dashboard)/quotes/actions.ts",
         "e2e/estimator/work-quote.spec.ts"
       ]
@@ -366,9 +369,9 @@
       ]
     },
     "gating_forbidden_surfaces": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: /finance, /finance/statements, /refunds all bounce for estimator (page.url() confirmed landing off each forbidden page's own content); source-confirmed deliberate role-specific redirects, not the generic fallback. Main loop independently spot-checked the refunds redirect source (profile.role===\"estimator\" -> redirect(\"/estimator/pay\")) -- matches. Observation (not a finding, out of scope): /board, /clients, /storage, /performance, /automations render for estimator with no redirect -- no CREW_FORBIDDEN-equivalent list exists for estimator beyond the 3 finance/refunds routes; flagged as a possible backlog item for Peter, not filed as a finding since it's not a documented boundary.",
+      "note": "Re-verified live by a role-agent subagent: /finance -> /estimator, /finance/statements -> /estimator/pay, /refunds -> /estimator/pay -- all role-appropriate redirects (not the generic fallback), matching app/(dashboard)/finance/page.tsx, finance/statements/page.tsx, refunds/page.tsx exactly. 0 findings. (Prior observation about /board /clients /storage /performance /automations having no estimator boundary still stands, unchanged, not re-flagged as new.)",
       "watch": [
         "app/(dashboard)/finance/**",
         "app/(dashboard)/refunds/**",
@@ -378,9 +381,9 @@
   },
   "customer": {
     "q_accept_sandbox_card": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: full non-card /q/<token> accept flow end-to-end -- 3 acks -> accept -> quotes.status=accepted, accepted_at/name/agreed_price/deposit_amount correct, signatures row (kind=contract) with real 56,966-byte PNG signature_data, real Zoho sandbox deposit invoice raised. Fresh reload matched deposit_amount exactly. STILL BLOCKED, unchanged since 2026-08-21: business_settings.card_payments_enabled=false, E2E_CARD_APPROVED/E2E_CARD_DECLINED absent from this environment too. 0 new findings.",
+      "note": "Re-verified live by a role-agent subagent: full non-card /q/<token> accept flow -- 3 acks -> accept -> quotes.status=accepted, accepted_name/agreed_price(£1500)/deposit_amount(£100) exact match, signatures row (kind=contract) with a real 79,599-byte PNG (valid magic number, not empty/placeholder). Fresh reload still showed accepted state. STILL BLOCKED, unchanged: business_settings.card_payments_enabled=false in this environment, bank-transfer path used and reported as before, no attempt to bypass. Self-healed a Zoho sandbox deposit invoice (INV-000371), expected, not a DB row so outside teardown scope. 0 findings.",
       "watch": [
         "app/q/**",
         "app/actions/card-payments.ts",
@@ -417,9 +420,9 @@
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "QA-20260825-01 (postcode not re-spaced, e.g. 'sp71ab' stored as 'SP71AB' instead of 'SP7 1AB') fixed in PR #79 and re-verified live this run: submitted /join/e2e-join-token-0001 with postcode 'sp71ab' -> staff_submissions.address_postcode = 'SP7 1AB', address line spaced correctly too. Finding moved to closed/. Marker row deleted, verified gone by query.",
+      "note": "FRESH CODE this run (6ae3ba3/#82 de-duplicated the postcode transform -- lib/staff/onboarding.ts now calls the SAME formatUkPostcode helper lib/leads/format.ts already used, instead of a second hand-rolled regex; intended as a no-behaviour-change refactor, not previously live-verified post-refactor). Role-agent subagent read formatUkPostcode's actual logic first, then drove 3 real /join/e2e-join-token-0001 submissions to catch a refactor regression: (a) 'sp71ab' -> 'SP7 1AB' (the original QA-20260825-01 case), (b) already-correct 'SP7 1AB' -> unchanged (not double-spaced/mangled), (c) a different postcode shape 'bh211aa' -> 'BH21 1AA' (3-char outward code, proving the transform generalizes). All 3 staff_submissions.address_postcode rows matched exactly by SQL, re-confirmed by a second query. 0 findings -- the de-dup refactor is behavior-identical to the original fix.",
       "watch": [
         "app/join/**",
         "lib/staff/onboarding.ts"
