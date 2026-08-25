@@ -1,11 +1,14 @@
 name: QA repair auto-merge
 
-# Repair PRs from the QA loop (label `qa-repair`, base `staging`) get the full
-# four-gate check ON THE PR — the repo's other workflows only run on push, so
-# without this job an auto-merge would land unvalidated. Green → squash-merge →
-# explicitly dispatch the staging deploy (a GITHUB_TOKEN merge does not trigger
-# push workflows, so without the dispatch the fix would never reach staging or
-# the e2e suite). Scope: only labelled PRs; everything else is untouched.
+# Repair PRs from the QA loop (label `qa-repair`) and Pitmans build gates
+# (label `pitmans-gate`, docs/multi-brand-prd.md §5), base `staging`, get the
+# full four-gate check ON THE PR — the repo's other workflows only run on push,
+# so without this job an auto-merge would land unvalidated. Green → squash-merge
+# → explicitly dispatch the staging deploy (a GITHUB_TOKEN merge does not
+# trigger push workflows, so without the dispatch the work would never reach
+# staging or the e2e suite). Scope: only labelled PRs; everything else is
+# untouched. The risky-path guard below applies to BOTH labels unchanged: any
+# PR touching schema/money/comms/auth paths fails the gate and sits for Peter.
 on:
   pull_request:
     types: [opened, labeled, synchronize, reopened]
@@ -17,7 +20,7 @@ concurrency:
 
 jobs:
   gate:
-    if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
+    if: contains(github.event.pull_request.labels.*.name, 'qa-repair') || contains(github.event.pull_request.labels.*.name, 'pitmans-gate')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -56,7 +59,7 @@ jobs:
 
   merge:
     needs: gate
-    if: contains(github.event.pull_request.labels.*.name, 'qa-repair')
+    if: contains(github.event.pull_request.labels.*.name, 'qa-repair') || contains(github.event.pull_request.labels.*.name, 'pitmans-gate')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
