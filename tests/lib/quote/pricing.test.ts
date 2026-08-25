@@ -360,3 +360,31 @@ describe('computeQuote — editable price config (margin calculator)', () => {
     expect(computeQuote(base({ deadMiles: 10, jobMiles: 20 }), pricing).grandTotal).toBe(940);
   });
 });
+
+describe('computeQuote — additional charges (internal uplift, PRD §3.9)', () => {
+  it('enters the subtotal like any other charge (grand total includes it)', () => {
+    const q = computeQuote(base({ additionalCharges: 250 }));
+    expect(q.additionalCharges).toBe(250);
+    expect(q.subtotal).toBe(1100); // 700 + 150 admin + 250 uplift
+    expect(q.grandTotal).toBe(1100);
+  });
+
+  it('absent or zero uplift leaves every locked total bit-identical', () => {
+    expect(computeQuote(base()).grandTotal).toBe(850);
+    expect(computeQuote(base()).additionalCharges).toBe(0);
+    expect(computeQuote(base({ additionalCharges: 0 }))).toEqual(computeQuote(base()));
+  });
+
+  it('composes with discount and VAT: uplift is discounted and VATed like the rest', () => {
+    // subtotal 700 + 150 + 250 = 1100; − 100 discount = 1000; × 1.2 = 1200
+    const q = computeQuote(base({ additionalCharges: 250, discount: 100, vatEnabled: true }));
+    expect(q.subtotal).toBe(1100);
+    expect(q.total).toBe(1000);
+    expect(q.vatAmount).toBe(200);
+    expect(q.grandTotal).toBe(1200);
+  });
+
+  it('a negative uplift clamps to 0 (discount is the only negative lever)', () => {
+    expect(computeQuote(base({ additionalCharges: -50 }))).toEqual(computeQuote(base()));
+  });
+});

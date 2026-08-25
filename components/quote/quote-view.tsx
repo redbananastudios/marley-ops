@@ -39,6 +39,10 @@ function accessLine(side: QuoteFormValues["collect"]): string {
 export interface QuoteViewMoney {
   subtotal: number | null;
   discount: number | null;
+  /** Internal uplift (PRD §3.9) — already inside subtotal/grand_total. This page
+   *  is office/estimator only, so showing it here leaks nothing to a customer. */
+  additional_charges: number | null;
+  additional_charges_reason: string | null;
   vat_enabled: boolean;
   vat_amount: number | null;
   grand_total: number | null;
@@ -142,6 +146,15 @@ export function QuoteView({ values, money }: { values: QuoteFormValues; money: Q
             <Truck className="size-3.5" strokeWidth={1.75} /> Money
           </p>
           {row("Subtotal", gbp(money.subtotal))}
+          {Number(money.additional_charges) > 0 ? (
+            <div className="flex items-baseline justify-between gap-3 py-1">
+              <span className="text-sm text-mist-500">Additional charges (internal)</span>
+              <span className="tabular text-sm font-medium text-foreground">{gbp(money.additional_charges)}</span>
+            </div>
+          ) : null}
+          {Number(money.additional_charges) > 0 && money.additional_charges_reason ? (
+            <p className="pb-1 text-right text-xs text-mist-400">{money.additional_charges_reason}</p>
+          ) : null}
           {Number(money.discount) > 0 ? row("Discount", `−${gbp(money.discount)}`) : null}
           {money.vat_enabled ? row("VAT (20%)", gbp(money.vat_amount)) : null}
           <div className="my-1 border-t border-border" />

@@ -5,8 +5,10 @@
  * Two rules the office/internal renderings do NOT follow (they keep full detail):
  *
  *  1. The vehicle base line(s) — Luton base, 7.5-tonne base, add-on Transit base —
- *     and the admin fee collapse into ONE line, "Your Removal". Van counts and
- *     crew numbers often change before move day, so no customer line names them.
+ *     the admin fee AND the internal additional-charges uplift (PRD §3.9) collapse
+ *     into ONE line, "Your Removal". Van counts and crew numbers often change
+ *     before move day, so no customer line names them; the uplift is
+ *     office/estimator-only, so no customer line itemises it either.
  *  2. No customer label or detail reveals a van count or crew size: floor / access /
  *     congestion details drop the "× N vans" multiplier and the word "van".
  *
@@ -47,9 +49,14 @@ export function customerLineItems(b: QuoteBreakdown): CustomerLineItem[] {
   const items: CustomerLineItem[] = [];
 
   // ── Your Removal — every fleet base line + the admin fee, as one line ──
-  // base (Luton) + 7.5t base + add-on Transit base + admin fee. This is the
-  // one place fleet detail would otherwise leak, so it is deliberately generic.
-  const yourRemoval = b.base + b.addon75Cost + b.transitCost + b.adminFee;
+  // base (Luton) + 7.5t base + add-on Transit base + admin fee + the internal
+  // additional-charges uplift (PRD §3.9). This is the one place fleet detail
+  // would otherwise leak, so it is deliberately generic — and the uplift folds
+  // INSIDE this line rather than being a separate hidden addend, because the
+  // rows must still sum exactly to b.subtotal (which includes the uplift; a
+  // dropped addend would break the PDF's own reconciliation). `?? 0` guards
+  // breakdown JSON stored before migration 0105 introduced the field.
+  const yourRemoval = b.base + b.addon75Cost + b.transitCost + b.adminFee + (b.additionalCharges ?? 0);
   items.push({
     label: "Your Removal",
     detail: "Team, transport & coordination",

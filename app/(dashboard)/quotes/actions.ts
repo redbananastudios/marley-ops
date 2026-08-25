@@ -286,6 +286,12 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
       packing: values.packing,
       subtotal: b.subtotal,
       discount: b.discount,
+      // Internal uplift (PRD §3.9): the amount comes from the computed breakdown
+      // (the single money source), the reason straight from the form. subtotal /
+      // grand_total above already include the uplift — these columns exist so the
+      // internal view and reporting can read it without unpacking the JSON.
+      additional_charges: b.additionalCharges,
+      additional_charges_reason: values.review.additionalChargesReason?.trim() || null,
       vat_enabled: b.vatEnabled,
       vat_amount: b.vatAmount,
       grand_total: b.grandTotal,

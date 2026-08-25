@@ -59,7 +59,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -338,6 +338,8 @@ export default async function QuoteDetailPage({
             money={{
               subtotal: quote.subtotal,
               discount: quote.discount,
+              additional_charges: quote.additional_charges,
+              additional_charges_reason: quote.additional_charges_reason,
               vat_enabled: quote.vat_enabled,
               vat_amount: quote.vat_amount,
               grand_total: quote.grand_total,
