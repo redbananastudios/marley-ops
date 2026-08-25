@@ -66,6 +66,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Jobs list + week strip + job sheet PDF | ✅ | crew/journey.spec.ts |
 | P0 #7 offline completion, #8 double-submit sign-off | ✅ | crew/p0.spec.ts |
 | Job detail — brief + add a private crew note | ✅ | crew/job-detail.spec.ts |
+| Job detail — add a note WITH a photo (upload → bucket object → fresh-context image load) | ✅ | crew/job-detail.spec.ts |
 | Availability — normal week + calendar render | ✅ | crew/availability.spec.ts |
 | Hours log — add, edit, clear a day | 🟡 | crew/hours.spec.ts — proven live 2026-08-24 via a throwaway crew login + SQL read-back (0 findings), but `test.skip`'d: this env has no `E2E_CREW_PASSWORD` so `auth.setup.ts` can't sign in the persistent crew fixture, so it has never actually executed |
 | Hours log — expense amount/note + receipt photo upload | 🟡 | crew/expense-receipt.spec.ts — never had a spec before (0 grep matches for "receipt\|expense" anywhere under e2e/, flagged 2026-08-23 and 2026-08-24); proven live 2026-08-24 via a throwaway crew login + storage/DB read-back (real JPEG bytes round-tripped through the bucket, `receipt_key` matching the object, 0 findings). `test.skip`'d: this env has no `E2E_CREW_PASSWORD`, so it has never actually executed |

@@ -1,6 +1,6 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "lastAuditSha": "06eff29",
+  "lastAuditSha": "2c963a7",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T04:35:00Z",
@@ -54,9 +54,9 @@
       ]
     },
     "job_note_photo": {
-      "lastTestedAt": "2026-08-24T08:36:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: real 40x30 PNG uploaded via the actual TUS upload path (createJobPhotoUploadTargetAction), job_notes row + storage object exact match (size 100B, mimetype image/png). Fresh browser context (new login) confirmed the rendered <img> genuinely loaded via page.evaluate (naturalWidth=40, naturalHeight=30, complete=true), src a real signed URL. 0 findings. Process note (not a product bug): addJobNoteAction also writes an activities row FK'd to the lead, which blocks a naive lead/client delete in any teardown that doesn't clear activities first -- same failure shape as QA-20260823-05's spec teardown; this run's agent hit it in its own scratch cleanup, diagnosed it, fixed its own teardown order, re-verified 0. Worth remembering for any future permanent spec touching this flow. SPEC GAP still open: crew/job-detail.spec.ts covers text notes only, no photo-upload test exists -- not written this run, see spec_gaps.crew_job_photo_spec.",
+      "note": "Re-verified live: real TUS upload of a generated PNG through the actual file input, storage object + job_notes.photo_paths exact match, re-opened in a FRESH browser context and confirmed the <img> genuinely decoded (naturalWidth/naturalHeight/complete via page.evaluate). 0 findings. NEW permanent spec added this run: e2e/crew/job-detail.spec.ts gained a second test covering this exact flow (upload -> save -> fresh-context image-load proof) -- closes the standing crew_job_photo_spec gap.",
       "watch": [
         "components/crew/job-notes.tsx",
         "app/actions/job-notes.ts",
@@ -75,9 +75,9 @@
       ]
     },
     "contractor_agreement_sign": {
-      "lastTestedAt": "2026-08-24T12:22:29Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (real Chromium): /my-jobs/agreement -> ticked all 5 acks + typed name -> submit -> redirected to /my-jobs/pay. CONTRACTOR_AGREEMENT_VERSION re-confirmed fresh by grep (v1-2026-07-18, not assumed). SQL exact match: contractor_agreements row (profile_id/staff_id/role=crew, agreement_version matches, all 5 acks true, real PNG signature_data, ip/user_agent stamped). Gate cleared with no reload needed AND confirmed on reload: /my-jobs/agreement re-fetched shows the signed-state card, /my-jobs/pay shows invoicing UI. 0 findings. Marker row deleted + verified 0.",
+      "note": "Re-verified live: CONTRACTOR_AGREEMENT_VERSION re-confirmed by fresh grep (v1-2026-07-18), signed live, gate cleared on same-session nav AND a fresh page reload, DB row exact match. 0 findings.",
       "watch": [
         "app/my-jobs/agreement/**",
         "components/contractor/agreement-sign.tsx"
@@ -94,9 +94,9 @@
       ]
     },
     "job_sheet_pdf": {
-      "lastTestedAt": "2026-08-23T20:20:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: real click-through download, 21,653 bytes, %PDF magic confirmed. Truth-of-UI: intercepted the exact docDef object handed to pdfMake.createPdf and diffed against the seeded DB row -- customer name, from/to addresses+postcodes, crew name, formatted move date all correct. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent (Sonnet): real download event captured, 21,717B/%PDF- magic, and a custom PDF-text extraction cross-checked customer name/phone/date/times/addresses byte-exact against the seeded leads/appointments row. 0 findings.",
       "watch": [
         "components/job-sheet-button.tsx",
         "lib/job-sheet-*.ts",
@@ -252,9 +252,9 @@
       ]
     },
     "claims_open_update_settle": {
-      "lastTestedAt": "2026-08-22T12:20:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (stalest admin item, first re-test since 2026-08-19): opened a claim (phone channel) on a marker lead -> advanced to Assessing -> settled (resolution=goodwill_payment, amount=87.50). SQL exact match: status=settled, resolution_amount=87.5, closed_at stamped. 0 findings.",
+      "note": "Re-verified live: open -> Assessing -> Settled (Goodwill payment, \u00a3187.50) all confirmed by reload (server-truth, not optimistic) and SQL read-back exact match. 3 activities rows correctly attributed, 0 communications (expected). 0 findings.",
       "watch": [
         "app/(dashboard)/claims/**",
         "components/claims/**",
@@ -262,9 +262,9 @@
       ]
     },
     "documents_content_review": {
-      "lastTestedAt": "2026-08-22T12:20:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (tied stalest admin item, first re-test since 2026-08-19): /documents tab counts rendered plausibly (not row-by-row resummed this run, time-boxed); /content IO-proved end to end -- seeded a real job-media bucket object (287B valid JPEG) on a marker lead, appeared under Needs review, Approve -> reappeared under Approved with marketing_approved_at/_by stamped correctly. 0 findings.",
+      "note": "Re-verified live: seeded a real job-media storage object + job_media row (a DB-only row would have silently vanished from the list since loadJobMedia filters out any row whose storage URL sign fails -- worth remembering for future seeds), approved for marketing via /content, SQL read-back showed marketing_approved_by == the approving admin's own profile id (two-hats: actor and record agree). 0 findings.",
       "watch": [
         "app/(dashboard)/documents/**",
         "app/(dashboard)/content/**",
@@ -308,12 +308,11 @@
       ]
     },
     "board_kanban_jobs_list": {
-      "lastTestedAt": "2026-08-24T08:36:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: seeded 3 marker leads (enquiry/quoted \u00a3777/completed \u00a32,222), independently recomputed the exact /board filter (leads+quotes joined, submitted_at||created_at in Europe/London, Mon-Sun window) in SQL immediately after each UI read -- all 6 columns matched exactly (Enquiry 3, Survey booked 2/\u00a32,040, Quoted 4/\u00a31,977, Provisional 1/\u00a31,500, Confirmed 7/\u00a310,800, Completed 5/\u00a37,322), marker leads visible in the correct columns via the board's own search. /jobs completed-count (5) matched a same-moment SQL count exactly. 0 findings. SPEC GAP still open: /board kanban has no permanent spec (only /jobs Completed Jobs does, office/jobs.spec.ts); not written this run, see spec_gaps.admin_board_kanban_spec. Also: COVERAGE.md's old 'Job Board' line (office/job-board.spec.ts) was found stale this run -- that spec file was deleted by PR #60 and never replaced by coverage for the JobBoardView now embedded in /schedule; corrected in COVERAGE.md this run (doc fix, not a product bug).",
+      "note": "Re-verified live: 3 marker leads across enquiry/quoted/completed, /board columns matched an independent SQL recompute using the exact week-window+basis logic read from components/board/status-board.tsx, /jobs completed-count cross-check also matched. One transient false-positive (another concurrently-running role-agent's marker lead landing mid-check) correctly diagnosed as a shared-staging race, not a product bug, via a synchronized re-check. 0 findings. Concrete seed shape + assertions recorded for a future permanent spec (still not written -- admin_board_kanban_spec gap stays open, but now has a validated recipe: seed N marker leads with distinct statuses inside the current Europe/London week, assert each card's enclosing section header, recompute counts scoped to marker-lead ids only to avoid the concurrency race).",
       "watch": [
         "app/(dashboard)/board/**",
-        "app/(dashboard)/jobs/**",
         "components/board/**"
       ]
     },
@@ -346,9 +345,9 @@
       ]
     },
     "book_survey_quote_from_visit": {
-      "lastTestedAt": "2026-08-24T20:42:00Z",
-      "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: booked a survey against a marker lead -> appointments.estimator_id AND surveys.estimator_id both explicitly confirmed = profiles.id (not staff.id, gotcha reconfirmed again), 2 dry-run comms rows (email+sms) + 3 activities rows. 'Create Quote' from the diary event navigated to a real /quotes/[id] (draft, ref MMR062), Step 1 fields verified via .inputValue() (not visible text) matching the seeded lead's name/phone/email and the quote's own state_blob addresses. A second 'Create Quote' click correctly resumed the SAME draft (native window.confirm 'already has quote...' dismissed, no duplicate quote row) -- createDraftQuote's resume-existing-draft behavior held. Appointment flipped to status=completed on quote creation (by design: providing the quote IS attending it). 0 findings.",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastResult": "blocked",
+      "note": "BLOCKED this run by a genuine new UI bug (QA-20260825-02, safe-fix/high): the onboarding tour auto-starts 1.2s after a fresh estimator's first page load and its full-viewport click-blocking overlay can land directly on top of an already-open 'Book survey' dialog, silently swallowing every click on the Book button; separately, driver.js's global Escape handler and the dialog's own Escape-to-close collide, so dismissing the tour with Escape also silently closes the dialog underneath it (losing the ?leadId= and the in-progress booking). Neither the comms-count check nor the quote pre-fill check was reached. Re-run once QA-20260825-02 lands.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -357,9 +356,9 @@
       ]
     },
     "estimator_pay_statement": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
-      "lastResult": "pass",
-      "note": "Re-verified live (\u00a312.34 statement): CONTRACTOR_AGREEMENT_VERSION re-confirmed fresh by grep (v1-2026-07-18). Signed via real /settings UI, then /estimator/pay -> Start invoice -> Add a line -> Submit -> confirm modal -> UI flipped to Submitted. SQL exact match: staff_statements/staff_statement_lines/contractor_agreements. 0 findings.",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastResult": "blocked",
+      "note": "BLOCKED this run -- the role-agent's time went entirely into diagnosing QA-20260825-02 (see book_survey_quote_from_visit) and never reached this item. CONTRACTOR_AGREEMENT_VERSION re-confirmed fresh by grep (v1-2026-07-18) but no agreement was signed and no statement was created/submitted. Not a finding against this item itself -- re-run next time.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
@@ -390,9 +389,9 @@
       ]
     },
     "cv_self_fill_survey": {
-      "lastTestedAt": "2026-08-24T20:42:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: happy path (search 'sofa', add item, type customer note, submit) -> SQL exact match (status=customer_submitted, items/total_ft3 shape, customer_notes verbatim). Two-hats re-confirmed: cubic_surveys.notes (office-internal) AND leads.notes both explicitly re-read and confirmed UNCHANGED after the customer submit -- no leakage into either office-facing notes column. Bad-token check: garbage token -> clean branded 404, no crash. 0 findings.",
+      "note": "Re-verified live: happy path SQL-exact (items/total_ft3 matched what was tapped), garbage token -> clean 404, two-hats explicitly confirmed by SQL diff that cubic_surveys.notes (office-internal, untouched) and .customer_notes (customer-typed) are genuinely separate columns and the UI never leaked the office note into the rendered page body. status transitioned draft -> customer_submitted correctly. 1 activities row (intended first-submit write per the code comment), 0 communications. 0 findings.",
       "watch": [
         "app/cv/**",
         "app/actions/cubic-survey.ts",
@@ -417,9 +416,9 @@
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-08-24T12:22:00Z",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (stalest customer item): read business_settings.staff_onboard_enabled/staff_onboard_token first (read-only, did not toggle the shared setting) -- enabled, real token used. Deliberately typed the postcode LOWERCASE ('sp7 8ab') to re-test normalization: staff_submissions.address_postcode AND the formatted address one-liner both came back UPPERCASED consistently (two-hats held). Bad token -> clean dead-link state (HTTP 200, no crash). Marker row deleted + verified gone (0).",
+      "note": "Re-verified live, plus 1 new finding (QA-20260825-01, safe-fix/low): postcode typed lowercase/no-space ('sp71ab') is uppercased but never re-spaced by lib/staff/onboarding.ts's transform, storing/displaying 'SP71AB' instead of 'SP7 1AB' -- confirmed by direct code read (UK_POSTCODE_RE's internal space is optional via \\\\s?, and the .transform() only calls .toUpperCase()). Not a two-hats bug (both the raw column and the derived one-line address agree with each other, just both wrong the same way). Garbage-token dead-link state also confirmed clean.",
       "watch": [
         "app/join/**"
       ]
@@ -678,13 +677,13 @@
       ]
     },
     "crew_job_photo_spec": {
-      "lastTestedAt": null,
-      "lastResult": null,
-      "note": "NOT written yet. crew/job-detail.spec.ts covers adding a text note only; there is no permanent spec for the photo-upload half of the same flow (job_note_photo in this ledger), which the 2026-08-24 QA audit re-proved live via a real TUS upload + fresh-context <img> load check (0 findings). Deferred per the run's time box -- next run should add a photo-upload test to crew/job-detail.spec.ts (or a sibling file) using a small generated PNG, same pattern as this run's role-agent evidence.",
+      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastResult": "pass",
+      "note": "e2e/crew/job-detail.spec.ts gained a second test this run -- closes this gap. Uploads a real tiny PNG through the actual file input (not a DB-only seed), confirms the local preview, saves the note, then opens a FRESH browser context (new storageState-backed context, not just a reload) and confirms the <img> genuinely decoded (naturalWidth/naturalHeight/complete). Reuses crewJobCustomer (same job as the sibling text-note test) rather than crewJobTwo/crewJobThree, which crew/p0.spec.ts completes -- a completed job might hide the note form, so this deliberately avoids that cross-spec ordering risk. tsc + eslint clean, `playwright test --list` confirms it loads under the crew project (5 tests total). Has never actually executed here (no E2E_CREW_PASSWORD in this environment, same standing gap as every other role-fixture spec) but was proven live this run via the role-agent's own throwaway login before being written.",
       "watch": [
+        "e2e/crew/job-detail.spec.ts",
         "components/crew/job-notes.tsx",
-        "app/actions/job-media.ts",
-        "e2e/crew/job-detail.spec.ts"
+        "app/actions/job-media.ts"
       ]
     },
     "admin_invoice_resend_lock_spec": {
@@ -701,7 +700,7 @@
     "admin_board_kanban_spec": {
       "lastTestedAt": null,
       "lastResult": null,
-      "note": "NOT written yet. /board (pipeline kanban by stage) has no permanent spec -- only /jobs (Completed Jobs) does. Proven live 2026-08-24 by the QA audit (admin.board_kanban_jobs_list, all 6 columns SQL-exact, 0 findings). Deferred per the run's time box -- needs replicating the board's exact cohort filter (leads+quotes, submitted_at||created_at in Europe/London, Mon-Sun window) as the spec's own recompute, same as app/(dashboard)/board/page.tsx does server-side.",
+      "note": "Still NOT written. Re-proven live again 2026-08-25 (admin.board_kanban_jobs_list) with a validated seed shape + assertions (see qa/state.json admin.board_kanban_jobs_list note) -- next run should write it directly from that recipe, scoping the SQL recompute to marker-lead ids only (a same-checkout concurrent role-agent's marker lead caused one transient false-positive this run when the recompute wasn't scoped).",
       "watch": [
         "app/(dashboard)/board/**",
         "components/board/**"
