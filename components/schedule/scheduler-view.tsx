@@ -102,6 +102,9 @@ export interface SchedulerEvent {
  *  fields this client actually needs (multi-brand PRD §4). */
 export interface BrandDiaryOption {
   slug: string;
+  /** Full brand name — structurally satisfies the booking dialog's
+   *  ApptBrandOption, so the same rows feed its bare-client picker. */
+  name: string;
   shortName: string;
   /** Diary meta-line letter (brands.initial); null renders no second signal. */
   initial: string | null;
@@ -793,6 +796,11 @@ export function SchedulerView({
         open={dialogOpen}
         onOpenChange={closeCreateDialog}
         leads={leads}
+        // Feeds the bare-client brand picker — without this the dialog's
+        // brands default ([]) leaves requireBrand permanently false and a
+        // bare-client booking dead-ends on the server's refusal
+        // (QA gate-11 op7, 2026-08-25).
+        brands={brands}
         estimators={estimators}
         defaultEstimatorId={defaultEstimatorId}
         defaultType={defaultType}
