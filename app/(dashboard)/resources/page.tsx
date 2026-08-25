@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
+import { listActiveBrands } from "@/lib/brand";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -26,7 +27,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
   // Availability is shown/edited forward only — a past day off is history.
   const today = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
-  const [{ data: staff }, { data: pay }, { data: vehicles }, { data: unavailability }, staffAvailability, { data: onboardSettings }, { data: submissions }] =
+  const [{ data: staff }, { data: pay }, { data: vehicles }, { data: unavailability }, staffAvailability, { data: onboardSettings }, { data: submissions }, activeBrands] =
     await Promise.all([
       supabase.from("staff").select("*").order("is_active", { ascending: false }).order("full_name"),
       // Pay is office-scoped (staff_pay); merged in below so a crew page never
@@ -56,7 +57,25 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
             .eq("status", "pending")
             .order("created_at", { ascending: true })
         : Promise.resolve({ data: null }),
+      // Brand layer (multi-brand PRD §4 /resources): livery chips on vehicle
+      // cards + the form's livery selector. Single active brand → no brand UI
+      // renders (the single-brand invariant, PRD §1).
+      listActiveBrands(supabase),
     ]);
+
+  // Minimal serialisable brand shape for the client component — chip + livery
+  // selector only; keeps brand config (emails, phone numbers, template ids)
+  // out of the client payload. Empty in single-brand mode so nothing renders.
+  const brandOptions =
+    activeBrands.length > 1
+      ? activeBrands.map((b) => ({
+          slug: b.slug,
+          name: b.name,
+          shortName: b.shortName,
+          initial: b.initial,
+          colourPrimary: b.colourPrimary,
+        }))
+      : [];
 
   const payById = new Map((pay ?? []).map((p) => [p.staff_id, p]));
   const staffRows = (staff ?? []).map((s) => {
@@ -73,6 +92,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
       <PageHeader eyebrow="Operations" title="Staff & Fleet" />
       <ResourcesView
         staff={staffRows}
+        brands={brandOptions}
         vehicles={(vehicles ?? []) as VehicleRow[]}
         unavailability={(unavailability ?? []) as UnavailabilityRow[]}
         staffAvailability={(staffAvailability ?? []) as StaffAvailabilityRow[]}

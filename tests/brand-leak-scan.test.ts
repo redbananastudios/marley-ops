@@ -90,6 +90,18 @@ describe("brand-leak scan — the manifest is alive", () => {
       expect(files, `${f} must be under scan`).toContain(f);
     }
   });
+
+  it("expands the gate-12 shared-surface entries to the resources + storage files", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "components/resources/resources-view.tsx",
+      "components/job-board/job-board-view.tsx",
+      "components/storage/storage-view.tsx",
+      "components/storage/manage-let-dialog.tsx",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+  });
 });
 
 describe("brand-leak scan — shared-surface allows are evidence-disciplined", () => {

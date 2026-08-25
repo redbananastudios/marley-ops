@@ -18,6 +18,7 @@ import {
   STORAGE_ACKS,
 } from "@/lib/signatures";
 import { termsSnapshot } from "@/lib/legal/documents";
+import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
 
@@ -44,6 +45,7 @@ const siteSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   address: z.string().trim().max(300).optional().or(z.literal("")),
   notes: z.string().trim().max(2000).optional().or(z.literal("")),
+  brand: z.string().trim().optional().or(z.literal("")),
   is_active: z.boolean(),
 });
 
@@ -58,7 +60,30 @@ export async function saveSiteAction(input: SiteInput) {
   const { sb, userId } = await actor();
   if (!userId) return { ok: false as const, error: "Not signed in." };
 
-  const row = { name: v.name, address: v.address || "", notes: v.notes || null, is_active: v.is_active };
+  const row: { name: string; address: string; notes: string | null; is_active: boolean; brand?: string } = {
+    name: v.name,
+    address: v.address || "",
+    notes: v.notes || null,
+    is_active: v.is_active,
+  };
+  // GATE 12 — the site's brand, validated SERVER-SIDE against active brands
+  // (data, not a constant list — multi-brand PRD §4 /storage). Single-brand
+  // mode: the dialog's selector never rendered, so whatever arrived is
+  // ignored and the column stays untouched — inserts take the DB default
+  // (DEFAULT_BRAND), edits keep their stored value: today's behaviour.
+  // Multi-brand: a provided slug must be active; absent defaults new sites
+  // to DEFAULT_BRAND and leaves an edited site's brand alone.
+  const activeBrands = await listActiveBrands(sb);
+  if (activeBrands.length > 1) {
+    if (v.brand) {
+      if (!activeBrands.some((b) => b.slug === v.brand)) {
+        return { ok: false as const, error: "Choose which brand this site belongs to." };
+      }
+      row.brand = v.brand;
+    } else if (!v.id) {
+      row.brand = DEFAULT_BRAND;
+    }
+  }
   const { error } = v.id
     ? await sb.from("storage_sites").update(row).eq("id", v.id)
     : await sb.from("storage_sites").insert(row);
@@ -166,6 +191,8 @@ const startLetSchema = z.object({
   /** Crate lets: record the "handling in" event at commencement (default on). */
   record_handling_in: z.boolean().optional(),
   handling_amount: optNum,
+  /** Multi-brand override only — "" / absent means resolve server-side. */
+  brand: z.string().trim().optional().or(z.literal("")),
   notes: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 
@@ -206,7 +233,7 @@ export async function startLetAction(input: StartLetInput) {
   // The billing model must match the physical product — crates bill per day
   // in arrears, everything else per period in advance. A mismatch here would
   // mis-route the billing engine for the life of the let.
-  const { data: unit } = await sb.from("storage_units").select("unit_type").eq("id", v.unit_id).single();
+  const { data: unit } = await sb.from("storage_units").select("unit_type, site_id").eq("id", v.unit_id).single();
   if (!unit) return { ok: false as const, error: "Unit not found." };
   if (v.billing_model === "crate_daily" && unit.unit_type !== "crate_250") {
     return { ok: false as const, error: "Day-rate crate billing is only for crate units — this unit bills per period." };
@@ -223,6 +250,51 @@ export async function startLetAction(input: StartLetInput) {
     .is("end_date", null);
   if ((count ?? 0) > 0) return { ok: false as const, error: "This unit is already occupied." };
 
+  // GATE 12 — the let's brand (multi-brand PRD §2 + §3.2): the client's most
+  // recent lead's brand, falling back to the site's. Resolved SERVER-SIDE at
+  // write time; the dialog's pre-filled selector only posts a value when the
+  // office overrides it. Single-brand mode: nothing is sent, nothing is
+  // stamped and the insert is unchanged — the DB default writes DEFAULT_BRAND
+  // silently, today's behaviour. Attribution only this gate (PRD §11.10):
+  // rates, billing model and invoicing carry no brand.
+  let letBrand: string | null = null;
+  const activeBrands = await listActiveBrands(sb);
+  if (activeBrands.length > 1) {
+    if (v.brand) {
+      if (!activeBrands.some((b) => b.slug === v.brand)) {
+        return { ok: false as const, error: "Choose which brand this let belongs to." };
+      }
+      letBrand = v.brand;
+    } else {
+      // Resolution reads fail LOUD — a fail-soft fallback here would silently
+      // mis-brand the let's attribution for its whole life.
+      const { data: lastLead, error: leadErr } = await sb
+        .from("leads")
+        .select("brand")
+        .eq("client_id", v.client_id)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (leadErr) {
+        return { ok: false as const, error: `Could not resolve the client's brand: ${leadErr.message}` };
+      }
+      if (lastLead?.brand) {
+        letBrand = lastLead.brand;
+      } else {
+        const { data: site, error: siteErr } = await sb
+          .from("storage_sites")
+          .select("brand")
+          .eq("id", unit.site_id)
+          .single();
+        if (siteErr || !site) {
+          return { ok: false as const, error: "Could not resolve the site's brand — try again." };
+        }
+        letBrand = site.brand;
+      }
+    }
+  }
+
   const { data: created, error } = await sb
     .from("storage_lets")
     .insert({
@@ -235,6 +307,7 @@ export async function startLetAction(input: StartLetInput) {
       min_days: v.billing_model === "crate_daily" ? minDays : null,
       min_amount: v.billing_model === "crate_daily" ? minAmount : null,
       notes: v.notes || null,
+      ...(letBrand ? { brand: letBrand } : {}),
     } as never)
     .select("id")
     .single();
@@ -501,6 +574,8 @@ const editLetSchema = z.object({
   rate: optNum,
   rate_period: z.enum(["week", "month", "day"]),
   start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Multi-brand override only — absent means leave the stamp alone. */
+  brand: z.string().trim().optional().or(z.literal("")),
   notes: z.string().trim().max(2000).optional().or(z.literal("")),
 });
 export type EditLetInput = z.infer<typeof editLetSchema>;
@@ -566,15 +641,33 @@ export async function editLetAction(letId: string, input: EditLetInput) {
     return { ok: false as const, error: "Start date can't be after the end date." };
   }
 
-  const { error } = await sb
-    .from("storage_lets")
-    .update({
-      rate: v.rate === "" || v.rate == null ? null : v.rate,
-      rate_period: v.rate_period,
-      start_date: v.start_date,
-      notes: v.notes || null,
-    })
-    .eq("id", letId);
+  const patch: {
+    rate: number | null;
+    rate_period: string;
+    start_date: string;
+    notes: string | null;
+    brand?: string;
+  } = {
+    rate: v.rate === "" || v.rate == null ? null : v.rate,
+    rate_period: v.rate_period,
+    start_date: v.start_date,
+    notes: v.notes || null,
+  };
+  // GATE 12 — the brand stamp is overridable post-creation (attribution only
+  // this gate, PRD §11.10 — rates and billing carry no brand). Single-brand
+  // mode: the selector never rendered, whatever arrived is ignored and the
+  // column stays untouched. Multi-brand: validated against active brands.
+  if (v.brand) {
+    const activeBrands = await listActiveBrands(sb);
+    if (activeBrands.length > 1) {
+      if (!activeBrands.some((b) => b.slug === v.brand)) {
+        return { ok: false as const, error: "Choose which brand this let belongs to." };
+      }
+      patch.brand = v.brand;
+    }
+  }
+
+  const { error } = await sb.from("storage_lets").update(patch).eq("id", letId);
   if (error) return { ok: false as const, error: error.message };
   revalidatePath("/storage");
   return { ok: true as const };

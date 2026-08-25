@@ -55,6 +55,9 @@ import {
 } from "@/app/(dashboard)/storage/actions";
 import { defaultCuft, occupiedUnitIds, siteOccupancy, UNIT_TYPES, type UnitType } from "@/lib/storage-units";
 import { letDefaultsForUnitType, type StorageRates } from "@/lib/storage-rates";
+import { DEFAULT_BRAND } from "@/lib/brand";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { ManageLetDialog } from "@/components/storage/manage-let-dialog";
 
 export interface SiteRow {
@@ -62,6 +65,8 @@ export interface SiteRow {
   name: string;
   address: string;
   notes: string | null;
+  /** Site brand slug (multi-brand PRD §4 /storage). */
+  brand: string;
   is_active: boolean;
 }
 
@@ -99,6 +104,9 @@ export interface LetRow {
   id: string;
   unit_id: string;
   client_id: string;
+  /** Brand stamped at creation — originating lead, falling back to the site
+   *  (multi-brand PRD §2). Attribution only; billing carries no brand. */
+  brand: string;
   client_name: string;
   /** Client's email, if on file — the "Email signing link" button needs it. */
   client_email: string | null;
@@ -127,6 +135,9 @@ export interface PickerClient {
   name: string;
   phone: string | null;
   email: string | null;
+  /** Most recent lead's brand — assign-dialog pre-fill only (multi-brand;
+   *  null in single-brand mode). The server re-resolves at write time. */
+  leadBrand: string | null;
 }
 
 const TYPE_LABEL = Object.fromEntries(UNIT_TYPES.map((t) => [t.value, t.label]));
@@ -150,12 +161,21 @@ export function StorageView({
   lets,
   clients,
   rates,
+  brands = [],
+  brandFilter = "all",
+  showBrandChips = false,
 }: {
   sites: SiteRow[];
   units: UnitRow[];
   lets: LetRow[];
   clients: PickerClient[];
   rates: StorageRates;
+  /** Slim brands rows (multi-brand only; empty in single-brand mode). */
+  brands?: BrandChipData[];
+  /** 'all' or an active brand slug — parsed server-side from ?brand=. */
+  brandFilter?: string;
+  /** Chips render only in multi-brand mode with the filter on All. */
+  showBrandChips?: boolean;
 }) {
   const firstActive = sites.find((s) => s.is_active) ?? sites[0] ?? null;
   const [siteId, setSiteId] = useState<string | null>(firstActive?.id ?? null);
@@ -189,6 +209,14 @@ export function StorageView({
   const site = sites.find((s) => s.id === siteId) ?? firstActive;
   const selectedId = site?.id ?? null;
 
+  // Chips only in multi-brand mode with the filter on All (PRD §2 "Chip when
+  // filtered" — the segmented control already says which brand).
+  const chipFor = (slug: string): BrandChipData | null =>
+    showBrandChips ? (brands.find((b) => b.slug === slug) ?? null) : null;
+  // A named ?brand= narrows the VISIBLE let details; occupancy stays derived
+  // from the full let pool because it is a physical fact, not a brand one.
+  const letVisible = (l: LetRow): boolean => brandFilter === "all" || l.brand === brandFilter;
+
   const siteUnits = useMemo(() => {
     if (!selectedId) return [];
     const needle = q.trim().toLowerCase();
@@ -218,19 +246,34 @@ export function StorageView({
           </Button>
         </div>
         {sites.length === 0 ? (
-          <div className="mt-3 rounded-lg border border-border bg-card">
-            <EmptyState
-              icon={Warehouse}
-              title="No storage sites yet"
-              hint="Add the yard or warehouse where the containers live — use Add site above."
-            />
-          </div>
+          <>
+            {/* The segmented control normally lives in the units search row,
+                but with zero visible sites that row never renders — keep the
+                filter reachable so a named brand can't strand the view. */}
+            {brands.length > 1 ? (
+              <div className="mt-3">
+                <BrandFilter brands={brands} />
+              </div>
+            ) : null}
+            <div className="mt-3 rounded-lg border border-border bg-card">
+              <EmptyState
+                icon={Warehouse}
+                title={brandFilter !== "all" ? "No sites for this brand" : "No storage sites yet"}
+                hint={
+                  brandFilter !== "all"
+                    ? "Switch the brand filter to All to see every site, or add one for this brand with Add site above."
+                    : "Add the yard or warehouse where the containers live — use Add site above."
+                }
+              />
+            </div>
+          </>
         ) : (
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {sites.map((s) => (
               <SiteCard
                 key={s.id}
                 s={s}
+                chip={chipFor(s.brand)}
                 occ={siteOccupancy(units, lets, s.id)}
                 selected={s.id === selectedId}
                 onSelect={() => setSiteId(s.id)}
@@ -280,6 +323,8 @@ export function StorageView({
                 aria-label="Search units"
               />
             </div>
+            {/* Renders null with fewer than two brands (the single-brand invariant). */}
+            {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
             <Button className="ml-auto" onClick={() => setUnitEdit("new")}>
               <Plus strokeWidth={1.75} />
               Add unit
@@ -304,25 +349,33 @@ export function StorageView({
             </div>
           ) : (
             <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {siteUnits.map((u) => (
-                <UnitCard
-                  key={u.id}
-                  u={u}
-                  openLet={openLetByUnit.get(u.id) ?? null}
-                  onEdit={() => setUnitEdit(u)}
-                  onAssign={() => setLetFor(u)}
-                  onEnd={(l) => setEndFor({ unit: u, let: l })}
-                  onManage={(l) => setManageFor({ unit: u, let: l })}
-                  lastEndedLet={lastEndedByUnit.get(u.id) ?? null}
-                />
-              ))}
+              {siteUnits.map((u) => {
+                const openLet = openLetByUnit.get(u.id) ?? null;
+                const lastEnded = lastEndedByUnit.get(u.id) ?? null;
+                return (
+                  <UnitCard
+                    key={u.id}
+                    u={u}
+                    openLet={openLet}
+                    // The let's details narrow with the brand filter; the
+                    // occupancy pill never does (a physical fact).
+                    letFiltered={openLet != null && !letVisible(openLet)}
+                    openLetChip={openLet ? chipFor(openLet.brand) : null}
+                    onEdit={() => setUnitEdit(u)}
+                    onAssign={() => setLetFor(u)}
+                    onEnd={(l) => setEndFor({ unit: u, let: l })}
+                    onManage={(l) => setManageFor({ unit: u, let: l })}
+                    lastEndedLet={lastEnded && letVisible(lastEnded) ? lastEnded : null}
+                  />
+                );
+              })}
             </div>
           )}
         </div>
       ) : null}
 
       {siteEdit ? (
-        <SiteDialog row={siteEdit === "new" ? null : siteEdit} onClose={() => setSiteEdit(null)} />
+        <SiteDialog row={siteEdit === "new" ? null : siteEdit} brands={brands} onClose={() => setSiteEdit(null)} />
       ) : null}
       {unitEdit && site ? (
         <UnitDialog
@@ -332,10 +385,25 @@ export function StorageView({
           onClose={() => setUnitEdit(null)}
         />
       ) : null}
-      {letFor ? <LetDialog unit={letFor} clients={clients} rates={rates} onClose={() => setLetFor(null)} /> : null}
+      {letFor ? (
+        <LetDialog
+          unit={letFor}
+          clients={clients}
+          rates={rates}
+          brands={brands}
+          siteBrand={sites.find((s) => s.id === letFor.site_id)?.brand ?? null}
+          onClose={() => setLetFor(null)}
+        />
+      ) : null}
       {endFor ? <EndLetDialog unit={endFor.unit} let_={endFor.let} rates={rates} onClose={() => setEndFor(null)} /> : null}
       {manageFor ? (
-        <ManageLetDialog unit={manageFor.unit} let_={manageFor.let} rates={rates} onClose={() => setManageFor(null)} />
+        <ManageLetDialog
+          unit={manageFor.unit}
+          let_={manageFor.let}
+          rates={rates}
+          brands={brands}
+          onClose={() => setManageFor(null)}
+        />
       ) : null}
     </div>
   );
@@ -345,12 +413,15 @@ export function StorageView({
 
 function SiteCard({
   s,
+  chip,
   occ,
   selected,
   onSelect,
   onEdit,
 }: {
   s: SiteRow;
+  /** Brand chip data — null hides it (single-brand mode or a named filter). */
+  chip: BrandChipData | null;
   occ: { total: number; occupied: number; available: number };
   selected: boolean;
   onSelect: () => void;
@@ -387,6 +458,7 @@ function SiteCard({
         <div className="flex min-w-0 items-center gap-2">
           <Warehouse className={cn("size-4 shrink-0", selected ? "text-mm-red" : "text-mist-400")} strokeWidth={1.75} />
           <p className="truncate text-sm font-semibold text-foreground">{s.name}</p>
+          {chip ? <BrandChip brand={chip} size={16} /> : null}
         </div>
         {!s.is_active ? (
           <span className="shrink-0 rounded-pill bg-mist-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-mist-400">
@@ -450,10 +522,22 @@ function SiteCard({
   );
 }
 
-function SiteDialog({ row, onClose }: { row: SiteRow | null; onClose: () => void }) {
+function SiteDialog({
+  row,
+  brands,
+  onClose,
+}: {
+  row: SiteRow | null;
+  /** Slim brands rows — the selector renders only with two or more. */
+  brands: BrandChipData[];
+  onClose: () => void;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [v, setV] = useState({ name: row?.name ?? "", address: row?.address ?? "", notes: row?.notes ?? "" });
+  // Multi-brand only (the selector below is gated): existing sites keep their
+  // stored value, new sites default to DEFAULT_BRAND (PRD §4 /storage).
+  const [brand, setBrand] = useState(row?.brand ?? DEFAULT_BRAND);
 
   // try/finally: a rejected server action (dropped signal, stale action id
   // after a deploy) must still clear busy — otherwise the dialog spins forever.
@@ -465,6 +549,10 @@ function SiteDialog({ row, onClose }: { row: SiteRow | null; onClose: () => void
         name: v.name,
         address: v.address,
         notes: v.notes,
+        // Post the brand only when it means something: on create, or when the
+        // office changed it. "" leaves an edited site's stamp untouched (and
+        // single-brand mode ignores whatever arrives server-side).
+        brand: !row || brand !== row.brand ? brand : "",
         is_active: row?.is_active ?? true,
       } satisfies SiteInput);
       if (!res.ok) {
@@ -497,6 +585,26 @@ function SiteDialog({ row, onClose }: { row: SiteRow | null; onClose: () => void
             <Label htmlFor="ss-addr">Address</Label>
             <Input id="ss-addr" className="h-11" value={v.address} onChange={(e) => setV({ ...v, address: e.target.value })} placeholder="Ash Cottage, Sherborne Causeway…" />
           </div>
+          {brands.length > 1 ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="ss-brand">Brand</Label>
+              <Select value={brand} onValueChange={setBrand}>
+                <SelectTrigger id="ss-brand" className="h-11 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {brands.map((b) => (
+                    <SelectItem key={b.slug} value={b.slug}>
+                      {b.shortName ?? b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-mist-400">
+                New lets here fall back to the site&apos;s brand when the client has no enquiry.
+              </p>
+            </div>
+          ) : null}
           <div className="grid gap-1.5">
             <Label htmlFor="ss-notes">Notes</Label>
             <textarea
@@ -528,6 +636,8 @@ function SiteDialog({ row, onClose }: { row: SiteRow | null; onClose: () => void
 function UnitCard({
   u,
   openLet,
+  letFiltered,
+  openLetChip,
   onEdit,
   onAssign,
   onEnd,
@@ -536,6 +646,11 @@ function UnitCard({
 }: {
   u: UnitRow;
   openLet: LetRow | null;
+  /** The open let exists but a named brand filter hides its details — the
+   *  occupancy pill still shows Occupied (a physical fact, never filtered). */
+  letFiltered: boolean;
+  /** Brand chip for the open let — null hides it (single-brand or filtered). */
+  openLetChip: BrandChipData | null;
   onEdit: () => void;
   onAssign: () => void;
   onEnd: (l: LetRow) => void;
@@ -587,11 +702,12 @@ function UnitCard({
         )}
       </div>
 
-      {occupied && openLet ? (
+      {occupied && openLet && !letFiltered ? (
         <div className="rounded-md bg-muted/60 px-3 py-2 text-xs">
           <p className="flex items-center gap-1.5 font-medium text-foreground">
             <UserRound className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} />
             <span className="truncate">{openLet.client_name}</span>
+            {openLetChip ? <BrandChip brand={openLetChip} size={16} /> : null}
           </p>
           <p className="mt-0.5 text-mist-500">
             since {fmtDate(openLet.start_date)}
@@ -625,14 +741,20 @@ function UnitCard({
       <div className="mt-auto flex items-center justify-between border-t border-border pt-3">
         {u.is_active ? (
           occupied && openLet ? (
-            <span className="flex gap-2">
-              <Button size="sm" onClick={() => onManage(openLet)} className="bg-mm-red text-white hover:bg-mm-red-deep">
-                Manage
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => onEnd(openLet)}>
-                End let
-              </Button>
-            </span>
+            letFiltered ? (
+              // The let belongs to a brand outside the current filter — its
+              // details and actions live on the All view.
+              <span className="text-xs text-mist-400">Let under another brand</span>
+            ) : (
+              <span className="flex gap-2">
+                <Button size="sm" onClick={() => onManage(openLet)} className="bg-mm-red text-white hover:bg-mm-red-deep">
+                  Manage
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => onEnd(openLet)}>
+                  End let
+                </Button>
+              </span>
+            )
           ) : (
             <span className="flex items-center gap-2">
               <Button size="sm" onClick={onAssign} className="bg-mm-red text-white hover:bg-mm-red-deep">
@@ -830,17 +952,31 @@ function LetDialog({
   unit,
   clients,
   rates,
+  brands,
+  siteBrand,
   onClose,
 }: {
   unit: UnitRow;
   clients: PickerClient[];
   rates: StorageRates;
+  /** Slim brands rows — the selector renders only with two or more. */
+  brands: BrandChipData[];
+  /** The unit's site brand — the pre-fill fallback when the client has no lead. */
+  siteBrand: string | null;
   onClose: () => void;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
   const [clientId, setClientId] = useState<string | null>(null);
+  // Brand pre-fill mirrors the server's write-time resolution (client's most
+  // recent lead, falling back to the site — PRD §2). Only an explicit office
+  // override posts a value; untouched, the server resolves fresh at save.
+  const [brandOverride, setBrandOverride] = useState<string | null>(null);
+  const pickClient = (id: string | null) => {
+    setClientId(id);
+    setBrandOverride(null);
+  };
   // Product defaults from the Settings rate card — crates bill a day rate with
   // a 28-day minimum upfront; containers bill the monthly card rate in advance.
   const defaults = useMemo(() => letDefaultsForUnitType(unit.unit_type, rates), [unit.unit_type, rates]);
@@ -864,6 +1000,8 @@ function LetDialog({
   }, [clients, search]);
 
   const chosen = clients.find((c) => c.id === clientId) ?? null;
+  const resolvedBrand = chosen?.leadBrand ?? siteBrand;
+  const brandValue = brandOverride ?? resolvedBrand;
 
   async function save() {
     if (!clientId) {
@@ -889,6 +1027,9 @@ function LetDialog({
         min_amount: isCrate ? rates.crateMinInc : "",
         record_handling_in: isCrate && handlingIn,
         handling_amount: handlingAmount === "" ? "" : Number(handlingAmount),
+        // Only an explicit override travels; "" lets the server resolve the
+        // brand fresh at write time (lead first, then site).
+        brand: brandOverride ?? "",
         notes: v.notes,
       });
       if (!res.ok) {
@@ -927,7 +1068,7 @@ function LetDialog({
                   <p className="truncate font-medium text-foreground">{chosen.name}</p>
                   <p className="truncate text-xs text-mist-500">{[chosen.phone, chosen.email].filter(Boolean).join(" · ") || "no contact"}</p>
                 </div>
-                <Button variant="ghost" size="sm" onClick={() => setClientId(null)}>
+                <Button variant="ghost" size="sm" onClick={() => pickClient(null)}>
                   Change
                 </Button>
               </div>
@@ -951,7 +1092,7 @@ function LetDialog({
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => setClientId(c.id)}
+                        onClick={() => pickClient(c.id)}
                         className="focus-ring flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted"
                       >
                         <span className="min-w-0">
@@ -967,6 +1108,31 @@ function LetDialog({
               </>
             )}
           </div>
+
+          {brands.length > 1 ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="sl-brand">Brand</Label>
+              <Select
+                value={brandValue ?? undefined}
+                onValueChange={(val) => setBrandOverride(val)}
+              >
+                <SelectTrigger id="sl-brand" className="h-11 w-full">
+                  <SelectValue placeholder="Choose a brand" />
+                </SelectTrigger>
+                <SelectContent>
+                  {brands.map((b) => (
+                    <SelectItem key={b.slug} value={b.slug}>
+                      {b.shortName ?? b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-mist-400">
+                Pre-filled from the client&apos;s latest enquiry (or this site). Change it if the let belongs to a
+                different brand.
+              </p>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 sm:grid-cols-3">
             <div className="grid gap-1.5">

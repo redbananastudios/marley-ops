@@ -46,12 +46,13 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * suspect. The fix is never to loosen this spec.
  */
 
-/** Sixteen routes: the five highest-traffic office surfaces — this spec's
+/** Eighteen routes: the five highest-traffic office surfaces — this spec's
  *  own choice of coverage (PRD §6 addition 1 mandates the parity assertion but
  *  names no routes) — plus /settings, where gate 2's Brands card lives, plus
  *  the seven gate-4 list surfaces (clients, follow-ups, documents, claims,
  *  content, payments, refunds), plus the three gate-11 diary surfaces
- *  (schedule, removals, surveys). NOTE on the diaries: the hollow-unconfirmed
+ *  (schedule, removals, surveys), plus the two gate-12 surfaces (/resources
+ *  and /storage). NOTE on the diaries: the hollow-unconfirmed
  *  removal rendering (dashed outline while `date_confirmed_at` is null) is
  *  deliberately NOT multi-brand-gated — Marley gets it too — so it must and
  *  does render here. It carries no brand testid and no brand text (classes
@@ -77,6 +78,13 @@ const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/schedule", heading: "Schedule & Allocation" },
   { path: "/schedule/removals", heading: "Removals" },
   { path: "/schedule/surveys", heading: "Surveys" },
+  // Gate 12: resources + storage. The vehicle livery chip and Livery select,
+  // the job-board livery-mismatch note, storage site/let chips, the storage
+  // brand filter and the site/let/manage dialogs' brand selects are all
+  // multi-brand-gated, so none of them may render here. NOTE: /resources'
+  // real PageHeader title is "Staff & Fleet" (the route name lies).
+  { path: "/resources", heading: "Staff & Fleet" },
+  { path: "/storage", heading: "Storage" },
 ];
 
 /**
