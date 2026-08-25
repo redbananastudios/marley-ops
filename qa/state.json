@@ -1,6 +1,6 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "lastAuditSha": "2c963a7",
+  "lastAuditSha": "2936c01",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T04:35:00Z",
@@ -12,9 +12,9 @@
       ]
     },
     "hours_log_edit_clear": {
-      "lastTestedAt": "2026-08-24T08:36:00Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (real Chromium, TLS1.2/proxy workaround): ADD 09:00-16:30 -> staff_time_entries row exact match, created_at stamped. EDIT to 10:15-18:00 (dialog re-opened pre-filled with the ADD values, confirming two-hats) -> SAME row id, updated_at bumped, created_at unchanged. CLEAR -> native window.confirm() captured verbatim (\"Clear Monday 24 Aug? This removes the day's hours, expense and receipt photo.\"), genuine DELETE (0 rows after), not zeroed. 0 findings. NEW permanent spec e2e/crew/hours.spec.ts added this run (shipped test.skip'd, no E2E_CREW_PASSWORD in this env) -- closes the standing spec gap for this item.",
+      "note": "Re-verified live by a role-agent subagent (Sonnet): ADD 08:00/16:30 Tue 25 Aug -> staff_time_entries exact match. Fresh reload + reopened edit dialog prefilled 08:00/16:30 exactly (two-hats held). EDIT to 09:15/17:45 -> SAME row id, updated_at bumped. CLEAR -> native window.confirm() captured verbatim (\"Clear Tuesday 25 Aug? This removes the day's hours, expense and receipt photo.\"), genuine DELETE (0 rows after). 0 findings. Existing e2e/crew/hours.spec.ts still covers this (still test.skip'd, no E2E_CREW_PASSWORD in this env).",
       "watch": [
         "app/my-jobs/hours/**",
         "components/my-jobs/hours-editor.tsx",
@@ -33,9 +33,9 @@
       ]
     },
     "job_list_detail": {
-      "lastTestedAt": "2026-08-24T20:42:00Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent on a fresh marker fixture (own client/lead/appointment/assignment, not the shared QA-SENTINEL Fixture): /my-jobs list card showed correct UK-local time window (10:00-14:00 BST for a seeded 09:00-13:00 UTC appointment, BST-offset two-hats check held) and correct addresses; detail page matched the same DB row byte-for-byte (date/time/from/to/crew name/notes marker). 0 findings.",
+      "note": "Re-verified live by a role-agent subagent on a fresh marker fixture: seeded 09:00-13:00Z appointment -> /my-jobs list card correctly rendered 10:00-14:00 UK-local (BST +1) with correct postcodes; detail page (incl. hard reload) matched the same DB row exactly (date/time/addresses/crew name/notes). 0 findings.",
       "watch": [
         "app/my-jobs/**",
         "components/my-jobs/**"
@@ -106,9 +106,9 @@
   },
   "admin": {
     "lead_create_edit": {
-      "lastTestedAt": "2026-08-22T20:40Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "QA-20260819-01 (Contact card showed a shared client's data instead of the lead's own, and could overwrite it) VERIFIED+CLOSED this run: two marker leads sharing one client, edit lead A -> shared client's display_name/phone/email unchanged (write-through declined, toast explains why), lead A's own row updated, lead B's own row and rendered page both unaffected. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: created via /leads/new UI, edited phone/property_size/notes -> SQL same row id (no duplicate), updated_at advanced. Fresh reload of /leads/[id] confirmed every displayed field reads the column just written (name/phone/email/postcode/property_size/notes, two-hats held). activities shows exactly lead_created then the edit note. 0 findings.",
       "watch": [
         "app/(dashboard)/leads/**",
         "components/leads/edit-lead-dialog.tsx",
@@ -299,9 +299,9 @@
       ]
     },
     "clients_register_detail": {
-      "lastTestedAt": "2026-08-22T20:30Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "QA-20260821-02 (Quotes card showed created_at instead of accepted_at, already closed prior to this run) re-confirmed still holding live. Fresh marker quote with created_at != accepted_at: the card correctly shows 'Accepted \u00b7 <accepted_at date>', not the creation date. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: search by marker substring returned exactly 1 matching card, no false positives against real clients. Client detail vs SQL matched exactly (name/phone/email/postcode/firstSeen). Enquiry-count rollup independently recomputed from SQL (count(*) leads where client_id=...) = 1, matched the UI's '1 enquiry' exactly. Also incidentally re-confirmed clientWriteThrough (editing the sole lead's phone wrote through to clients.phone_raw/phone_e164). 0 findings.",
       "watch": [
         "app/(dashboard)/clients/**",
         "components/clients/**"
@@ -345,9 +345,9 @@
       ]
     },
     "book_survey_quote_from_visit": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
-      "lastResult": "blocked",
-      "note": "BLOCKED this run by a genuine new UI bug (QA-20260825-02, safe-fix/high): the onboarding tour auto-starts 1.2s after a fresh estimator's first page load and its full-viewport click-blocking overlay can land directly on top of an already-open 'Book survey' dialog, silently swallowing every click on the Book button; separately, driver.js's global Escape handler and the dialog's own Escape-to-close collide, so dismissing the tour with Escape also silently closes the dialog underneath it (losing the ?leadId= and the in-progress booking). Neither the comms-count check nor the quote pre-fill check was reached. Re-run once QA-20260825-02 lands.",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastResult": "pass",
+      "note": "UNBLOCKED and fully verified live now that QA-20260825-02 is fixed+closed: main loop first confirmed the dialog-guard fix directly (Book click on an open survey dialog, held open 2s past the tour's 1.2s autostart, not intercepted -- tour correctly deferred the whole time). Role-agent subagent then ran the FULL flow: book survey (self-assigned) -> reschedule (appointments.starts_at/ends_at moved correctly, 1hr duration preserved) -> mark attended via Create Quote (surveys.status=completed) -> quote wizard steps 1-7 -> save draft. Quote row matched wizard's own read-back exactly (customer fields, addresses, £1,122 total) -- two-hats held throughout. driver-overlay count = 0 at the Create Quote click (no regression). 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -356,9 +356,9 @@
       ]
     },
     "estimator_pay_statement": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
-      "lastResult": "blocked",
-      "note": "BLOCKED this run -- the role-agent's time went entirely into diagnosing QA-20260825-02 (see book_survey_quote_from_visit) and never reached this item. CONTRACTOR_AGREEMENT_VERSION re-confirmed fresh by grep (v1-2026-07-18) but no agreement was signed and no statement was created/submitted. Not a finding against this item itself -- re-run next time.",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastResult": "pass",
+      "note": "UNBLOCKED and verified live by a role-agent subagent: signed contractor agreement (5/5 acks) -> started This-week invoice -> 'Add my work this week' pulled the OP1 attended survey in as a line (source=survey, £50) -> added a manual £12.34 line -> submitted. staff_statements (ref MMP148) status=submitted, total=£62.34 matched UI exactly; staff_statement_lines' survey line's appointment_id matched the OP1 survey, proving the pay engine correctly picks up attended surveys. 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
@@ -399,17 +399,17 @@
       ]
     },
     "s_storage_signing": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: full sign flow via real Chromium -- /s/<token> -> 3 acks + name -> submit -> 'All signed'. SQL exact match (signatures row, real 56,966-byte PNG signature_data), count=1. Re-opened in a FRESH browser context (not just reload) -> idempotent 'All signed' state confirmed again, 0 form fields re-rendered. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: /s/<token> -> 3 acks + name -> submit -> 'All signed' confirmation text. SQL exact match (signatures row, acknowledgments all true, signature_data present). IO proof: signature_data decoded to 36,971 raw bytes starting with the PNG magic number 89 50 4E 47 0D 0A 1A 0A -- a real, non-empty image. Re-opened in a FRESH browser context -> idempotent 'All signed' state, 0 form fields re-rendered (DB-backed, not client state). 0 findings.",
       "watch": [
         "app/s/**"
       ]
     },
     "sheet_day_sheet": {
-      "lastTestedAt": "2026-08-24T20:42:00Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: seeded 09:00-13:00 UTC appointment + assignment + crew_job_sheets token -> /sheet/<token> HTTP 200, full field-by-field diff vs DB. UK-local time conversion explicitly re-checked (the known past-bug class): rendered '09:00-13:00 Move' correctly as UK-local (BST, +1h from UTC), not raw UTC. Addresses/crew name/notes all matched exactly. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: seeded 09:00-14:00Z removal appointment + crew_job_sheets token -> /sheet/<token> rendered '10:00-15:00 Move' (BST +1h, explicitly targeted since this bug class has recurred before), correct date/customer/addresses/crew/notes, price-free confirmed (no £ anywhere). 0 findings.",
       "watch": [
         "app/sheet/**",
         "e2e/public/day-sheet.spec.ts"
