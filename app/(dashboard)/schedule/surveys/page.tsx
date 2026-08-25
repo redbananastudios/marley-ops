@@ -167,6 +167,7 @@ export default async function SurveysSchedulePage({
         baseLocation={baseLocation}
         brands={activeBrands.map((b) => ({
           slug: b.slug,
+          name: b.name,
           shortName: b.shortName,
           initial: b.initial,
           colourPrimary: b.colourPrimary,
