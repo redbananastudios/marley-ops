@@ -19,6 +19,7 @@ import type { DriveStep } from "driver.js";
 import { markTourSeenAction } from "@/app/actions/tour";
 import { TOURS, type TourName, type TourStep } from "./tours";
 import { START_TOUR_EVENT, tourDoneKey } from "./launch";
+import { hasOpenBlockingDialog } from "./dialog-guard";
 
 let driverAssets: Promise<typeof import("driver.js")> | null = null;
 
@@ -118,6 +119,11 @@ export function OnboardingTour({
         disableActiveInteraction: true,
         smoothScroll: true,
         allowClose: true,
+        // driver.js's Escape handler is window-global, so with a dialog open
+        // under the tour one keypress would close BOTH (the dialog's own Radix
+        // handler fires too) and dump whatever the user was mid-way through.
+        // The popover buttons own all tour control instead.
+        allowKeyboardControl: false,
         steps,
         // An explicit "Don't show again" beside the Next/Done controls (Peter,
         // 2026-07-17) — a clear opt-out so the guide never reappears.
@@ -166,7 +172,19 @@ export function OnboardingTour({
       }
       // Stamp happens when the tour actually renders (in run), not here — so a
       // first-timer who leaves inside the 1.2s window still sees it next login.
-      if (!done) timer = setTimeout(run, 1200);
+      if (!done) {
+        const autoRun = () => {
+          // A dialog the user is already in (e.g. /schedule/surveys?leadId=…
+          // opens "Book survey" on load) must keep working — the tour overlay
+          // would swallow its clicks. Re-check until the dialog closes.
+          if (hasOpenBlockingDialog(document)) {
+            timer = setTimeout(autoRun, 1200);
+            return;
+          }
+          void run();
+        };
+        timer = setTimeout(autoRun, 1200);
+      }
     }
 
     return () => {
