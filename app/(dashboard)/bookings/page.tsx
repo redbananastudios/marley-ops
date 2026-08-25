@@ -166,10 +166,11 @@ export default async function BookingsPage({
     // CHUNKED on purpose: PostgREST caps unpaged reads at 1000 rows, and this
     // is the one place where truncation would DROP rows rather than degrade
     // enrichment — a brand-filtered /bookings keeps only rows this read
-    // returns, so a silent cap would understate the money tiles. 500 ids per
-    // batch also keeps the `in` filter comfortably inside URL limits.
-    for (let i = 0; i < leadIds.length; i += 500) {
-      const batch = leadIds.slice(i, i + 500);
+    // returns, so a silent cap would understate the money tiles. 100 ids per
+    // batch keeps the `in` filter inside the gateway's measured ~200-UUID/8KB
+    // URL limit (lib/bank-feed/sync.ts chunks at 100 for the same reason).
+    for (let i = 0; i < leadIds.length; i += 100) {
+      const batch = leadIds.slice(i, i + 100);
       const { data: leadBrands, error: leadBrandsErr } = await applyBrandFilter(
         sb.from("leads").select("id, brand, source_system").in("id", batch),
         brandFilter,

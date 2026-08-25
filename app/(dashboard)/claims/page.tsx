@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
@@ -48,7 +52,7 @@ const fmtAt = (iso: string): string =>
 export default async function ClaimsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<{ tab?: string; brand?: string }>;
 }) {
   const office = await requireOfficeProfile();
   if (!office) redirect("/");
@@ -57,6 +61,12 @@ export default async function ClaimsPage({
   const tab = (TABS.find((t) => t.key === sp.tab)?.key ?? "open") as "open" | "closed" | "all";
 
   const sb = await createClient();
+  // Brand layer (multi-brand PRD §4 Claims): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
   // Open-claim badge is the live-liability signal, so it must be the TRUE total,
   // not "open within the 400 most-recently-reported" — a head count query keeps
   // it independent of the display window (which caps at 400 for render weight).
@@ -78,19 +88,53 @@ export default async function ClaimsPage({
   const claims = all.filter((c) =>
     tab === "all" ? true : tab === "open" ? isOpenClaimStatus(c.status) : !isOpenClaimStatus(c.status),
   );
-  const openCount = openTotal ?? all.filter((c) => isOpenClaimStatus(c.status)).length;
 
-  const leadIds = [...new Set(claims.map((c) => c.lead_id))];
+  // Claims carry no brand column, so brand rides the existing per-batch leads
+  // lookup (the /bookings supplementary-read precedent), narrowed IN THE DB
+  // via applyBrandFilter. In multi-brand mode the lookup widens to every
+  // window row so the Open tab count can follow the filter too.
+  const leadIds = [...new Set((multi ? all : claims).map((c) => c.lead_id))];
   // PostgREST .in() rides the GET query string — past ~200 UUIDs it 414s and
   // the join silently returns nothing, so the lookup goes in batches of 100.
   const leadName = new Map<string, string | null>();
+  const leadBrand = new Map<string, string>();
   for (let i = 0; i < leadIds.length; i += 100) {
-    const { data: leadRows } = await sb
-      .from("leads")
-      .select("id, name")
-      .in("id", leadIds.slice(i, i + 100));
-    for (const l of leadRows ?? []) leadName.set(l.id, l.name);
+    const { data: leadRows, error: leadErr } = await applyBrandFilter(
+      sb.from("leads").select("id, name, brand").in("id", leadIds.slice(i, i + 100)),
+      brandFilter,
+    );
+    // Fail loud once a brand filter narrows rows: a failed batch would then
+    // silently DROP every claim in it (the "I could not check" rule), where
+    // unfiltered it only degrades a name to "Customer" as before.
+    if (leadErr && brandFilter !== "all")
+      throw new Error(`claims brand read failed: ${leadErr.message}`);
+    for (const l of leadRows ?? []) {
+      leadName.set(l.id, l.name);
+      leadBrand.set(l.id, l.brand);
+    }
   }
+
+  const visible = brandFilter === "all" ? claims : claims.filter((c) => leadBrand.has(c.lead_id));
+  // Filtered, the badge counts open claims of that brand within the display
+  // window; unfiltered it keeps the exact head count (the live-liability
+  // signal, independent of the 400-row window).
+  const openCount =
+    brandFilter === "all"
+      ? (openTotal ?? all.filter((c) => isOpenClaimStatus(c.status)).length)
+      : all.filter((c) => isOpenClaimStatus(c.status) && leadBrand.has(c.lead_id)).length;
+
+  // Chip hidden when the segmented control already names one brand
+  // (multi-brand PRD §4 opening rules).
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
+
+  const tabHref = (key: string): string => {
+    const qs = new URLSearchParams();
+    if (key !== "open") qs.set("tab", key);
+    if (brandFilter !== "all") qs.set(BRAND_FILTER_PARAM, brandFilter);
+    const s = qs.toString();
+    return s ? `/claims?${s}` : "/claims";
+  };
 
   const now = new Date();
 
@@ -101,6 +145,14 @@ export default async function ClaimsPage({
           Damage and service claims, incident to resolution — sign-off exceptions open one
           automatically.
         </p>
+        {/* Brand filter (multi-brand PRD §4 Claims) — this page has no search
+            bar, so the segmented control lives in the PageHeader and composes
+            with the Open/Closed/All tabs below. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
       </PageHeader>
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
@@ -108,7 +160,7 @@ export default async function ClaimsPage({
           {TABS.map((t) => (
             <Link
               key={t.key}
-              href={t.key === "open" ? "/claims" : `/claims?tab=${t.key}`}
+              href={tabHref(t.key)}
               aria-current={tab === t.key ? "page" : undefined}
               className={segmentedItemClass(tab === t.key)}
             >
@@ -120,7 +172,7 @@ export default async function ClaimsPage({
       </div>
 
       <Card className="p-0">
-        {claims.length === 0 ? (
+        {visible.length === 0 ? (
           <EmptyState
             icon={ShieldCheck}
             title={tab === "open" ? "No open claims" : "No claims here"}
@@ -128,9 +180,12 @@ export default async function ClaimsPage({
           />
         ) : (
           <ul className="divide-y">
-            {claims.map((c) => {
+            {visible.map((c) => {
               const open = isOpenClaimStatus(c.status);
               const amount = c.resolution_amount != null ? Number(c.resolution_amount) : null;
+              // Brand chip — after the claim ref, before the status pill
+              // (multi-brand PRD §4 Claims).
+              const chipBrand = showBrandChips ? chipBySlug.get(leadBrand.get(c.lead_id) ?? "") : undefined;
               return (
                 <li key={c.id} className="px-5 py-3.5">
                   <div className="flex flex-wrap items-center gap-3">
@@ -140,6 +195,7 @@ export default async function ClaimsPage({
                     >
                       {claimRef(c.claim_no)}
                     </Link>
+                    {chipBrand ? <BrandChip brand={chipBrand} /> : null}
                     <ClaimStatusPill status={c.status as ClaimStatus} />
                     <span className="text-sm font-medium text-foreground">
                       {leadName.get(c.lead_id) ?? "Customer"}

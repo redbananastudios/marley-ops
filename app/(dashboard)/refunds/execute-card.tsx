@@ -44,6 +44,7 @@ import {
   type QueueItemView,
   type RailView,
 } from "@/lib/refunds/queue-view";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 
 function dateLabel(day: string | null): string {
   if (!day) return "the original date";
@@ -492,7 +493,15 @@ function RetainDialog({ item, isDateChange }: { item: QueueItemView; isDateChang
 
 /* ------------------------------------------------------------------ card */
 
-export function ExecuteCard({ item }: { item: QueueItemView }) {
+export function ExecuteCard({
+  item,
+  brandChip,
+}: {
+  item: QueueItemView;
+  /** Slim chip data (multi-brand PRD §4 Refunds) — absent in single-brand
+   *  mode / when the ?brand= filter names one brand, so nothing renders. */
+  brandChip?: BrandChipData;
+}) {
   const isRetainRow = item.determination === "not_filled";
   // A date-change row's booking is STILL LIVE: nothing ever pays out of it —
   // "filled" closes as released (money keeps counting), "not filled" retains
@@ -509,6 +518,7 @@ export function ExecuteCard({ item }: { item: QueueItemView }) {
           ) : (
             <span className="font-medium text-foreground">{item.customer}</span>
           )}
+          {brandChip ? <BrandChip brand={brandChip} className="ml-2 align-middle" /> : null}
           <p className="text-xs text-mist-400">
             {item.quoteRef ?? "—"} · {item.triggerLabel}
             {item.originalMoveDate ? ` · original date ${dateLabel(item.originalMoveDate)}` : ""}

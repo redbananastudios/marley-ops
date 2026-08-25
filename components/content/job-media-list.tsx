@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { BadgeCheck, Camera, Loader2, Lock, Mic, Trash2, Video } from "lucide-react";
 import { toast } from "sonner";
 import { approveJobMediaAction, deleteJobMediaAction } from "@/app/actions/job-media";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 
 export interface JobMediaView {
   id: string;
@@ -49,13 +50,22 @@ function KindIcon({ kind }: { kind: JobMediaView["kind"] }) {
 export function JobMediaList({
   items,
   showJobLink = false,
+  brands = [],
+  brandByLead,
 }: {
   items: JobMediaView[];
   showJobLink?: boolean;
+  /** Active brands (multi-brand PRD §4) — slim chip data. Empty or absent in
+   *  single-brand mode / when the ?brand= filter names one brand, and the
+   *  chips render nothing (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** leadId → brand slug for the rows on screen. */
+  brandByLead?: Record<string, string>;
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [, start] = useTransition();
+  const brandBySlug = new Map(brands.map((b) => [b.slug, b]));
 
   const act = (id: string, fn: () => Promise<{ ok: boolean; error?: string }>, okMsg: string) => {
     setBusyId(id);
@@ -84,6 +94,8 @@ export function JobMediaList({
       {items.map((m) => {
         const internalOnly = m.consentState === "internal_only";
         const busy = busyId === m.id;
+        // Brand chip — beside the job link (multi-brand PRD §4 Content).
+        const chipBrand = brandByLead ? brandBySlug.get(brandByLead[m.leadId] ?? "") : undefined;
         return (
           <li key={m.id} className="flex gap-3 px-4 py-3">
             <a
@@ -117,6 +129,7 @@ export function JobMediaList({
                     {m.leadName ?? "Open job"}
                   </a>
                 ) : null}
+                {chipBrand ? <BrandChip brand={chipBrand} size={16} /> : null}
               </div>
               {m.caption ? <p className="mt-1 text-sm text-foreground">{m.caption}</p> : null}
               {m.kind === "audio" ? (

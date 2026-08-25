@@ -4,7 +4,9 @@ import { Camera, FileDown, FileText, NotebookPen, PenLine, ShieldCheck } from "l
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { JOB_DOCS_BUCKET } from "@/lib/signatures";
+import { listActiveBrands } from "@/lib/brand";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip } from "@/components/brand/brand-chip";
 import { Card } from "@/components/ui/card";
 import { ClaimStatusPill } from "@/components/claims/claim-status-pill";
 import { ClaimUpdateForm } from "@/components/claims/claim-update-form";
@@ -100,9 +102,17 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
     .maybeSingle();
   if (!claim) notFound();
 
-  const [{ data: lead }, { data: completion }, notesCount, mediaCount, { data: acceptedQuote }, { data: contractSig }] =
+  const [
+    { data: lead },
+    { data: completion },
+    notesCount,
+    mediaCount,
+    { data: acceptedQuote },
+    { data: contractSig },
+    activeBrands,
+  ] =
     await Promise.all([
-      sb.from("leads").select("id, name, client_id").eq("id", claim.lead_id).maybeSingle(),
+      sb.from("leads").select("id, name, client_id, brand").eq("id", claim.lead_id).maybeSingle(),
       claim.completion_id
         ? sb
             .from("job_completions")
@@ -136,7 +146,13 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
         .order("signed_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      // Brand layer (multi-brand PRD §4): the detail-page chip renders only in
+      // multi-brand mode (the single-brand invariant, PRD §1).
+      listActiveBrands(sb),
     ]);
+
+  const chipBrand =
+    activeBrands.length > 1 ? activeBrands.find((b) => b.slug === lead?.brand) : undefined;
 
   let certificateUrl: string | null = null;
   if (completion?.certificate_path) {
@@ -160,7 +176,14 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
         title={`Claim ${ref}`}
         backHref="/claims"
         backLabel="Claims"
-        eyebrowAccessory={<ClaimStatusPill status={status} />}
+        eyebrowAccessory={
+          <>
+            <ClaimStatusPill status={status} />
+            {/* Detail-page eyebrows have room, so the chip carries the short
+                name (multi-brand PRD §4 opening rules). */}
+            {chipBrand ? <BrandChip brand={chipBrand} variant="eyebrow" /> : null}
+          </>
+        }
       >
         <PrintSummaryButton />
       </PageHeader>

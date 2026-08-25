@@ -3,6 +3,7 @@ import { CalendarClock } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadBookingRows, ukDayOfInstant } from "@/lib/bookings/load-signals";
 import { buildUpcoming, type UpcomingSignal } from "@/lib/payments/upcoming";
+import { applyBrandFilter } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { poundsMoney, shortDate } from "./format";
 
@@ -24,9 +25,32 @@ function weekLabel(startDay: string, endDay: string, todayUk: string): string {
   return startDay <= todayUk && todayUk <= endDay ? `This week · ${label}` : label;
 }
 
-export async function UpcomingTab() {
+export async function UpcomingTab({ brandFilter = "all" }: { brandFilter?: string }) {
   const sb = await createClient();
-  const { rows, todayUk } = await loadBookingRows(sb);
+  const { rows: allRows, todayUk } = await loadBookingRows(sb);
+
+  // Brand narrowing (multi-brand PRD §4 Payments): loadBookingRows is shared
+  // verbatim with /bookings, so the ?brand= filter rides a supplementary
+  // CHUNKED fail-loud leads read (the /bookings precedent — a silent cap or
+  // failed read would DROP rows and understate expected money), narrowed IN
+  // THE DB on that read. At 'all' (including single-brand mode) nothing runs
+  // and the tab is unchanged.
+  let rows = allRows;
+  if (brandFilter !== "all" && allRows.length) {
+    const leadIds = [...new Set(allRows.map((r) => r.leadId))];
+    const brandLeads = new Set<string>();
+    // 100-id batches: PostgREST .in() rides the GET query string and the
+    // gateway 414s past ~200 UUIDs (lib/bank-feed/sync.ts measured the limit).
+    for (let i = 0; i < leadIds.length; i += 100) {
+      const { data: leadRows, error: leadErr } = await applyBrandFilter(
+        sb.from("leads").select("id").in("id", leadIds.slice(i, i + 100)),
+        brandFilter,
+      );
+      if (leadErr) throw new Error(`payments upcoming: brand read failed: ${leadErr.message}`);
+      for (const l of leadRows ?? []) brandLeads.add(l.id);
+    }
+    rows = allRows.filter((r) => brandLeads.has(r.leadId));
+  }
 
   const signals: UpcomingSignal[] = rows.map((r) => ({
     quoteId: r.quoteId,

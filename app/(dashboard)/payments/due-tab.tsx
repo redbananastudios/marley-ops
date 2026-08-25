@@ -3,6 +3,7 @@ import { AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadBookingRows, ukDayOfInstant, type BookingRow } from "@/lib/bookings/load-signals";
 import { daysBetweenUk, type BookingBucket } from "@/lib/bookings/queue";
+import { applyBrandFilter } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { poundsMoney, shortDate } from "./format";
 
@@ -101,9 +102,32 @@ function sectionAmount(r: BookingRow): number {
   return r.balanceAmount;
 }
 
-export async function DueTab() {
+export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) {
   const sb = await createClient();
-  const { rows, todayUk } = await loadBookingRows(sb);
+  const { rows: allRows, todayUk } = await loadBookingRows(sb);
+
+  // Brand narrowing (multi-brand PRD §4 Payments): loadBookingRows is shared
+  // verbatim with /bookings, so the ?brand= filter rides a supplementary
+  // CHUNKED fail-loud leads read (the /bookings precedent — PostgREST caps
+  // unpaged reads at 1000 and a silent cap here would DROP rows and understate
+  // the money tiles), with the narrowing applied IN THE DB on that read. At
+  // 'all' (including single-brand mode) nothing runs and the tab is unchanged.
+  let rows = allRows;
+  if (brandFilter !== "all" && allRows.length) {
+    const leadIds = [...new Set(allRows.map((r) => r.leadId))];
+    const brandLeads = new Set<string>();
+    // 100-id batches: PostgREST .in() rides the GET query string and the
+    // gateway 414s past ~200 UUIDs (lib/bank-feed/sync.ts measured the limit).
+    for (let i = 0; i < leadIds.length; i += 100) {
+      const { data: leadRows, error: leadErr } = await applyBrandFilter(
+        sb.from("leads").select("id").in("id", leadIds.slice(i, i + 100)),
+        brandFilter,
+      );
+      if (leadErr) throw new Error(`payments due: brand read failed: ${leadErr.message}`);
+      for (const l of leadRows ?? []) brandLeads.add(l.id);
+    }
+    rows = allRows.filter((r) => brandLeads.has(r.leadId));
+  }
 
   const by = (b: BookingBucket) => rows.filter((r) => r.bucket === b);
   const sum = (rs: BookingRow[]) => rs.reduce((s, r) => s + sectionAmount(r), 0);

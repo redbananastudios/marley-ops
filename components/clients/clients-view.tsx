@@ -45,6 +45,8 @@ import { Pager, usePager } from "@/components/ui/pager";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { EmptyState } from "@/components/ui/empty-state";
 import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
@@ -66,6 +68,9 @@ export interface ClientRow {
   leadCount: number;
   lastLeadAt: string | null;
   origin: SourceKey;
+  /** Brand slugs this client has LEADS under (derived, never stored —
+   *  multi-brand PRD §4 Clients). Empty in single-brand mode. */
+  brands: string[];
 }
 
 const SOURCE_COLOR: Record<SourceKey, string> = Object.fromEntries(
@@ -96,7 +101,21 @@ type SortKey = "newest" | "oldest" | "name";
 
 const VIEW_STORE = "mm-clients-view";
 
-export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; baseLocation: string }) {
+export function ClientsView({
+  clients,
+  baseLocation,
+  brands = [],
+  showBrandChips = false,
+}: {
+  clients: ClientRow[];
+  baseLocation: string;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. Empty or
+   *  single-entry → no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — chips are
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
+}) {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [view, setView] = useState<ViewMode>("grid");
@@ -105,6 +124,11 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
   const [compose, setCompose] = useState<{ to: string; clientId: string } | null>(null);
   const repeat = useMemo(() => clients.filter((c) => c.leadCount > 1).length, [clients]);
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
+
+  // Chips per client, in brand sort order (the `brands` prop is already sorted).
+  // Resolves to [] whenever chips are hidden, so no call site needs its own gate.
+  const chipsFor = (c: ClientRow): BrandChipData[] =>
+    showBrandChips && c.brands.length ? brands.filter((b) => c.brands.includes(b.slug)) : [];
 
   // Restore the device's view preference after mount (SSR-safe).
   useEffect(() => {
@@ -179,7 +203,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
             <h3 className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-mist-400">{g.letter}</h3>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {g.rows.map((c) => (
-                <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
+                <ClientCard key={c.id} c={c} chips={chipsFor(c)} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
               ))}
             </div>
           </section>
@@ -217,7 +241,7 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
     /* ——— Card grid, date sorts: flat grid ——— */
     <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {pager.paged.map((c) => (
-        <ClientCard key={c.id} c={c} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
+        <ClientCard key={c.id} c={c} chips={chipsFor(c)} baseLocation={baseLocation} onEmail={(to, id) => setCompose({ to, clientId: id })} />
       ))}
     </div>
   );
@@ -246,6 +270,12 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
             <SelectItem value="name">Name A–Z</SelectItem>
           </SelectContent>
         </Select>
+
+        {/* Brand filter (multi-brand PRD §4 Clients) — joins the existing
+            toggle/search/sort row. Renders nothing below 2 brands. Shows
+            clients having at least one lead in the selected brand (the page
+            narrows server-side off ?brand=). */}
+        {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
 
         <span className="text-xs text-mist-400">
           {clients.length} clients{repeat > 0 ? ` · ${repeat} repeat` : ""}
@@ -276,6 +306,11 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
             <thead>
               <tr className="border-b text-left">
                 <th className="eyebrow px-4 py-2.5 font-semibold">Client</th>
+                {/* Brands column between Client and Phone (multi-brand PRD §4
+                    Clients) — renders only in multi-brand mode with the filter
+                    on All; a named filter already says the brand, so the
+                    column goes with the chips. */}
+                {showBrandChips ? <th className="eyebrow px-4 py-2.5 font-semibold">Brands</th> : null}
                 <th className="eyebrow px-4 py-2.5 font-semibold">Phone</th>
                 <th className="eyebrow px-4 py-2.5 font-semibold">Email</th>
                 <th className="eyebrow px-4 py-2.5 font-semibold">Postcode</th>
@@ -307,6 +342,19 @@ export function ClientsView({ clients, baseLocation }: { clients: ClientRow[]; b
                       <OriginBadge origin={c.origin} />
                     </span>
                   </td>
+                  {showBrandChips ? (
+                    <td className="px-4 py-3">
+                      {chipsFor(c).length ? (
+                        <span className="flex items-center gap-1">
+                          {chipsFor(c).map((b) => (
+                            <BrandChip key={b.slug} brand={b} />
+                          ))}
+                        </span>
+                      ) : (
+                        <span className="text-mist-400">—</span>
+                      )}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3 text-mist-500">
                     {c.phone ? (
                       <a href={`tel:${c.phone}`} onClick={(e) => e.stopPropagation()} className="focus-ring rounded-sm hover:text-foreground hover:underline">
@@ -375,10 +423,13 @@ interface RouteInfo {
 
 function ClientCard({
   c,
+  chips,
   baseLocation,
   onEmail,
 }: {
   c: ClientRow;
+  /** Resolved brand chips (multi-brand PRD §4 Clients) — [] hides them. */
+  chips: BrandChipData[];
   baseLocation: string;
   onEmail: (to: string, clientId: string) => void;
 }) {
@@ -434,8 +485,16 @@ function ClientCard({
             {c.isCompany ? <Building2 className="size-3.5 shrink-0 text-mist-400" strokeWidth={1.75} /> : null}
             {c.display_name || "Unnamed"}
           </p>
-          <div className="mt-1.5">
+          {/* Wrapper class is conditional so single-brand markup stays exactly
+              as today (the single-brand invariant, PRD §1). */}
+          <div className={chips.length ? "mt-1.5 flex flex-wrap items-center gap-1.5" : "mt-1.5"}>
             <OriginBadge origin={c.origin} />
+            {/* Brand chips under the name beside the OriginBadge (multi-brand
+                PRD §4 Clients) — 16px for this tight sub-line, like the leads
+                board card. */}
+            {chips.map((b) => (
+              <BrandChip key={b.slug} brand={b} size={16} />
+            ))}
           </div>
         </div>
         {c.leadCount > 1 ? (

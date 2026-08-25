@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -51,6 +52,9 @@ import {
 export interface FollowUpRow {
   id: string;
   leadId: string;
+  /** Brand slug from the lead join (multi-brand PRD §4 Follow-ups); null when
+   *  the lead record is missing. */
+  brand: string | null;
   reason: string;
   /** Free-text discriminator — decides the chip for reason='custom' rows. */
   source: string | null;
@@ -109,7 +113,23 @@ function fmtDate(d: string | null): string {
   return Number.isNaN(t.getTime()) ? "—" : t.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
-export function FollowUpsQueue({ rows }: { rows: FollowUpRow[] }) {
+export function FollowUpsQueue({
+  rows,
+  brands = [],
+  showBrandChips = false,
+}: {
+  rows: FollowUpRow[];
+  /** Active brands (multi-brand PRD §4) — chip data. Empty or single-entry →
+   *  no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip
+   *  is hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
+}) {
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
+  const chipFor = (r: FollowUpRow): BrandChipData | null =>
+    showBrandChips && r.brand ? (brandBySlug.get(r.brand) ?? null) : null;
+
   const groups = useMemo(() => {
     const cmp = (a: FollowUpRow, b: FollowUpRow) => {
       // Rank by what the card actually SAYS it is, so a bounced address sorts
@@ -147,14 +167,24 @@ export function FollowUpsQueue({ rows }: { rows: FollowUpRow[] }) {
 
   return (
     <div className="space-y-8">
-      <Section title="Overdue" tone="danger" rows={groups.overdue} />
-      <Section title="Due today" tone="normal" rows={groups.today} />
-      <Section title="Upcoming" tone="muted" rows={groups.upcoming} />
+      <Section title="Overdue" tone="danger" rows={groups.overdue} chipFor={chipFor} />
+      <Section title="Due today" tone="normal" rows={groups.today} chipFor={chipFor} />
+      <Section title="Upcoming" tone="muted" rows={groups.upcoming} chipFor={chipFor} />
     </div>
   );
 }
 
-function Section({ title, tone, rows }: { title: string; tone: "danger" | "normal" | "muted"; rows: FollowUpRow[] }) {
+function Section({
+  title,
+  tone,
+  rows,
+  chipFor,
+}: {
+  title: string;
+  tone: "danger" | "normal" | "muted";
+  rows: FollowUpRow[];
+  chipFor: (r: FollowUpRow) => BrandChipData | null;
+}) {
   if (rows.length === 0) return null;
   return (
     <section>
@@ -169,14 +199,14 @@ function Section({ title, tone, rows }: { title: string; tone: "danger" | "norma
       </h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((r) => (
-          <FollowUpCard key={r.id} r={r} />
+          <FollowUpCard key={r.id} r={r} chip={chipFor(r)} />
         ))}
       </div>
     </section>
   );
 }
 
-function FollowUpCard({ r }: { r: FollowUpRow }) {
+function FollowUpCard({ r, chip }: { r: FollowUpRow; chip: BrandChipData | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [outcomeOpen, setOutcomeOpen] = useState(false);
@@ -220,7 +250,18 @@ function FollowUpCard({ r }: { r: FollowUpRow }) {
               {[r.postcode, r.propertySize].filter(Boolean).join(" · ") || "—"}
             </p>
           </div>
-          <span className={cn("shrink-0 rounded-pill px-2 py-0.5 text-xs font-medium", meta.cls)}>{meta.label}</span>
+          {/* Brand chip beside the reason-tone chip (multi-brand PRD §4
+              Follow-ups) — 16px for this tight header line. Wrapper only
+              exists when a chip renders, so single-brand markup is unchanged
+              (the single-brand invariant, PRD §1). */}
+          {chip ? (
+            <span className="flex shrink-0 items-center gap-1.5">
+              <BrandChip brand={chip} size={16} />
+              <span className={cn("shrink-0 rounded-pill px-2 py-0.5 text-xs font-medium", meta.cls)}>{meta.label}</span>
+            </span>
+          ) : (
+            <span className={cn("shrink-0 rounded-pill px-2 py-0.5 text-xs font-medium", meta.cls)}>{meta.label}</span>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">

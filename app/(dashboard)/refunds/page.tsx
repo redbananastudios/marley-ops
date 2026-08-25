@@ -5,7 +5,11 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukDayOf } from "@/lib/sales-report";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import {
   buildRefundQueueView,
@@ -92,7 +96,15 @@ const HISTORY_LABELS: Record<string, string> = {
   superseded: "Superseded",
 };
 
-function HistoryRow({ item, byName }: { item: QueueItemView; byName: string | null }) {
+function HistoryRow({
+  item,
+  byName,
+  chip,
+}: {
+  item: QueueItemView;
+  byName: string | null;
+  chip?: BrandChipData;
+}) {
   const refunded = item.status === "refunded";
   const retained = item.status === "retained";
   return (
@@ -105,6 +117,7 @@ function HistoryRow({ item, byName }: { item: QueueItemView; byName: string | nu
         ) : (
           <span className="font-medium text-foreground">{item.customer}</span>
         )}
+        {chip ? <BrandChip brand={chip} className="ml-2 align-middle" /> : null}
         <p className="text-xs text-mist-400">
           {item.quoteRef ?? "—"}
           {" · "}
@@ -140,7 +153,11 @@ function HistoryRow({ item, byName }: { item: QueueItemView; byName: string | nu
   );
 }
 
-export default async function RefundsPage() {
+export default async function RefundsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ brand?: string }>;
+}) {
   const profile = await getSessionProfile();
   if (!profile) redirect("/login");
   // Admin-only: this page decides and moves customer money.
@@ -149,6 +166,12 @@ export default async function RefundsPage() {
   if (profile.role !== "admin") redirect("/");
 
   const sb = await createClient();
+  // Brand layer (multi-brand PRD §4 Refunds): with a single active brand no
+  // brand UI renders and the page is unchanged (the single-brand invariant,
+  // PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(await searchParams, activeBrands);
   const rows = await fetchAllRows<QueueRowIn>((from, to) =>
     sb.from("refund_queue").select(QUEUE_COLS).order("created_at", { ascending: false }).range(from, to),
   );
@@ -167,11 +190,8 @@ export default async function RefundsPage() {
   ];
   const pendingIds = rows.filter((r) => r.status === "pending").map((r) => r.id);
 
-  const [{ data: quotes }, { data: actors }, { data: cardRows }, { data: markRows }] =
+  const [{ data: actors }, { data: cardRows }, { data: markRows }] =
     await Promise.all([
-      quoteIds.length
-        ? sb.from("quotes").select("id, quote_ref, customer_name, lead_id").in("id", quoteIds)
-        : Promise.resolve({ data: [] as { id: string; quote_ref: string; customer_name: string | null; lead_id: string | null }[] }),
       actorIds.length
         ? sb.from("profiles").select("id, full_name").in("id", actorIds)
         : Promise.resolve({ data: [] as { id: string; full_name: string | null }[] }),
@@ -188,9 +208,26 @@ export default async function RefundsPage() {
         : Promise.resolve({ data: [] as { entity_id: string | null; diff: unknown }[] }),
     ]);
 
-  const quotesById = new Map<string, QuoteRefIn>(
-    (quotes ?? []).map((q) => [q.id, { quote_ref: q.quote_ref, customer_name: q.customer_name, lead_id: q.lead_id }]),
-  );
+  // Quote refs/names ride this lookup — and under a named ?brand= so does row
+  // MEMBERSHIP: leadIdOf below falls back to the quote's lead for rows with no
+  // lead_id, so a failed or truncated read would silently drop queue rows —
+  // held customer money — from a filtered view (the "I could not check" rule).
+  // CHUNKED at 100 ids (PostgREST .in() rides the GET query string and 414s
+  // past ~200 UUIDs; lib/bank-feed/sync.ts chunks at 100 for the same measured
+  // limit) and fail-LOUD when a brand filter narrows. On "all" the read only
+  // decorates — refs and names degrade, the row stays — so it keeps the
+  // previous fail-soft display behaviour.
+  const quotesById = new Map<string, QuoteRefIn>();
+  for (let i = 0; i < quoteIds.length; i += 100) {
+    const { data: quoteRows, error: quoteErr } = await sb
+      .from("quotes")
+      .select("id, quote_ref, customer_name, lead_id")
+      .in("id", quoteIds.slice(i, i + 100));
+    if (quoteErr && brandFilter !== "all")
+      throw new Error(`refunds quote read failed: ${quoteErr.message}`);
+    for (const q of quoteRows ?? [])
+      quotesById.set(q.id, { quote_ref: q.quote_ref, customer_name: q.customer_name, lead_id: q.lead_id });
+  }
   const nameById = new Map((actors ?? []).map((p) => [p.id, p.full_name]));
   const cardStatesById = new Map<string, CardStateIn>((cardRows ?? []).map((c) => [c.id, c]));
   const railMarks: RailMarkIn[] = (markRows ?? [])
@@ -204,8 +241,60 @@ export default async function RefundsPage() {
     })
     .filter((m) => m.queueId && m.rail);
 
+  // refund_queue carries no brand column — brand comes from the row's lead
+  // (falling back to the quote's lead), via a supplementary CHUNKED fail-loud
+  // leads read (the /bookings precedent), narrowed IN THE DB. Runs only in
+  // multi-brand mode; the three sections and the stat tiles are built from the
+  // filtered rows, so they all respect the filter.
+  const leadIdOf = (r: QueueRowIn): string | null =>
+    r.lead_id ?? (r.quote_id ? (quotesById.get(r.quote_id)?.lead_id ?? null) : null);
+  const brandByLead = new Map<string, string>();
+  if (multi && rows.length) {
+    const leadIds = [...new Set(rows.map(leadIdOf).filter((v): v is string => !!v))];
+    // 100-id batches: PostgREST .in() rides the GET query string and the
+    // gateway 414s past ~200 UUIDs (lib/bank-feed/sync.ts measured the limit).
+    for (let i = 0; i < leadIds.length; i += 100) {
+      const { data: leadRows, error: leadErr } = await applyBrandFilter(
+        sb.from("leads").select("id, brand").in("id", leadIds.slice(i, i + 100)),
+        brandFilter,
+      );
+      // Fail loud ONLY when a named brand filter narrows: a failed batch
+      // there would silently drop refund entries — held customer money — from
+      // the queue (the "I could not check" rule). On All this read decorates
+      // chips only (queueRows = rows), so it degrades instead of 500ing the
+      // whole money surface for a decoration.
+      if (leadErr) {
+        if (brandFilter !== "all") throw new Error(`refunds brand read failed: ${leadErr.message}`);
+        continue;
+      }
+      for (const l of leadRows ?? []) brandByLead.set(l.id, l.brand);
+    }
+  }
+  // A row whose lead can't be resolved has no brand to match, so it shows on
+  // the default All view only — All remains the full-truth surface.
+  const queueRows =
+    multi && brandFilter !== "all" ? rows.filter((r) => brandByLead.has(leadIdOf(r) ?? "")) : rows;
+
+  // Chip hidden when the segmented control already names one brand
+  // (multi-brand PRD §4 opening rules). Slim chip shape for the client cards —
+  // never the full brand rows.
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = new Map<string, BrandChipData>(
+    activeBrands.map((b) => [
+      b.slug,
+      { slug: b.slug, name: b.name, shortName: b.shortName, initial: b.initial, colourPrimary: b.colourPrimary },
+    ]),
+  );
+  const chipByQueueId = new Map<string, BrandChipData>();
+  if (showBrandChips) {
+    for (const r of queueRows) {
+      const chip = chipBySlug.get(brandByLead.get(leadIdOf(r) ?? "") ?? "");
+      if (chip) chipByQueueId.set(r.id, chip);
+    }
+  }
+
   const view = buildRefundQueueView({
-    rows,
+    rows: queueRows,
     quotesById,
     cardStatesById,
     railMarks,
@@ -220,7 +309,15 @@ export default async function RefundsPage() {
 
   return (
     <main className="flex-1 space-y-5 p-6 md:p-8">
-      <PageHeader eyebrow="Finance" title="Refunds" />
+      <PageHeader eyebrow="Finance" title="Refunds">
+        {/* Brand filter (multi-brand PRD §4 Refunds) — this page has no search
+            bar, so the segmented control lives in the PageHeader. */}
+        {multi ? (
+          <BrandFilter
+            brands={activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))}
+          />
+        ) : null}
+      </PageHeader>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat
@@ -247,7 +344,7 @@ export default async function RefundsPage() {
         empty="Nothing is waiting on the re-book question."
       >
         {view.needsDecision.map((item) => (
-          <DecisionCard key={item.id} item={item} />
+          <DecisionCard key={item.id} item={item} brandChip={chipByQueueId.get(item.id)} />
         ))}
       </Section>
 
@@ -258,7 +355,7 @@ export default async function RefundsPage() {
         empty="No refunds are waiting to be paid out."
       >
         {view.toExecute.map((item) => (
-          <ExecuteCard key={item.id} item={item} />
+          <ExecuteCard key={item.id} item={item} brandChip={chipByQueueId.get(item.id)} />
         ))}
       </Section>
 
@@ -269,7 +366,12 @@ export default async function RefundsPage() {
         empty="No refunds have been settled yet."
       >
         {view.history.map((item) => (
-          <HistoryRow key={item.id} item={item} byName={item.executedBy ? (nameById.get(item.executedBy) ?? null) : null} />
+          <HistoryRow
+            key={item.id}
+            item={item}
+            byName={item.executedBy ? (nameById.get(item.executedBy) ?? null) : null}
+            chip={chipByQueueId.get(item.id)}
+          />
         ))}
       </Section>
     </main>
