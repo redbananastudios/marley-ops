@@ -87,10 +87,26 @@ test.describe("Crew — job detail + notes", () => {
         await expect(freshPage.getByText(note)).toBeVisible();
         const img = freshPage.getByRole("img", { name: "Crew photo" }).first();
         await expect(img).toBeVisible();
-        const loaded = await img.evaluate(
-          (el: HTMLImageElement) => el.complete && el.naturalWidth > 0 && el.naturalHeight > 0,
-        );
-        expect(loaded).toBe(true);
+        // The photo renders with loading="lazy" (components/crew/job-notes.tsx),
+        // so a browser may not have STARTED fetching it while it sits below the
+        // fold — and `toBeVisible()` only means it has a layout box, not that it
+        // is in view or decoded. Scroll it in to trigger the fetch, then poll:
+        // reading `complete` the instant it becomes visible catches the image
+        // mid-load and reports a false negative.
+        //
+        // This waits, it does not weaken. If the photo genuinely never loads for
+        // another viewer — the defect this test exists to catch — it still fails,
+        // just after 15s instead of instantly.
+        await img.scrollIntoViewIfNeeded();
+        await expect
+          .poll(
+            () =>
+              img.evaluate(
+                (el: HTMLImageElement) => el.complete && el.naturalWidth > 0 && el.naturalHeight > 0,
+              ),
+            { timeout: 15_000, message: "the crew photo never finished loading in a fresh context" },
+          )
+          .toBe(true);
       } finally {
         await freshContext.close();
       }
