@@ -21,6 +21,11 @@ import { TOURS, type TourName, type TourStep } from "./tours";
 import { START_TOUR_EVENT, tourDoneKey } from "./launch";
 import { hasOpenBlockingDialog } from "./dialog-guard";
 
+/** Auto-start delay, and how long it will wait out an open dialog before
+ *  giving up and leaving the tour for the next login (QA-20260825-02). */
+const AUTO_START_DELAY_MS = 1200;
+const AUTO_START_MAX_WAIT_MS = 12_000;
+
 let driverAssets: Promise<typeof import("driver.js")> | null = null;
 
 function loadDriverAssets() {
@@ -173,17 +178,25 @@ export function OnboardingTour({
       // Stamp happens when the tour actually renders (in run), not here — so a
       // first-timer who leaves inside the 1.2s window still sees it next login.
       if (!done) {
+        // A dialog the user is already in (e.g. /schedule/surveys?leadId=…
+        // opens "Book survey" on load) must keep working — the tour overlay
+        // would swallow its clicks. So wait for it to close, but BOUNDED:
+        // retrying forever polls for the page's whole lifetime and then throws a
+        // full-viewport overlay up the instant the user closes a dialog, however
+        // many minutes later — startling, and never what they asked for.
+        // Giving up is safe: the tour is only stamped when it actually renders,
+        // so a first-timer still gets it next login.
+        let waited = 0;
         const autoRun = () => {
-          // A dialog the user is already in (e.g. /schedule/surveys?leadId=…
-          // opens "Book survey" on load) must keep working — the tour overlay
-          // would swallow its clicks. Re-check until the dialog closes.
           if (hasOpenBlockingDialog(document)) {
-            timer = setTimeout(autoRun, 1200);
+            waited += AUTO_START_DELAY_MS;
+            if (waited >= AUTO_START_MAX_WAIT_MS) return;
+            timer = setTimeout(autoRun, AUTO_START_DELAY_MS);
             return;
           }
           void run();
         };
-        timer = setTimeout(autoRun, 1200);
+        timer = setTimeout(autoRun, AUTO_START_DELAY_MS);
       }
     }
 

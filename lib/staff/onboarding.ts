@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { formatUkPostcode } from "@/lib/leads/format";
 
 /**
  * Public staff onboarding — pure helpers shared by the /join/<token> page,
@@ -69,11 +70,12 @@ export const staffSubmissionSchema = z.object({
     .trim()
     .min(1, "Enter your postcode")
     .refine((s) => UK_POSTCODE_RE.test(s), "Enter a valid UK postcode")
-    // Canonical UK form: uppercase, single space before the 3-char inward code
-    // ("sp71ab" stores as "SP7 1AB").
-    .transform((s) =>
-      s.toUpperCase().replace(/\s+/g, "").replace(/^(.+)(\d[A-Z]{2})$/, "$1 $2").slice(0, 10),
-    ),
+    // Canonical UK form ("sp71ab" stores as "SP7 1AB"). Uses the SAME helper the
+    // leads schema already applies (lib/leads/format.ts) rather than a second
+    // regex: one rule, one implementation, so the two cannot drift apart. Both
+    // produce identical output for everything UK_POSTCODE_RE accepts — this is a
+    // de-duplication, not a behaviour change.
+    .transform((s) => formatUkPostcode(s).slice(0, 10)),
   email: z
     .string()
     .trim()

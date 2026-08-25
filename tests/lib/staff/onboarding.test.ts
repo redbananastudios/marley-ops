@@ -110,6 +110,16 @@ describe("staffSubmissionSchema", () => {
     }
   });
 
+  it("rejects separators the validator does not allow, rather than silently re-spacing them", () => {
+    // UK_POSTCODE_RE permits at most ONE internal space and no punctuation, so
+    // these never reach the transform at all — worth pinning, because it is the
+    // validator (not the formatter) that decides, and a future loosening of the
+    // regex would silently change what gets stored.
+    for (const typed of ["SP7-1AB", "sp7.1ab", "SP7  1AB"]) {
+      expect(staffSubmissionSchema.safeParse({ ...valid, address_postcode: typed }).success).toBe(false);
+    }
+  });
+
   it("requires a street address; town is optional", () => {
     expect(staffSubmissionSchema.safeParse({ ...valid, address_line1: "  " }).success).toBe(false);
     expect(staffSubmissionSchema.safeParse({ ...valid, address_town: "" }).success).toBe(true);
