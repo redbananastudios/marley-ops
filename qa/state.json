@@ -416,11 +416,12 @@
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-25T12:11:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live, plus 1 new finding (QA-20260825-01, safe-fix/low): postcode typed lowercase/no-space ('sp71ab') is uppercased but never re-spaced by lib/staff/onboarding.ts's transform, storing/displaying 'SP71AB' instead of 'SP7 1AB' -- confirmed by direct code read (UK_POSTCODE_RE's internal space is optional via \\\\s?, and the .transform() only calls .toUpperCase()). Not a two-hats bug (both the raw column and the derived one-line address agree with each other, just both wrong the same way). Garbage-token dead-link state also confirmed clean.",
+      "note": "QA-20260825-01 (postcode not re-spaced, e.g. 'sp71ab' stored as 'SP71AB' instead of 'SP7 1AB') fixed in PR #79 and re-verified live this run: submitted /join/e2e-join-token-0001 with postcode 'sp71ab' -> staff_submissions.address_postcode = 'SP7 1AB', address line spaced correctly too. Finding moved to closed/. Marker row deleted, verified gone by query.",
       "watch": [
-        "app/join/**"
+        "app/join/**",
+        "lib/staff/onboarding.ts"
       ]
     }
   },
