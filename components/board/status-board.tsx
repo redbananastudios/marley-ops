@@ -19,6 +19,8 @@ import { updateLeadStatusAction } from "@/app/(dashboard)/leads/actions";
 import { isBackwardMove } from "@/lib/leads/funnel";
 import { MarkLostDialog } from "@/components/leads/mark-lost-button";
 import { StatusReasonDialog } from "@/components/leads/status-reason-dialog";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
 import {
   DropdownMenu,
@@ -41,6 +43,8 @@ import { cn } from "@/lib/utils";
 
 export interface BoardLead {
   id: string;
+  /** Brand slug (leads.brand) — resolved to chip data via the page's active-brand list. */
+  brand: string;
   name: string | null;
   status: string;
   source: SourceKey;
@@ -58,13 +62,16 @@ export interface BoardLead {
 
 const STATUSES = LEAD_STATUSES as string[];
 
-/** Per-stage colour identity (column header + card stripe). */
+/** Per-stage colour identity (column header + card stripe).
+ *  Hex→token cleanup (multi-brand PRD §4 cross-cutting): only `confirmed` has
+ *  a byte-equal token (--color-mm-red = #c03838); the rest have no identical
+ *  token and stay hex to avoid visual drift. */
 const STATUS_COLOR: Record<string, string> = {
   website_enquiry: "#71717a",
   survey_booked: "#C0822E",
   quoted: "#2F7E96",
   provisional: "#7C5CBF",
-  confirmed: "#c03838",
+  confirmed: "var(--color-mm-red)",
   completed: "#3F9B6B",
   declined: "#a1a1aa",
 };
@@ -139,10 +146,18 @@ export function StatusBoard({
   leads: initialLeads,
   meId,
   thisWeekStart,
+  brands = [],
+  showBrandChips = false,
 }: {
   leads: BoardLead[];
   meId: string | null;
   thisWeekStart: string;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. Empty or
+   *  single-entry → no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip is
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
 }) {
   const router = useRouter();
   const [leads, setLeads] = useState<BoardLead[]>(initialLeads);
@@ -166,6 +181,8 @@ export function StatusBoard({
     () => [...STATUSES.filter((s) => s !== "declined"), ...(showDeclined ? ["declined"] : [])],
     [showDeclined],
   );
+
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
 
   const filtered = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -328,6 +345,9 @@ export function StatusBoard({
             ))}
           </SelectContent>
         </Select>
+        {/* Brand filter (multi-brand PRD §4 Pipeline Board) — joins the
+            search / source / week / Mine row. Renders nothing below 2 brands. */}
+        {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
         <button
           type="button"
           onClick={() => setMine((m) => !m)}
@@ -434,7 +454,17 @@ export function StatusBoard({
                     <p className="px-2 py-6 text-center text-xs text-mist-400">No leads.</p>
                   ) : (
                     columnLeads.map((lead) => (
-                      <Card key={lead.id} lead={lead} color={color} draggingId={draggingId} setDraggingId={setDraggingId} setDropTarget={setDropTarget} columns={columns} move={move} />
+                      <Card
+                        key={lead.id}
+                        lead={lead}
+                        brand={showBrandChips ? (brandBySlug.get(lead.brand) ?? null) : null}
+                        color={color}
+                        draggingId={draggingId}
+                        setDraggingId={setDraggingId}
+                        setDropTarget={setDropTarget}
+                        columns={columns}
+                        move={move}
+                      />
                     ))
                   )}
                 </div>
@@ -476,6 +506,7 @@ export function StatusBoard({
 
 function Card({
   lead,
+  brand = null,
   color,
   draggingId,
   setDraggingId,
@@ -484,6 +515,9 @@ function Card({
   move,
 }: {
   lead: BoardLead;
+  /** Resolved chip data — null hides the chip (single-brand mode, or the
+   *  ?brand= filter already names one brand; multi-brand PRD §4). */
+  brand?: BrandChipData | null;
   color: string;
   draggingId: string | null;
   setDraggingId: (id: string | null) => void;
@@ -525,6 +559,9 @@ function Card({
       <Link href={`/leads/${lead.id}`} className="block">
         <div className="flex items-start justify-between gap-2">
           <span className="flex min-w-0 items-center gap-1.5">
+            {/* Brand chip beside the source dot (multi-brand PRD §4 Pipeline
+                Board). 16px — the tight sub-line size. */}
+            {brand ? <BrandChip brand={brand} size={16} /> : null}
             <span className="size-2 shrink-0 rounded-full" style={{ background: SOURCE_COLOR[lead.source] }} title={SOURCE_LABEL[lead.source]} />
             <span className="truncate text-sm font-semibold text-foreground">{lead.name ?? "—"}</span>
           </span>

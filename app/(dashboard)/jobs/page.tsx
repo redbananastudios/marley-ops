@@ -12,6 +12,8 @@ import {
   type CompletedRemovalAppt,
 } from "@/lib/completed-jobs";
 import { CompletedJobsView, type CompletedJobRowView } from "@/components/jobs/completed-jobs-view";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 /**
  * /jobs — Completed Jobs (Peter, 2026-07-14). The chronological ledger of
@@ -28,22 +30,33 @@ export const metadata: Metadata = { title: "Completed Jobs" };
 export default async function CompletedJobsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; brand?: string }>;
 }) {
-  const { q } = await searchParams;
-  const query = (q ?? "").trim();
+  const sp = await searchParams;
+  const query = (sp.q ?? "").trim();
   // Same sanitize as /quotes — the search is applied in-memory here, but keeping
   // the grammar-safe term means the two pages behave identically for a user.
   const term = query.replace(/[,()%*\\"]/g, "").trim();
 
   const supabase = await createClient();
 
+  // Brand layer (multi-brand PRD §4 Pipeline and jobs): with a single active
+  // brand no brand UI renders and the page is unchanged (the single-brand
+  // invariant, PRD §1). The ?brand= filter narrows the base leads query, so
+  // the enrichment batches and the count all follow it for free.
+  const activeBrands = await listActiveBrands(supabase);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+
   // Base set: every completed lead (unbounded → page through fetchAllRows).
-  const leads = await fetchAllRows<CompletedLead>((f, t) =>
-    supabase
-      .from("leads")
-      .select("id, name, client_id, updated_at, from_postcode, to_postcode, review_requested_at, review_suppressed")
-      .eq("status", "completed")
+  const leads = await fetchAllRows<CompletedLead & { brand: string }>((f, t) =>
+    applyBrandFilter(
+      supabase
+        .from("leads")
+        .select("id, brand, name, client_id, updated_at, from_postcode, to_postcode, review_requested_at, review_suppressed")
+        .eq("status", "completed"),
+      brandFilter,
+    )
       .order("updated_at", { ascending: false, nullsFirst: false })
       .order("id")
       .range(f, t),
@@ -100,15 +113,38 @@ export default async function CompletedJobsPage({
     for (const s of signed) if (s) certUrl.set(s[0], s[1]);
   }
 
+  // Brand slug per lead — buildCompletedJobRows is brand-agnostic (shared,
+  // pure), so the slug rejoins the shaped rows here for the chip.
+  const brandByLead = new Map(leads.map((l) => [l.id, l.brand]));
+
   const viewRows: CompletedJobRowView[] = rows.map((r) => ({
     ...r,
     certificateUrl: r.certificatePath ? (certUrl.get(r.certificatePath) ?? null) : null,
+    brand: brandByLead.get(r.leadId) ?? null,
   }));
+
+  // Minimal serialisable brand shape for the client view — satisfies both
+  // BrandChipData and BrandFilterOption; keeps brand config (emails, phone
+  // numbers, template ids) out of the client payload. Same pattern as /leads.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
 
   return (
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Schedule" title="Completed Jobs" />
-      <CompletedJobsView rows={viewRows} query={query} />
+      <CompletedJobsView
+        rows={viewRows}
+        query={query}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
+      />
     </main>
   );
 }

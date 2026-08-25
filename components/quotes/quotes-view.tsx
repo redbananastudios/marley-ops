@@ -10,7 +10,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition, type MouseEvent } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ClipboardCheck, MoreHorizontal, Search, Trash2, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -23,6 +23,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
 import { QuoteStatusPill } from "@/components/quote/quote-status-pill";
@@ -30,6 +32,10 @@ import { QuoteStatusPill } from "@/components/quote/quote-status-pill";
 export interface QuoteRow {
   id: string;
   quote_ref: string | null;
+  /** Brand slug (quotes.brand) — resolved to chip data via the page's
+   *  active-brand list. Optional so the view stays safe if a caller's query
+   *  hasn't selected it. */
+  brand?: string | null;
   customer_name: string | null;
   collect_addr: string | null;
   dest_addr: string | null;
@@ -144,14 +150,23 @@ export function QuotesView({
   quotes,
   defaultDeposit = 100,
   query = "",
+  brands = [],
+  showBrandChips = false,
 }: {
   quotes: QuoteRow[];
   defaultDeposit?: number;
   /** Active server-side search term (URL `q`) — seeds the input and empty state. */
   query?: string;
+  /** Active brands (multi-brand PRD §4) — filter options + chip data. Empty or
+   *  single-entry → no brand UI renders (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip is
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const [isPending, startTransition] = useTransition();
   const [preset, setPreset] = useState<PresetKey>("all");
   // The input is the source of truth for what's typed; the URL `q` (server-filtered)
@@ -172,14 +187,20 @@ export function QuotesView({
       const next = search.trim();
       if (next === query) return;
       startTransition(() => {
-        router.replace(next ? `${pathname}?q=${encodeURIComponent(next)}` : pathname, { scroll: false });
+        // Rebuild from the live params so the ?brand= filter (and anything
+        // else on the URL) survives a search — multi-brand PRD §4 Quotes.
+        const params = new URLSearchParams(searchParams.toString());
+        if (next) params.set("q", next);
+        else params.delete("q");
+        const qs = params.toString();
+        router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
       });
     }, 300);
     return () => {
       if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
       searchTimerRef.current = null;
     };
-  }, [search, query, pathname, router]);
+  }, [search, query, pathname, router, searchParams]);
 
   function cancelPendingSearch() {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -197,6 +218,8 @@ export function QuotesView({
   }
 
   const stats = useMemo(() => computeQuoteStats(quotes), [quotes]);
+
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
 
   const counts = useMemo(
     () => ({
@@ -256,6 +279,10 @@ export function QuotesView({
             </button>
           );
         })}
+        {/* Brand filter (multi-brand PRD §4 Quotes) — joins the search row; the
+            5 preset chips compose with it (they slice within the server-side
+            ?brand= narrowed set). Renders nothing below 2 brands. */}
+        {brands.length > 1 ? <BrandFilter brands={brands} /> : null}
         {/* basis-full drops the search onto its own full-width row on phones —
             flex-1 alone squeezed it into the sliver left beside the chips and
             the input poked past the viewport edge. */}
@@ -303,6 +330,13 @@ export function QuotesView({
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-2">
                     <span className="truncate text-sm font-semibold text-foreground">{q.customer_name?.trim() || "New quote"}</span>
+                    {/* Brand chip — between the customer name and the route line,
+                        on the ref's row; hidden when the ?brand= filter already
+                        names one brand (multi-brand PRD §4 Quotes). */}
+                    {(() => {
+                      const b = showBrandChips && q.brand ? brandBySlug.get(q.brand) : undefined;
+                      return b ? <BrandChip brand={b} /> : null;
+                    })()}
                     <span className="tabular shrink-0 text-xs text-mist-400">{q.quote_ref}</span>
                   </span>
                   <span className="block truncate text-xs text-mist-400">{routeLine(q)}</span>

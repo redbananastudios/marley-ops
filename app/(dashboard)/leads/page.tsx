@@ -10,10 +10,12 @@ import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { startOfUkDay } from "@/lib/uk-time";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { listActiveBrands } from "@/lib/brand";
+import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
 
-type SearchParams = { status?: string };
+type SearchParams = { status?: string; brand?: string };
 
 const DAY = 86_400_000;
 
@@ -30,15 +32,24 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     data: { user },
   } = await supabase.auth.getUser();
 
+  // Brand layer (multi-brand PRD §4): with a single active brand no brand UI
+  // renders and the page is unchanged (the single-brand invariant, PRD §1).
+  const activeBrands = await listActiveBrands(supabase);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+
   // Unbounded tables go through fetchAllRows (PostgREST truncates at 1000 rows);
   // the open no-reply set is small by nature so a plain select is fine.
   const [leads, quoteData, apptData, { data: retryData }] = await Promise.all([
     fetchAllRows((f, t) =>
-      supabase
-        .from("leads")
-        .select(
-          "id, name, status, entry_channel, from_postcode, to_postcode, property_size, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
-        )
+      applyBrandFilter(
+        supabase
+          .from("leads")
+          .select(
+            "id, brand, name, status, entry_channel, from_postcode, to_postcode, property_size, submitted_at, created_at, first_contacted_at, phone, email, estimator_id, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+          ),
+        brandFilter,
+      )
         .order("submitted_at", { ascending: false })
         .order("id")
         .range(f, t),
@@ -120,6 +131,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     const v = valueMap.get(l.id);
     return {
       id: l.id,
+      brand: l.brand,
       name: l.name,
       status: l.status,
       entry_channel: l.entry_channel,
@@ -141,11 +153,27 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
     };
   });
 
+  // Minimal serialisable brand shape for the client components — satisfies
+  // both BrandChipData and BrandFilterOption; keeps brand config (emails,
+  // phone numbers, template ids) out of the client payload.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
+
   return (
     <main className="min-h-full flex-1 bg-[#F7F8FA] p-6 md:p-8">
       <PageHeader eyebrow="Pipeline" title="Leads">
         <SyncLeadsButton />
-        <Button asChild className="bg-[#C03838] hover:bg-[#A8221C]">
+        {/* bg: mm-red token (= #C03838; multi-brand PRD §4 hex→token cleanup).
+            Hover #A8221C has NO byte-equal token (mm-red-deep is #963030), so
+            it stays hex to avoid visual drift. */}
+        <Button asChild className="bg-mm-red hover:bg-[#A8221C]">
           <Link href="/leads/new">
             <Plus strokeWidth={1.75} />
             Add lead
@@ -153,7 +181,13 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
         </Button>
       </PageHeader>
 
-      <LeadsBoard leads={cards} meId={user?.id ?? null} initialStatus={initialStatus} />
+      <LeadsBoard
+        leads={cards}
+        meId={user?.id ?? null}
+        initialStatus={initialStatus}
+        brands={brandOptions}
+        showBrandChips={multi && brandFilter === "all"}
+      />
     </main>
   );
 }
