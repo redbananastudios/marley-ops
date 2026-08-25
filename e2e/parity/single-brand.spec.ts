@@ -19,14 +19,17 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  *     sub-lines — ALL of them).
  *   - `data-testid="brand-filter"` → every brand filter (the segmented
  *     All / Marley / Pitmans control, wherever it lives).
+ *   - `data-testid="brand-settings-card"` → the Settings › Brands card root
+ *     (gate 2) — renders only in multi-brand mode, so /settings must show it
+ *     never here.
  * Plus: the literal brand name ("Pitmans") must reach a page ONLY through
  * brand UI — never hardcoded, and never embedded in seeded customer/test data
- * (name seed rows "E2E …", not "Pitmans …", or assertion (c) below breaks on
+ * (name seed rows "E2E …", not "Pitmans …", or assertion (d) below breaks on
  * data instead of catching a real leak).
  *
  * At gate 1 nothing renders these testids yet, so this spec passing proves the
  * BASELINE: the app in single-brand mode contains zero brand UI. As gates 3+
- * land chips and filters behind `isMultiBrand()`, the same three assertions
+ * land chips and filters behind `isMultiBrand()`, the same four assertions
  * gain teeth — a chip that leaks past its gate fails here, on the exact page
  * that leaked it.
  *
@@ -40,14 +43,16 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * suspect. The fix is never to loosen this spec.
  */
 
-/** Five highest-traffic office surfaces — this spec's own choice of coverage
- *  (PRD §6 addition 1 mandates the parity assertion but names no routes). */
+/** Six routes: the five highest-traffic office surfaces — this spec's own
+ *  choice of coverage (PRD §6 addition 1 mandates the parity assertion but
+ *  names no routes) — plus /settings, where gate 2's Brands card lives. */
 const PARITY_ROUTES: { path: string; heading: string }[] = [
   { path: "/", heading: "Dashboard" },
   { path: "/leads", heading: "Leads" },
   { path: "/quotes", heading: "Quotes" },
   { path: "/bookings", heading: "Bookings" },
   { path: "/leads/new", heading: "Add lead" },
+  { path: "/settings", heading: "Settings" },
 ];
 
 /**
@@ -69,7 +74,13 @@ async function expectNoBrandUi(page: Page, path: string, heading: string): Promi
   await expect(page.getByTestId("brand-chip"), `${path} must render zero brand chips`).toHaveCount(0);
   // (b) No brand filter anywhere on the page.
   await expect(page.getByTestId("brand-filter"), `${path} must render zero brand filters`).toHaveCount(0);
-  // (c) The second brand's name appears nowhere — not in a chip, a tooltip, a
+  // (c) No Brands settings card (gate 2 — only /settings can render it, and
+  // only in multi-brand mode).
+  await expect(
+    page.getByTestId("brand-settings-card"),
+    `${path} must render zero brand settings cards`,
+  ).toHaveCount(0);
+  // (d) The second brand's name appears nowhere — not in a chip, a tooltip, a
   // select option, an eyebrow, or a stray hardcode.
   await expect(page.getByText(/Pitmans/i), `${path} must not contain the text "Pitmans"`).toHaveCount(0);
 }
