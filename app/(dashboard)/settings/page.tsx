@@ -25,6 +25,8 @@ import {
 } from "@/lib/storage-supplier";
 import { SettingsNav, type SettingsSection } from "@/components/settings/settings-nav";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isMultiBrand, listAllBrands, type Brand } from "@/lib/brand";
+import { BrandsCard } from "@/components/settings/brands-card";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +110,18 @@ export default async function SettingsPage() {
     }
   }
 
+  // Brands card (admin, multi-brand only). Gated on isMultiBrand() — THE
+  // single-brand invariant (multi-brand PRD §1): with one active brand this
+  // page must stay byte-identical to today, and the parity e2e deactivates
+  // Pitmans and asserts /settings renders zero brand UI. The card lists EVERY
+  // row (group + inactive included) via listAllBrands — a config surface shows
+  // what exists, not just what's live.
+  let brands: Brand[] = [];
+  if (canEdit && (await isMultiBrand(sb))) {
+    brands = await listAllBrands(sb);
+  }
+  const showBrands = canEdit && brands.length > 0;
+
   // Team management is admin-only — estimators don't see the card at all.
   let team: TeamMember[] = [];
   if (canEdit) {
@@ -146,6 +160,8 @@ export default async function SettingsPage() {
     ...(canEdit
       ? [
           { id: "payments", label: "Payments" },
+          // Multi-brand only — absent in single-brand mode (parity invariant).
+          ...(showBrands ? [{ id: "brands", label: "Brands" }] : []),
           { id: "self-billing", label: "Contractor invoicing" },
           { id: "fleet", label: "Fleet" },
           { id: "ai", label: "AI" },
@@ -190,6 +206,11 @@ export default async function SettingsPage() {
         {canEdit ? (
           <section id="payments" className={sectionClass}>
             <CardPaymentsCard testToken={cardTestToken} />
+          </section>
+        ) : null}
+        {showBrands ? (
+          <section id="brands" className={sectionClass}>
+            <BrandsCard brands={brands} />
           </section>
         ) : null}
         {canEdit ? (

@@ -122,6 +122,19 @@ export async function getBrandOrDefault(sb: SupabaseClient, slug: string): Promi
   );
 }
 
+/** EVERY brands row — group and inactive included — in sort order. The
+ *  Settings › Brands card reader: a config surface shows what exists, not just
+ *  what's live (an inactive row is exactly the one an admin needs to see, and
+ *  the group pseudo-brand's details are edited here too). Customer-facing
+ *  resolution keeps using listActiveBrands/getBrand. */
+export async function listAllBrands(sb: SupabaseClient): Promise<Brand[]> {
+  const { data } = await sb
+    .from("brands")
+    .select(BRAND_COLUMNS)
+    .order("sort_order", { ascending: true });
+  return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
+}
+
 /** Active customer-facing brands ('group' excluded), in sort order. */
 export async function listActiveBrands(sb: SupabaseClient): Promise<Brand[]> {
   const { data } = await sb
