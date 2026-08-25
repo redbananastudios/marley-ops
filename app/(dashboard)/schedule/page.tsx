@@ -101,7 +101,9 @@ export default async function SchedulePage({
       supabase.from("staff").select("id, full_name, staff_role, working_days, is_driver").eq("is_active", true).order("full_name"),
       supabase
         .from("vehicles")
-        .select("id, name, vehicle_type, registration, tax_due, mot_due, insurance_renewal, service_due, end_of_term")
+        // `brand` = livery only (multi-brand PRD §4 /resources) — feeds the
+        // board's soft mismatch note; a decorating read, so it fails soft.
+        .select("id, name, vehicle_type, registration, tax_due, mot_due, insurance_renewal, service_due, end_of_term, brand")
         .eq("is_active", true)
         .order("name"),
       fetchAllRows((f, t) =>

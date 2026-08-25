@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
+import { listActiveBrands } from "@/lib/brand";
 import { normalizeWorkingDays } from "@/lib/staff/availability";
 import { normalisePhone, staffFieldsFromSubmission } from "@/lib/staff/onboarding";
 
@@ -54,6 +55,10 @@ const vehicleSchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(80),
   vehicle_type: z.enum(["luton", "transit", "7.5t", "other"]),
   registration: z.string().trim().max(12).optional().or(z.literal("")),
+  // Livery brand slug (multi-brand PRD §4 /resources) — informational only,
+  // never restricts allocation. Empty/absent = unbranded/shared (null).
+  // Validated against the active brands inside saveVehicleAction.
+  brand: z.string().trim().max(40).optional().or(z.literal("")),
   tax_due: optDate,
   mot_due: optDate,
   insurance_renewal: optDate,
@@ -78,10 +83,24 @@ export async function saveVehicleAction(input: VehicleInput) {
   if ("error" in ctx) return { ok: false as const, error: ctx.error };
   const { sb } = ctx;
 
+  // Livery brand (multi-brand PRD §4 /resources): a supplied slug must name an
+  // active brand — a named-brand write fails LOUD, never silently degrades.
+  // Single-brand mode always writes null, so nothing changes today (the
+  // single-brand invariant, PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  let liveryBrand: string | null = null;
+  if (activeBrands.length > 1 && v.brand) {
+    if (!activeBrands.some((b) => b.slug === v.brand)) {
+      return { ok: false as const, error: "Choose a valid livery brand." };
+    }
+    liveryBrand = v.brand;
+  }
+
   const row = {
     name: v.name,
     vehicle_type: v.vehicle_type,
     registration: (v.registration || "").toUpperCase(),
+    brand: liveryBrand,
     tax_due: v.tax_due || null,
     mot_due: v.mot_due || null,
     insurance_renewal: v.insurance_renewal || null,

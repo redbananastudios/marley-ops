@@ -135,6 +135,38 @@ export const MANIFEST = [
     reason:
       "mm-red app chrome (PRD §2): checkbox accent, required-field markers, address section tint",
   },
+  // Gate 12: resources + storage. The vehicle livery chip and Livery select,
+  // the job-board livery-mismatch note, storage site/let chips, the brand
+  // filter and the site/let/manage dialogs' brand selects are all data-driven
+  // (slim brands-table rows via props); only deliberate mm-red APP CHROME
+  // remains per PRD §2 — everything else stays forbidden both directions.
+  // (app/(dashboard)/storage/actions.ts is deliberately NOT listed: its
+  // agreement email still hardcodes default-brand identity — that is gate 13
+  // comms work, and listing the file before then would just be a red scan.)
+  {
+    pattern: "components/resources/resources-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): active-toggle fill, working-days selected state, dialog save buttons",
+  },
+  {
+    pattern: "components/job-board/job-board-view.tsx",
+    allow: ["mm-red", "Marley"],
+    reason:
+      "mm-red app chrome (PRD §2): today-column highlight, surveys toggle, assign-modal selection states, save buttons and the vehicle icon-tile tint; Marley appears only in the comment naming that tile tint — the livery-mismatch note itself is data-driven",
+  },
+  {
+    pattern: "components/storage/storage-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): occupancy pill and segmented occupancy filter, selected-site/unit accents, checkbox accents, action/save buttons",
+  },
+  {
+    pattern: "components/storage/manage-let-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
+  },
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);

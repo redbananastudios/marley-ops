@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -117,6 +118,9 @@ export interface VehicleRow {
   name: string;
   vehicle_type: string;
   registration: string;
+  /** Livery brand slug (multi-brand PRD §4 /resources) — informational only,
+   *  never restricts which job a van can take. Null = unbranded/shared. */
+  brand: string | null;
   tax_due: string | null;
   mot_due: string | null;
   insurance_renewal: string | null;
@@ -145,6 +149,10 @@ export interface StaffAvailabilityRow {
   status: string;
   note: string | null;
 }
+
+/** Radix Select rejects "" as an item value — sentinel for the null livery
+ *  ("Unbranded / shared", the default; multi-brand PRD §4 /resources). */
+const UNBRANDED = "__none__";
 
 const OFFROAD_REASONS = [
   { value: "service", label: "Service" },
@@ -237,6 +245,7 @@ export function ResourcesView({
   initialTab,
   onboarding,
   pendingSubmissions,
+  brands = [],
 }: {
   staff: StaffRow[];
   vehicles: VehicleRow[];
@@ -247,10 +256,22 @@ export function ResourcesView({
   initialTab: "staff" | "vehicles" | "availability";
   onboarding: StaffOnboardingState;
   pendingSubmissions: StaffSubmissionRow[];
+  /** Active brands (multi-brand PRD §4 /resources) — livery chips on vehicle
+   *  cards + the form's livery selector. The server page passes brands only
+   *  when listActiveBrands().length > 1; empty or single-entry → no brand UI
+   *  renders anywhere here (the single-brand invariant, PRD §1). Staff and
+   *  availability carry no brand — crew are one shared pool. */
+  brands?: BrandChipData[];
 }) {
   const [tab, setTab] = useState<"staff" | "vehicles" | "availability">(initialTab);
   const [staffEdit, setStaffEdit] = useState<StaffRow | "new" | null>(null);
   const [vehicleEdit, setVehicleEdit] = useState<VehicleRow | "new" | null>(null);
+
+  // Multi-brand mode is server-verified — the page passes 2+ brands or none.
+  // /resources has no ?brand= filter, so the chip renders whenever the vehicle
+  // has a livery brand (unlike filtered boards, where a named filter hides it).
+  const multiBrand = brands.length > 1;
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
 
   const windowsByVehicle = useMemo(() => {
     const m = new Map<string, UnavailabilityRow[]>();
@@ -387,6 +408,7 @@ export function ResourcesView({
               <VehicleCard
                 key={v.id}
                 v={v}
+                brand={multiBrand && v.brand ? (brandBySlug.get(v.brand) ?? null) : null}
                 windows={windowsByVehicle.get(v.id) ?? []}
                 isAdmin={isAdmin}
                 onEdit={() => setVehicleEdit(v)}
@@ -408,6 +430,7 @@ export function ResourcesView({
         <VehicleDialog
           row={vehicleEdit === "new" ? null : vehicleEdit}
           windows={vehicleEdit && vehicleEdit !== "new" ? (windowsByVehicle.get(vehicleEdit.id) ?? []) : []}
+          brands={multiBrand ? brands : []}
           onClose={() => setVehicleEdit(null)}
         />
       ) : null}
@@ -815,7 +838,21 @@ function StaffDialog({
 
 /* --------------------------------------------------------------- vehicles */
 
-function VehicleCard({ v, windows, isAdmin, onEdit }: { v: VehicleRow; windows: UnavailabilityRow[]; isAdmin: boolean; onEdit: () => void }) {
+function VehicleCard({
+  v,
+  brand = null,
+  windows,
+  isAdmin,
+  onEdit,
+}: {
+  v: VehicleRow;
+  /** Resolved livery chip data — null hides the chip (single-brand mode, or an
+   *  unbranded/shared van; multi-brand PRD §4 /resources). */
+  brand?: BrandChipData | null;
+  windows: UnavailabilityRow[];
+  isAdmin: boolean;
+  onEdit: () => void;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const today = todayUk();
@@ -838,7 +875,16 @@ function VehicleCard({ v, windows, isAdmin, onEdit }: { v: VehicleRow; windows: 
     <div className={cn("flex flex-col gap-3 rounded-lg border border-border bg-card p-4", !v.is_active && "opacity-60")}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{v.name}</p>
+          {/* Livery chip (multi-brand PRD §4 /resources) — the single-brand
+              branch keeps today's exact markup. */}
+          {brand ? (
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <span className="truncate">{v.name}</span>
+              <BrandChip brand={brand} size={16} />
+            </p>
+          ) : (
+            <p className="truncate text-sm font-semibold text-foreground">{v.name}</p>
+          )}
           <p className="mt-0.5 text-xs text-mist-400">{TYPE_LABEL[v.vehicle_type] ?? v.vehicle_type}</p>
         </div>
         {v.registration ? (
@@ -918,10 +964,14 @@ function VehicleCard({ v, windows, isAdmin, onEdit }: { v: VehicleRow; windows: 
 function VehicleDialog({
   row,
   windows,
+  brands = [],
   onClose,
 }: {
   row: VehicleRow | null;
   windows: UnavailabilityRow[];
+  /** Active brands for the livery selector — empty in single-brand mode, so
+   *  the selector never renders and the form is unchanged (PRD §1). */
+  brands?: BrandChipData[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -930,6 +980,8 @@ function VehicleDialog({
     name: row?.name ?? "",
     vehicle_type: (row?.vehicle_type ?? "luton") as VehicleInput["vehicle_type"],
     registration: row?.registration ?? "",
+    // "" = unbranded/shared (null in the DB) — the deliberate default.
+    brand: row?.brand ?? "",
     tax_due: row?.tax_due?.slice(0, 10) ?? "",
     mot_due: row?.mot_due?.slice(0, 10) ?? "",
     insurance_renewal: row?.insurance_renewal?.slice(0, 10) ?? "",
@@ -949,6 +1001,7 @@ function VehicleDialog({
       name: v.name,
       vehicle_type: v.vehicle_type,
       registration: v.registration,
+      brand: v.brand,
       tax_due: v.tax_due,
       mot_due: v.mot_due,
       insurance_renewal: v.insurance_renewal,
@@ -1019,6 +1072,35 @@ function VehicleDialog({
             <Label htmlFor="vh-reg">Registration</Label>
             <Input id="vh-reg" className="h-11 uppercase" value={v.registration} onChange={(e) => set({ registration: e.target.value })} placeholder="AB12 CDE" />
           </div>
+
+          {/* Livery brand (multi-brand PRD §4 /resources) — informational only,
+              it never restricts which job a van takes (one shared pool). Only
+              rendered in multi-brand mode; "Unbranded / shared" is the default
+              and maps to null server-side. */}
+          {brands.length > 1 ? (
+            <div className="grid gap-1.5">
+              <Label htmlFor="vh-brand">Livery</Label>
+              <Select
+                value={v.brand === "" ? UNBRANDED : v.brand}
+                onValueChange={(val) => set({ brand: val === UNBRANDED ? "" : val })}
+              >
+                <SelectTrigger id="vh-brand" className="h-11 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={UNBRANDED}>Unbranded / shared</SelectItem>
+                  {brands.map((b) => (
+                    <SelectItem key={b.slug} value={b.slug}>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-mist-400">
+                Sign-writing only — any van can still take any job. Mismatches show as a quiet note on the schedule.
+              </p>
+            </div>
+          ) : null}
 
           <p className="eyebrow pt-1">Compliance dates</p>
           <div className="grid gap-4 sm:grid-cols-2">
