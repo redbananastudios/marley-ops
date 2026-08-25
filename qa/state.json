@@ -1,7 +1,7 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "buildInProgress": "Pitmans multi-brand build under way (docs/multi-brand-prd.md, one PR per gate, label pitmans-gate). Gates merged so far: 0 (PRD + auto-merge label); gate 1 (brand foundation) in flight. Staging is deliberately multi-brand (brands.pitmans active=true) but the brand UI is UNBUILT until gates 3+ land - partially-built or absent brand surfaces are EXPECTED and are not findings; the standing contract is single-brand parity (e2e/parity/single-brand.spec.ts). Repair tier: leave safe-fix findings on surfaces a pitmans-gate PR is touching to the build session (PRD SS6/SS8).",
-  "lastAuditSha": "0cf7a7a",
+  "buildInProgress": "Pitmans multi-brand build: gates 1-5 all MERGED as of 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a) - brand foundation, Settings Brands card, chips/filters across leads/board/quotes/jobs/bookings/clients/follow-ups/documents/claims/content/payments/refunds, and the required brand picker on lead creation + BrandChanger pre-quote edit are all LIVE on staging now (brands.pitmans active=true). The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. 2026-08-25 audit found the brand UI itself sound (chips/filters/cascade/lock all correct) but found a real ref-prefix bug in quote creation - see QA-20260825-03.",
+  "lastAuditSha": "54adc9a",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T16:26:00Z",
@@ -65,9 +65,9 @@
       ]
     },
     "complete_job": {
-      "lastTestedAt": "2026-08-24T12:24:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live via the CUSTOMER-ABSENT path this time by a role-agent subagent (real Chromium): ticked 'Customer isn't available', filled the required absent-reason, crew-lead signature drawn, Exceptions left blank. appointments.status scheduled->completed; job_completions row correct (customer_absent=true, absent_reason set, crew_name/crew_signature set, customer_name/customer_signature null as expected); completion-certificate PDF downloaded back from job-docs, 26,189B, %PDF-1.3 magic; communications row status=sent provider_id=dryrun-... (dry-run confirmed). 0 findings. Process note: this run's ad-hoc fixture teardown hit the same activities-FK-blocks-lead-delete shape as the QA-20260823-05 class of bug (job completion also logs an activities row) -- agent diagnosed and fixed its own teardown order, re-verified 0; worth remembering for any future spec/script touching this flow.",
+      "note": "Re-verified live via the CUSTOMER-PRESENT path this time by a role-agent subagent (real Chromium): customer name + customer signature + crew signature both drawn, Exceptions left blank. appointments.status scheduled->completed; job_completions row correct (customer_absent=false, both signatures/names set, completed_by=crew auth id); completion-certificate PDF downloaded back from job-docs, 24,064B, %PDF- magic; communications row status=sent. Two-hats: admin's /leads/[id] CompletionCard rendered the exact same names/timestamps the crew action wrote. 0 findings.",
       "watch": [
         "components/crew/complete-job-button.tsx",
         "components/crew/crew-action-bar.tsx",
@@ -85,9 +85,9 @@
       ]
     },
     "weekly_invoice_create_seed_submit": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: logged 09:00-13:00 -> created statement (MMP132) -> 'Add my hours this period' seeded a job-source line (qty=4,total=60) -> edited qty 4->6 (SQL: amount recomputed to 90, total=90) -> submitted (status=submitted, submitted_at stamped). Two-hats cross-check: office's /finance/statements query selects identical columns, no transform beyond Number(). 0 findings.",
+      "note": "Re-verified live: logged Tue 25 Aug 08:00-16:30 -> statement MMP184 -> 'Add my hours this period' seeded a line -> edited qty 8.5h->6h (SQL: amount recomputed server-side to 90=6x15, not client-trusted) -> submitted (status=submitted, edit/delete buttons gone post-submit, genuine transition not a UI-only flip). RLS independently backstops further writes to a submitted day. Two-hats: /finance/statements selects identical columns. 0 findings. NOTE: the sibling estimator surface found a real accessibility gap in its own 'Add a line' inputs (QA-20260825-04) which likely also applies to this crew statement-editor.tsx (same unlinked-label pattern per the finding's suspected-cause) -- not independently verified on the crew surface this run, flagged for next run to check directly.",
       "watch": [
         "app/my-jobs/pay/**",
         "components/my-jobs/statement-editor.tsx",
@@ -107,9 +107,9 @@
   },
   "admin": {
     "lead_create_edit": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: created via /leads/new UI, edited phone/property_size/notes -> SQL same row id (no duplicate), updated_at advanced. Fresh reload of /leads/[id] confirmed every displayed field reads the column just written (name/phone/email/postcode/property_size/notes, two-hats held). activities shows exactly lead_created then the edit note. 0 findings.",
+      "note": "FRESH CODE this run (gate 5, #88/#89): re-verified live by a role-agent subagent with the new required brand picker on /leads/new -- client-side blocks a no-brand submit (newLeadSchemaWithBrand), created lead with brand=pitmans, SQL exact match. Then used the new BrandChanger control (leads/[id]/brand-changer.tsx) to switch brand pre-quote -- leads.brand + cascaded appointments.brand + activities row all correct. A two-tab stale-forge test proved the lock is server-side, not just client-side: Tab A (opened before any quote existed) tried to change brand AFTER Tab B created a quote in between -- server correctly rejected with the 'ref already issued' error and Tab A re-rendered locked after refresh (exercises updateLeadBrandAction's live COUNT re-check, leads/actions.ts:250-266). 0 findings on this surface itself -- see quote_build_send_supersede for the ref-prefix bug this same run surfaced one step downstream.",
       "watch": [
         "app/(dashboard)/leads/**",
         "components/leads/edit-lead-dialog.tsx",
@@ -147,9 +147,9 @@
       ]
     },
     "quote_build_send_supersede": {
-      "lastTestedAt": "2026-08-23T16:20Z",
-      "lastResult": "pass",
-      "note": "QA-20260823-02 VERIFIED+CLOSED this run: seeded a draft quote with subtotal/grand_total deliberately mismatched (\u00a399,999) vs computeQuote()'s live output. Opened the quote, jumped straight to Step 7 with no field edits, sent -- Send dialog showed the live-recomputed \u00a31,087.20 and the send succeeded; SQL immediately after showed grand_total=1087.2, subtotal=906, email_sent=true -- the DB now holds exactly what was emailed, not the stale seeded figure. saveQuoteDraft persists server-side before send, as PR #62 intended. 0 findings.",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
+      "lastResult": "finding",
+      "note": "FRESH CODE this run (gate 3, #86): the build->send->supersede flow itself still works correctly end-to-end (full pass on a marker Pitmans lead: prefill, live route/mileage calc, dry-run send, revision correctly flipped the original to status=superseded) and quotes.brand/chip/filter all read the correct column. BUT found a real defect: QA-20260825-03 (risky, high) -- every quote created for a brand='pitmans' lead mints an MM-prefixed ref (e.g. MMR085/086/087) instead of PM, because nextQuoteRef() in quotes/actions.ts never passes the lead's resolved brand into the next_quote_ref RPC (which already supports it). Independently reproduced by the main loop at the RPC level: next_quote_ref(kind:'R') with no brand arg -> MMR088; next_quote_ref(kind:'R',brand:'pitmans') -> PMR001. Skipped regression spec e2e/office/quote-brand-ref.spec.ts added this run, un-skips in the repair PR.",
       "watch": [
         "app/(dashboard)/quotes/**",
         "components/quote/**",
@@ -300,18 +300,18 @@
       ]
     },
     "clients_register_detail": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: search by marker substring returned exactly 1 matching card, no false positives against real clients. Client detail vs SQL matched exactly (name/phone/email/postcode/firstSeen). Enquiry-count rollup independently recomputed from SQL (count(*) leads where client_id=...) = 1, matched the UI's '1 enquiry' exactly. Also incidentally re-confirmed clientWriteThrough (editing the sole lead's phone wrote through to clients.phone_raw/phone_e164). 0 findings.",
+      "note": "FRESH CODE this run (gate 4, #87): re-verified live by a role-agent subagent, brand-focused. Confirmed via source that clients has no own brand column -- the chip/filter is derived from the client's leads.brand set. Seeded a marker client with one marley lead + one pitmans lead: detail page rendered 2 brand chips (data-brand=['pitmans','marley']) matching exactly; register search by marker substring returned exactly 1 row, leadCount=2 matched SQL, and the client correctly appeared under BOTH ?brand=pitmans and ?brand=marley filters (has a lead in each -- confirmed as intentional, not brand-narrowed). Also re-confirmed the standing create->edit->detail flow (notes field edit, SQL exact match). 0 findings.",
       "watch": [
         "app/(dashboard)/clients/**",
         "components/clients/**"
       ]
     },
     "board_kanban_jobs_list": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: 3 marker leads across enquiry/quoted/completed, /board columns matched an independent SQL recompute using the exact week-window+basis logic read from components/board/status-board.tsx, /jobs completed-count cross-check also matched. One transient false-positive (another concurrently-running role-agent's marker lead landing mid-check) correctly diagnosed as a shared-staging race, not a product bug, via a synchronized re-check. 0 findings. Concrete seed shape + assertions recorded for a future permanent spec (still not written -- admin_board_kanban_spec gap stays open, but now has a validated recipe: seed N marker leads with distinct statuses inside the current Europe/London week, assert each card's enclosing section header, recompute counts scoped to marker-lead ids only to avoid the concurrency race).",
+      "note": "FRESH CODE this run (gate 3, #86): re-verified live by a role-agent subagent, brand-focused. Seeded 2 board leads (marley/pitmans) + 2 completed jobs (marley/pitmans). Chip read scoped strictly to each record's own card container (an earlier looser selector falsely returned the same brand for both -- fixed and re-verified). Board: chip data-brand matched each lead's own brand exactly; ?brand=pitmans/?brand=marley each correctly restricted to the matching card only. Jobs: same result, chip + filter both matched leads.brand. 0 findings. admin_board_kanban_spec gap (a permanent spec) still not written -- see prior run's recorded recipe.",
       "watch": [
         "app/(dashboard)/board/**",
         "components/board/**"
@@ -338,9 +338,9 @@
   },
   "estimator": {
     "cockpit": {
-      "lastTestedAt": "2026-08-25T04:35:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: seeded lead(quoted)+survey-today+overdue-follow-up+sent-quote all owned by the estimator's own PROFILE id (staff-id query re-confirmed 0 rows -- known mixup ruled out again). Every tile (today's surveys, overdue follow-ups, quotes awaiting, needs-attention 4 active leads + badges) recomputed from SQL before viewing the UI matched exactly. 0 findings.",
+      "note": "Re-verified live: seeded 5 marker leads (owned via estimator_id=own profile id, staff-id mixup re-ruled-out) across today's surveys/later-this-week/overdue-follow-up/quote-awaiting-reply. Every tile matched SQL exactly incl. UK/BST time conversion and the needs-attention 4-lead set in the same order. Reload confirmed server-backed, not stale client state. Process note: mid-run a concurrent role-agent's over-broad cleanup (bare 'QA-SENTINEL' substring match, not scoped to its own run suffix) deleted this agent's round-1 marker rows before use -- recovered by reseeding with a distinguishing suffix; not a product defect, see this run's LOG entry for the process fix. 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/**"
       ]
@@ -360,16 +360,16 @@
       ]
     },
     "estimator_pay_statement": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
-      "lastResult": "pass",
-      "note": "UNBLOCKED and verified live by a role-agent subagent: signed contractor agreement (5/5 acks) -> started This-week invoice -> 'Add my work this week' pulled the OP1 attended survey in as a line (source=survey, £50) -> added a manual £12.34 line -> submitted. staff_statements (ref MMP148) status=submitted, total=£62.34 matched UI exactly; staff_statement_lines' survey line's appointment_id matched the OP1 survey, proving the pay engine correctly picks up attended surveys. 0 findings.",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
+      "lastResult": "finding",
+      "note": "Re-verified live by a role-agent subagent: seeded contractor agreement -> statement MMP182 -> 'Add my work this week' pulled the attended survey in as a line (£50, source=survey) -> added a manual £12.34 line -> submitted, total=£62.34 matched SQL exactly, genuine draft->submitted transition. Gating re-check also PASS (/finance, /finance/statements, /refunds all redirect correctly). BUT found QA-20260825-04 (safe-fix, low): the 'Add a line' sheet's Description/Amount inputs have no id/aria-label/htmlFor -- page.getByLabel() finds nothing, confirmed via live DOM inspection. Likely also affects the crew twin (components/my-jobs/statement-editor.tsx) per the same unlinked-label pattern, not independently verified there this run.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
       ]
     },
     "gating_forbidden_surfaces": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
       "note": "Re-verified live by a role-agent subagent: /finance -> /estimator, /finance/statements -> /estimator/pay, /refunds -> /estimator/pay -- all role-appropriate redirects (not the generic fallback), matching app/(dashboard)/finance/page.tsx, finance/statements/page.tsx, refunds/page.tsx exactly. 0 findings. (Prior observation about /board /clients /storage /performance /automations having no estimator boundary still stands, unchanged, not re-flagged as new.)",
       "watch": [
@@ -393,9 +393,9 @@
       ]
     },
     "cv_self_fill_survey": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: happy path SQL-exact (items/total_ft3 matched what was tapped), garbage token -> clean 404, two-hats explicitly confirmed by SQL diff that cubic_surveys.notes (office-internal, untouched) and .customer_notes (customer-typed) are genuinely separate columns and the UI never leaked the office note into the rendered page body. status transitioned draft -> customer_submitted correctly. 1 activities row (intended first-submit write per the code comment), 0 communications. 0 findings.",
+      "note": "Re-verified live: added 2x Sofa 2-seater + 1x Sofa 3-seater + 1 custom item (12ft3) + customer notes -> 'Sent -- thank you.' total_ft3=132 matched the UI maths exactly (2x35+50+12), items array correct incl. the custom line, customer_notes captured. activities row summary matched. Two-hats: office's cubic page reads the same customer_notes column and renders it under 'What the customer wrote'. Confirmed via source that SurveyPhotos only renders in office mode -- the public /cv flow genuinely has no photo upload surface (not a gap). 0 findings.",
       "watch": [
         "app/cv/**",
         "app/actions/cubic-survey.ts",
@@ -403,9 +403,9 @@
       ]
     },
     "s_storage_signing": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: /s/<token> -> 3 acks + name -> submit -> 'All signed' confirmation text. SQL exact match (signatures row, acknowledgments all true, signature_data present). IO proof: signature_data decoded to 36,971 raw bytes starting with the PNG magic number 89 50 4E 47 0D 0A 1A 0A -- a real, non-empty image. Re-opened in a FRESH browser context -> idempotent 'All signed' state, 0 form fields re-rendered (DB-backed, not client state). 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: /s/<token> -> 3 acks + name -> submit -> 'All signed' confirmation text. SQL exact match (signatures row, acknowledgments all true, terms_version stamped). IO proof: signature_data decoded to 65,920 raw bytes starting with the PNG magic number 89 50 4E 47 0D 0A 1A 0A -- a real, non-empty image. Re-opened in a FRESH browser context -> idempotent 'All signed' state, 0 form fields re-rendered (DB-backed, not client state). 0 findings.",
       "watch": [
         "app/s/**"
       ]

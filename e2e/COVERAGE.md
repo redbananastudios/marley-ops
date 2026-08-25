@@ -25,6 +25,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Mark lost — reason-gated loss flow | ✅ | office/mark-lost.spec.ts |
 | Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
 | Quote builder wizard — new quote → 7-step wizard → send dialog | ✅ | office/quote-builder.spec.ts |
+| Quote ref mints the lead's own brand prefix (PM for pitmans, not MM) | 🟡 | office/quote-brand-ref.spec.ts — proven live 2026-08-25 by the admin role agent + independently reproduced by the main loop at the RPC level (`next_quote_ref` already supports `brand`, the app just never passes it); ships `test.skip`'d with the open finding QA-20260825-03, un-skips in the repair PR |
 | Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
 | Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
