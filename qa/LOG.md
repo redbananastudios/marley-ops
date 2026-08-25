@@ -4,6 +4,8 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-25T05:35Z — first-pass repair sweep (scheduled): nothing eligible — `qa/findings/open/` holds `.gitkeep` only (verified against `origin/staging` @ `854e2cf`; `grep -rn "escalate:\|status: fixing" qa/findings/open/` empty, no `qa-repair/*` branch on the remote). Nothing claimed, no branches, no PRs, no escalations, master untouched, no DB or browser access used. Evidence for the standing first-pass-tier stall flag (AGENTS.md / 2026-08-24T06:33Z): this is the first first-pass entry since 2026-08-21 — the **scheduled-sweep path now demonstrably fires**; whether the push-triggered (webhook) path fires remains unproven until a safe-fix finding is next filed. Time spent: ~3 min.
+
 ## 2026-08-25T04:35Z — scheduled QA audit: 4 role agents (Sonnet tier), 11/11 pass, 0 findings, 1 new permanent spec (appointment view dialog)
 
 - sha audited: `06eff29` (`git fetch origin staging && git checkout -B staging origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
