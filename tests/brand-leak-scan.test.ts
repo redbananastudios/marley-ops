@@ -120,6 +120,23 @@ describe("brand-leak scan — the manifest is alive", () => {
     }
   });
 
+  it("expands the gate-21 entries to the reporting libs, /performance and the dashboard home", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "lib/sales-report.ts",
+      "lib/storage-report.ts",
+      "lib/estimator.ts",
+      "components/performance/sales-tab.tsx",
+      "components/performance/storage-tab.tsx",
+      "app/(dashboard)/performance/page.tsx",
+      "lib/dashboard/compute.ts",
+      "components/dashboard/dashboard-view.tsx",
+      "app/(dashboard)/page.tsx",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+  });
+
   it("keeps the GROUP doc-defs OUT of the manifest — they carry default identity by design (PRD §3.6)", () => {
     // Documents about the GROUP (crew day sheet, contractor statement) render
     // the group identity on purpose; listing them would force allows for

@@ -14,9 +14,9 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * playwright.config.ts: the ordering is load-bearing).
  *
  * THE TESTID CONTRACT — every later gate must use these, or this spec is blind:
- *   - `data-testid="brand-chip"`   → every brand chip (the 20px filled monogram
- *     square, list rows, kanban cards, detail-page eyebrows, dashboard
- *     sub-lines — ALL of them).
+ *   - `data-testid="brand-chip"`   → every brand chip (the filled monogram
+ *     square — 20px default, 16px in the gate-21 KPI sub-lines — list rows,
+ *     kanban cards, detail-page eyebrows, dashboard sub-lines: ALL of them).
  *   - `data-testid="brand-filter"` → every brand filter (the segmented
  *     All / Marley / Pitmans control, wherever it lives).
  *   - `data-testid="brand-settings-card"` → the Settings › Brands card root
@@ -46,13 +46,16 @@ import { setBrandActive, getBrandActive } from "../fixtures/brands";
  * suspect. The fix is never to loosen this spec.
  */
 
-/** Eighteen routes: the five highest-traffic office surfaces — this spec's
+/** Nineteen routes: the five highest-traffic office surfaces — this spec's
  *  own choice of coverage (PRD §6 addition 1 mandates the parity assertion but
  *  names no routes) — plus /settings, where gate 2's Brands card lives, plus
  *  the seven gate-4 list surfaces (clients, follow-ups, documents, claims,
  *  content, payments, refunds), plus the three gate-11 diary surfaces
  *  (schedule, removals, surveys), plus the two gate-12 surfaces (/resources
- *  and /storage). NOTE on the diaries: the hollow-unconfirmed
+ *  and /storage), plus the gate-21 reporting surface (/performance — and note
+ *  "/" is already listed, so the dashboard's gate-21 KPI sub-lines and filter
+ *  row are covered by the existing first route). NOTE on the diaries: the
+ *  hollow-unconfirmed
  *  removal rendering (dashed outline while `date_confirmed_at` is null) is
  *  deliberately NOT multi-brand-gated — Marley gets it too — so it must and
  *  does render here. It carries no brand testid and no brand text (classes
@@ -85,6 +88,14 @@ const PARITY_ROUTES: { path: string; heading: string }[] = [
   // real PageHeader title is "Staff & Fleet" (the route name lies).
   { path: "/resources", heading: "Staff & Fleet" },
   { path: "/storage", heading: "Storage" },
+  // Gate 21: reporting. On the dashboard ("/", above) the per-brand KPI
+  // sub-lines (16px chips), the "Estimators · sources · funnel" filter row
+  // and the brand splits are all multi-brand-gated; on /performance the
+  // TabBar's BrandFilter, the visits-list chips and the Jobs & margin Brand
+  // column are too — so neither page may render a chip, a filter, or the
+  // second brand's name here. (The combined KPI headline itself is not brand
+  // UI and renders identically in both modes by design — PRD §2.)
+  { path: "/performance", heading: "Performance" },
 ];
 
 /**

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPeriodStats, isWonQuote, type LeadLite, type ProgressSets } from "@/lib/dashboard/compute";
+import { buildBrandKpiSplits, buildPeriodStats, isWonQuote, type LeadLite, type ProgressSets } from "@/lib/dashboard/compute";
 
 /* Fixed "now" inside BST so the today/month windows are deterministic. */
 const NOW = new Date("2026-07-15T12:00:00+01:00").getTime();
@@ -96,5 +96,35 @@ describe("buildPeriodStats — medianRespMins re-scopes per period (L1)", () => 
   it("is null when no cohort lead was contacted", () => {
     const s = buildPeriodStats("today", [lead({ id: "x" })], emptyProg(), NOW, null);
     expect(s.medianRespMins).toBeNull();
+  });
+});
+
+describe("buildBrandKpiSplits — per-brand KPI shares (multi-brand PRD §4 Dashboard home)", () => {
+  it("splits cohort counts per brand, in the given order, and keeps zero-count brands", () => {
+    const leads = [
+      lead({ id: "m1", brand: "marley", first_contacted_at: "2026-07-15T09:30:00+01:00" }), // 30 min
+      lead({ id: "m2", brand: "marley", status: "confirmed" }),
+      lead({ id: "p1", brand: "pitmans" }),
+    ];
+    const prog = emptyProg();
+    prog.surveyed.add("p1");
+    prog.won.set("m2", 1500);
+
+    const splits = buildBrandKpiSplits("today", leads, prog, NOW, ["marley", "pitmans"]);
+    expect(splits.map((s) => s.slug)).toEqual(["marley", "pitmans"]);
+
+    const [marley, pitmans] = splits;
+    expect(marley).toMatchObject({ newLeads: 2, contacted: 1, surveys: 0, jobs: 1, medianRespMins: 30 });
+    // Zero-count shares still yield a row — an absent chip is ambiguous during ramp-up.
+    expect(pitmans).toMatchObject({ newLeads: 1, contacted: 0, surveys: 1, jobs: 0, medianRespMins: null });
+  });
+
+  it("leaves a lead matching no listed slug out of every split (combined keeps it)", () => {
+    const leads = [lead({ id: "m1", brand: "marley" }), lead({ id: "x1", brand: "retired" }), lead({ id: "n1" })];
+    const splits = buildBrandKpiSplits("today", leads, emptyProg(), NOW, ["marley", "pitmans"]);
+    expect(splits[0].newLeads).toBe(1);
+    expect(splits[1].newLeads).toBe(0);
+    // The combined headline still counts all three — the sub-line never claims to sum to it.
+    expect(buildPeriodStats("today", leads, emptyProg(), NOW, null).newLeads).toBe(3);
   });
 });

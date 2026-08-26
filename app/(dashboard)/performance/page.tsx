@@ -1,8 +1,13 @@
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
+import { listActiveBrands, type Brand } from "@/lib/brand";
+import { parseBrandParam, type BrandFilterValue } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
@@ -63,25 +68,67 @@ function resolveRange(preset: string, fromQ?: string, toQ?: string): { from: str
   return { from: day(now.year, now.month, 1), to: day(now.year, now.month, lastOfMonth(now.year, now.month)), label: "this calendar month" };
 }
 
-type SearchParams = { month?: string; tab?: string; range?: string; from?: string; to?: string };
+type SearchParams = { month?: string; tab?: string; range?: string; from?: string; to?: string; brand?: string };
 
-function TabBar({ active }: { active: "overview" | "sales" | "storage" }) {
+function TabBar({
+  active,
+  brand = "all",
+  filter,
+}: {
+  active: "overview" | "sales" | "storage";
+  /** `'all'` or an active brand slug — carried on the tab hrefs so one
+   *  `?brand=` filter survives switching between all three tabs. `'all'`
+   *  appends nothing, keeping single-brand URLs byte-identical. */
+  brand?: BrandFilterValue;
+  /** The BrandFilter control (multi-brand only) — it joins the TabBar row
+   *  (multi-brand PRD §4 /performance). Absent → today's exact markup. */
+  filter?: ReactNode;
+}) {
+  const withBrand = (href: string) =>
+    brand === "all" ? href : `${href}${href.includes("?") ? "&" : "?"}brand=${encodeURIComponent(brand)}`;
   const tab = (key: "overview" | "sales" | "storage", label: string, href: string) => (
-    <Link href={href} aria-current={active === key ? "page" : undefined} className={segmentedItemClass(active === key)}>
+    <Link href={withBrand(href)} aria-current={active === key ? "page" : undefined} className={segmentedItemClass(active === key)}>
       {label}
     </Link>
   );
-  return (
-    <div className={cn(segmentedTrackClass, "mb-5")}>
+  const track = (
+    <div className={cn(segmentedTrackClass, filter ? undefined : "mb-5")}>
       {tab("overview", "Overview", "/performance")}
       {tab("sales", "Sales", "/performance?tab=sales")}
       {tab("storage", "Storage", "/performance?tab=storage")}
     </div>
   );
+  if (!filter) return track;
+  return (
+    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+      {track}
+      {filter}
+    </div>
+  );
 }
 
-async function StorageTabPage() {
+/** BrandFilter options / chip data from the full brand rows — slim shapes
+ *  only ever cross to the client control (house rule: never the full rows). */
+const filterOptions = (brands: Brand[]) =>
+  brands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }));
+const chipMap = (brands: Brand[]) =>
+  new Map<string, BrandChipData>(
+    brands.map((b) => [
+      b.slug,
+      { slug: b.slug, name: b.name, shortName: b.shortName, initial: b.initial, colourPrimary: b.colourPrimary },
+    ]),
+  );
+
+async function StorageTabPage({ sp }: { sp: SearchParams }) {
   const sb = await createClient();
+
+  // Brand layer (multi-brand PRD §4 /performance): with a single active brand
+  // no brand UI renders and the tab is byte-identical (the single-brand
+  // invariant, PRD §1). Lets are the brand carrier (storage_lets.brand);
+  // sites and units are shared physical infrastructure and never narrow.
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
 
   // Supplier-cost window = the current UK calendar month, accrued to TODAY —
   // crate days beyond today haven't been stored yet (PRD §6 "capped at end/today").
@@ -97,12 +144,16 @@ async function StorageTabPage() {
   const [{ data: sites }, { data: units }, lets, { data: clients }, supplier, handlingEvents] = await Promise.all([
     sb.from("storage_sites").select("id, name, is_active"),
     sb.from("storage_units").select("id, site_id, code, name, unit_type, is_active"),
-    fetchAllRows((f, t) =>
-      sb
-        .from("storage_lets")
-        .select("id, unit_id, client_id, start_date, end_date, rate, rate_period, billing_model")
-        .order("id")
-        .range(f, t),
+    fetchAllRows(
+      (f, t) =>
+        sb
+          .from("storage_lets")
+          .select("id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, billing_model")
+          .order("id")
+          .range(f, t),
+      // Under a named ?brand= a partial window would render a wrong-narrowed
+      // view that LOOKS complete — fail loud then, keep today's fail-soft on All.
+      { strict: brandFilter !== "all" },
     ),
     sb.from("clients").select("id, display_name"),
     // Supplier costs are admin-only (storage_supplier_rates RLS) — read with
@@ -123,31 +174,42 @@ async function StorageTabPage() {
   ]);
   // Full storage-invoice history feeds the billing stats (aggregation only, so
   // order-independent) → page through fetchAllRows past PostgREST's 1000-row cap.
-  const storageInvoices = await fetchAllRows((f, t) =>
-    sb.from("storage_invoices").select("amount, status, period_start").order("id").range(f, t),
-  );
-
-  const billing = buildStorageBillingStats(
-    (storageInvoices ?? []).map((i) => ({ ...i, amount: Number(i.amount) })),
-    today,
+  // let_id is fetched to resolve each invoice's brand from its let — the let is
+  // the brand's system of record; invoices carry none of their own.
+  const storageInvoices = await fetchAllRows(
+    (f, t) => sb.from("storage_invoices").select("amount, status, period_start, let_id").order("id").range(f, t),
+    { strict: brandFilter !== "all" },
   );
 
   const letRows = lets.map((l) => ({
     id: l.id,
     unit_id: l.unit_id,
     client_id: l.client_id,
+    brand: l.brand,
     start_date: l.start_date,
     end_date: l.end_date,
     rate: l.rate == null ? null : Number(l.rate),
     rate_period: l.rate_period,
     billing_model: (l as { billing_model?: string | null }).billing_model ?? null,
   }));
+  const brandByLet = new Map(letRows.map((l) => [l.id, l.brand]));
+
+  const billing = buildStorageBillingStats(
+    (storageInvoices ?? []).map((i) => ({
+      ...i,
+      amount: Number(i.amount),
+      brand: brandByLet.get(i.let_id) ?? null,
+    })),
+    today,
+    brandFilter,
+  );
 
   const report = buildStorageReport(
     (sites ?? []).map((s) => ({ id: s.id, is_active: s.is_active })),
     units ?? [],
     letRows,
     today,
+    brandFilter,
   );
 
   const cost = supplier
@@ -164,8 +226,10 @@ async function StorageTabPage() {
   const clientName = new Map((clients ?? []).map((c) => [c.id, c.display_name as string]));
   const unitById = new Map((units ?? []).map((u) => [u.id, u]));
   const siteName = new Map((sites ?? []).map((s) => [s.id, s.name as string]));
+  // The current-lets list narrows with the report it sits under — one brand's
+  // let listed beneath another brand's numbers would read as part of them.
   const currentLets: CurrentLetRow[] = letRows
-    .filter((l) => l.end_date == null)
+    .filter((l) => l.end_date == null && (brandFilter === "all" || l.brand === brandFilter))
     .map((l) => {
       const u = unitById.get(l.unit_id);
       return {
@@ -185,7 +249,11 @@ async function StorageTabPage() {
   return (
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Reports" title="Performance" />
-      <TabBar active="storage" />
+      <TabBar
+        active="storage"
+        brand={brandFilter}
+        filter={multi ? <BrandFilter brands={filterOptions(activeBrands)} /> : undefined}
+      />
       <StorageTab report={report} currentLets={currentLets} billing={billing} cost={cost} costMonthLabel={costMonthLabel} />
     </main>
   );
@@ -196,33 +264,50 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
   const { from, to, label } = resolveRange(preset, sp.from, sp.to);
   const sb = await createClient();
 
+  // Brand layer (multi-brand PRD §4 /performance): quotes and leads each carry
+  // their own brand; the report slices in plain TypeScript, so the reads stay
+  // identical and single-brand renders byte-identical (PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+  // Under a named ?brand= a partially-fetched window would render a
+  // wrong-narrowed report that LOOKS complete — fail loud then, keep today's
+  // fail-soft on All (mirrors /storage, gate 12).
+  const strict = { strict: brandFilter !== "all" };
+
   const [quotes, leads, surveys] = await Promise.all([
-    fetchAllRows((f, t) =>
-      sb
-        .from("quotes")
-        .select(
-          "id, lead_id, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at",
-        )
-        .order("id")
-        .range(f, t),
+    fetchAllRows(
+      (f, t) =>
+        sb
+          .from("quotes")
+          .select(
+            "id, lead_id, brand, status, grand_total, agreed_price, created_at, email_sent_at, accepted_at, moving_date, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at",
+          )
+          .order("id")
+          .range(f, t),
+      strict,
     ),
-    fetchAllRows((f, t) =>
-      sb
-        .from("leads")
-        .select(
-          "id, status, submitted_at, created_at, preferred_date, balance_amount, balance_paid_at, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
-        )
-        .order("id")
-        .range(f, t),
+    fetchAllRows(
+      (f, t) =>
+        sb
+          .from("leads")
+          .select(
+            "id, brand, status, submitted_at, created_at, preferred_date, balance_amount, balance_paid_at, entry_channel, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium",
+          )
+          .order("id")
+          .range(f, t),
+      strict,
     ),
-    fetchAllRows((f, t) =>
-      sb
-        .from("appointments")
-        .select("lead_id, starts_at, ends_at, status")
-        .eq("appt_type", "survey")
-        .neq("status", NOT_CANCELLED)
-        .order("id")
-        .range(f, t),
+    fetchAllRows(
+      (f, t) =>
+        sb
+          .from("appointments")
+          .select("lead_id, brand, starts_at, ends_at, status")
+          .eq("appt_type", "survey")
+          .neq("status", NOT_CANCELLED)
+          .order("id")
+          .range(f, t),
+      strict,
     ),
   ]);
 
@@ -230,15 +315,21 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
   // passed (Peter, 2026-08-09). `status='completed'` used to be the filter, but
   // nothing sets that except one button in the diary modal, so surveys quoted by
   // any other route were missing from every figure on this page.
-  const attended = attendedSurveys(surveys as { lead_id: string | null; starts_at: string; ends_at: string | null; status: string | null }[]);
+  const attended = attendedSurveys(
+    surveys as { lead_id: string | null; brand: string | null; starts_at: string; ends_at: string | null; status: string | null }[],
+  );
 
-  const report = buildSalesReport(quotes as SalesQuote[], leads as SalesLead[], attended, from, to);
+  const report = buildSalesReport(quotes as SalesQuote[], leads as SalesLead[], attended, from, to, brandFilter);
 
   return (
     <main className="flex-1 p-6 md:p-8">
       <PageHeader eyebrow="Reports" title="Performance" />
-      <TabBar active="sales" />
-      <SalesTab report={report} rangeLabel={`Showing ${label}.`} preset={preset} from={from} to={to} />
+      <TabBar
+        active="sales"
+        brand={brandFilter}
+        filter={multi ? <BrandFilter brands={filterOptions(activeBrands)} /> : undefined}
+      />
+      <SalesTab report={report} rangeLabel={`Showing ${label}.`} preset={preset} from={from} to={to} brand={brandFilter} />
     </main>
   );
 }
@@ -246,7 +337,7 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
 export default async function PerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
   if (sp.tab === "sales") return <SalesTabPage sp={sp} />;
-  if (sp.tab === "storage") return <StorageTabPage />;
+  if (sp.tab === "storage") return <StorageTabPage sp={sp} />;
   const nowUk = ukParts();
   const m = /^\d{4}-\d{2}$/.test(sp.month ?? "") ? sp.month!.split("-") : null;
   const year = m ? Number(m[0]) : nowUk.year;
@@ -256,16 +347,31 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const monthEnd = ukInstant(year, month0 + 2, 1);
   const prev = new Date(Date.UTC(year, month0 - 1, 1));
   const next = new Date(Date.UTC(year, month0 + 1, 1));
-  const prevHref = `/performance?month=${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}`;
-  const nextHref = `/performance?month=${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}`;
   const monthLabel = monthStart.toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: UK_TZ });
 
   const sb = await createClient();
+
+  // Brand layer (multi-brand PRD §4 /performance): appointments and quotes
+  // each carry their own brand, so the month's figures slice in plain
+  // TypeScript below — the queries stay identical. Single brand → no brand UI
+  // and a byte-identical page (the single-brand invariant, PRD §1).
+  const activeBrands = await listActiveBrands(sb);
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+  // Chip hidden when the segmented control already names one brand
+  // (multi-brand PRD §4 opening rules).
+  const showBrandChips = multi && brandFilter === "all";
+  const chipBySlug = chipMap(activeBrands);
+  // The month navigator rebuilds its URLs from scratch — carry the filter.
+  const brandQS = brandFilter === "all" ? "" : `&brand=${encodeURIComponent(brandFilter)}`;
+  const prevHref = `/performance?month=${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}${brandQS}`;
+  const nextHref = `/performance?month=${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}${brandQS}`;
+
   const [{ data: appts }, { data: profiles }, leads, quotes] =
     await Promise.all([
       sb
         .from("appointments")
-        .select("id, starts_at, ends_at, status, estimator_id, lead_id")
+        .select("id, brand, starts_at, ends_at, status, estimator_id, lead_id")
         .eq("appt_type", "survey")
         .neq("status", NOT_CANCELLED)
         .gte("starts_at", monthStart.toISOString())
@@ -281,7 +387,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Accepted quotes in this month = the booked jobs we score margin on.
   const { data: acceptedQuotes } = await sb
     .from("quotes")
-    .select("id, quote_ref, customer_name, lead_id, agreed_price, grand_total, breakdown, state_blob, accepted_at")
+    .select("id, quote_ref, customer_name, lead_id, brand, agreed_price, grand_total, breakdown, state_blob, accepted_at")
     .eq("status", "accepted")
     // A cancelled booking keeps status='accepted' — counting it here put
     // refunded money in the month's revenue/cost/margin footer.
@@ -293,12 +399,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // Losses this month, grouped by reason (mark-lost dialog + 30-day auto-lapse).
   const { data: lostLeads } = await sb
     .from("leads")
-    .select("lost_reason")
+    .select("lost_reason, brand")
     .eq("status", "declined")
     .gte("lost_at", monthStart.toISOString())
     .lt("lost_at", monthEnd.toISOString());
   const lostCounts = new Map<string, number>();
   for (const l of lostLeads ?? []) {
+    // Brand slice in plain TS — the query stays untouched (multi-brand PRD §4).
+    if (brandFilter !== "all" && l.brand !== brandFilter) continue;
     const r = (l.lost_reason as string | null) ?? "unrecorded";
     lostCounts.set(r, (lostCounts.get(r) ?? 0) + 1);
   }
@@ -332,11 +440,15 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       date: a.starts_at,
       won: a.lead_id ? wonLeadIds.has(a.lead_id) : false,
       value: a.lead_id ? valueByLead.get(a.lead_id) ?? null : null,
+      brand: a.brand,
     }))
     .sort((x, y) => new Date(y.date ?? 0).getTime() - new Date(x.date ?? 0).getTime());
+  // The itemised list narrows with the stats above it (same slice, applied in
+  // the lib for the aggregate and here for the rows).
+  const visibleVisits = brandFilter === "all" ? visits : visits.filter((v) => v.brand === brandFilter);
 
   const settings = await getBusinessSettings(sb);
-  const stats = aggregateEstimators(visits, settings.estimatorFee);
+  const stats = aggregateEstimators(visits, settings.estimatorFee, brandFilter);
   const totalFee = stats.reduce((s, e) => s + e.fee, 0);
 
   // Lead-level 3rd-party referral fees — a real cost of the jobs they became.
@@ -348,12 +460,17 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   );
 
   // Per-job margin for the month's booked jobs (cost assumes 1-day jobs for now).
-  const jobs = (acceptedQuotes ?? []).map((q) => {
+  // Brand slice in plain TS on the quote's own brand (multi-brand PRD §4).
+  const bookedQuotes = (acceptedQuotes ?? []).filter(
+    (q) => brandFilter === "all" || q.brand === brandFilter,
+  );
+  const jobs = bookedQuotes.map((q) => {
     const b = (q.breakdown ?? {}) as Partial<QuoteBreakdown>;
     const blob = (q.state_blob as { items?: Record<string, number>; job?: { days?: number } } | null) ?? null;
     // Margin compares like-for-like ex-VAT: strip the VAT the customer merely passes
-    // through to HMRC off the gross price (Marley is VAT-registered, quotes default
-    // VAT-on) so pass-through tax isn't counted as profit against the VAT-free rate card.
+    // through to HMRC off the gross price (the business is VAT-registered, quotes
+    // default VAT-on) so pass-through tax isn't counted as profit against the
+    // VAT-free rate card.
     const gross = Number(q.agreed_price ?? q.grand_total ?? 0);
     const revenue = marginRevenue(gross, b.vatEnabled ?? true, settings);
     const cost = jobCost(
@@ -376,6 +493,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       ref: q.quote_ref,
       customer: q.customer_name || (q.lead_id ? leadName.get(q.lead_id) ?? "—" : "—"),
       leadId: q.lead_id,
+      brand: q.brand,
       revenue,
       commission,
       cost: totalCost,
@@ -403,7 +521,11 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
         </div>
       </PageHeader>
 
-      <TabBar active="overview" />
+      <TabBar
+        active="overview"
+        brand={brandFilter}
+        filter={multi ? <BrandFilter brands={filterOptions(activeBrands)} /> : undefined}
+      />
 
       <p className="mb-4 text-sm text-mist-400">
         Attended survey visits this month, by estimator. Fee = visits × {gbp(settings.estimatorFee)} per visit.
@@ -456,16 +578,22 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       </p>
 
       {/* itemised visits */}
-      {visits.length > 0 ? (
+      {visibleVisits.length > 0 ? (
         <Card className="mt-6 p-0">
           <div className="border-b px-5 py-3.5">
             <h2 className="font-display text-lg font-semibold text-foreground">Visits this month</h2>
           </div>
           <ul className="divide-y">
-            {visits.map((v) => (
+            {visibleVisits.map((v) => (
               <li key={v.apptId} className="flex items-center justify-between gap-3 px-5 py-3">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">
+                    {/* Chip only in multi-brand mode with the filter on All —
+                        single-brand markup is exactly today's (PRD §1). */}
+                    {(() => {
+                      const b = showBrandChips && v.brand ? chipBySlug.get(v.brand) : undefined;
+                      return b ? <BrandChip brand={b} size={16} className="mr-2 align-text-bottom" /> : null;
+                    })()}
                     {v.leadId ? <Link href={`/leads/${v.leadId}`} className="hover:underline">{v.customer}</Link> : v.customer}
                   </p>
                   <p className="text-xs text-mist-400">
@@ -503,6 +631,12 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
               <thead>
                 <tr className="border-b text-left">
                   <th scope="col" className="eyebrow px-5 py-3 font-semibold">Job</th>
+                  {/* Brand column only in multi-brand mode with the filter on
+                      All — a single named brand is already stated by the
+                      segmented control, and single-brand is byte-identical. */}
+                  {showBrandChips ? (
+                    <th scope="col" className="eyebrow px-2 py-3 font-semibold">Brand</th>
+                  ) : null}
                   <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Revenue</th>
                   <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Est. cost</th>
                   <th scope="col" className="eyebrow px-2 py-3 text-right font-semibold">Margin</th>
@@ -518,6 +652,14 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
                       </p>
                       <p className="text-xs text-mist-400">{j.ref}</p>
                     </td>
+                    {showBrandChips ? (
+                      <td className="px-2 py-3">
+                        {(() => {
+                          const b = j.brand ? chipBySlug.get(j.brand) : undefined;
+                          return b ? <BrandChip brand={b} size={16} /> : null;
+                        })()}
+                      </td>
+                    ) : null}
                     <td className="tabular px-2 py-3 text-right text-foreground">{gbp(j.revenue)}</td>
                     <td className="tabular px-2 py-3 text-right text-mist-500">
                       {gbp(j.cost)}
@@ -532,7 +674,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
               </tbody>
               <tfoot>
                 <tr className="border-t">
-                  <td className="px-5 py-3 text-sm font-semibold text-foreground">Total ({jobs.length})</td>
+                  {/* undefined (not 1) keeps single-brand markup byte-identical */}
+                  <td className="px-5 py-3 text-sm font-semibold text-foreground" colSpan={showBrandChips ? 2 : undefined}>Total ({jobs.length})</td>
                   <td className="tabular px-2 py-3 text-right font-semibold text-foreground">{gbp(jobTotals.revenue)}</td>
                   <td className="tabular px-2 py-3 text-right font-semibold text-mist-500">{gbp(jobTotals.cost)}</td>
                   <td className="tabular px-2 py-3 text-right font-display text-base font-bold text-foreground">{gbp(jobTotals.margin)}</td>

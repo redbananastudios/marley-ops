@@ -19,6 +19,9 @@ export interface EstimatorVisit {
   date: string | null;
   won: boolean;
   value: number | null;
+  /** Brand slug (appointments.brand, stamped from the lead) — the carrier for
+   *  the optional per-brand slice (multi-brand PRD §4 /performance). */
+  brand?: string | null;
 }
 
 export interface EstimatorStat {
@@ -32,11 +35,18 @@ export interface EstimatorStat {
 }
 
 /** Group attended visits into per-estimator stats, sorted by visits desc.
- *  `fee` is the per-visit rate from Settings (defaults to ESTIMATOR_FEE). */
+ *  `fee` is the per-visit rate from Settings (defaults to ESTIMATOR_FEE).
+ *
+ *  `brand`: undefined or `'all'` narrows nothing (byte-identical to today); a
+ *  named slug counts only that brand's visits, so combined visits/fees equal
+ *  the sum of the per-brand slices. The stats stay per-PERSON either way —
+ *  estimators work both brands, so a row is an estimator, never a brand. */
 export function aggregateEstimators(
   visits: EstimatorVisit[],
   fee: number = ESTIMATOR_FEE,
+  brand?: string,
 ): EstimatorStat[] {
+  if (brand && brand !== "all") visits = visits.filter((v) => v.brand === brand);
   const by = new Map<string, EstimatorStat>();
   for (const v of visits) {
     const cur =
