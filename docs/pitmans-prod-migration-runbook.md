@@ -20,6 +20,7 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 2 | `supabase/migrations/0105_additional_charges.sql` | `quotes.additional_charges numeric(10,2) not null default 0` + `quotes.additional_charges_reason text` — internal uplift (PRD §3.9), folded inside the customer's "Your Removal" line; default 0 backfills every existing quote as "no uplift" | No — additive columns with defaults; existing rows and totals untouched |
 | 3 | `supabase/migrations/0106_ingest_brand.sql` | replaces 0102's global unique index on `leads.external_lead_id` with `leads_external_lead_brand_uq` on `(brand, external_lead_id)` — two brands' websites can mint the same submission id without the second being silently swallowed as a duplicate of the first | No — index swap on a small table; creates the new index before dropping the old, so uniqueness never lapses |
 | 4 | `supabase/migrations/0107_pitmans_sms_sender.sql` | sets `brands.sms_sender = 'Pitmans'` on the pitmans row — the WebEx alphanumeric sender id, created 2026-08-26, that 0104 had to seed NULL. Until it lands every Pitmans SMS (including the deposit/balance money chases, whose bodies already say "Pitmans Removals & Storage here") is delivered fronted by MARLEY'S sender id, and replies land on Marley's rail | No — one-row data UPDATE, slug-scoped; Marley cannot be affected (smsSenderFor ignores the column for the default brand). No `notify pgrst` needed: no schema change |
+| 5 | `supabase/migrations/0108_ledger.sql` | creates `ledger_tokens` (the persistent OAuth token row the Xero adapter needs, because Xero rotates its refresh token on every use and env-var storage therefore locks the integration out the moment a second container refreshes) and `ledger_invoice_archive` (the pre-cutover snapshot of the outgoing provider's books, so /finance keeps its view of hand-raised invoices after the Zoho account lapses). Both tables land EMPTY and nothing reads them while `LEDGER_PROVIDER` is unset or `zoho` | No — two new tables, no existing table touched, no data written. Carries its own `notify pgrst` |
 
 *(rows appended per gate)*
 
@@ -121,6 +122,39 @@ No app-side check is needed beyond this: the code path is already locked by
 `smsSenderFor({slug:"pitmans", smsSender:"Pitmans"})` returns `Pitmans` and that the
 WebEx request body carries `from: "Pitmans"` while an unbranded send still carries
 `from: "Marley"`. What was missing was only the data.
+
+### 0108
+
+```sql
+-- Both tables exist, are EMPTY, and are locked to the service role: RLS on with
+-- ZERO policies is the whole access control here. ledger_tokens holds live OAuth
+-- credentials for the real books, so a policy count of anything but 0 is a stop.
+select c.relname                                        as tbl,
+       c.relrowsecurity                                 as rls_enabled,
+       (select count(*) from pg_policies p where p.tablename = c.relname) as policies
+from pg_class c
+join pg_namespace n on n.oid = c.relnamespace
+where n.nspname = 'public'
+  and c.relname in ('ledger_tokens', 'ledger_invoice_archive')
+order by 1;
+
+select (select count(*) from ledger_tokens)           as tokens_rows,
+       (select count(*) from ledger_invoice_archive)  as archive_rows;
+```
+
+Expected: two rows, both `rls_enabled = true` and `policies = 0`; and both counts
+**0**. A non-zero `tokens_rows` on prod would mean someone has already authorised a
+provider against production — check with Peter before going further.
+
+No app-side check is needed: gate 17's contract is zero behaviour change, and
+`LEDGER_PROVIDER` is deliberately left unset at this promotion, so every money path
+resolves to the same Zoho adapter it used before. The switch to Xero is a separate,
+later env edit — and per `docs/ledger-adapter-design.md` §9 it sets
+`LEDGER_HISTORY_CUTOVER` and `LEDGER_PROVIDER=xero` in **one** edit and one restart.
+Setting the provider first empties all invoice history with no error; setting the
+cutover first puts an unverified archive on the money read path while Zoho is still
+authoritative. Neither is recoverable by re-running the snapshot once a human has
+read a wrong number off the page.
 
 ---
 

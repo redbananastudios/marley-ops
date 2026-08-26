@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
-import { listInvoices, zohoInvoiceAppUrl, type ZohoInvoiceListItem } from "@/lib/zoho";
+import { invoiceAppUrl, listInvoices, type LedgerInvoiceListItem } from "@/lib/ledger";
 import {
   addDaysIso,
   dayLabel,
@@ -65,7 +65,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function InvoiceRow({ inv }: { inv: ZohoInvoiceListItem }) {
+function InvoiceRow({ inv }: { inv: LedgerInvoiceListItem }) {
   const pill = STATUS_PILL[inv.status] ?? { label: inv.status, cls: "bg-mist-100 text-mist-500" };
   const dead = inv.status === "void";
   const vat = invoiceVat(inv);
@@ -95,7 +95,7 @@ function InvoiceRow({ inv }: { inv: ZohoInvoiceListItem }) {
         {fmtGBP(inv.total)}
       </span>
       <a
-        href={zohoInvoiceAppUrl(inv.invoiceId)}
+        href={invoiceAppUrl(inv.invoiceId)}
         target="_blank"
         rel="noopener noreferrer"
         aria-label={`Open ${inv.invoiceNumber} in Zoho`}
@@ -133,10 +133,10 @@ export default async function FinancePage({
   const settings = await getBusinessSettings(sb);
   const quarter = vatQuarterFor(day, settings.vatStaggerGroup);
 
-  let dayInvoices: ZohoInvoiceListItem[] = [];
-  let mtdInvoices: ZohoInvoiceListItem[] = [];
-  let quarterInvoices: ZohoInvoiceListItem[] = [];
-  let unpaidInvoices: ZohoInvoiceListItem[] = [];
+  let dayInvoices: LedgerInvoiceListItem[] = [];
+  let mtdInvoices: LedgerInvoiceListItem[] = [];
+  let quarterInvoices: LedgerInvoiceListItem[] = [];
+  let unpaidInvoices: LedgerInvoiceListItem[] = [];
   let unpaidTruncated = false;
   let mtdTruncated = false;
   let quarterTruncated = false;
@@ -146,7 +146,7 @@ export default async function FinancePage({
       listInvoices({ dateStart: day, dateEnd: day }),
       listInvoices({ dateStart: monthStart(day), dateEnd: day }),
       listInvoices({ dateStart: quarter.start, dateEnd: day }),
-      listInvoices({ filterBy: "Status.Unpaid" }),
+      listInvoices({ status: "unpaid" }),
     ]);
     dayInvoices = dayL.invoices;
     mtdInvoices = mtdL.invoices;

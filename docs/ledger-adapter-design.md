@@ -250,6 +250,60 @@ the page.
 
 ---
 
+## 11. What the live Xero org actually shows (2026-08-26)
+
+Peter's invoices have already been migrated into Xero and he showed the Invoices
+list. Everything below is read off that screen, so treat the counts as a snapshot
+of one page rather than a query — but the shapes are unambiguous and two of them
+change the plan.
+
+**The `Reference` field survived the migration.** The Ref column carries OUR
+references verbatim: `MMR102-COM`, `MMR102-DEP`, `MMC002-COM`, `MMR069-DEP`,
+`MMR079-BAL`. This is the single most important fact for the cutover. Every
+`quotes.zoho_*_invoice_id` we hold is a **Zoho** GUID and resolves to nothing in
+Xero (Xero minted new ids — the Number column reads `INV-000271` and counts down),
+so without a re-map the flip strands every stored id. Because the reference
+survived, `findInvoiceByReference` — which already exists, and under Xero must use
+`where=Reference=="..."` per §4 — is a working re-map path. **This makes §8's
+option (b) achievable rather than aspirational**, and it is now the recommended
+route: stamp each row with its provider, and re-map by reference rather than by id.
+
+**Reference formats in the wild are wider than the bank-feed shape.** Also visible:
+`IMV007-BAL`, `IMV008-BAL` (the iMovE import) and `MM-260709-308-BAL` (an older
+format). None of those match `(?:MM|PM)[RC]\d{3,}`, so §9's brand attribution
+leaves them NULL. That is the correct direction — ambiguity yields nothing — but it
+means the archive's NULL bucket will be substantial rather than a rounding error,
+and whatever renders it must present NULL as its own visible category rather than
+implying Marley.
+
+**Every visible row reads `Awaiting Payment` with `Paid 0.00`,** and the tab counts
+show 198 awaiting payment out of 199. Among them is `MMR069-DEP` at £100 dated
+21 Aug. If payment history genuinely did not migrate — Peter to confirm; it is also
+consistent with only OPEN invoices having been brought across — then pointing
+`getInvoiceStatus` at Xero would read paid deposits as unpaid at
+`accept-flow.ts:2770` and `storage-billing/route.ts:125`, and the app would chase
+customers who have already paid. **This is not a reason to delay the adapter; it is
+a reason the per-row provider stamp is mandatory rather than optional.** A
+pre-cutover invoice must keep being polled against the system that holds its
+payment record.
+
+**Due Date equals Invoice Date on every visible row.** §1 recorded that `overdue`
+is unreachable under Xero because `createInvoice` sets no DueDate — true for
+invoices WE raise, but not for these. Migrated invoices carry a due date already
+past, so a Xero-backed `/finance` would render essentially the whole back catalogue
+in the overdue tone on day one. Worth knowing before anyone reads that page and
+concludes the business is in trouble.
+
+**Xero's own invoice reminders are switched on.** The list header states reminders
+are enabled and will send one day before due, then 7 and 14 days after. With every
+migrated invoice already past due, that is a second, independent chase rail
+pointed at the same customers our own ladder chases — and, if the payment history
+did not migrate, aimed at people who have already paid. It is a live customer-comms
+hazard that exists **right now**, independent of any code here. Flagged to Peter
+2026-08-26 with a recommendation to turn Xero's reminders off and leave chasing to
+Ops, which is the only system that knows what has actually been paid.
+
+
 ## Decisions needed from Peter before gate 18 can finish
 
 1. **Branding themes** (§2) — two theme ids per brand means a migration widening

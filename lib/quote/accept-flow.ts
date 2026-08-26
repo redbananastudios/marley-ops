@@ -97,7 +97,7 @@ import {
   getInvoiceStatus,
   recordInvoicePayment,
   voidInvoice,
-} from "@/lib/zoho";
+} from "@/lib/ledger";
 
 type Sb = SupabaseClient<Database>;
 

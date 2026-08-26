@@ -4,7 +4,7 @@ import { runCron } from "@/lib/cron/run-logger";
 import { log, errorContext } from "@/lib/log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { getInvoiceStatus } from "@/lib/zoho";
+import { getInvoiceStatus } from "@/lib/ledger";
 import {
   raiseDueStorageInvoices,
   repairPendingStorageClaims,

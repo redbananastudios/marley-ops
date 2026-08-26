@@ -44,7 +44,7 @@ import { accountsFromFor } from "@/lib/comms/sender";
 import { getBrandOrDefault, type Brand } from "@/lib/brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
-import { voidInvoice } from "@/lib/zoho";
+import { voidInvoice } from "@/lib/ledger";
 import { balanceDueDate, moveDateLabel } from "@/lib/quote/payments";
 import { ukInstant } from "@/lib/uk-time";
 import { ukDayOf } from "@/lib/sales-report";
