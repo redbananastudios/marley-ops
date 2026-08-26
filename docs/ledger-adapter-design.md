@@ -268,13 +268,18 @@ survived, `findInvoiceByReference` — which already exists, and under Xero must
 option (b) achievable rather than aspirational**, and it is now the recommended
 route: stamp each row with its provider, and re-map by reference rather than by id.
 
-**Reference formats in the wild are wider than the bank-feed shape.** Also visible:
-`IMV007-BAL`, `IMV008-BAL` (the iMovE import) and `MM-260709-308-BAL` (an older
-format). None of those match `(?:MM|PM)[RC]\d{3,}`, so §9's brand attribution
-leaves them NULL. That is the correct direction — ambiguity yields nothing — but it
-means the archive's NULL bucket will be substantial rather than a rounding error,
-and whatever renders it must present NULL as its own visible category rather than
-implying Marley.
+**Reference formats in the wild are wider than one pattern.** Also visible:
+`IMV007-BAL`, `IMV008-BAL` (the iMovE import) and `MM-260709-308-BAL` (the legacy
+scheme). **Correction to §9:** that section named only `(?:MM|PM)[RC]\d{3,}`, but
+`lib/bank-feed/match.ts` REF_PATTERNS carries a *second* pattern — `MM-\d{6}-\d{3}`
+— and the legacy form does carry its brand pair, so `MM-260709-308-BAL` IS
+attributable to Marley. The archive must mirror **both** patterns, not the first
+one alone; `scripts/ledger-snapshot.mjs` does. What genuinely stays NULL is the
+iMovE set and storage's `MMS-<hash>` references, which are minted with no brand
+input at all — which is also exactly why a `startsWith(ref_prefix)` compare must
+never be used here: it would attribute every storage invoice, Pitmans lets
+included, to Marley, and it would look right. Whatever renders the archive must
+give NULL its own visible category rather than implying Marley.
 
 **Every visible row reads `Awaiting Payment` with `Paid 0.00`,** and the tab counts
 show 198 awaiting payment out of 199. Among them is `MMR069-DEP` at £100 dated
