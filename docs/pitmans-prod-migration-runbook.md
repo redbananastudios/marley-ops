@@ -18,8 +18,27 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 |---|---|---|---|
 | 1 | `supabase/migrations/0104_brands.sql` | brands table + seed (pitmans `active=false`), brand columns on leads/quotes/appointments/storage_sites/storage_lets/vehicles, `brand_ref_counters`, `next_quote_ref(kind, brand default 'marley')` (drops the one-arg) | **YES** — counter seed races live quote acceptance; also DROPs the RPC signature PostgREST has cached |
 | 2 | `supabase/migrations/0105_additional_charges.sql` | `quotes.additional_charges numeric(10,2) not null default 0` + `quotes.additional_charges_reason text` — internal uplift (PRD §3.9), folded inside the customer's "Your Removal" line; default 0 backfills every existing quote as "no uplift" | No — additive columns with defaults; existing rows and totals untouched |
+| 3 | `supabase/migrations/0106_ingest_brand.sql` | replaces 0102's global unique index on `leads.external_lead_id` with `leads_external_lead_brand_uq` on `(brand, external_lead_id)` — two brands' websites can mint the same submission id without the second being silently swallowed as a duplicate of the first | No — index swap on a small table; creates the new index before dropping the old, so uniqueness never lapses |
 
 *(rows appended per gate)*
+
+### The image/migration window cuts BOTH ways — keep it inside the quiet window
+
+There is no deploy order that is safe on its own, so do not treat either half as
+the "safe first step":
+
+- **Image first, then migrations** (what "confirm prod == the promoted `master`
+  tip" above implies): between the two, `quotes` has no `additional_charges`
+  column, so `/quotes/[id]` gets a PostgREST 42703. That page drops the error and
+  falls through to `notFound()`, so **every quote in the system renders as a 404**
+  — indistinguishable from a deleted quote, with nothing logged.
+- **Migrations first, then image**: 0104 DROPs the one-arg `next_quote_ref`, so the
+  still-running old image cannot mint a quote reference — **quote creation fails**
+  until the new image is up.
+
+Both windows are minutes, and both are survivable only because nobody is issuing
+quotes. Do the whole operation — image and all migrations — inside the single
+quiet window, and re-check `/quotes/<a real id>` loads before reopening.
 
 ---
 
@@ -69,6 +88,20 @@ from quotes;
 ```
 
 Then, from the app (not psql): create one draft quote on a test lead and confirm it receives the next `MMR###` in sequence — that proves PostgREST resolved the new function signature. Do NOT call `next_quote_ref` from psql to "test" it: every call mints a real reference.
+
+### 0106
+
+```sql
+-- Exactly one index over external_lead_id remains, and it keys on BOTH columns.
+select indexname, indexdef
+from pg_indexes
+where tablename = 'leads'
+  and indexname in ('leads_external_lead_uq', 'leads_external_lead_brand_uq');
+```
+
+Expected: one row, `leads_external_lead_brand_uq`, whose `indexdef` reads `(brand, external_lead_id)` and carries `WHERE (external_lead_id IS NOT NULL)`. If `leads_external_lead_uq` still appears, 0106 did not complete — re-run it before taking Pitmans website traffic.
+
+Cross-brand duplicate-id check — **described, not executed** (prod leads are real customers; do not insert test rows): the property this index guarantees is that two leads may share an `external_lead_id` when their `brand` differs, and never when it matches. It is proven by the unit suite that runs against every promoted build (`tests/lib/leads/website-lead.test.ts` — same id under two brands lands two leads; same id under one brand adopts the existing row). On prod, the index definition above IS the guarantee — no insert test adds evidence it doesn't already give.
 
 ---
 

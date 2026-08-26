@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { landWebsiteLead } from "@/lib/leads/website-lead";
 import {
+  brandIngestSecrets,
   firstIssueMessage,
-  ingestAuthorized,
   MAX_INGEST_BODY_BYTES,
+  payloadBrandMismatch,
+  resolveIngestBrand,
   resolveSubmittedAt,
   websiteLeadIngestSchema,
 } from "@/lib/leads/ingest";
@@ -23,8 +25,15 @@ import { errorContext, log } from "@/lib/log";
  * The contract the caller is written against:
  *
  *   POST /api/ingest/lead
- *   Authorization: Bearer <LEAD_INGEST_SECRET>
+ *   Authorization: Bearer <that brand's ingest secret>
  *   Content-Type: application/json
+ *
+ * One route serves every brand's website. WHICH brand is posting derives from
+ * which secret matched — `LEAD_INGEST_SECRET` is and stays Marley's, other
+ * brands use `LEAD_INGEST_SECRET_<SLUG>` — never from the payload. A body
+ * `brand` field, if present, must equal the derived one or the request is
+ * refused with the same uninformative 401 a bad secret gets (multi-brand PRD
+ * §3.8).
  *
  *   201 { ok: true,  leadId, created: true  }  the lead is now in the panel
  *   200 { ok: true,  leadId, created: false }  a retry — already landed
@@ -51,13 +60,15 @@ function reject(status: number, error: string, detail?: string) {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.LEAD_INGEST_SECRET;
-  if (!ingestAuthorized(req.headers.get("authorization"), secret)) {
+  const brand = resolveIngestBrand(req.headers.get("authorization"), brandIngestSecrets());
+  if (!brand) {
     // A missing secret and a wrong secret are the same answer to the caller —
     // it learns nothing about which. They are NOT the same event to us: an
-    // unconfigured secret means every real lead is being turned away, so it is
-    // logged loudly rather than blending into ordinary rejected traffic.
-    if (!secret?.trim()) log.warn("lead-ingest.secret_unconfigured", {});
+    // unconfigured MARLEY secret means the live site's every real lead is
+    // being turned away, so it is logged loudly rather than blending into
+    // ordinary rejected traffic. An unconfigured per-brand secret is not the
+    // same emergency — that brand's site isn't wired up yet by definition.
+    if (!process.env.LEAD_INGEST_SECRET?.trim()) log.warn("lead-ingest.secret_unconfigured", {});
     return reject(401, "unauthorized");
   }
 
@@ -83,6 +94,14 @@ export async function POST(req: Request) {
     return reject(400, "invalid_payload", "body is not valid JSON");
   }
 
+  // Checked BEFORE payload validation because it is authorisation, not shape:
+  // a body naming a brand its secret cannot vouch for is refused outright,
+  // however well-formed the rest of it is. Same response as a bad secret.
+  if (payloadBrandMismatch(body, brand)) {
+    log.warn("lead-ingest.brand_mismatch", { brand });
+    return reject(401, "unauthorized");
+  }
+
   const parsed = websiteLeadIngestSchema.safeParse(body);
   if (!parsed.success) {
     const detail = firstIssueMessage(parsed.error);
@@ -103,6 +122,8 @@ export async function POST(req: Request) {
     landed = await landWebsiteLead(
       createAdminClient(),
       {
+        // From the matched secret, never the payload — see resolveIngestBrand.
+        brand,
         externalLeadId: input.leadId,
         name: input.name,
         phone: input.phone,
@@ -126,7 +147,7 @@ export async function POST(req: Request) {
   } catch (err) {
     // The row is not committed, so this MUST read as a failure — the caller
     // retries and ultimately falls back to a human.
-    log.error("lead-ingest.failed", { leadId: input.leadId, ...errorContext(err) });
+    log.error("lead-ingest.failed", { leadId: input.leadId, brand, ...errorContext(err) });
     return reject(500, "ingest_failed");
   }
 
@@ -143,7 +164,7 @@ export async function POST(req: Request) {
     }
   }
 
-  log.info("lead-ingest.landed", { leadId: landed.leadId, created: landed.created });
+  log.info("lead-ingest.landed", { leadId: landed.leadId, created: landed.created, brand });
   return NextResponse.json(
     { ok: true, leadId: landed.leadId, created: landed.created },
     { status: landed.created ? 201 : 200, headers: { "Cache-Control": "no-store" } },

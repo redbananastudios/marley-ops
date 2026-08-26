@@ -167,6 +167,39 @@ export const MANIFEST = [
     reason:
       "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
   },
+  // Gate 19: the ingest stack. These three are brand-resolved by contract —
+  // one route serves EVERY brand's website, the pure half derives the brand
+  // from whichever secret matched (never the payload, PRD §3.8), and the
+  // landing path takes brand as data — so they live under scan. The default
+  // brand's name (and, in ingest.ts, its domain) appears only in comments
+  // pinning the pre-brand-layer compatibility contract: the live site posts
+  // with the original `LEAD_INGEST_SECRET` and must see zero change.
+  //
+  // Deliberately NOT listed, because they are PER-BRAND RAILS by design, not
+  // leak surfaces (each rail is one brand's own delivery channel and may name
+  // its brand, exactly as lib/sync/sanity-leads.ts — the default brand's pull
+  // rail — has never been listed): lib/sync/wp-leads.ts and
+  // app/api/cron/wp-leads/route.ts (the second brand's pull rail), and the
+  // WordPress plugin under wordpress/pitmans-lead-bridge/ (PHP shipped to that
+  // brand's own site; a "leak" of its brand into it is the point).
+  {
+    pattern: "lib/leads/ingest.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "comments only: the compatibility contract for the pre-brand-layer LEAD_INGEST_SECRET names whose secret it is and which live site posts with it",
+  },
+  {
+    pattern: "app/api/ingest/lead/route.ts",
+    allow: ["Marley"],
+    reason:
+      "comment only: the route contract doc names whose secret LEAD_INGEST_SECRET is and stays",
+  },
+  {
+    pattern: "lib/leads/website-lead.ts",
+    allow: ["Marley"],
+    reason:
+      "comments only: the brand-field doc and the sanity_id-stays-global rationale name which brand's pull rail carries a Sanity id",
+  },
   // Gate 14: the JOB-document doc-defs (PRD §3.6). Brand identity, colours and
   // filenames arrive as a DocBrand from the brands row; the remaining default-
   // brand literals are the DEFAULT CONSTANTS selected when no brand is passed —

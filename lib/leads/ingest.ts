@@ -62,6 +62,74 @@ export function ingestAuthorized(
   return token.length === expected.length && timingSafeEqual(token, expected);
 }
 
+/** One configured ingest secret and the brand it authorises. */
+export interface BrandIngestSecret {
+  brand: string;
+  secret: string | null | undefined;
+}
+
+/**
+ * Every ingest secret the environment configures, each naming its brand.
+ *
+ * `LEAD_INGEST_SECRET` is Marley's and predates the brand layer — the live
+ * marleymoves.co.uk site posts with it, so its name and its behaviour never
+ * change. Every other brand gets `LEAD_INGEST_SECRET_<SLUG-UPPERCASED>`
+ * (`LEAD_INGEST_SECRET_PITMANS` → brand `pitmans`): the suffix lowercased IS
+ * the brand slug, so wiring a new site is an environment variable, not a code
+ * change. A suffix that names no row in `brands` cannot land a lead — the
+ * insert's foreign key refuses it, loudly, as a 5xx the caller retries and
+ * escalates to a human, never as a lead filed under a brand that doesn't exist.
+ */
+export function brandIngestSecrets(
+  env: Record<string, string | undefined> = process.env,
+): BrandIngestSecret[] {
+  const secrets: BrandIngestSecret[] = [{ brand: "marley", secret: env.LEAD_INGEST_SECRET }];
+  const prefix = "LEAD_INGEST_SECRET_";
+  for (const key of Object.keys(env)) {
+    if (!key.startsWith(prefix)) continue;
+    const slug = key.slice(prefix.length).toLowerCase();
+    if (slug) secrets.push({ brand: slug, secret: env[key] });
+  }
+  return secrets;
+}
+
+/**
+ * Which brand is calling? The brand DERIVES FROM THE SECRET, never from the
+ * payload (multi-brand PRD §3.8): the payload is caller-controlled, the secret
+ * is not, and a lead filed under the wrong brand would send one brand's
+ * customer another brand's emails. Each candidate secret is checked with the
+ * same fail-closed, timing-safe comparison Marley's has always had, so an
+ * unconfigured (or placeholder-short) per-brand secret simply never matches.
+ * Returns the matched secret's slug, or null — the caller answers 401.
+ */
+export function resolveIngestBrand(
+  authorizationHeader: string | null | undefined,
+  secrets: readonly BrandIngestSecret[],
+): string | null {
+  for (const { brand, secret } of secrets) {
+    if (ingestAuthorized(authorizationHeader, secret)) return brand;
+  }
+  return null;
+}
+
+/**
+ * Does the body claim to be a different brand from the one its secret proves?
+ *
+ * The payload never CHOOSES the brand — but if it names one, it must agree
+ * with the one the secret derived, and disagreement earns the same
+ * uninformative 401 a bad secret gets. A caller holding brand A's secret and
+ * posting brand B is misconfigured at best; either way it must not land a
+ * lead under a brand it cannot authenticate for. An absent or null field
+ * carries no claim (Marley's live site sends none) and is fine; anything else
+ * — including a non-string — must equal the derived slug exactly.
+ */
+export function payloadBrandMismatch(body: unknown, derivedBrand: string): boolean {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return false;
+  const claimed = (body as { brand?: unknown }).brand;
+  if (claimed === undefined || claimed === null) return false;
+  return claimed !== derivedBrand;
+}
+
 /** Trimmed, length-capped, and empty-to-null so "" never reaches a column. */
 function optionalText(max: number) {
   return z

@@ -57,6 +57,16 @@ export const CRON_JOBS: CronJobMeta[] = [
     endpoint: "/api/sync/sanity-leads",
   },
   {
+    slug: "wp-leads",
+    label: "Pitmans website lead pull",
+    schedule: "*/15 * * * *",
+    cadence: "Every 15 minutes",
+    description:
+      "Polls the Pitmans WordPress lead-bridge plugin and lands any enquiry the direct push missed (brand pitmans) — the backstop that keeps push failures from losing leads silently.",
+    maxAgeMins: 60,
+    endpoint: "/api/cron/wp-leads",
+  },
+  {
     slug: "storage-billing",
     label: "Storage billing",
     schedule: "0 7 * * *",

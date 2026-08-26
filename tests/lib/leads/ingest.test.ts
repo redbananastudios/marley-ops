@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  brandIngestSecrets,
   firstIssueMessage,
   ingestAuthorized,
   MAX_SUBMISSION_AGE_MS,
+  payloadBrandMismatch,
+  resolveIngestBrand,
   resolveSubmittedAt,
   websiteLeadIngestSchema,
 } from "@/lib/leads/ingest";
@@ -53,6 +56,64 @@ describe("ingestAuthorized", () => {
   it("tolerates surrounding whitespace on the header but not inside the token", () => {
     expect(ingestAuthorized(`  Bearer ${SECRET}  `, SECRET)).toBe(true);
     expect(ingestAuthorized(`Bearer ${SECRET.slice(0, 5)} ${SECRET.slice(5)}`, SECRET)).toBe(false);
+  });
+});
+
+describe("brand resolution — WHICH secret matched IS the brand (PRD §3.8)", () => {
+  const MARLEY = SECRET;
+  const PITMANS = "p1tmans-secret-long-enough";
+  const secrets = brandIngestSecrets({
+    LEAD_INGEST_SECRET: MARLEY,
+    LEAD_INGEST_SECRET_PITMANS: PITMANS,
+  });
+
+  it("collects Marley's original variable plus one per LEAD_INGEST_SECRET_<SLUG>", () => {
+    expect(secrets).toEqual([
+      { brand: "marley", secret: MARLEY },
+      { brand: "pitmans", secret: PITMANS },
+    ]);
+  });
+
+  it("resolves each brand from its own secret", () => {
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, secrets)).toBe("marley");
+    expect(resolveIngestBrand(`Bearer ${PITMANS}`, secrets)).toBe("pitmans");
+  });
+
+  it("resolves nothing for a wrong or absent secret", () => {
+    expect(resolveIngestBrand("Bearer wrong-but-plenty-long-enough", secrets)).toBe(null);
+    expect(resolveIngestBrand(null, secrets)).toBe(null);
+  });
+
+  it("an unconfigured per-brand secret never matches — Marley alone behaves exactly as before", () => {
+    const marleyOnly = brandIngestSecrets({ LEAD_INGEST_SECRET: MARLEY });
+    expect(marleyOnly).toEqual([{ brand: "marley", secret: MARLEY }]);
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, marleyOnly)).toBe("marley");
+    expect(resolveIngestBrand(`Bearer ${PITMANS}`, marleyOnly)).toBe(null);
+  });
+
+  it("a placeholder-short or blank per-brand secret fails CLOSED, like Marley's always has", () => {
+    const s = brandIngestSecrets({ LEAD_INGEST_SECRET_PITMANS: "changeme", LEAD_INGEST_SECRET_GROUP: "" });
+    expect(resolveIngestBrand("Bearer changeme", s)).toBe(null);
+    expect(resolveIngestBrand("Bearer ", s)).toBe(null);
+  });
+});
+
+describe("payloadBrandMismatch", () => {
+  it("passes a body that names no brand — Marley's live site sends none", () => {
+    expect(payloadBrandMismatch({ leadId: "x" }, "marley")).toBe(false);
+    expect(payloadBrandMismatch({ leadId: "x", brand: null }, "marley")).toBe(false);
+    expect(payloadBrandMismatch(null, "marley")).toBe(false);
+    expect(payloadBrandMismatch([{ brand: "pitmans" }], "marley")).toBe(false);
+  });
+
+  it("passes a claim that agrees with the secret's brand", () => {
+    expect(payloadBrandMismatch({ brand: "pitmans" }, "pitmans")).toBe(false);
+  });
+
+  it("refuses a claim the secret cannot vouch for — exactly, case and type included", () => {
+    expect(payloadBrandMismatch({ brand: "marley" }, "pitmans")).toBe(true);
+    expect(payloadBrandMismatch({ brand: "Pitmans" }, "pitmans")).toBe(true);
+    expect(payloadBrandMismatch({ brand: 1234 }, "pitmans")).toBe(true);
   });
 });
 
