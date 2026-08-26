@@ -24,7 +24,8 @@ import { Label } from "@/components/ui/label";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { saveQuoteDraft, setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
 import { buildQuoteEmailHtml, quoteEmailTemplateVars } from "@/lib/comms/quote-email";
-import { quotePdfBase64 } from "@/lib/quote/pdf-client";
+import { quotePdfBase64, quotePdfFilename } from "@/lib/quote/pdf-client";
+import type { DocBrand } from "@/lib/pdf/doc-brand";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -52,6 +53,7 @@ export function SendQuoteDialog({
   vatNumber,
   depositAmount,
   acceptUrl,
+  brand,
   resend,
   onSent,
 }: {
@@ -74,6 +76,9 @@ export function SendQuoteDialog({
   depositAmount?: number;
   /** Customer accept page (/q/<token>) — email CTA + the PDF's QR codes. */
   acceptUrl?: string;
+  /** Non-default brand for the attached PDF + its filename (PRD §3.6). Absent
+   *  keeps today's Marley PDF and MarleyMoves-Quote-<ref>.pdf name exactly. */
+  brand?: DocBrand | null;
   /** Re-send of an already-sent/accepted quote (customer asked again). Preserves
    *  the quote's status — a re-send must never bump an accepted quote back to
    *  "sent" — and the duplicate override is reasoned "customer requested re-send". */
@@ -157,6 +162,7 @@ export function SendQuoteDialog({
         vatNumber,
         depositAmount,
         acceptUrl,
+        brand,
       });
 
       const result = await sendCommunication({
@@ -167,7 +173,7 @@ export function SendQuoteDialog({
         ...(templateVariables ? { templateKey: "quote-email" as const, templateVariables } : {}),
         bodyText: "Your removal quote is attached.",
         attachmentBase64,
-        attachmentName: `MarleyMoves-Quote-${quoteRef}.pdf`,
+        attachmentName: quotePdfFilename(quoteRef, brand),
         quoteId,
         leadId: leadId ?? undefined,
         clientId: clientId ?? undefined,
@@ -303,7 +309,7 @@ export function SendQuoteDialog({
             </p>
             <p className="mt-2 flex items-center gap-2 text-xs text-mist-400">
               <Paperclip className="size-3.5" strokeWidth={1.75} />
-              MarleyMoves-Quote-{quoteRef}.pdf attached
+              {quotePdfFilename(quoteRef, brand)} attached
             </p>
           </div>
         </div>

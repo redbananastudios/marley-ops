@@ -20,6 +20,8 @@ import {
   vehicleShortLabel,
 } from "@/lib/cubic-survey";
 import { getBusinessSettings } from "@/lib/settings";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { docBrandFrom } from "@/lib/pdf/doc-brand";
 import type { JobSheetData, JobSheetPhoto } from "@/lib/job-sheet-docdef";
 
 const MAX_PHOTOS = 6;
@@ -103,7 +105,7 @@ export async function crewAssignedToAppointment(
 export async function loadJobSheet(admin: Admin, appointmentId: string): Promise<JobSheetLoad | null> {
   const { data: appt } = await admin
     .from("appointments")
-    .select("id, title, starts_at, ends_at, all_day, appt_type, lead_id")
+    .select("id, title, starts_at, ends_at, all_day, appt_type, lead_id, brand")
     .eq("id", appointmentId)
     .single();
   if (!appt) return null;
@@ -161,6 +163,13 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
     crew,
     vehicles,
   );
+
+  // The sheet is a JOB document, so it carries the job's brand (PRD §3.6).
+  // DEFAULT_BRAND skips the read entirely — the doc-def's own constants ARE
+  // that rendering (byte-parity by construction), so data.brand stays unset.
+  if (appt.brand && appt.brand !== DEFAULT_BRAND) {
+    data.brand = docBrandFrom(await getBrandOrDefault(admin, appt.brand));
+  }
 
   // Cubic-survey data for the crew — volume summary + the FULL room-grouped
   // item list + a count of the AI walkthrough videos. All price-free (owner

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildContractDocDef, termsToContent, type ContractDocData } from "@/lib/contract-docdef";
 import { currentVersion, versionById } from "@/lib/legal/documents";
+import type { DocBrand } from "@/lib/pdf/doc-brand";
 
 const base: ContractDocData = {
   documentTitle: "Contract",
@@ -82,6 +83,45 @@ describe("contract doc-def", () => {
     const s = flat({ ...base, channel: "in_person", collectedByName: "Connor" });
     expect(s).toContain("in person on a Marley Moves device");
     expect(s).toContain("collected by Connor");
+  });
+
+  it("no brand renders today's default-brand literals — the byte-parity contract", () => {
+    const s = flat(base);
+    expect(s).toContain("MARLEY MOVES");
+    expect(s).toContain("#C03838");
+    expect(s).not.toContain("Pitmans");
+  });
+
+  it("a brand substitutes its identity, group disclosure, legal line, colour and device line", () => {
+    const pitmans: DocBrand = {
+      slug: "pitmans",
+      name: "Pitmans Removals & Storage",
+      shortName: "Pitmans",
+      groupLine: "Part of the Marley Group",
+      legalLine: "MarleyMoves Ltd trading as Pitmans Removals & Storage · Company No. 15914266",
+      phone: "01258 000000",
+      email: "info@example.co.uk",
+      websiteUrl: null,
+      colour: "#2B2B76",
+    };
+    // A neutral terms body: the real published terms name the default brand,
+    // which would mask a leak assertion.
+    const s = flat({
+      ...base,
+      quoteRef: "PMR001",
+      channel: "in_person",
+      termsBody: "## 1. Scope\n\nThe Company will carry out the removal.",
+      brand: pitmans,
+    });
+    expect(s).toContain("PITMANS REMOVALS & STORAGE");
+    expect(s).toContain("Part of the Marley Group");
+    expect(s).toContain("MarleyMoves Ltd trading as Pitmans Removals & Storage · Company No. 15914266");
+    expect(s).toContain("in person on a Pitmans device");
+    expect(s).toContain("#2B2B76");
+    // No default-brand leak: no red, no wordmark, no default device line.
+    expect(s).not.toContain("#C03838");
+    expect(s).not.toContain("MARLEY MOVES");
+    expect(s).not.toContain("Marley Moves device");
   });
 
   it("survives the fields a real row can be missing", () => {

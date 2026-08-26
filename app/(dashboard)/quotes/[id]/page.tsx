@@ -7,6 +7,8 @@ import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { docBrandFrom, type DocBrand } from "@/lib/pdf/doc-brand";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
 import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
@@ -59,7 +61,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id, brand",
     )
     .eq("id", id)
     .maybeSingle();
@@ -100,6 +102,17 @@ export default async function QuoteDetailPage({
       : blobValues;
   const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
   const emailedCount = quote.email_send_count ?? 0;
+
+  // Brand for the PDF (PRD §3.6 — a document about a job carries its brand).
+  // Resolved HERE (where a supabase client exists) and passed down as the plain
+  // serialisable DocBrand, because the PDF builds client-side. docBrandFrom
+  // returns null for the default brand — the doc-def's own literals ARE that
+  // brand's rendering, byte-identical — and getBrandOrDefault's Marley
+  // fallback on a bad slug lands there too.
+  const pdfBrand: DocBrand | null =
+    quote.brand && quote.brand !== DEFAULT_BRAND
+      ? docBrandFrom(await getBrandOrDefault(sb, quote.brand))
+      : null;
 
   // Every quote gets its accept token here (lazily, idempotent) so the PDF QR
   // codes and the email CTA always point at the live /q/<token> page.
@@ -298,6 +311,7 @@ export default async function QuoteDetailPage({
           estimatorName={estimatorName}
           vatNumber={settings.vatNumber || undefined}
           acceptUrl={acceptUrl}
+          brand={pdfBrand}
         />
       </PageHeader>
 
@@ -330,6 +344,7 @@ export default async function QuoteDetailPage({
           settings={settings}
           acceptUrl={acceptUrl}
           cubicHint={cubicHint}
+          brand={pdfBrand}
         />
       ) : (
         <>
