@@ -117,6 +117,7 @@ export function FollowUpsQueue({
   rows,
   brands = [],
   showBrandChips = false,
+  brandComms = {},
 }: {
   rows: FollowUpRow[];
   /** Active brands (multi-brand PRD §4) — chip data. Empty or single-entry →
@@ -125,6 +126,10 @@ export function FollowUpsQueue({
   /** True only in multi-brand mode with the ?brand= filter on All — the chip
    *  is hidden when the segmented control already names a single brand. */
   showBrandChips?: boolean;
+  /** Per-slug comms identity for the prefilled templates (multi-brand PRD
+   *  §3.5) — name + phone so a non-default brand's follow-up copy never says
+   *  Marley. Absent/marley rows keep today's exact copy. */
+  brandComms?: Record<string, { name: string; phone: string | null }>;
 }) {
   const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
   const chipFor = (r: FollowUpRow): BrandChipData | null =>
@@ -167,9 +172,9 @@ export function FollowUpsQueue({
 
   return (
     <div className="space-y-8">
-      <Section title="Overdue" tone="danger" rows={groups.overdue} chipFor={chipFor} />
-      <Section title="Due today" tone="normal" rows={groups.today} chipFor={chipFor} />
-      <Section title="Upcoming" tone="muted" rows={groups.upcoming} chipFor={chipFor} />
+      <Section title="Overdue" tone="danger" rows={groups.overdue} chipFor={chipFor} brandComms={brandComms} />
+      <Section title="Due today" tone="normal" rows={groups.today} chipFor={chipFor} brandComms={brandComms} />
+      <Section title="Upcoming" tone="muted" rows={groups.upcoming} chipFor={chipFor} brandComms={brandComms} />
     </div>
   );
 }
@@ -179,11 +184,13 @@ function Section({
   tone,
   rows,
   chipFor,
+  brandComms,
 }: {
   title: string;
   tone: "danger" | "normal" | "muted";
   rows: FollowUpRow[];
   chipFor: (r: FollowUpRow) => BrandChipData | null;
+  brandComms: Record<string, { name: string; phone: string | null }>;
 }) {
   if (rows.length === 0) return null;
   return (
@@ -199,14 +206,22 @@ function Section({
       </h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((r) => (
-          <FollowUpCard key={r.id} r={r} chip={chipFor(r)} />
+          <FollowUpCard key={r.id} r={r} chip={chipFor(r)} brandComms={brandComms} />
         ))}
       </div>
     </section>
   );
 }
 
-function FollowUpCard({ r, chip }: { r: FollowUpRow; chip: BrandChipData | null }) {
+function FollowUpCard({
+  r,
+  chip,
+  brandComms,
+}: {
+  r: FollowUpRow;
+  chip: BrandChipData | null;
+  brandComms: Record<string, { name: string; phone: string | null }>;
+}) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [outcomeOpen, setOutcomeOpen] = useState(false);
@@ -216,11 +231,16 @@ function FollowUpCard({ r, chip }: { r: FollowUpRow; chip: BrandChipData | null 
   // also fills card_payments.zoho_credit_note_number — a bare "Done" would close
   // the card and leave the books and the app disagreeing.
   const isCreditNote = r.reason === "custom" && r.source === "card_payment" && r.kind === "credit_note";
+  // Non-default brands prefill their own name + phone into the canned copy
+  // (multi-brand PRD §3.5); marley/absent keeps today's exact defaults.
+  const brandCtx = r.brand && r.brand !== "marley" ? brandComms[r.brand] : undefined;
   const template = templateForReason(r.reason, {
     firstName: r.name,
     quoteRef: r.quoteRef,
     amount: r.amount,
     moveDate: r.moveDate ? fmtDate(r.moveDate) : null,
+    brandName: brandCtx?.name ?? null,
+    brandPhone: brandCtx?.phone ?? null,
   });
 
   function run(fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {

@@ -261,15 +261,15 @@ export const MANIFEST = [
   },
   {
     pattern: "components/quote/quote-header-actions.tsx",
-    allow: ["Marley", "mm-red"],
+    allow: ["mm-red"],
     reason:
-      "mm-red app chrome (PRD §2): the send button; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+      "mm-red app chrome (PRD §2): the send button. The gate-14 'Marley' allow is GONE — gate 13 rewrote the brand-prop jsdoc to describe the full brands row, so the literal no longer occurs and the dead-allow rule required its removal",
   },
   {
     pattern: "components/quote/resend-quote-button.tsx",
-    allow: ["Marley", "mm-red"],
+    allow: ["mm-red"],
     reason:
-      "mm-red app chrome (PRD §2): the mail icon tint; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+      "mm-red app chrome (PRD §2): the mail icon tint. The gate-14 'Marley' allow is GONE for the same reason as quote-header-actions.tsx above",
   },
   {
     pattern: "app/my-jobs/[id]/page.tsx",
@@ -326,13 +326,27 @@ export const MANIFEST = [
     reason:
       "appears only in the legacy-iMVE contract-suppression comment (same rule lib/job-sheet-load.ts documents) — the unsigned-contracts tile logic, not rendered identity",
   },
-  // NOT-YET-manifest (2026-08-26): components/quote/send-quote-dialog.tsx and
-  // app/actions/crew-signatures.ts thread the gate-14 brand into their PDF
-  // attachment names, but their EMAIL surfaces (the hardcoded quote subject
-  // line, the cert email body/sender, office notification links) still carry
-  // default-brand identity — that is gate 13 comms work, flagged in that
-  // gate's report. Listing them now would need allows that mask the very
-  // leaks gate 13 exists to fix; add both entries in gate 13's PR instead.
+  // STILL-NOT-manifest, and this note is deliberately NOT self-clearing.
+  //
+  // Written before gate 13 as "add both entries in gate 13's PR instead". Gate
+  // 13 has now landed and they are still absent, because the reason they were
+  // excluded has NOT gone away: both files retain default-brand identity that
+  // an allow list would have to exempt wholesale, which is exactly the masking
+  // the original note warned against.
+  //
+  //   components/quote/send-quote-dialog.tsx — the subject line's default arm
+  //     is the "Marley Moves" literal (brand.slug !== "marley" ? brand.name :
+  //     "Marley Moves"), plus the "MarleyMoves-Quote-<ref>.pdf" filename echo.
+  //     Exempting those needs allow: ["Marley Moves", "MarleyMoves", ...],
+  //     which would also wave through a genuine leak of either literal.
+  //   app/actions/crew-signatures.ts — two marleymoves.co.uk office-notification
+  //     links survive brand resolution.
+  //
+  // So these two remain unscanned, and that gap is stated here rather than
+  // being hidden behind a green run (this file's own evidence-discipline rule:
+  // "I could not check" must never render as "nothing to report"). Whoever
+  // de-brands those surfaces adds the entries in the SAME change and deletes
+  // this block — do not add them earlier to make the manifest look complete.
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);

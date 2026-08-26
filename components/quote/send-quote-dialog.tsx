@@ -25,10 +25,11 @@ import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { saveQuoteDraft, setQuoteStatus } from "@/app/(dashboard)/quotes/actions";
 import { buildQuoteEmailHtml, quoteEmailTemplateVars } from "@/lib/comms/quote-email";
 import { quotePdfBase64, quotePdfFilename } from "@/lib/quote/pdf-client";
-import type { DocBrand } from "@/lib/pdf/doc-brand";
+import { docBrandFrom } from "@/lib/pdf/doc-brand";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
+import type { Brand } from "@/lib/brand";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -76,9 +77,12 @@ export function SendQuoteDialog({
   depositAmount?: number;
   /** Customer accept page (/q/<token>) — email CTA + the PDF's QR codes. */
   acceptUrl?: string;
-  /** Non-default brand for the attached PDF + its filename (PRD §3.6). Absent
-   *  keeps today's Marley PDF and MarleyMoves-Quote-<ref>.pdf name exactly. */
-  brand?: DocBrand | null;
+  /** The quote's brand row (multi-brand PRD §3.5 + §3.6) — the FULL row, because
+   *  the email needs it: subject line, chrome and reply-to all resolve from it.
+   *  The slim, serialisable DocBrand the attached PDF's doc-def takes is derived
+   *  from it below (docBrandFrom), so one prop still carries both gates. Absent,
+   *  or marley, composes today's exact email and today's exact Marley PDF. */
+  brand?: Brand | null;
   /** Re-send of an already-sent/accepted quote (customer asked again). Preserves
    *  the quote's status — a re-send must never bump an accepted quote back to
    *  "sent" — and the duplicate override is reasoned "customer requested re-send". */
@@ -111,6 +115,14 @@ export function SendQuoteDialog({
 
   // Once the entered address differs from the lead's stored one, offer to adopt it.
   const differs = email.trim() !== "" && norm(email) !== norm(baseline);
+
+  // Two gates, one `brand` prop. The EMAIL takes the full brands row (subject,
+  // chrome, reply-to — PRD §3.5); the PDF doc-def takes the slim, serialisable
+  // DocBrand (PRD §3.6), because it is built in the browser. docBrandFrom is the
+  // bridge and returns null for the default brand, so a Marley quote renders
+  // today's exact document from the doc-def's own literals — parity by
+  // construction, not by the seeded row happening to hold the right values.
+  const pdfBrand = brand ? docBrandFrom(brand) : null;
 
   async function doSend(override?: { reason: string }) {
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
@@ -151,7 +163,7 @@ export function SendQuoteDialog({
         }
       }
 
-      const emailMeta = { quoteRef, acceptUrl, depositAmount };
+      const emailMeta = { quoteRef, acceptUrl, depositAmount, brand };
       const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
       // Server prefers the published Resend template (dashboard-editable copy)
       // when its env id is set; bodyHtml stays as the fallback body.
@@ -162,18 +174,22 @@ export function SendQuoteDialog({
         vatNumber,
         depositAmount,
         acceptUrl,
-        brand,
+        brand: pdfBrand,
       });
 
       const result = await sendCommunication({
         channel: "email",
         to: email.trim(),
-        subject: `Your removal quote from Marley Moves — ${quoteRef}`,
+        subject: `Your removal quote from ${brand && brand.slug !== "marley" ? brand.name : "Marley Moves"} — ${quoteRef}`,
         bodyHtml,
         ...(templateVariables ? { templateKey: "quote-email" as const, templateVariables } : {}),
         bodyText: "Your removal quote is attached.",
         attachmentBase64,
-        attachmentName: quotePdfFilename(quoteRef, brand),
+        // Gate 14's shared helper wins here: the emailed attachment must carry
+        // exactly the name the PDF downloads under (brand shortName, PRD §10 —
+        // Pitmans-Quote-PMR001.pdf), and for Marley pdfBrand is null, so this is
+        // byte-identically today's MarleyMoves-Quote-<ref>.pdf.
+        attachmentName: quotePdfFilename(quoteRef, pdfBrand),
         quoteId,
         leadId: leadId ?? undefined,
         clientId: clientId ?? undefined,
@@ -309,7 +325,7 @@ export function SendQuoteDialog({
             </p>
             <p className="mt-2 flex items-center gap-2 text-xs text-mist-400">
               <Paperclip className="size-3.5" strokeWidth={1.75} />
-              {quotePdfFilename(quoteRef, brand)} attached
+              {quotePdfFilename(quoteRef, pdfBrand)} attached
             </p>
           </div>
         </div>

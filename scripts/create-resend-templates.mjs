@@ -17,6 +17,30 @@
  *
  * The everyday MARLEY_RESEND_API_KEY works here (verified 2026-07-13 — it has
  * full template read/write). Without a key you can still --preview-dir.
+ *
+ * --brand <slug> (default marley) builds the set for another brand with
+ * BRAND-PREFIXED template names ("pitmans-quote-email"), so a Pitmans run can
+ * never name-collide with the live Marley set (multi-brand PRD §11.7 trap 4).
+ * Brand copy, colours and addresses come from BRAND_CONFIGS below — an
+ * offline mirror of the seeded brands rows (supabase/migrations/0104_brands.sql).
+ * THE DB ROW IS CANONICAL; the inline lookup exists only because this script
+ * runs outside the app with no database access. Group comms (the crew portal
+ * invite) stay Marley-only per PRD §11.10 and are never cloned per brand.
+ *
+ *   node scripts/create-resend-templates.mjs --brand pitmans --preview-dir .resend-preview/pitmans
+ *
+ * LIVE PUSH FOR PITMANS IS GATED: do not run a keyed --brand pitmans push
+ * until Resend domain verification for pitmansremovals.co.uk lands (Phase 0).
+ * After a live push the script prints the template-key -> id JSON. Store it on
+ * the brand row (id capture, PRD §3.5) with:
+ *
+ *   update brands
+ *      set resend_template_ids = '<paste the printed JSON>'::jsonb
+ *    where slug = 'pitmans';
+ *
+ * The JSON is keyed by the UNPREFIXED template key ("quote-email") — the key
+ * templateIdFor(brand, key) resolves — while the brand prefix lives only in
+ * the Resend dashboard name.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -30,6 +54,120 @@ const PREVIEW_DIR = previewArg >= 0 ? process.argv[previewArg + 1] : null;
 const onlyArg = process.argv.indexOf("--only");
 const ONLY = onlyArg >= 0 ? new Set((process.argv[onlyArg + 1] ?? "").split(",").filter(Boolean)) : null;
 
+// --brand <slug> selects whose set to build. Default marley: a no-flag run is
+// byte-identical to the script's original single-brand behaviour (unprefixed
+// names, env-var lines printed). Non-marley sets take brand-prefixed names so
+// a push can never PATCH a live Marley template by name (PRD §11.7 trap 4).
+const brandArg = process.argv.indexOf("--brand");
+const BRAND = brandArg >= 0 ? (process.argv[brandArg + 1] ?? "") : "marley";
+
+/* ================================================================= brands
+ * Offline mirror of the seeded brands rows (supabase/migrations/0104_brands.sql)
+ * plus the per-brand template copy that exists only here. THE DB ROW IS
+ * CANONICAL for every value it also carries (colours, phones, addresses,
+ * from-addresses): if the row changes, change this mirror in the same commit.
+ */
+const BRAND_CONFIGS = {
+  marley: {
+    // Every value here is today's live literal. The no-flag run must remain
+    // byte-identical to the pre-refactor script (verified render-to-render at
+    // gate 13) — do not "tidy" these strings.
+    namePrefix: "",
+    name: "Marley Moves",
+    signoff: "The Marley Moves Team",
+    logoUrl: "https://marleymoves.co.uk/logo.png",
+    accent: "#C03838",
+    headerTdAttrs: 'style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;"',
+    phone: "01747 637070",
+    phoneHref: "01747637070",
+    email: "hello@marleymoves.co.uk",
+    websiteUrl: "https://marleymoves.co.uk",
+    websiteLabel: "marleymoves.co.uk",
+    footerLegalHtml:
+      '<strong style="color:#5A554F;">MarleyMoves Ltd</strong> &middot; Company No. 15914266 &middot; VAT 520 2213 58',
+    footerAddress: "Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX",
+    termsUrl: "https://marleymoves.co.uk/terms-conditions",
+    privacyUrl: "https://marleymoves.co.uk/privacy-policy",
+    helloFrom: "Marley Moves <hello@marleymoves.co.uk>",
+    moneyFrom: "Marley Moves <accounts@marleymoves.co.uk>",
+    howToPayLine: "Bank transfer, card over the phone on 01747 637070, or cash. Whichever suits.",
+    payEntityNoteHtml: "",
+    fleetNoteLine: "",
+    quoteDepositStepDesc: "Card or bank transfer. This secures your booking; confirming your date then locks it in.",
+    chaseDeposit1PayLine: "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
+    depositChaseEntityLine: "",
+    reviewCrewPhrase: "Connor and the crew",
+    reviewUrlFallback: "https://g.page/r/CXD_Yh4RUF1cEBM/review",
+    quoteLinkFallback: "https://marleymoves.co.uk/quote/",
+    refundSlaFallback:
+      "Card refunds normally show on your statement within 3 to 5 working days and bank transfers usually arrive the same day, all well within the 14 days we promise.",
+    includeCrewInvite: true,
+    previewOverrides: {},
+  },
+  pitmans: {
+    // PRD §3.5: yellow header band; buttons, links and accents blue. Card
+    // copy is ABSENT throughout — brands.card_payments_enabled is false for
+    // Pitmans and the word "card" may only reach customer copy when the
+    // global AND brand switches are both true (§11.10). Both §3.5 disclosures
+    // live here: payment emails name MarleyMoves Ltd with the PM reference;
+    // booking-confirmation and pre-move emails note a Marley Moves vehicle or
+    // crew may attend.
+    namePrefix: "pitmans-",
+    name: "Pitmans Removals & Storage",
+    signoff: "The Pitmans Removals Team",
+    // PLACEHOLDER (Phase 0): real logo asset pending from Mark — §10 stubs.
+    logoUrl: "https://pitmansremovals.co.uk/logo.png",
+    accent: "#2B2B76",
+    headerTdAttrs: 'bgcolor="#FFCC00" style="padding:34px 36px 22px;background:#FFCC00;"',
+    phone: "01258 858564",
+    phoneHref: "01258858564",
+    email: "info@pitmansremovals.co.uk",
+    websiteUrl: "https://pitmansremovals.co.uk",
+    websiteLabel: "pitmansremovals.co.uk",
+    footerLegalHtml:
+      '<strong style="color:#5A554F;">Pitmans Removals &amp; Storage</strong> is a trading name of MarleyMoves Ltd &middot; Company No. 15914266 &middot; VAT 520 2213 58',
+    footerAddress: "Uplands Business Park, Blandford Heights, Shaftesbury Road, Blandford Forum, Dorset DT11 7UZ",
+    // Marley's documents on purpose until gate 15 ships the unified terms
+    // (0104 seed: terms_url null renders Marley terms). MarleyMoves Ltd is
+    // the legal entity and data controller for both brands.
+    termsUrl: "https://marleymoves.co.uk/terms-conditions",
+    privacyUrl: "https://marleymoves.co.uk/privacy-policy",
+    helloFrom: "Pitmans Removals & Storage <info@pitmansremovals.co.uk>",
+    // accounts@ is provisional (Phase 0 mailbox list pending Mark) — §10 stubs.
+    moneyFrom: "Pitmans Removals & Storage <accounts@pitmansremovals.co.uk>",
+    howToPayLine: "Bank transfer or cash. Whichever suits.",
+    payEntityNoteHtml:
+      '\n        <div style="font-size:12.5px;color:#5A554F;line-height:1.55;margin-bottom:12px;">Pitmans Removals &amp; Storage is part of the Marley Group. Your payment goes to our parent company, MarleyMoves Ltd, using the account details and reference below.</div>',
+    fleetNoteLine:
+      "One thing worth knowing: a Marley Moves vehicle or crew, part of the same family firm, may carry out your move.",
+    quoteDepositStepDesc:
+      "By bank transfer, details on your quote page. This secures your booking; confirming your date then locks it in.",
+    chaseDeposit1PayLine:
+      "You can pay by bank transfer from your quote page. Your payment goes to our parent company, MarleyMoves Ltd, with reference {{{QUOTE_REF}}}:",
+    depositChaseEntityLine:
+      "A quick note on payment: your deposit goes to our parent company, MarleyMoves Ltd, with reference {{{QUOTE_REF}}}.",
+    reviewCrewPhrase: "the crew",
+    // PLACEHOLDER (Phase 0): the Pitmans Google listing link is pending. The
+    // app only sends review requests when brands.review_url is set, and it
+    // must never fall back to Marley's listing (0104 seed comment).
+    reviewUrlFallback: "https://pitmansremovals.co.uk",
+    quoteLinkFallback: "https://pitmansremovals.co.uk",
+    refundSlaFallback: "Bank transfers usually arrive the same day, well within the 14 days we promise.",
+    includeCrewInvite: false, // group comm — Marley-only per PRD §11.10
+    previewOverrides: {
+      OWNER_NAME: "Mark",
+      QUOTE_REF: "PMR017",
+      REPLY_HREF: "mailto:info@pitmansremovals.co.uk",
+    },
+  },
+};
+
+const B = BRAND_CONFIGS[BRAND];
+if (!B) {
+  console.error(`Unknown --brand "${BRAND}". Known brands: ${Object.keys(BRAND_CONFIGS).join(", ")}`);
+  process.exit(1);
+}
+
 const KEY = process.env.RESEND_FULL_API_KEY || process.env.MARLEY_RESEND_FULL_API_KEY || process.env.MARLEY_RESEND_API_KEY;
 if (!KEY && !PREVIEW_DIR) {
   console.error("Set RESEND_FULL_API_KEY (or MARLEY_RESEND_API_KEY) for the Marley Resend team.");
@@ -39,38 +177,43 @@ if (!KEY && !PREVIEW_DIR) {
 const API = "https://api.resend.com";
 const headers = { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
 
+/** Build the full template registry for one brand. Everything brand-specific
+ *  reads from `B`; the marley config reproduces the original output byte for
+ *  byte (verified against a pre-refactor render) — keep it that way. */
+function buildTemplateSet(B) {
 /* ================================================================ house style */
 
-const LOGO_URL = "https://marleymoves.co.uk/logo.png";
+const LOGO_URL = B.logoUrl;
 const FONT_STACK = "'Montserrat','Segoe UI',Helvetica,Arial,sans-serif";
 const FONT_LINK =
   '<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700&display=swap" rel="stylesheet">';
-const RED = "#C03838";
+const ACCENT = B.accent;
 const INK = "#1A1A1A";
 const INK_SOFT = "#5A554F";
+const PHONE = B.phone;
 
 // Standard footer on EVERY email. Legal name MarleyMoves Ltd (one word); brand
 // "Marley Moves" (space) stays in body copy + team sign-off.
 const STANDARD_FOOTER = `  <tr><td style="padding:26px 36px;border-top:1px solid #EAE7E2;">
     <p style="margin:0;font-size:11px;line-height:1.85;color:#8A857E;text-align:center;">
-      <strong style="color:#5A554F;">MarleyMoves Ltd</strong> &middot; Company No. 15914266 &middot; VAT 520 2213 58<br>
-      Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX<br>
-      <a href="tel:01747637070" style="color:#8A857E;text-decoration:none;">01747 637070</a> &middot; <a href="mailto:hello@marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">hello@marleymoves.co.uk</a> &middot; <a href="https://marleymoves.co.uk" style="color:#8A857E;text-decoration:none;">marleymoves.co.uk</a><br>
+      ${B.footerLegalHtml}<br>
+      ${B.footerAddress}<br>
+      <a href="tel:${B.phoneHref}" style="color:#8A857E;text-decoration:none;">${B.phone}</a> &middot; <a href="mailto:${B.email}" style="color:#8A857E;text-decoration:none;">${B.email}</a> &middot; <a href="${B.websiteUrl}" style="color:#8A857E;text-decoration:none;">${B.websiteLabel}</a><br>
       Fully insured: Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
-      Registered in England &amp; Wales &middot; <a href="https://marleymoves.co.uk/terms-conditions" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="https://marleymoves.co.uk/privacy-policy" style="color:#8A857E;text-decoration:underline;">Privacy</a>
+      Registered in England &amp; Wales &middot; <a href="${B.termsUrl}" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="${B.privacyUrl}" style="color:#8A857E;text-decoration:underline;">Privacy</a>
     </p>
   </td></tr>`;
 
 const shellHtml = (preheader, inner) => `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title>${FONT_LINK}</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${B.name}</title>${FONT_LINK}</head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:${FONT_STACK};color:${INK};">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${preheader}</div>
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
-  <tr><td align="center" style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">
+  <tr><td align="center" ${B.headerTdAttrs}>
+    <img src="${LOGO_URL}" alt="${B.name}" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">
   </td></tr>
 ${inner}
 ${STANDARD_FOOTER}
@@ -92,8 +235,12 @@ const sublineRow = (html, pad = "12px 36px 22px") => `  <tr><td style="padding:$
     <p style="font-size:14.5px;color:${INK_SOFT};line-height:1.7;margin:0;">${html}</p>
   </td></tr>`;
 const signoffRow = () => `  <tr><td style="padding:8px 36px 30px;">
-    <p style="margin:0;font-size:14px;color:${INK};">The Marley Moves Team</p>
+    <p style="margin:0;font-size:14px;color:${INK};">${B.signoff}</p>
   </td></tr>`;
+
+// §3.5 disclosure: Pitmans booking-confirmation and pre-move emails note a
+// Marley Moves vehicle or crew may attend. Empty for Marley (renders nothing).
+const fleetNoteRows = B.fleetNoteLine ? [sublineRow(B.fleetNoteLine, "0 36px 16px")] : [];
 
 const fact = (label, value, last = false) => `
       <tr>
@@ -101,17 +248,17 @@ const fact = (label, value, last = false) => `
         <td style="padding:10px 0;${last ? "" : "border-bottom:1px solid #F0EDE8;"}font-size:14px;color:${INK};font-weight:600;">${value}</td>
       </tr>`;
 const factsCard = (rows) => `  <tr><td style="padding:0 36px 22px;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;"><tr><td style="padding:16px 24px;border-left:4px solid ${RED};">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;"><tr><td style="padding:16px 24px;border-left:4px solid ${ACCENT};">
       <table width="100%" cellpadding="0" cellspacing="0">${rows}</table>
     </td></tr></table>
   </td></tr>`;
 
 const stepsRow = (steps) => `  <tr><td style="padding:4px 36px 22px;">
-    <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:${RED};margin-bottom:16px;">What happens next</div>
+    <div style="font-size:10px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:${ACCENT};margin-bottom:16px;">What happens next</div>
     <table width="100%" cellpadding="0" cellspacing="0">${steps
       .map(
         (s, i) => `<tr>
-      <td valign="top" width="40" style="padding:0 12px 16px 0;"><table cellpadding="0" cellspacing="0"><tr><td width="28" height="28" align="center" valign="middle" bgcolor="${RED}" style="width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:700;color:#FFFFFF;font-family:${FONT_STACK};">${i + 1}</td></tr></table></td>
+      <td valign="top" width="40" style="padding:0 12px 16px 0;"><table cellpadding="0" cellspacing="0"><tr><td width="28" height="28" align="center" valign="middle" bgcolor="${ACCENT}" style="width:28px;height:28px;border-radius:50%;font-size:13px;font-weight:700;color:#FFFFFF;font-family:${FONT_STACK};">${i + 1}</td></tr></table></td>
       <td valign="top" style="padding:0 0 16px;font-size:14px;color:${INK_SOFT};line-height:1.5;"><strong style="color:${INK};font-weight:600;">${s.t}</strong><br>${s.d}</td>
     </tr>`,
       )
@@ -119,14 +266,14 @@ const stepsRow = (steps) => `  <tr><td style="padding:4px 36px 22px;">
   </td></tr>`;
 
 const linkButton = (label, href) => `  <tr><td align="center" style="padding:2px 36px 10px;">
-    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${RED}" style="border-radius:8px;">
-      <a href="${href}" style="display:inline-block;padding:16px 36px;background:${RED};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;white-space:nowrap;font-family:${FONT_STACK};">${label}</a>
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${ACCENT}" style="border-radius:8px;">
+      <a href="${href}" style="display:inline-block;padding:16px 36px;background:${ACCENT};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;white-space:nowrap;font-family:${FONT_STACK};">${label}</a>
     </td></tr></table>
   </td></tr>`;
 
 const amountCard = (label, amount, note) => `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;">
-      <tr><td style="padding:20px 26px;border-left:4px solid ${RED};">
+      <tr><td style="padding:20px 26px;border-left:4px solid ${ACCENT};">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#8A857E;margin-bottom:6px;">${label}</div>
         <div style="font-family:${FONT_STACK};font-size:34px;font-weight:300;color:${INK};letter-spacing:-0.02em;line-height:1;">${amount}</div>${
           note ? `\n        <div style="font-size:11px;color:#8A857E;margin-top:8px;">${note}</div>` : ""
@@ -156,14 +303,14 @@ const bankOnlyCard = (reference) => {
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F4;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 24px;">
         <div style="font-size:10px;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#8A857E;margin-bottom:4px;">How to pay</div>
-        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">Bank transfer, card over the phone on 01747 637070, or cash. Whichever suits.</div>
+        <div style="font-size:12.5px;color:${INK_SOFT};line-height:1.55;margin-bottom:12px;">${B.howToPayLine}</div>${B.payEntityNoteHtml}
         <table width="100%" cellpadding="0" cellspacing="0">
           ${row("Account name", "MARLEYMOVES LTD")}
           ${row("Sort code", "04-00-03")}
           ${row("Account number", "12787423")}
           <tr>
             <td style="padding:8px 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">Reference</td>
-            <td style="padding:8px 0;font-size:14px;color:${RED};font-weight:700;">${reference}</td>
+            <td style="padding:8px 0;font-size:14px;color:${ACCENT};font-weight:700;">${reference}</td>
           </tr>
         </table>
       </td></tr>
@@ -181,7 +328,7 @@ const refundLinesCard = (title, linesVar, totalLabel, totalVar) => `  <tr><td st
           ${linesVar}
           <tr>
             <td style="padding:10px 0 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">${totalLabel}</td>
-            <td align="right" style="padding:10px 0 0;font-size:16px;color:${RED};font-weight:700;white-space:nowrap;">${totalVar}</td>
+            <td align="right" style="padding:10px 0 0;font-size:16px;color:${ACCENT};font-weight:700;white-space:nowrap;">${totalVar}</td>
           </tr>
         </table>
       </td></tr>
@@ -195,7 +342,7 @@ const refundLinesCard = (title, linesVar, totalLabel, totalVar) => `  <tr><td st
    emails.ts — the template mirrors the fallback so the two paths never drift.
    Copy rule (test-enforced): the word "penalty" appears NOWHERE; held money is
    always "held against your original date, refunded in full if we re-book it". */
-const MONEY_FROM = "Marley Moves <accounts@marleymoves.co.uk>";
+const MONEY_FROM = B.moneyFrom;
 
 const dateConfirmationHtml = shellHtml(
   "Your move date is confirmed. Here's what happens next with your booking.",
@@ -207,8 +354,9 @@ const dateConfirmationHtml = shellHtml(
     ),
     "{{{COMMITMENT_BLOCK}}}",
     sublineRow("{{{HELD_POSITION_LINE}}}", "0 36px 16px"),
+    ...fleetNoteRows,
     sublineRow(
-      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -229,7 +377,7 @@ const commitmentReceivedHtml = shellHtml(
       "0 36px 16px",
     ),
     sublineRow(
-      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -252,7 +400,7 @@ const commitmentChaseHtml = shellHtml(
       "0 36px 16px",
     ),
     sublineRow(
-      `If anything about your move has changed, or you would like to talk it through, reply to this email or call us on <strong style="color:${RED};">01747 637070</strong> and we will help.`,
+      `If anything about your move has changed, or you would like to talk it through, reply to this email or call us on <strong style="color:${ACCENT};">${PHONE}</strong> and we will help.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -270,7 +418,7 @@ const cancellationAckHtml = shellHtml(
     "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCES}}}", "0 36px 16px"),
     sublineRow(
-      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -278,7 +426,7 @@ const cancellationAckHtml = shellHtml(
 );
 
 const refundExecutedHtml = shellHtml(
-  "Your {{{TOTAL_REFUND}}} refund from Marley Moves is on its way.",
+  `Your {{{TOTAL_REFUND}}} refund from ${B.name} is on its way.`,
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("Your refund is on its way."),
@@ -288,7 +436,7 @@ const refundExecutedHtml = shellHtml(
     refundLinesCard("Refunded to you", "{{{REFUND_LINES}}}", "Total refunded", "{{{TOTAL_REFUND}}}"),
     sublineRow("{{{SLA_LINE}}}", "0 36px 16px"),
     sublineRow(
-      `Any questions at all, just reply to this email or call us on <strong style="color:${RED};">01747 637070</strong>.`,
+      `Any questions at all, just reply to this email or call us on <strong style="color:${ACCENT};">${PHONE}</strong>.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -305,7 +453,7 @@ const retainedOutcomeHtml = shellHtml(
     ),
     "{{{REFUND_SECTION}}}",
     sublineRow(
-      `If anything here does not look right, or you would like to talk it through, just reply to this email or call us on <strong style="color:${RED};">01747 637070</strong>.`,
+      `If anything here does not look right, or you would like to talk it through, just reply to this email or call us on <strong style="color:${ACCENT};">${PHONE}</strong>.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -323,7 +471,7 @@ const marleyCancelHtml = shellHtml(
     "{{{REFUND_CARD}}}",
     sublineRow("{{{REFUND_SENTENCE}}}", "0 36px 16px"),
     sublineRow(
-      `If we can help with your move on another date, call <strong style="color:${RED};">the team</strong> on 01747 637070. We'd like to make it right.`,
+      `If we can help with your move on another date, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE}. We'd like to make it right.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -341,8 +489,9 @@ const dateChangeConfirmationHtml = shellHtml(
     "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCE}}}", "0 36px 16px"),
     sublineRow("{{{COMMITMENT_SENTENCE}}}", "0 36px 16px"),
+    ...fleetNoteRows,
     sublineRow(
-      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -352,7 +501,7 @@ const dateChangeConfirmationHtml = shellHtml(
 /* ================================================================= templates */
 
 const surveyConfirmationHtml = shellHtml(
-  "Your free home survey with Marley Moves is booked for {{{DATE_LABEL}}} at {{{TIME_LABEL}}}.",
+  `Your free home survey with ${B.name} is booked for {{{DATE_LABEL}}} at {{{TIME_LABEL}}}.`,
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("You're booked in."),
@@ -371,7 +520,7 @@ const surveyConfirmationHtml = shellHtml(
       "0 36px 16px",
     ),
     sublineRow(
-      `Need to change the time? Just call <strong style="color:${RED};">01747 637070</strong> or reply to this email.`,
+      `Need to change the time? Just call <strong style="color:${ACCENT};">${PHONE}</strong> or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -379,7 +528,7 @@ const surveyConfirmationHtml = shellHtml(
 );
 
 const quoteEmailHtml = shellHtml(
-  "Your fixed price from Marley Moves: {{{GRAND_TOTAL}}}. PDF attached.",
+  `Your fixed price from ${B.name}: {{{GRAND_TOTAL}}}. PDF attached.`,
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("Your fixed price."),
@@ -387,7 +536,7 @@ const quoteEmailHtml = shellHtml(
     `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;">
       <tr>
-        <td style="padding:22px 26px;border-left:4px solid ${RED};">
+        <td style="padding:22px 26px;border-left:4px solid ${ACCENT};">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#8A857E;margin-bottom:6px;">Total move cost</div>
           <div style="font-family:${FONT_STACK};font-size:40px;font-weight:300;color:${INK};letter-spacing:-0.02em;line-height:1;">{{{GRAND_TOTAL}}}</div>
           <div style="font-size:11px;color:#8A857E;margin-top:8px;">{{{TOTAL_COST_NOTE}}}</div>
@@ -408,7 +557,7 @@ const quoteEmailHtml = shellHtml(
             <div style="font-size:10px;color:#8A857E;letter-spacing:0.1em;text-transform:uppercase;">Collection</div>
             <div style="font-size:13px;color:${INK};font-weight:600;margin-top:4px;line-height:1.45;">{{{COLLECTION_HTML}}}</div>
           </td>
-          <td align="center" valign="middle" style="width:8%;font-size:18px;color:${RED};font-weight:600;">&rarr;</td>
+          <td align="center" valign="middle" style="width:8%;font-size:18px;color:${ACCENT};font-weight:600;">&rarr;</td>
           <td valign="top" style="width:46%;">
             <div style="font-size:10px;color:#8A857E;letter-spacing:0.1em;text-transform:uppercase;">Destination</div>
             <div style="font-size:13px;color:${INK};font-weight:600;margin-top:4px;line-height:1.45;">{{{DESTINATION_HTML}}}</div>
@@ -430,7 +579,7 @@ const quoteEmailHtml = shellHtml(
       // Policy v2 truth (Peter, 2026-08-16): the deposit secures the BOOKING;
       // the date is only reserved at the separate confirm-your-date step (25%).
       { t: "Accept your quote", d: "About 30 seconds, and your price is locked in." },
-      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: "Card or bank transfer. This secures your booking; confirming your date then locks it in." },
+      { t: "Pay your {{{DEPOSIT_AMOUNT}}} deposit", d: B.quoteDepositStepDesc },
       { t: "Before &amp; on the day", d: "Balance due 24 hours before moving day, then we arrive on time and get you moved." },
     ]),
     sublineRow(
@@ -438,7 +587,7 @@ const quoteEmailHtml = shellHtml(
       "0 36px 18px",
     ),
     sublineRow(
-      `Any changes, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any changes, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 8px",
     ),
     signoffRow(),
@@ -452,18 +601,19 @@ const depositReceivedHtml = shellHtml(
   "We've received your {{{AMOUNT}}} deposit. Your move date is secured.",
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
-    headlineRow("Thank you for booking with Marley Moves."),
+    headlineRow(`Thank you for booking with ${B.name}.`),
     sublineRow(
       `We've received your <strong style="color:${INK};">{{{AMOUNT}}}</strong> deposit for your move on <strong style="color:${INK};">{{{MOVE_DATE_LABEL}}}</strong>. Your date and crew are now secured.`,
     ),
     amountCard("Deposit paid", "{{{AMOUNT}}}"),
     sublineRow("{{{BALANCE_LINE}}}", "0 36px 16px"),
+    ...fleetNoteRows,
     sublineRow(
       "If we need anything from you beforehand we'll be in touch. Otherwise, rest assured we'll see you on the day. In the meantime, just let us know if you'd like any <strong style=\"color:" + INK + ';">boxes</strong> dropped off.',
       "0 36px 16px",
     ),
     sublineRow(
-      `Any questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -486,8 +636,9 @@ const balanceInvoiceHtml = shellHtml(
     // on an invoice raised with disableOnlinePayments (see the note by
     // bankOnlyCard). The commitment template already uses this one.
     bankOnlyCard("{{{QUOTE_REF}}}"),
+    ...fleetNoteRows,
     sublineRow(
-      `Already paid, or need a different arrangement? Call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Already paid, or need a different arrangement? Call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -503,7 +654,7 @@ const balanceReceivedHtml = shellHtml(
       `We've received your balance of <strong style="color:${INK};">{{{AMOUNT}}}</strong>, so there's nothing more to pay. Everything's in order for your move on <strong style="color:${INK};">{{{MOVE_DAY_LABEL}}}</strong>, and we look forward to seeing you then.`,
     ),
     sublineRow(
-      `Any last-minute questions, call <strong style="color:${RED};">the team</strong> on 01747 637070 or reply to this email.`,
+      `Any last-minute questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -511,21 +662,21 @@ const balanceReceivedHtml = shellHtml(
 );
 
 const completionCertificateHtml = shellHtml(
-  "Your move with Marley Moves is complete. Your certificate is attached.",
+  `Your move with ${B.name} is complete. Your certificate is attached.`,
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("That's your move complete."),
     sublineRow(
-      "Your move on <strong style=\"color:" + INK + ';">{{{MOVE_DATE_LABEL}}}</strong> is all done, and we genuinely can\'t thank you enough for choosing Marley Moves. We know moving is a big deal and that you had plenty of choice; it really does mean a lot that you trusted us with it.',
+      "Your move on <strong style=\"color:" + INK + ';">{{{MOVE_DATE_LABEL}}}</strong> is all done, and we genuinely can\'t thank you enough for choosing ' + B.name + '. We know moving is a big deal and that you had plenty of choice; it really does mean a lot that you trusted us with it.',
     ),
     sublineRow("Your <strong style=\"color:" + INK + ';">completion certificate is attached</strong> for your records.', "0 36px 18px"),
     `  <tr><td style="padding:0 36px 22px;">
-    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FBF8F4;border-radius:8px;"><tr><td style="padding:16px 22px;border-left:4px solid ${RED};">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FBF8F4;border-radius:8px;"><tr><td style="padding:16px 22px;border-left:4px solid ${ACCENT};">
       <p style="margin:0;font-size:13px;color:${INK_SOFT};line-height:1.6;">{{{STATUS_LINE}}}</p>
     </td></tr></table>
   </td></tr>`,
     sublineRow(
-      `If anything comes up at all, just reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070. We're always happy to help.`,
+      `If anything comes up at all, just reply to this email or call <strong style="color:${ACCENT};">the team</strong> on ${PHONE}. We're always happy to help.`,
       "0 36px 6px",
     ),
     signoffRow(),
@@ -533,20 +684,20 @@ const completionCertificateHtml = shellHtml(
 );
 
 const reviewRequestHtml = shellHtml(
-  "Thank you for moving with Marley Moves. A quick review means a lot.",
+  `Thank you for moving with ${B.name}. A quick review means a lot.`,
   [
     greetRow("{{{CUSTOMER_FIRST_NAME}}}"),
     headlineRow("How did we do?"),
     sublineRow(
-      "That's your move done, and thank you, genuinely, for choosing Marley Moves. It really does mean a lot to a small local firm like ours, and we're grateful you trusted us with your move.",
+      "That's your move done, and thank you, genuinely, for choosing " + B.name + ". It really does mean a lot to a small local firm like ours, and we're grateful you trusted us with your move.",
     ),
     sublineRow(
-      `If Connor and the crew looked after you well, a quick <strong style="color:${INK};">{{{REVIEW_PLATFORM}}}</strong> review would make a real difference. It only takes a minute.`,
+      `If ${B.reviewCrewPhrase} looked after you well, a quick <strong style="color:${INK};">{{{REVIEW_PLATFORM}}}</strong> review would make a real difference. It only takes a minute.`,
       "0 36px 20px",
     ),
     linkButton("Leave a {{{REVIEW_PLATFORM}}} review&nbsp;&rarr;", "{{{REVIEW_URL}}}"),
     sublineRow(
-      `And if anything wasn't quite right, please reply to this email or call <strong style="color:${RED};">the team</strong> on 01747 637070 first. We'd always rather put it right.`,
+      `And if anything wasn't quite right, please reply to this email or call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} first. We'd always rather put it right.`,
       "16px 36px 6px",
     ),
     signoffRow(),
@@ -570,7 +721,7 @@ const crewInviteHtml = shellHtml(
       { t: "Add Face ID or fingerprint", d: "Turn on quick sign-in so you never type it again." },
     ]),
     sublineRow(
-      `This link is just for you and expires in 7 days. If you weren't expecting it, ignore this email or call <strong style="color:${RED};">01747 637070</strong>.`,
+      `This link is just for you and expires in 7 days. If you weren't expecting it, ignore this email or call <strong style="color:${ACCENT};">${PHONE}</strong>.`,
       "0 36px 8px",
     ),
     signoffRow(),
@@ -598,12 +749,12 @@ const chaseHtml = (preheader, { intro, cta = "Accept your quote online&nbsp;&rar
     ].join("\n"),
   );
 
-const CHASE_FROM = "Marley Moves <hello@marleymoves.co.uk>";
+const CHASE_FROM = B.helloFrom;
 const CHASE_VARS = [
   { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
-  { key: "OWNER_NAME", type: "string", fallback_value: "The Marley Moves Team" },
+  { key: "OWNER_NAME", type: "string", fallback_value: B.signoff },
   { key: "QUOTE_REF", type: "string", fallback_value: "your quote" },
-  { key: "ACCEPT_LINK", type: "string", fallback_value: "https://marleymoves.co.uk/quote/" },
+  { key: "ACCEPT_LINK", type: "string", fallback_value: B.quoteLinkFallback },
   { key: "EXPIRY_DATE", type: "string", fallback_value: "the expiry date on your quote" },
   { key: "DEPOSIT_AMOUNT", type: "string", fallback_value: "£100" },
 ];
@@ -614,8 +765,8 @@ const TEMPLATES = [
     name: "survey-confirmation",
     envVar: "RESEND_TEMPLATE_SURVEY_CONFIRMATION",
     subject: "Your survey is booked: {{{DATE_LABEL}}}, {{{TIME_LABEL}}}",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
-    reply_to: "hello@marleymoves.co.uk",
+    from: B.helloFrom,
+    reply_to: B.email,
     html: surveyConfirmationHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -628,8 +779,8 @@ const TEMPLATES = [
   {
     name: "quote-email",
     envVar: "RESEND_TEMPLATE_QUOTE_EMAIL",
-    subject: "Your removal quote from Marley Moves ({{{QUOTE_REF}}})",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    subject: `Your removal quote from ${B.name} ({{{QUOTE_REF}}})`,
+    from: B.helloFrom,
     html: quoteEmailHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -643,8 +794,8 @@ const TEMPLATES = [
       { key: "MOVE_DATE_GLANCE", type: "string", fallback_value: "TBC" },
       { key: "VEHICLE", type: "string", fallback_value: "—" },
       { key: "PACKING", type: "string", fallback_value: "—" },
-      { key: "ACCEPT_URL", type: "string", fallback_value: "https://marleymoves.co.uk/quote/" },
-      { key: "REPLY_HREF", type: "string", fallback_value: "mailto:hello@marleymoves.co.uk" },
+      { key: "ACCEPT_URL", type: "string", fallback_value: B.quoteLinkFallback },
+      { key: "REPLY_HREF", type: "string", fallback_value: "mailto:" + B.email },
       { key: "DEPOSIT_AMOUNT", type: "string", fallback_value: "£100" },
       { key: "ISSUED_DATE", type: "string", fallback_value: "today" },
     ],
@@ -653,7 +804,7 @@ const TEMPLATES = [
     name: "deposit-received",
     envVar: "RESEND_TEMPLATE_DEPOSIT_RECEIVED",
     subject: "Deposit received. You're booked in ({{{QUOTE_REF}}})",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    from: B.helloFrom,
     html: depositReceivedHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -672,7 +823,7 @@ const TEMPLATES = [
     name: "balance-invoice",
     envVar: "RESEND_TEMPLATE_BALANCE_INVOICE",
     subject: "Your final balance: {{{QUOTE_REF}}} ({{{AMOUNT}}})",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    from: B.helloFrom,
     html: balanceInvoiceHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -687,7 +838,7 @@ const TEMPLATES = [
     name: "balance-received",
     envVar: "RESEND_TEMPLATE_BALANCE_RECEIVED",
     subject: "Payment received. All settled ({{{QUOTE_REF}}})",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    from: B.helloFrom,
     html: balanceReceivedHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -700,8 +851,8 @@ const TEMPLATES = [
     name: "completion-certificate",
     envVar: "RESEND_TEMPLATE_COMPLETION_CERT",
     subject: "Your move is complete. Certificate attached",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
-    reply_to: "hello@marleymoves.co.uk",
+    from: B.helloFrom,
+    reply_to: B.email,
     html: completionCertificateHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -717,24 +868,20 @@ const TEMPLATES = [
     name: "review-request",
     envVar: "RESEND_TEMPLATE_REVIEW_REQUEST",
     subject: "How did we do, {{{CUSTOMER_FIRST_NAME}}}?",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
+    from: B.helloFrom,
     html: reviewRequestHtml,
     variables: [
       { key: "CUSTOMER_FIRST_NAME", type: "string", fallback_value: "there" },
       { key: "REVIEW_PLATFORM", type: "string", fallback_value: "Google" },
-      {
-        key: "REVIEW_URL",
-        type: "string",
-        fallback_value: "https://g.page/r/CXD_Yh4RUF1cEBM/review",
-      },
+      { key: "REVIEW_URL", type: "string", fallback_value: B.reviewUrlFallback },
     ],
   },
   {
     name: "crew-portal-invite",
     envVar: "RESEND_TEMPLATE_CREW_INVITE",
     subject: "Set up your Marley Moves crew login",
-    from: "Marley Moves <hello@marleymoves.co.uk>",
-    reply_to: "hello@marleymoves.co.uk",
+    from: B.helloFrom,
+    reply_to: B.email,
     html: crewInviteHtml,
     variables: [
       { key: "CREW_FIRST_NAME", type: "string", fallback_value: "there" },
@@ -752,7 +899,7 @@ const TEMPLATES = [
         "If everything looks right, you can accept online in about 30 seconds and that reserves your date:",
       ],
       cta: "Accept your quote online&nbsp;&rarr;",
-      closing: ["Anything you'd like adjusted, just reply to this email or call me on 01747 637070."],
+      closing: [`Anything you'd like adjusted, just reply to this email or call me on ${PHONE}.`],
     }),
     variables: CHASE_VARS,
   },
@@ -784,7 +931,7 @@ const TEMPLATES = [
     html: chaseHtml("No rush at all. Your quote is open until {{{EXPIRY_DATE}}}.", {
       intro: [
         "It's {{{OWNER_NAME}}} here, and this is the last reminder I'll send you, so I'll keep it brief.",
-        "Your quote ({{{QUOTE_REF}}}) is open until {{{EXPIRY_DATE}}} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on 01747 637070. I'd be glad to help.",
+        `Your quote ({{{QUOTE_REF}}}) is open until {{{EXPIRY_DATE}}} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on ${PHONE}. I'd be glad to help.`,
       ],
       cta: "View your quote&nbsp;&rarr;",
       // No "all the best with the move" line here: the shell already signs off
@@ -804,10 +951,10 @@ const TEMPLATES = [
     html: chaseHtml("One last step to secure your booking.", {
       intro: [
         "It's {{{OWNER_NAME}}} here. Great to have you booked in. The last step is your {{{DEPOSIT_AMOUNT}}} deposit, which makes everything official. Once it's in, we'll confirm your moving date with you to lock it in. If you're still waiting on completion, no problem, your booking is held with a fully amendable date. Either way, your price and your crew are secured.",
-        "You can pay by card or bank transfer on your quote page (bank transfer reference: {{{QUOTE_REF}}}):",
+        B.chaseDeposit1PayLine,
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
-      closing: ["Any questions, just reply to this email or call me on 01747 637070."],
+      closing: [`Any questions, just reply to this email or call me on ${PHONE}.`],
     }),
     variables: CHASE_VARS,
   },
@@ -821,7 +968,10 @@ const TEMPLATES = [
         "Just a friendly reminder that we're still holding your booking for you. Whenever you're ready, your {{{DEPOSIT_AMOUNT}}} deposit is what confirms your place and your crew. And if your date isn't settled yet, no problem at all. It stays fully amendable:",
       ],
       cta: "Pay your deposit&nbsp;&rarr;",
-      closing: ["If your timing has changed or plans have shifted, just reply and let me know."],
+      closing: [
+        "If your timing has changed or plans have shifted, just reply and let me know.",
+        ...(B.depositChaseEntityLine ? [B.depositChaseEntityLine] : []),
+      ],
     }),
     variables: CHASE_VARS,
   },
@@ -909,7 +1059,7 @@ const TEMPLATES = [
   {
     name: "refund-executed",
     envVar: "RESEND_TEMPLATE_REFUND_EXECUTED",
-    subject: "Your {{{TOTAL_REFUND}}} refund from Marley Moves ({{{QUOTE_REF}}})",
+    subject: `Your {{{TOTAL_REFUND}}} refund from ${B.name} ({{{QUOTE_REF}}})`,
     from: MONEY_FROM,
     html: refundExecutedHtml,
     variables: [
@@ -919,12 +1069,7 @@ const TEMPLATES = [
       // Pre-rendered <tr> rows from lib/comms/refund-emails.ts lineRows() —
       // one per rail, each "label · rail" with its amount.
       { key: "REFUND_LINES", type: "string", fallback_value: "" },
-      {
-        key: "SLA_LINE",
-        type: "string",
-        fallback_value:
-          "Card refunds normally show on your statement within 3 to 5 working days and bank transfers usually arrive the same day, all well within the 14 days we promise.",
-      },
+      { key: "SLA_LINE", type: "string", fallback_value: B.refundSlaFallback },
     ],
   },
   {
@@ -986,6 +1131,19 @@ const TEMPLATES = [
   },
 ];
 
+  // Group comms (PRD §11.10) keep Marley's identity: the crew portal invite is
+  // never cloned into another brand's set. key = the unprefixed lookup key
+  // (what brands.resend_template_ids and the env fallback are keyed by);
+  // name = what Resend displays and the PATCH-by-name matcher matches on.
+  return TEMPLATES.filter((t) => B.includeCrewInvite || t.name !== "crew-portal-invite").map((t) => ({
+    ...t,
+    key: t.name,
+    name: B.namePrefix + t.name,
+  }));
+}
+
+const TEMPLATES = buildTemplateSet(B);
+
 /* ---------------------------------------------------------------- preview */
 
 if (PREVIEW_DIR) {
@@ -1022,6 +1180,9 @@ if (PREVIEW_DIR) {
     STATUS_LINE: "Everything was signed off on the day with nothing to report.",
     REVIEW_PLATFORM: "Google",
     REVIEW_URL: "https://search.google.com/local/writereview?placeid=example",
+    // Per-brand sample values (ref shape, owner, reply address) — marley's are
+    // empty so the block above stays the exact original render input.
+    ...B.previewOverrides,
   };
   await mkdir(directory, { recursive: true });
   for (const template of ONLY ? TEMPLATES.filter((t) => ONLY.has(t.name)) : TEMPLATES) {
@@ -1060,14 +1221,26 @@ if (ONLY && SELECTED.length === 0) {
   process.exit(1);
 }
 
+// Trap-4 hard guard (PRD §11.7): a non-marley run may only ever PATCH names
+// carrying its own prefix — an unprefixed name here would overwrite a live
+// Marley template. Belt and braces on top of the prefixing in buildTemplateSet.
+if (B.namePrefix) {
+  const unprefixed = SELECTED.filter((t) => !t.name.startsWith(B.namePrefix));
+  if (unprefixed.length > 0) {
+    console.error(`Refusing to push for '${BRAND}': unprefixed template names ${unprefixed.map((t) => t.name).join(", ")}`);
+    process.exit(1);
+  }
+}
+
 // Resend enforces declared-variables ≡ html-variables at every moment, so an
 // in-place PATCH that changes the variable SET is rejected. So: try PATCH first
 // (keeps the id — no env re-wire for copy/design-only edits); only if that fails
 // (a variable was added/removed) delete + recreate (new id). The loop prints an
 // env line for each — apply any that changed to the app env.
 const envLines = [];
+const idsByKey = {};
 for (const t of SELECTED) {
-  const { envVar, ...def } = t;
+  const { envVar, key, ...def } = t;
   const old = byName.get(t.name)?.id;
   let id = old;
   if (old) {
@@ -1086,8 +1259,17 @@ for (const t of SELECTED) {
   await api("POST", `/templates/${id}/publish`).catch((e) => {
     console.warn(`  publish failed (${e.message}) — publish "${t.name}" in the dashboard.`);
   });
-  envLines.push(`${envVar}=${id}`);
+  if (envVar && !B.namePrefix) envLines.push(`${envVar}=${id}`);
+  idsByKey[key] = id;
 }
-console.log("\n--- env (set these on the app) ---");
-for (const line of envLines) console.log(line);
+if (B.namePrefix) {
+  // Id capture (PRD §3.5): paste this JSON into brands.resend_template_ids —
+  // the exact update statement is documented in the header comment. Keys are
+  // the unprefixed template keys templateIdFor(brand, key) resolves.
+  console.log(`\n--- brands.resend_template_ids for '${BRAND}' ---`);
+  console.log(JSON.stringify(idsByKey, null, 2));
+} else {
+  console.log("\n--- env (set these on the app) ---");
+  for (const line of envLines) console.log(line);
+}
 console.log("done");

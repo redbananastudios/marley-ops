@@ -191,6 +191,7 @@ export default async function FollowUpsPage({
         rows={rows}
         brands={brandOptions}
         showBrandChips={multi && brandFilter === "all"}
+        brandComms={Object.fromEntries(activeBrands.map((b) => [b.slug, { name: b.name, phone: b.phone }]))}
       />
     </main>
   );

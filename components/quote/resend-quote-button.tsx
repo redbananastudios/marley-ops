@@ -13,7 +13,7 @@ import { useMemo, useState } from "react";
 import { Mail } from "lucide-react";
 import { computeQuote, type PricingConfig } from "@/lib/quote/pricing";
 import { deriveInputs, type QuoteFormValues } from "@/lib/quote/form-types";
-import type { DocBrand } from "@/lib/pdf/doc-brand";
+import type { Brand } from "@/lib/brand";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
 import { useRouter } from "next/navigation";
 
@@ -45,8 +45,11 @@ export function ResendQuoteButton({
   vatNumber?: string;
   depositAmount?: number;
   acceptUrl?: string;
-  /** Non-default brand for the attached PDF (PRD §3.6) — absent means Marley. */
-  brand?: DocBrand | null;
+  /** The quote's brand row (multi-brand PRD §3.5/§3.6) — absent/marley sends
+   *  today's exact email AND today's exact PDF. Threaded whole so the dialog
+   *  can both compose the branded email and derive the slim DocBrand its
+   *  doc-def needs (docBrandFrom returns null for the default brand). */
+  brand?: Brand | null;
   /** Controlled mode: when `open`/`onOpenChange` are supplied the built-in
    *  trigger is suppressed and the dialog is driven from outside (the quote
    *  header opens it from its "⋯ More" overflow menu). */
@@ -77,6 +80,7 @@ export function ResendQuoteButton({
         onOpenChange={setOpen}
         quoteId={quoteId}
         quoteRef={quoteRef}
+        brand={brand}
         values={values}
         breakdown={breakdown}
         leadId={leadId}
@@ -86,7 +90,6 @@ export function ResendQuoteButton({
         vatNumber={vatNumber}
         depositAmount={depositAmount}
         acceptUrl={acceptUrl}
-        brand={brand}
         resend
         onSent={() => router.refresh()}
       />

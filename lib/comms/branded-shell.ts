@@ -1,3 +1,5 @@
+import { brandCtaColour, DEFAULT_BRAND, type Brand } from "@/lib/brand";
+
 /**
  * Branded shell for ad-hoc (non-template) customer emails — a TypeScript port of
  * the house style in scripts/create-resend-templates.mjs (which is the canonical
@@ -5,6 +7,14 @@
  * STANDARD_FOOTER with the VAT line + full address + insurance + Registered in
  * England & Wales). Every one-off email an operator composes in the panel goes
  * through here so it looks identical to the managed Resend templates.
+ *
+ * Multi-brand (docs/multi-brand-prd.md §3.5): `brand` selects the shell chrome —
+ * logo/wordmark header, CTA colour, sign-off and footer identity. With `brand`
+ * absent or the marley row the output is BYTE-IDENTICAL to the single-brand
+ * shell: the default chrome IS today's literal strings, never values read back
+ * from the brands table. Other brands render from their row, falling back
+ * per-field to the Marley literals (the operating company's registered details)
+ * where a stub row has gaps — PRD §10.
  *
  * Pure server util — no React, no DOM. Returns an HTML string. UK English.
  * ALL interpolated text is HTML-escaped (URLs are attribute-escaped) — the copy
@@ -42,6 +52,100 @@ const STANDARD_FOOTER = `  <tr><td style="padding:26px 36px;border-top:1px solid
     </p>
   </td></tr>`;
 
+/** The shell chrome one brand contributes: everything outside the free copy. */
+interface ShellChrome {
+  /** <title> text and the header image alt. */
+  title: string;
+  /** Full header `<tr>` chunk (logo/wordmark, band when the brand takes one). */
+  headerRow: string;
+  /** CTA button colour. */
+  ctaColour: string;
+  /** Team sign-off line. */
+  signOff: string;
+  /** Full footer `<tr>` chunk (legal + group disclosure + contact links). */
+  footerRow: string;
+}
+
+// The default chrome is TODAY'S literals, verbatim — the marley/absent path
+// must never depend on the brands row round-tripping to the same bytes.
+const MARLEY_CHROME: ShellChrome = {
+  title: "Marley Moves",
+  headerRow: `  <tr><td align="center" style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;">
+    <img src="${LOGO_URL}" alt="Marley Moves" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">
+  </td></tr>`,
+  ctaColour: RED,
+  signOff: "The Marley Moves Team",
+  footerRow: STANDARD_FOOTER,
+};
+
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
+
+/** Build another brand's chrome from its row, Marley literals filling gaps. */
+function brandChrome(brand: Brand): ShellChrome {
+  const name = brand.name.trim() || "Marley Moves";
+  const ctaColour = brandCtaColour(brand) ?? RED;
+
+  // Header band — the same WCAG data rule as the diary (lib/brand.ts), no slug
+  // switches: an accent white text is NOT legible on is a large-flat-area
+  // colour (PRD §2/§10 — Pitmans yellow), so the header renders it as a full
+  // band with the primary colour carrying the wordmark ("yellow blocks take
+  // blue text"). A dark accent keeps the plain white header Marley uses.
+  const accent = (brand.colourAccent ?? "").trim();
+  const bandColour =
+    HEX_COLOUR.test(accent) &&
+    brandCtaColour({ colourPrimary: null, colourAccent: accent }) === null
+      ? accent
+      : null;
+  const primary = (brand.colourPrimary ?? "").trim();
+  const wordmarkColour = bandColour && HEX_COLOUR.test(primary) ? primary : INK;
+
+  const headerInner = brand.logoUrl
+    ? `<img src="${escAttr(brand.logoUrl)}" alt="${escAttr(name)}" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">`
+    : `<span style="font-family:${FONT_STACK};font-size:23px;font-weight:700;letter-spacing:-0.01em;color:${wordmarkColour};">${esc(name)}</span>`;
+  const headerRow = bandColour
+    ? `  <tr><td align="center" bgcolor="${bandColour}" style="padding:26px 36px;background:${bandColour};">
+    ${headerInner}
+  </td></tr>`
+    : `  <tr><td align="center" style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;">
+    ${headerInner}
+  </td></tr>`;
+
+  // Footer identity from the row; the fallbacks are the operating company's
+  // registered details (the same MarleyMoves Ltd every brand trades as).
+  // terms_url null deliberately renders Marley's terms until gate 15 ships the
+  // unified document (migration 0104 note); privacy is entity-level and has no
+  // per-brand field yet, so it points at the company policy for every brand.
+  const legalLine = brand.legalLine.trim() || "MarleyMoves Ltd · Company No. 15914266 · VAT 520 2213 58";
+  const groupLine = brand.groupLine.trim();
+  const address = (brand.address ?? "").trim() || "Ash Cottage, Sherborne Causeway, Shaftesbury, SP7 9PX";
+  const phone = (brand.phone ?? "").trim() || "01747 637070";
+  const telHref = "tel:" + phone.replace(/[^0-9+]/g, "");
+  const email = (brand.helloFrom ?? "").trim() || "hello@marleymoves.co.uk";
+  const website = ((brand.websiteUrl ?? "").trim() || "https://marleymoves.co.uk").replace(/\/+$/, "");
+  const websiteLabel = website.replace(/^https?:\/\//, "");
+  const termsUrl = (brand.termsUrl ?? "").trim() || "https://marleymoves.co.uk/terms-conditions";
+  const privacyUrl = "https://marleymoves.co.uk/privacy-policy";
+
+  const footerRow = `  <tr><td style="padding:26px 36px;border-top:1px solid #EAE7E2;">
+    <p style="margin:0;font-size:11px;line-height:1.85;color:#8A857E;text-align:center;">
+      ${groupLine ? `${esc(groupLine)}<br>
+      ` : ""}<strong style="color:#5A554F;">${esc(legalLine)}</strong><br>
+      ${esc(address)}<br>
+      <a href="${escAttr(telHref)}" style="color:#8A857E;text-decoration:none;">${esc(phone)}</a> &middot; <a href="mailto:${escAttr(email)}" style="color:#8A857E;text-decoration:none;">${esc(email)}</a> &middot; <a href="${escAttr(website)}" style="color:#8A857E;text-decoration:none;">${esc(websiteLabel)}</a><br>
+      Fully insured: Public Liability up to &pound;2.5m &middot; Goods in Transit up to &pound;50k<br>
+      Registered in England &amp; Wales &middot; <a href="${escAttr(termsUrl)}" style="color:#8A857E;text-decoration:underline;">Terms</a> &middot; <a href="${escAttr(privacyUrl)}" style="color:#8A857E;text-decoration:underline;">Privacy</a>
+    </p>
+  </td></tr>`;
+
+  return {
+    title: name,
+    headerRow,
+    ctaColour,
+    signOff: `The ${name} Team`,
+    footerRow,
+  };
+}
+
 export interface BrandedEmailInput {
   /** Hidden inbox-preview line. */
   preheader: string;
@@ -53,6 +157,9 @@ export interface BrandedEmailInput {
   paragraphs: string[];
   /** Optional red call button. */
   cta?: { label: string; url: string };
+  /** Brand chrome (multi-brand PRD §3.5). Omit, null, or the marley row →
+   *  today's exact single-brand bytes. */
+  brand?: Brand | null;
 }
 
 /** Compose an ad-hoc customer email in the house style. */
@@ -62,7 +169,10 @@ export function brandedEmailHtml({
   headline,
   paragraphs,
   cta,
+  brand,
 }: BrandedEmailInput): string {
+  const chrome =
+    !brand || brand.slug === DEFAULT_BRAND ? MARLEY_CHROME : brandChrome(brand);
   const rows: string[] = [];
 
   if (greeting && greeting.trim()) {
@@ -89,30 +199,28 @@ export function brandedEmailHtml({
 
   if (cta && cta.label && cta.url) {
     rows.push(`  <tr><td align="center" style="padding:8px 36px 14px;">
-    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${RED}" style="border-radius:8px;">
-      <a href="${escAttr(cta.url)}" style="display:inline-block;padding:17px 52px;background:${RED};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;font-family:${FONT_STACK};">${esc(cta.label)}</a>
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${chrome.ctaColour}" style="border-radius:8px;">
+      <a href="${escAttr(cta.url)}" style="display:inline-block;padding:17px 52px;background:${chrome.ctaColour};color:#FFFFFF;font-size:14.5px;font-weight:600;text-decoration:none;border-radius:8px;letter-spacing:0.02em;font-family:${FONT_STACK};">${esc(cta.label)}</a>
     </td></tr></table>
   </td></tr>`);
   }
 
   // Team sign-off, then the standard footer.
   rows.push(`  <tr><td style="padding:10px 36px 30px;">
-    <p style="margin:0;font-size:14px;color:${INK};">The Marley Moves Team</p>
+    <p style="margin:0;font-size:14px;color:${INK};">${esc(chrome.signOff)}</p>
   </td></tr>`);
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title>${FONT_LINK}</head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(chrome.title)}</title>${FONT_LINK}</head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:${FONT_STACK};color:${INK};">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${esc(preheader)}</div>
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
-  <tr><td align="center" style="padding:34px 36px 22px;border-bottom:1px solid #EFECE7;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="200" style="display:block;margin:0 auto;height:auto;max-width:64%;border:0;outline:none;text-decoration:none;">
-  </td></tr>
+${chrome.headerRow}
 ${rows.join("\n")}
-${STANDARD_FOOTER}
+${chrome.footerRow}
 </table>
 </td></tr>
 </table>

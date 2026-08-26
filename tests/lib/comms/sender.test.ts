@@ -2,12 +2,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   accountsAddress,
   accountsFrom,
+  accountsFromFor,
+  brandInboundDomains,
   capName,
   HELLO_FROM,
+  helloFromFor,
   opsAlertRecipient,
   ownerFrom,
   shouldForwardUnmatched,
 } from "@/lib/comms/sender";
+import { mapBrand } from "@/lib/brand";
 
 afterEach(() => {
   delete process.env.ACCOUNTS_EMAIL;
@@ -128,5 +132,95 @@ describe("shouldForwardUnmatched — the catch-all loop guard", () => {
     expect(shouldForwardUnmatched('"Bounce Castles Ltd" <sales@partyhire.example.com>')).toBe(true);
     // ...but a lookalike domain of ours never gets forwarded to
     expect(shouldForwardUnmatched("x@sub.reply.marleymoves.co.uk")).toBe(false);
+  });
+
+  it("extraDomains WIDEN the own-mail set — Marley recognition never narrows (trap 3)", () => {
+    const extra = ["pitmansremovals.co.uk", "reply.pitmansremovals.co.uk"];
+    expect(shouldForwardUnmatched("info@pitmansremovals.co.uk", extra)).toBe(false);
+    expect(shouldForwardUnmatched("Pitmans <q-t0k@reply.pitmansremovals.co.uk>", extra)).toBe(false);
+    // the base Marley set survives whatever is passed in
+    expect(shouldForwardUnmatched("hello@marleymoves.co.uk", extra)).toBe(false);
+    expect(shouldForwardUnmatched("q-abc@reply.marleymoves.co.uk", extra)).toBe(false);
+    // real customers still forward with the widened set in force
+    expect(shouldForwardUnmatched("jane.smith@gmail.com", extra)).toBe(true);
+    // a lookalike of the extra domain does not pass the suffix check
+    expect(shouldForwardUnmatched("x@notpitmansremovals.co.uk", extra)).toBe(true);
+  });
+});
+
+const pitmans = mapBrand({
+  slug: "pitmans",
+  name: "Pitmans Removals & Storage",
+  short_name: "Pitmans",
+  email_domain: "pitmansremovals.co.uk",
+  hello_from: "info@pitmansremovals.co.uk",
+  accounts_from: "accounts@pitmansremovals.co.uk",
+  reply_domain: "reply.pitmansremovals.co.uk",
+});
+const marley = mapBrand({
+  slug: "marley",
+  name: "Marley Moves",
+  short_name: "Marley",
+  email_domain: "marleymoves.co.uk",
+  hello_from: "hello@marleymoves.co.uk",
+  accounts_from: "accounts@marleymoves.co.uk",
+});
+const group = mapBrand({ slug: "group", name: "Marley Group", short_name: "Group" });
+
+describe("brand From identities — Marley byte-identical, others from the row", () => {
+  it("marley resolves to EXACTLY today's identities, env override included", () => {
+    expect(helloFromFor(marley)).toBe(HELLO_FROM);
+    expect(accountsFromFor(marley)).toBe(accountsFrom());
+    process.env.ACCOUNTS_EMAIL = "money@marleymoves.co.uk";
+    expect(accountsFromFor(marley)).toBe("Marley Moves <money@marleymoves.co.uk>");
+  });
+
+  it("a non-default brand formats name + row address", () => {
+    expect(helloFromFor(pitmans)).toBe("Pitmans Removals & Storage <info@pitmansremovals.co.uk>");
+    expect(accountsFromFor(pitmans)).toBe("Pitmans Removals & Storage <accounts@pitmansremovals.co.uk>");
+  });
+
+  it("null fields (the group pseudo-brand) degrade to the Marley house identity (§11.10)", () => {
+    expect(helloFromFor(group)).toBe(HELLO_FROM);
+    expect(accountsFromFor(group)).toBe(accountsFrom());
+  });
+
+  it("header hardening: a malformed row address or injected name never reaches the From", () => {
+    const bad = mapBrand({ slug: "pitmans", name: "Pitmans", hello_from: "info@pitmans.co.uk>bcc:x@y" });
+    expect(helloFromFor(bad)).toBe(HELLO_FROM);
+    const sneaky = mapBrand({
+      slug: "pitmans",
+      name: "Pitmans <evil@attacker.com>",
+      hello_from: "info@pitmansremovals.co.uk",
+    });
+    // the injected address loses its header syntax AND its @, so no second
+    // address token can appear in the display phrase
+    expect(helloFromFor(sneaky)).toBe("Pitmans evil attacker.com <info@pitmansremovals.co.uk>");
+  });
+});
+
+describe("ownerFrom extraDomains — widened recognition, zero-arg unchanged", () => {
+  it("a widened domain can front; the Marley domain always can", () => {
+    expect(ownerFrom("Mark", "mark@pitmansremovals.co.uk", ["pitmansremovals.co.uk"])).toBe(
+      "Mark at Marley Moves <mark@pitmansremovals.co.uk>",
+    );
+    expect(ownerFrom("Luke", "luke@marleymoves.co.uk", ["pitmansremovals.co.uk"])).toBe(
+      "Luke at Marley Moves <luke@marleymoves.co.uk>",
+    );
+    // without the widening argument the off-domain address still never fronts
+    expect(ownerFrom("Mark", "mark@pitmansremovals.co.uk")).toBe(
+      "Mark at Marley Moves <hello@marleymoves.co.uk>",
+    );
+  });
+});
+
+describe("brandInboundDomains", () => {
+  it("collects email + reply domains, dropping nulls and duplicates", () => {
+    expect(brandInboundDomains([marley, pitmans, group])).toEqual([
+      "marleymoves.co.uk",
+      "pitmansremovals.co.uk",
+      "reply.pitmansremovals.co.uk",
+    ]);
+    expect(brandInboundDomains([])).toEqual([]);
   });
 });

@@ -39,3 +39,24 @@ export function selectReviewLink(
   if (hasGoogleMailbox(email)) return { platform: REVIEW_LINKS.google.platform, url: googleUrl };
   return REVIEW_LINKS.trustpilot;
 }
+
+/**
+ * Multi-brand routing (docs/multi-brand-prd.md §3.5). Every link above is a
+ * MARLEY property — the Checkatrade and Trustpilot profiles and the Settings
+ * Google URL all point at Marley's listings — so a non-default brand may only
+ * ever be asked on its own brands.review_url. Null there means NO review ask
+ * for that brand at all (the caller must skip and log, never fall back to
+ * business_settings.google_review_url). Marley keeps the mailbox/channel
+ * routing unchanged.
+ */
+export function selectBrandReviewLink(
+  brand: { slug: string; reviewUrl: string | null },
+  defaultBrandSlug: string,
+  email: string,
+  entryChannel: string | null,
+  marleyGoogleUrl: string,
+): { platform: string; url: string } | null {
+  if (brand.slug === defaultBrandSlug) return selectReviewLink(email, entryChannel, marleyGoogleUrl);
+  const url = (brand.reviewUrl ?? "").trim();
+  return url ? { platform: "Google", url } : null;
+}

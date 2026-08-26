@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 
 /**
  * Sender identity — the ONE place that decides which address an email comes
@@ -32,6 +33,48 @@ export function accountsFrom(): string {
   return `Marley Moves <${accountsAddress()}>`;
 }
 
+/* --------------------------------------------------- brand-aware identities */
+
+/**
+ * Build "Brand Name <address>" from a brands-table row, with the same header
+ * hardening as ownerFrom: the display name (office-editable in Settings) loses
+ * any address/header syntax, and the address must be a plain local@domain
+ * token. Null when either half is unusable — callers fall back to the Marley
+ * house identity, because a deliverable Marley From (visible, fixable) beats a
+ * malformed From that Resend rejects (silent non-delivery).
+ */
+const brandFrom = (brand: Pick<Brand, "name">, address: string | null): string | null => {
+  const addr = plainAddress(address);
+  if (!addr) return null;
+  // ownerFrom's strip set plus "@" — a multi-word brand name keeps its spaces,
+  // so a smuggled bare address must not survive as an @-token in the phrase.
+  const display = (brand.name ?? "").replace(/[<>"\\;,@\r\n]/g, " ").replace(/\s+/g, " ").trim();
+  if (!display) return null;
+  return `${display} <${addr}>`;
+};
+
+/**
+ * A brand's front-door From identity — "Pitmans Removals & Storage <info@…>".
+ * For the DEFAULT brand this returns EXACTLY today's HELLO_FROM (byte-equal),
+ * and any row without a usable hello_from (the group pseudo-brand seeds null —
+ * group comms keep Marley's from-address, PRD §11.10) degrades to it too, so
+ * every pre-brand-layer send is unchanged.
+ */
+export function helloFromFor(brand: Brand): string {
+  if (brand.slug === DEFAULT_BRAND) return HELLO_FROM;
+  return brandFrom(brand, brand.helloFrom) ?? HELLO_FROM;
+}
+
+/**
+ * A brand's money-desk From identity. The DEFAULT brand resolves through
+ * accountsFrom() — NOT the brands row — so the ACCOUNTS_EMAIL env override
+ * keeps working exactly as today; a null accounts_from degrades the same way.
+ */
+export function accountsFromFor(brand: Brand): string {
+  if (brand.slug === DEFAULT_BRAND) return accountsFrom();
+  return brandFrom(brand, brand.accountsFrom) ?? accountsFrom();
+}
+
 /** Capitalise a name segment that arrives all-lower ("freddy") or all-upper
  *  ("FREDDY") -> "Freddy"; leave intentional mixed case (McDonald, O'Brien) alone. */
 export const capName = (seg: string): string => {
@@ -43,12 +86,27 @@ export const capName = (seg: string): string => {
   return seg;
 };
 
-const onDomain = (email: string | null | undefined): string | null => {
+/** Reject anything that could smuggle a second address or header syntax into
+ *  the From — the address part must be a plain local@domain token. */
+const plainAddress = (email: string | null | undefined): string | null => {
   const addr = (email ?? "").trim().toLowerCase();
-  // Reject anything that could smuggle a second address or header syntax into
-  // the From — the address part must be a plain local@domain token.
-  if (!/^[a-z0-9._+-]+@[a-z0-9.-]+$/.test(addr)) return null;
-  return addr.endsWith(`@${MARLEY_EMAIL_DOMAIN}`) ? addr : null;
+  return /^[a-z0-9._+-]+@[a-z0-9.-]+$/.test(addr) ? addr : null;
+};
+
+/**
+ * Own-domain recognition (inbound/reply classification, PRD §11.7 trap 3):
+ * the recognised set WIDENS to every active brand's domains, never swaps to
+ * the current brand — threading `brand` through and substituting would
+ * silently stop Marley recognising its own reply addresses. Marley's domain is
+ * always in the set; `extraDomains` (from brandInboundDomains below) adds the
+ * others. The zero-argument form is byte-identical to the pre-brand behaviour,
+ * so sync callers need no change.
+ */
+const onDomain = (email: string | null | undefined, extraDomains: readonly string[] = []): string | null => {
+  const addr = plainAddress(email);
+  if (!addr) return null;
+  if (addr.endsWith(`@${MARLEY_EMAIL_DOMAIN}`)) return addr;
+  return extraDomains.some((d) => d && addr.endsWith(`@${d.trim().toLowerCase()}`)) ? addr : null;
 };
 
 /**
@@ -56,9 +114,17 @@ const onDomain = (email: string | null | undefined): string | null => {
  * The ADDRESS is used only when it's on the company domain; the display name
  * falls back to the address's local part, and with neither name nor a usable
  * address this degrades to the plain house identity.
+ *
+ * `extraDomains` WIDENS the recognised set (see onDomain — never substitute):
+ * pass only Resend-verified brand domains, since the address becomes a live
+ * From. Today every login is on the Marley domain, so no caller needs it yet.
  */
-export function ownerFrom(name: string | null | undefined, email: string | null | undefined): string {
-  const addr = onDomain(email);
+export function ownerFrom(
+  name: string | null | undefined,
+  email: string | null | undefined,
+  extraDomains: readonly string[] = [],
+): string {
+  const addr = onDomain(email, extraDomains);
   // Display names come from profiles.full_name (office-editable free text) —
   // strip header/address syntax so a name can never break out of the display
   // slot ("Luke <x@y>" stays a name, not a second address).
@@ -93,8 +159,17 @@ export function opsAlertRecipient(category: OpsAlertCategory = "business"): stri
  * human mailbox. Robot detection anchors on the address's LOCAL PART — a real
  * customer at info@bounce-castles.co.uk or "Jenny Osbounce" must not be
  * swallowed by a substring match.
+ *
+ * Own-domain recognition here WIDENS per brand (PRD §11.7 trap 3): threading
+ * `brand` through and substituting would silently stop Marley recognising its
+ * own reply addresses. The Marley set below is never removed; `extraDomains`
+ * (brandInboundDomains) adds the other brands'. Zero-argument calls behave
+ * byte-identically to today, so sync callers stay safe by default.
  */
-export function shouldForwardUnmatched(fromAddress: string | null | undefined): boolean {
+export function shouldForwardUnmatched(
+  fromAddress: string | null | undefined,
+  extraDomains: readonly string[] = [],
+): boolean {
   const raw = (fromAddress ?? "").toLowerCase();
   // Pull the bare address out of "Display Name <addr>" or use the string as-is.
   const addr = (/<([^<>]+)>/.exec(raw)?.[1] ?? raw).trim();
@@ -102,9 +177,36 @@ export function shouldForwardUnmatched(fromAddress: string | null | undefined): 
   if (at <= 0) return false;
   const local = addr.slice(0, at);
   const domain = addr.slice(at + 1);
-  const ours = [MARLEY_EMAIL_DOMAIN, `reply.${MARLEY_EMAIL_DOMAIN}`, "resend.dev", "amazonses.com"];
+  const ours = [
+    MARLEY_EMAIL_DOMAIN,
+    `reply.${MARLEY_EMAIL_DOMAIN}`,
+    "resend.dev",
+    "amazonses.com",
+    ...extraDomains.map((d) => d.trim().toLowerCase()).filter(Boolean),
+  ];
   if (ours.some((d) => domain === d || domain.endsWith(`.${d}`))) return false;
   return !/^(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce|bounces)([@+._-]|$)/.test(local);
+}
+
+/**
+ * The inbound/reply own-domain set from brands rows — email + reply domains,
+ * deduped, nulls dropped (the group pseudo-brand contributes nothing). Feed
+ * ALL brands rows, not just active ones: recognition is a loop guard, and a
+ * deactivated brand's reply address is still ours — mail from it must never be
+ * forwarded back out as a "customer". Wired where a supabase client already
+ * exists (the inbound webhook); sync callers keep the Marley-only default.
+ */
+export function brandInboundDomains(
+  brands: readonly Pick<Brand, "emailDomain" | "replyDomain">[],
+): string[] {
+  const out = new Set<string>();
+  for (const b of brands) {
+    for (const d of [b.emailDomain, b.replyDomain]) {
+      const domain = (d ?? "").trim().toLowerCase();
+      if (domain) out.add(domain);
+    }
+  }
+  return [...out];
 }
 
 /* ------------------------------------------------------------- IO helpers */
@@ -181,6 +283,7 @@ export async function ownerFromFor(sb: Sb, estimatorId: string | null | undefine
 export async function latestReplyAddressForLead(
   sb: Sb,
   leadId: string | null | undefined,
+  displayName = "Marley Moves",
 ): Promise<string | undefined> {
   if (!leadId) return undefined;
   const { data: q } = await sb
@@ -194,5 +297,8 @@ export async function latestReplyAddressForLead(
   const token = (q?.accept_token as string | null) ?? null;
   if (!token) return undefined;
   const domain = process.env.REPLY_EMAIL_DOMAIN || "reply.marleymoves.co.uk";
-  return `Marley Moves <q-${token}@${domain}>`;
+  // Display name only — the ADDRESS stays on Marley's Resend-inbound reply
+  // domain for every brand (machine-facing; a stub brand's reply_domain has
+  // no MX yet, and a dead Reply-To silently breaks the panel thread).
+  return `${displayName} <q-${token}@${domain}>`;
 }

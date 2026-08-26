@@ -12,10 +12,16 @@
  * in a push payload (see lib/push/categories.ts: first name only, lock screens
  * are readable by anyone holding the phone).
  *
+ * Multi-brand (docs/multi-brand-prd.md §3.5): the CUSTOMER builders take an
+ * optional `brand` on their input; absent/marley renders today's exact bytes
+ * via the default theme in lib/comms/email-brand.ts. The estimator heads-up is
+ * an internal staff surface and stays on the Marley identity deliberately.
+ *
  * Pure server util — no React, no DOM. Returns strings.
  */
 
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+import type { Brand } from "@/lib/brand";
+import { emailTheme, themedDarkFooter, type EmailTheme } from "@/lib/comms/email-brand";
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -30,6 +36,8 @@ export interface SurveyConfirmInput {
   estimatorName: string | null;
   /** Where the visit happens (the pickup address). */
   address: string | null;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 /** A reschedule restates the new slot and names the old one, so the customer can
@@ -58,10 +66,12 @@ function shell(opts: {
   intro: string;
   facts: string;
   footerNote: string;
+  theme?: EmailTheme;
 }): string {
+  const t = opts.theme ?? emailTheme();
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(opts.title)} | Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(opts.title)} | ${escapeHtml(t.name)}</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
 <div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${opts.preheader}</div>
 
@@ -70,11 +80,11 @@ function shell(opts: {
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
 
   <tr><td align="center" style="padding:34px 36px 8px;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+    ${t.logoHtml}
   </td></tr>
 
   <tr><td align="center" style="padding:0 36px 24px;">
-    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">${opts.badge}</div>
+    <div style="display:inline-block;padding:6px 14px;background:${t.pillBg};border:1px solid ${t.pillBorder};border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:${t.accent};">${opts.badge}</div>
   </td></tr>
 
   <tr><td align="center" style="padding:0 36px 6px;">
@@ -86,7 +96,7 @@ function shell(opts: {
 
   <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
-      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+      <tr><td style="padding:20px 26px;border-left:4px solid ${t.accent};">
         <table width="100%" cellpadding="0" cellspacing="0">
           ${opts.facts}
         </table>
@@ -98,10 +108,7 @@ function shell(opts: {
     <p style="font-size:14px;color:#5A554F;line-height:1.65;margin:0;">${opts.footerNote}</p>
   </td></tr>
 
-  <tr><td style="padding:20px 36px;background:#1A1A1A;">
-    <p style="margin:0;font-size:12px;color:#B8B3AC;line-height:1.7;">Marley Moves · Company No. 15914266 · 01747 637070<br>
-    <a href="mailto:hello@marleymoves.co.uk" style="color:#E85959;text-decoration:none;">hello@marleymoves.co.uk</a> · <a href="https://marleymoves.co.uk" style="color:#E85959;text-decoration:none;">marleymoves.co.uk</a></p>
-  </td></tr>
+${themedDarkFooter(t)}
 
 </table>
 </td></tr>
@@ -126,17 +133,19 @@ function visitFacts(i: SurveyConfirmInput, whenLabel: string): string {
   ].join("");
 }
 
-const CHANGE_NOTE = `Need to change the time? Just call us on <strong style="color:#C03838;">01747 637070</strong> or reply to this email and we'll sort it.`;
+const changeNote = (t: EmailTheme): string =>
+  `Need to change the time? Just ${t.callUsHtml} or reply to this email and we'll sort it.`;
 
 /* ------------------------------------------------------------ survey booked */
 
 export function surveyConfirmSms(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
-  const who = i.estimatorName ? `${i.estimatorName} from Marley Moves` : "One of the Marley Moves team";
+  const who = i.estimatorName ? `${i.estimatorName} from ${t.name}` : `One of the ${t.name} team`;
   const where = i.address ? ` at ${i.address}` : "";
   return (
     `Hi ${first}, your free home survey is booked for ${i.dateLabel} at ${i.timeLabel}. ` +
-    `${who} will visit you${where}. Need to change it? Call 01747 637070. Marley Moves`
+    `${who} will visit you${where}. Need to change it? Call ${t.phone}. ${t.name}`
   );
 }
 
@@ -145,31 +154,34 @@ export function surveyConfirmSubject(i: SurveyConfirmInput): string {
 }
 
 export function surveyConfirmEmailHtml(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || null;
   return shell({
     title: "Survey booked",
-    preheader: `Your free home survey with Marley Moves is booked for ${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}.`,
+    preheader: `Your free home survey with ${escapeHtml(t.name)} is booked for ${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}.`,
     badge: "Survey booked",
     headline: `You're in the diary${first ? `, ${escapeHtml(first)}` : ""}`,
     intro:
       "We'll come and take a proper look at your move so your fixed quote covers everything. The visit takes about an hour and there is nothing to prepare.",
     facts: visitFacts(i, "When"),
-    footerNote: CHANGE_NOTE,
+    footerNote: changeNote(t),
+    theme: t,
   });
 }
 
 export function surveyConfirmEmailText(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
-  const who = i.estimatorName ? `${i.estimatorName} from Marley Moves` : "One of the Marley Moves team";
+  const who = i.estimatorName ? `${i.estimatorName} from ${t.name}` : `One of the ${t.name} team`;
   return [
     `Hi ${first},`,
     ``,
     `Your free home survey is booked for ${i.dateLabel} at ${i.timeLabel}.`,
     `${who} will come and take a proper look at your move so your fixed quote covers everything.${i.address ? ` The visit is at ${i.address}.` : ""} It takes about an hour and there is nothing to prepare.`,
     ``,
-    `Need to change the time? Call 01747 637070 or reply to this email.`,
+    `Need to change the time? Call ${t.phone} or reply to this email.`,
     ``,
-    `Marley Moves · 01747 637070 · hello@marleymoves.co.uk`,
+    `${t.name} · ${t.phone} · ${t.helloAddress}`,
   ].join("\n");
 }
 
@@ -180,15 +192,17 @@ export function surveyRescheduleSubject(i: SurveyRescheduleInput): string {
 }
 
 export function surveyRescheduleSms(i: SurveyRescheduleInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
-  const who = i.estimatorName ? `${i.estimatorName} from Marley Moves` : "One of the Marley Moves team";
+  const who = i.estimatorName ? `${i.estimatorName} from ${t.name}` : `One of the ${t.name} team`;
   return (
-    `Hi ${first}, your Marley Moves survey has been moved to ${i.dateLabel} at ${i.timeLabel}. ` +
-    `${who} will visit you then. Not right? Call 01747 637070. Marley Moves`
+    `Hi ${first}, your ${t.name} survey has been moved to ${i.dateLabel} at ${i.timeLabel}. ` +
+    `${who} will visit you then. Not right? Call ${t.phone}. ${t.name}`
   );
 }
 
 export function surveyRescheduleEmailHtml(i: SurveyRescheduleInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || null;
   const facts =
     visitFacts(i, "New time") +
@@ -201,19 +215,21 @@ export function surveyRescheduleEmailHtml(i: SurveyRescheduleInput): string {
       : "");
   return shell({
     title: "Survey moved",
-    preheader: `Your survey with Marley Moves has moved to ${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}.`,
+    preheader: `Your survey with ${escapeHtml(t.name)} has moved to ${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}.`,
     badge: "New time",
     headline: `Your survey has moved${first ? `, ${escapeHtml(first)}` : ""}`,
     intro:
       "Everything else stays the same. The visit still takes about an hour and there is nothing to prepare. Please use this email rather than the earlier one.",
     facts,
-    footerNote: `Does this new time not work? Call us on <strong style="color:#C03838;">01747 637070</strong> or reply to this email and we'll find another.`,
+    footerNote: `Does this new time not work? ${t.callUsHtmlCap} or reply to this email and we'll find another.`,
+    theme: t,
   });
 }
 
 export function surveyRescheduleEmailText(i: SurveyRescheduleInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
-  const who = i.estimatorName ? `${i.estimatorName} from Marley Moves` : "One of the Marley Moves team";
+  const who = i.estimatorName ? `${i.estimatorName} from ${t.name}` : `One of the ${t.name} team`;
   return [
     `Hi ${first},`,
     ``,
@@ -221,9 +237,9 @@ export function surveyRescheduleEmailText(i: SurveyRescheduleInput): string {
     i.previousLabel ? `It was previously booked for ${i.previousLabel}. Please use this email rather than the earlier one.` : "",
     `${who} will visit you then.${i.address ? ` The visit is at ${i.address}.` : ""} It still takes about an hour and there is nothing to prepare.`,
     ``,
-    `Does this new time not work? Call 01747 637070 or reply to this email.`,
+    `Does this new time not work? Call ${t.phone} or reply to this email.`,
     ``,
-    `Marley Moves · 01747 637070 · hello@marleymoves.co.uk`,
+    `${t.name} · ${t.phone} · ${t.helloAddress}`,
   ]
     .filter((line) => line !== "")
     .join("\n");
@@ -236,14 +252,16 @@ export function surveyCancelledSubject(i: SurveyConfirmInput): string {
 }
 
 export function surveyCancelledSms(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
   return (
-    `Hi ${first}, we've had to cancel your Marley Moves survey on ${i.dateLabel} at ${i.timeLabel}, ` +
-    `so please don't wait in. Call 01747 637070 and we'll rebook you. Marley Moves`
+    `Hi ${first}, we've had to cancel your ${t.name} survey on ${i.dateLabel} at ${i.timeLabel}, ` +
+    `so please don't wait in. Call ${t.phone} and we'll rebook you. ${t.name}`
   );
 }
 
 export function surveyCancelledEmailHtml(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || null;
   return shell({
     title: "Survey cancelled",
@@ -256,20 +274,22 @@ export function surveyCancelledEmailHtml(i: SurveyConfirmInput): string {
       fact("Cancelled visit", `${escapeHtml(i.dateLabel)} at ${escapeHtml(i.timeLabel)}`),
       i.address ? fact("Was at", escapeHtml(i.address)) : "",
     ].join(""),
-    footerNote: `To rebook, call us on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.`,
+    footerNote: `To rebook, ${t.callUsHtml} or just reply to this email.`,
+    theme: t,
   });
 }
 
 export function surveyCancelledEmailText(i: SurveyConfirmInput): string {
+  const t = emailTheme(i.brand);
   const first = (i.customerName || "").trim().split(/\s+/)[0] || "there";
   return [
     `Hi ${first},`,
     ``,
     `Sorry, we've had to cancel your free home survey on ${i.dateLabel} at ${i.timeLabel}. Please don't wait in for us that day.`,
     ``,
-    `We'd still like to price up your move properly. Call 01747 637070 or reply to this email and we'll find another time.`,
+    `We'd still like to price up your move properly. Call ${t.phone} or reply to this email and we'll find another time.`,
     ``,
-    `Marley Moves · 01747 637070 · hello@marleymoves.co.uk`,
+    `${t.name} · ${t.phone} · ${t.helloAddress}`,
   ].join("\n");
 }
 

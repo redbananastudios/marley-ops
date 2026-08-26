@@ -35,8 +35,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { LeadOption } from "@/components/schedule/appointment-dialog";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
+import type { Brand } from "@/lib/brand";
 import type { PricingConfig } from "@/lib/quote/pricing";
-import type { DocBrand } from "@/lib/pdf/doc-brand";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -70,8 +70,11 @@ export interface QuoteHeaderActionsProps {
   estimatorName: string | null;
   vatNumber?: string;
   acceptUrl?: string;
-  /** Non-default brand for the re-send's attached PDF (PRD §3.6) — absent means Marley. */
-  brand?: DocBrand | null;
+  /** The quote's brand row (multi-brand PRD §3.5 + §3.6). Pure pass-through:
+   *  the re-send dialog composes the branded email from it AND derives the
+   *  attached PDF's DocBrand via docBrandFrom(), which returns null for the
+   *  default row — so absent/marley renders today's exact email and PDF. */
+  brand?: Brand | null;
 }
 
 export function QuoteHeaderActions({

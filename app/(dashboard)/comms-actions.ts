@@ -7,11 +7,15 @@ import { createClient } from "@/lib/supabase/server";
 import { replyAddressFor } from "@/lib/quote/chase";
 import {
   accountsFrom,
+  accountsFromFor,
+  helloFromFor,
   leadOwnerIdentity,
   ownerFrom,
   ownerIdentity,
   HELLO_FROM,
 } from "@/lib/comms/sender";
+import { DEFAULT_BRAND, getBrandOrDefault, type Brand } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
 import {
@@ -37,8 +41,8 @@ export type SendCommInput = DispatchCommInput & {
 };
 export type SendCommResult = DispatchCommResult;
 
-const TEMPLATE_KEYS: Record<NonNullable<SendCommInput["templateKey"]>, string | undefined> = {
-  "quote-email": process.env.RESEND_TEMPLATE_QUOTE_EMAIL,
+const TEMPLATE_ENV_NAMES: Record<NonNullable<SendCommInput["templateKey"]>, string> = {
+  "quote-email": "RESEND_TEMPLATE_QUOTE_EMAIL",
 };
 
 /** Dashboard send — the signed-in user's client + actor id over the shared
@@ -49,8 +53,25 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
     data: { user },
   } = await sb.auth.getUser();
 
+  // The record's brand, resolved SERVER-SIDE from the quote/lead row — never
+  // trusted from the client (multi-brand PRD §3.5). Drives the hosted
+  // template set (a Pitmans send must NEVER resolve Marley's env template id
+  // — §11.7 trap 4), the reply display name, the fallback From identity and
+  // the SMS sender. Marley/absent behaves byte-identically to today.
+  let slug: string | null = null;
+  if (input.quoteId) {
+    const { data: q } = await sb.from("quotes").select("brand").eq("id", input.quoteId).maybeSingle();
+    slug = (q?.brand as string | null) ?? null;
+  }
+  if (!slug && input.leadId) {
+    const { data: l } = await sb.from("leads").select("brand").eq("id", input.leadId).maybeSingle();
+    slug = (l?.brand as string | null) ?? null;
+  }
+  const brand: Brand = await getBrandOrDefault(sb, slug ?? DEFAULT_BRAND);
+  input = { ...input, brand };
+
   if (input.templateKey && input.templateVariables && !input.template) {
-    const id = TEMPLATE_KEYS[input.templateKey];
+    const id = templateIdFor(brand, TEMPLATE_ENV_NAMES[input.templateKey]);
     if (id) input = { ...input, template: { id, variables: input.templateVariables } };
   }
 
@@ -87,7 +108,7 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
         .maybeSingle();
       token = (q?.accept_token as string | null) ?? null;
     }
-    if (token) input = { ...input, replyTo: replyAddressFor(token) };
+    if (token) input = { ...input, replyTo: replyAddressFor(token, brand.name) };
   }
 
   // A quote email sends from its ASSIGNED ESTIMATOR (Peter, 2026-07-30): Luke's
@@ -108,14 +129,20 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
         .maybeSingle();
       estimatorId = (q?.estimator_id as string | null) ?? null;
     }
-    const owner = await ownerIdentity(sb, estimatorId);
-    // Reuse ownerFrom's OWN on-domain validation instead of a looser endsWith:
-    // ownerFrom returns HELLO_FROM whenever it can't build a valid personal
-    // @marleymoves.co.uk identity (unassigned, off-domain, or a malformed address
-    // that would fail its header-safe regex). In that case front the Accounts
-    // money desk — never hello@, never the creator.
-    const fronted = ownerFrom(owner.name, owner.email);
-    input = { ...input, from: fronted === HELLO_FROM ? accountsFrom() : fronted };
+    if (brand.slug !== DEFAULT_BRAND) {
+      // Personal identities are all Marley-domain logins — another brand's
+      // quote fronts its own money desk, never a Marley From (PRD §3.5).
+      input = { ...input, from: accountsFromFor(brand) };
+    } else {
+      const owner = await ownerIdentity(sb, estimatorId);
+      // Reuse ownerFrom's OWN on-domain validation instead of a looser endsWith:
+      // ownerFrom returns HELLO_FROM whenever it can't build a valid personal
+      // @marleymoves.co.uk identity (unassigned, off-domain, or a malformed address
+      // that would fail its header-safe regex). In that case front the Accounts
+      // money desk — never hello@, never the creator.
+      const fronted = ownerFrom(owner.name, owner.email);
+      input = { ...input, from: fronted === HELLO_FROM ? accountsFrom() : fronted };
+    }
   }
 
   // Sales identity: a lead-linked email with no explicit sender goes out as
@@ -138,7 +165,10 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
       leadId = leadId ?? ((q?.lead_id as string | null) ?? null);
       lastResort = (q?.estimator_id as string | null) ?? null;
     }
-    if (leadId || lastResort) {
+    if (brand.slug !== DEFAULT_BRAND) {
+      // Same rule as above: a non-default brand's mail fronts its own door.
+      input = { ...input, from: helloFromFor(brand) };
+    } else if (leadId || lastResort) {
       const owner = await leadOwnerIdentity(sb, leadId, lastResort);
       if (owner.name || owner.email) input = { ...input, from: ownerFrom(owner.name, owner.email) };
     }

@@ -14,7 +14,9 @@
  * should read like a genuine follow-up, not a campaign. UK English, no em-dashes.
  */
 
-import { capName, ownerFrom } from "@/lib/comms/sender";
+import { capName, helloFromFor, ownerFrom } from "@/lib/comms/sender";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
+import { emailTheme, type EmailTheme } from "@/lib/comms/email-brand";
 import { round2 } from "@/lib/quote/payments";
 import {
   COMMITMENT_DUE_DAYS_BEFORE,
@@ -89,6 +91,10 @@ export interface ChaseContext {
   ownerEmail?: string | null;
   /** Deposit, pre-formatted (e.g. "£100"). */
   depositAmount?: string | null;
+  /** Sending brand (multi-brand PRD §3.5) — absent/marley composes today's
+   *  exact copy, signature and From. A non-default brand chases in its own
+   *  name and phone, from its own front door. */
+  brand?: Brand | null;
 }
 
 /** "£100" / "£300" / "£187.50" — the deposit as customers should read it. */
@@ -112,20 +118,28 @@ const cap = capName;
 const first = (name: string | null): string => cap((name ?? "").trim().split(/\s+/)[0]) || "there";
 
 /** Owner's first name for the personal chase voice; falls back to the team. */
-const ownerFirst = (name: string | null | undefined): string =>
-  cap((name ?? "").trim().split(/\s+/)[0]) || "The Marley Moves Team";
+const ownerFirst = (name: string | null | undefined, t: EmailTheme = emailTheme()): string =>
+  cap((name ?? "").trim().split(/\s+/)[0]) || (t.isDefault ? "The Marley Moves Team" : `The ${t.name} Team`);
 
 /** The chase sender: the lead owner from THEIR OWN mailbox when their login is
  *  on the company domain ("Luke at Marley Moves <luke@marleymoves.co.uk>"),
- *  else the owner display name at hello@, else the plain house identity. */
-function chaseFromFor(ownerName: string | null | undefined, ownerEmail?: string | null): string {
+ *  else the owner display name at hello@, else the plain house identity.
+ *  Every personal identity is a MARLEY identity, so a non-default brand's
+ *  chase fronts its own hello_from instead — a Pitmans customer must never
+ *  see a Marley From (PRD §3.5). */
+function chaseFromFor(
+  ownerName: string | null | undefined,
+  ownerEmail?: string | null,
+  brand?: Brand | null,
+): string {
+  if (brand && brand.slug !== DEFAULT_BRAND) return helloFromFor(brand);
   return ownerFrom(ownerName, ownerEmail);
 }
 
 function vars(c: ChaseContext): Record<string, string> {
   return {
     CUSTOMER_FIRST_NAME: first(c.firstName),
-    OWNER_NAME: ownerFirst(c.ownerName),
+    OWNER_NAME: ownerFirst(c.ownerName, emailTheme(c.brand)),
     QUOTE_REF: c.quoteRef,
     ACCEPT_LINK: c.acceptUrl,
     EXPIRY_DATE: c.expiryLabel,
@@ -134,10 +148,11 @@ function vars(c: ChaseContext): Record<string, string> {
 }
 
 export function quoteChaseEmail(step: 1 | 2 | 3, c: ChaseContext): ChaseEmail {
+  const t = emailTheme(c.brand);
   const dep = c.depositAmount ?? "£100";
   const name = first(c.firstName);
-  const owner = ownerFirst(c.ownerName);
-  const from = chaseFromFor(c.ownerName, c.ownerEmail);
+  const owner = ownerFirst(c.ownerName, t);
+  const from = chaseFromFor(c.ownerName, c.ownerEmail, c.brand);
   if (step === 1) {
     return {
       subject: `Did my quote come through okay, ${name}?`,
@@ -150,7 +165,7 @@ ${c.acceptUrl}
 
 It takes about 30 seconds and provisionally reserves your move date.
 
-If you'd rather talk it through, reply to this email or call me on 01747 637070.
+If you'd rather talk it through, reply to this email or call me on ${t.phone}.
 
 Best regards,
 ${owner}`,
@@ -193,7 +208,7 @@ ${owner}`,
 
 It's ${owner} here, and this is the last reminder I'll send you, so I'll keep it brief.
 
-Your quote ${c.quoteRef} is open until ${c.expiryLabel} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on 01747 637070. I'd be glad to help.
+Your quote ${c.quoteRef} is open until ${c.expiryLabel} and there's nothing you need to do before then. If anything has changed, a different date, more or less to move, or something you'd like me to look at again, just reply to this email or call me on ${t.phone}. I'd be glad to help.
 
 Your quote is here whenever you want it:
 ${c.acceptUrl}
@@ -208,10 +223,17 @@ ${owner}`,
 }
 
 export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
+  const t = emailTheme(c.brand);
   const dep = c.depositAmount ?? "£100";
   const name = first(c.firstName);
-  const owner = ownerFirst(c.ownerName);
-  const from = chaseFromFor(c.ownerName, c.ownerEmail);
+  const owner = ownerFirst(c.ownerName, t);
+  const from = chaseFromFor(c.ownerName, c.ownerEmail, c.brand);
+  // The deposit accepts card ON THE PAYMENT PAGE for card-enabled brands; a
+  // bank-only brand's page shows bank details, so the copy matches it. The
+  // marley branch is today's literal.
+  const payLine = t.isDefault
+    ? "You can pay by card or bank transfer from your quote page:"
+    : "You can pay by bank transfer from your quote page:";
   if (step === 1) {
     return {
       subject: `One last step to secure your booking (${c.quoteRef})`,
@@ -219,11 +241,11 @@ export function depositChaseEmail(step: 1 | 2, c: ChaseContext): ChaseEmail {
 
 It's ${owner} here. Great to have you booked in. The last step is your ${dep} deposit, which makes everything official. Once it's in, we'll confirm your moving date with you to lock it in. If you're still waiting on completion, no problem, your booking is held with a fully amendable date. Either way, your price and your crew are secured.
 
-You can pay by card or bank transfer from your quote page:
+${payLine}
 ${c.acceptUrl}
 
 Bank transfer reference: ${c.quoteRef}
-
+${t.isDefault ? "" : `\n${t.name} is part of MarleyMoves Ltd, so your payment goes to the MARLEYMOVES LTD account shown on your quote page. Please use reference ${c.quoteRef} so we can match it to your booking.\n`}
 Once payment arrives, we'll email confirmation that everything is booked in.
 
 Best regards,
@@ -286,29 +308,53 @@ const TEAM_SIGNATURE_HTML = `<table role="presentation" cellpadding="0" cellspac
   <tr><td style="padding:12px 0 0;font-size:9px;line-height:13px;color:#6A6A6A;">This communication contains information which is confidential and may also be privileged. It is for the exclusive use of the intended recipient. If you are not the intended recipient, please note that any form of distribution, copying or use of this communication or the information contained therein is strictly prohibited and may be unlawful.</td></tr>
 </table>`;
 
+/** A non-default brand's plain signature block: name, contact row, group and
+ *  legal lines. Deliberately modest — the Marley block above carries socials
+ *  and a logo that other brands' rows don't hold yet (Phase 0 stubs). */
+function brandSignatureHtml(t: EmailTheme): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  return `<table role="presentation" cellpadding="0" cellspacing="0" border="0" width="360" style="width:100%;max-width:360px;border-collapse:collapse;font-family:Arial,Helvetica,sans-serif;color:#1F1D1B;mso-line-height-rule:exactly;">
+  <tr><td style="padding:0 0 3px;font-size:20px;line-height:24px;font-weight:700;color:#111111;">The ${esc(t.name)} Team</td></tr>${
+    t.groupLine
+      ? `\n  <tr><td style="padding:0 0 12px;font-size:13px;line-height:18px;color:#3A3A3A;">${esc(t.groupLine)}</td></tr>`
+      : ""
+  }
+  <tr><td style="padding:0 0 12px;border-top:2px solid ${t.accent};font-size:0;line-height:0;">&nbsp;</td></tr>
+  <tr><td style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="${t.telHref}" style="color:#1F1D1B;text-decoration:none;">${esc(t.phone)}</a> &middot; <a href="mailto:${esc(t.helloAddress)}" style="color:#1F1D1B;text-decoration:none;">${esc(t.helloAddress)}</a></td></tr>
+  <tr><td style="padding:0 0 9px;font-size:12px;line-height:18px;color:#1F1D1B;"><a href="${t.websiteUrl}" style="color:#1F1D1B;text-decoration:none;">${esc(t.websiteLabel)}</a></td></tr>
+  <tr><td style="padding:12px 0 0;font-size:9px;line-height:13px;color:#6A6A6A;">${t.footerMetaHtml}</td></tr>
+</table>`;
+}
+
 /** House HTML fallback when a Resend template id isn't configured. Team-signed
- * (never a hardcoded individual — the owner voice lives in the message text). */
-export function chaseTextToHtml(text: string): string {
+ * (never a hardcoded individual — the owner voice lives in the message text).
+ * `brand` swaps the signature and link colour; absent/marley = today's bytes. */
+export function chaseTextToHtml(text: string, brand?: Brand | null): string {
+  const t = emailTheme(brand);
   const body = text.replace(/\nPeter\s*$/, "").trim();
   const esc = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const linked = esc.replace(
     /(https?:\/\/[^\s]+)/g,
-    '<a href="$1" style="color:#C03838;text-decoration:underline;">$1</a>',
+    `<a href="$1" style="color:${t.accent};text-decoration:underline;">$1</a>`,
   );
   const paragraphs = linked
     .split(/\n{2,}/)
     .map((paragraph) => `<p style="margin:0 0 16px;">${paragraph.replace(/\n/g, "<br>")}</p>`)
     .join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#FFFFFF;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;"><tr><td style="padding:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A1A;line-height:1.7;">${paragraphs}</td></tr><tr><td style="padding:8px 0 0;">${TEAM_SIGNATURE_HTML}</td></tr></table></td></tr></table></body></html>`;
+  const signature = t.isDefault ? TEAM_SIGNATURE_HTML : brandSignatureHtml(t);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0;padding:0;background:#FFFFFF;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:24px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;max-width:600px;border-collapse:collapse;"><tr><td style="padding:0;font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1A1A1A;line-height:1.7;">${paragraphs}</td></tr><tr><td style="padding:8px 0 0;">${signature}</td></tr></table></td></tr></table></body></html>`;
 }
 
 /** The per-lead reply address that routes an inbound reply back to its quote
  *  (Resend inbound on the reply subdomain → webhook → pause chase + log). */
-export function replyAddressFor(acceptToken: string): string {
+export function replyAddressFor(acceptToken: string, displayName = "Marley Moves"): string {
   const domain = process.env.REPLY_EMAIL_DOMAIN || "reply.marleymoves.co.uk";
-  // Display name so mail clients show "Marley Moves" not the raw token. The
-  // inbound webhook's tokenFromReplyAddress parses either form.
-  return `Marley Moves <q-${acceptToken}@${domain}>`;
+  // Display name so mail clients show the brand, not the raw token — the
+  // ADDRESS stays on Marley's Resend-inbound reply domain for every brand
+  // (it is machine-facing; a stub brand's reply_domain has no MX yet and a
+  // dead Reply-To would silently break the panel thread). The inbound
+  // webhook's tokenFromReplyAddress parses either form.
+  return `${displayName} <q-${acceptToken}@${domain}>`;
 }
 
 /** Parse a reply address back to its accept token (null when not ours).

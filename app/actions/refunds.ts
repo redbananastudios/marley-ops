@@ -26,7 +26,9 @@ import {
   type DispatchOutcome,
 } from "@/lib/refunds/customer-notice";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
-import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
+import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
+import { getBrandOrDefault } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor } from "@/lib/quote/chase";
 import { ukDayOf } from "@/lib/sales-report";
 import { type FillDetermination, type PaymentRail } from "@/lib/payments-policy";
@@ -110,6 +112,8 @@ interface QueueQuote {
   zoho_contact_id: string | null;
   zoho_deposit_invoice_id: string | null;
   zoho_deposit_invoice_number: string | null;
+  /** Brand slug — resolves the refund emails' copy, From and template set (§3.5). */
+  brand: string;
 }
 
 async function loadQuote(admin: Sb, quoteId: string | null): Promise<QueueQuote | null> {
@@ -117,7 +121,7 @@ async function loadQuote(admin: Sb, quoteId: string | null): Promise<QueueQuote 
   const { data } = await admin
     .from("quotes")
     .select(
-      "id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number",
+      "id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, brand",
     )
     .eq("id", quoteId)
     .maybeSingle();
@@ -652,26 +656,30 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
   // the row is settled either way; a send failure alerts accounts to follow up.
   let dispatched: DispatchOutcome = null;
   if (quote?.customer_email && lines.length) {
+    // ONE brand resolve per send (multi-brand PRD §3.5); marley = today.
+    const brand = await getBrandOrDefault(admin, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       lines,
       totalRefund: totalPence / 100,
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_REFUND_EXECUTED;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_REFUND_EXECUTED");
     const sent = await dispatchComm(admin, prof.id, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: quote.customer_email,
-      subject: `Your ${gbpPence(totalPence)} refund from Marley Moves (${quote.quote_ref})`,
-      bodyText: `We have refunded ${gbpPence(totalPence)} for booking ${quote.quote_ref}. Each payment goes back the way it came in. Any questions, call us on 01747 637070.`,
+      subject: `Your ${gbpPence(totalPence)} refund from ${brand.slug === "marley" ? "Marley Moves" : brand.name} (${quote.quote_ref})`,
+      bodyText: `We have refunded ${gbpPence(totalPence)} for booking ${quote.quote_ref}. Each payment goes back the way it came in. Any questions, call us on ${brand.slug === "marley" ? "01747 637070" : (brand.phone ?? "01747 637070")}.`,
       ...(templateId
         ? { template: { id: templateId, variables: refundExecutedTemplateVars(meta) } }
         : { bodyHtml: buildRefundExecutedEmailHtml(meta) }),
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : accountsAddress(),
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : accountsAddress(),
       leadId: row.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
+      brand,
     });
     dispatched = sent;
     if ("ok" in sent && !sent.ok) {
@@ -800,6 +808,7 @@ export async function retainRefundQueueAction(
 
   let retainDispatched: DispatchOutcome = null;
   if (quote?.customer_email) {
+    const brand = await getBrandOrDefault(admin, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
@@ -807,21 +816,23 @@ export async function retainRefundQueueAction(
       retainedTotal: retainPence / 100,
       refundLines: lines,
       refundTotal: refundedPence / 100,
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_RETAINED_OUTCOME;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_RETAINED_OUTCOME");
     const sent = await dispatchComm(admin, prof.id, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: quote.customer_email,
       subject: `An update on your booking (${quote.quote_ref})`,
-      bodyText: `We were not able to re-book your original move date, so ${gbpPence(retainPence)} of what you had paid has been held against that date, as set out in your booking terms.${refundedPence > 0 ? ` ${gbpPence(refundedPence)} above that amount has been refunded in full.` : ""} Any questions, call us on 01747 637070.`,
+      bodyText: `We were not able to re-book your original move date, so ${gbpPence(retainPence)} of what you had paid has been held against that date, as set out in your booking terms.${refundedPence > 0 ? ` ${gbpPence(refundedPence)} above that amount has been refunded in full.` : ""} Any questions, call us on ${brand.slug === "marley" ? "01747 637070" : (brand.phone ?? "01747 637070")}.`,
       ...(templateId
         ? { template: { id: templateId, variables: retainedOutcomeTemplateVars(meta) } }
         : { bodyHtml: buildRetainedOutcomeEmailHtml(meta) }),
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : accountsAddress(),
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : accountsAddress(),
       leadId: row.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
+      brand,
     });
     retainDispatched = sent;
     if ("ok" in sent && !sent.ok) {

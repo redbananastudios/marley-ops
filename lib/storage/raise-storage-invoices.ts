@@ -1,7 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { log, errorContext } from "@/lib/log";
 import { sendEmail } from "@/lib/comms/send";
-import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
+import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
+import { getBrandOrDefault } from "@/lib/brand";
 import {
   createInvoice,
   findInvoiceByReference,
@@ -195,8 +196,13 @@ async function emailStorageInvoice(
     invoiceId: string;
     invoiceNumber: string;
     invoiceUrl: string | null;
+    /** The let's brand slug (multi-brand PRD §3.5) — absent/marley sends
+     *  today's exact email; another brand gets its own chrome, From and the
+     *  MarleyMoves Ltd payment disclosure. */
+    letBrand?: string | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const brand = await getBrandOrDefault(admin, args.letBrand ?? "marley");
   const input: StorageInvoiceEmailInput = {
     firstName: (args.clientName ?? "").trim().split(/\s+/)[0] || "there",
     unitLabel: args.unitLabel,
@@ -205,6 +211,7 @@ async function emailStorageInvoice(
     invoiceNumber: args.invoiceNumber,
     invoiceUrl: args.invoiceUrl,
     footerNote: FOOTER_NOTES[args.kind],
+    brand,
   };
   let pdf: string | undefined;
   try {
@@ -221,7 +228,7 @@ async function emailStorageInvoice(
     // Money desk identity — storage bills have no quote token, so
     // replies go straight to the accounts mailbox.
     replyTo: accountsAddress(),
-    from: accountsFrom(),
+    from: accountsFromFor(brand),
   });
   if (!sent.ok) return { ok: false, error: sent.error ?? "send failed" };
   await admin
@@ -255,7 +262,7 @@ export async function raiseDueStorageInvoices(
         let q = admin
           .from("storage_lets")
           .select(
-            "id, unit_id, client_id, start_date, end_date, rate, rate_period, billing_paused, billing_model, min_days, min_amount, notes",
+            "id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, billing_paused, billing_model, min_days, min_amount, notes",
           )
           .gt("rate", 0);
         q = opts.letId ? q.eq("id", opts.letId) : q.or(`end_date.is.null,end_date.gte.${cutoffIso}`);
@@ -471,6 +478,7 @@ export async function raiseDueStorageInvoices(
             invoiceId: ref.invoiceId,
             invoiceNumber: ref.invoiceNumber,
             invoiceUrl: ref.invoiceUrl,
+            letBrand: (let_ as { brand?: string | null }).brand ?? null,
           });
           if (sent.ok) summary.emailed++;
           else summary.errors.push(`email ${ref.invoiceNumber}: ${sent.error}`);
@@ -554,7 +562,7 @@ export async function repairPendingStorageClaims(
   const letIds = [...new Set(pending.map((c) => c.let_id))];
   const clientIds = [...new Set(pending.map((c) => c.client_id).filter((id): id is string => !!id))];
   const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
-    admin.from("storage_lets").select("id, unit_id").in("id", letIds),
+    admin.from("storage_lets").select("id, unit_id, brand").in("id", letIds),
     admin.from("storage_units").select("id, code, unit_type, site_id"),
     admin.from("storage_sites").select("id, name"),
     admin.from("clients").select("id, display_name, email").in("id", clientIds),
@@ -653,6 +661,7 @@ export async function repairPendingStorageClaims(
         invoiceId: ref.invoiceId,
         invoiceNumber: ref.invoiceNumber,
         invoiceUrl: ref.invoiceUrl,
+        letBrand: (let_ as { brand?: string | null } | undefined)?.brand ?? null,
       });
       if (!sent.ok) result.alerts.push(`Claim ${reference}: adopted but the customer email failed (${sent.error})`);
     }
@@ -706,7 +715,7 @@ export async function resendUnemailedStorageInvoices(
   const letIds = [...new Set(rows.map((r) => r.let_id))];
   const clientIds = [...new Set(rows.map((r) => r.client_id).filter((id): id is string => !!id))];
   const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
-    admin.from("storage_lets").select("id, unit_id").in("id", letIds),
+    admin.from("storage_lets").select("id, unit_id, brand").in("id", letIds),
     admin.from("storage_units").select("id, code, unit_type, site_id"),
     admin.from("storage_sites").select("id, name"),
     admin.from("clients").select("id, display_name, email").in("id", clientIds),
@@ -741,6 +750,7 @@ export async function resendUnemailedStorageInvoices(
       invoiceId: row.zoho_invoice_id as string,
       invoiceNumber: row.zoho_invoice_number as string,
       invoiceUrl: row.zoho_invoice_url as string | null,
+      letBrand: (let_ as { brand?: string | null } | undefined)?.brand ?? null,
     });
     if (sent.ok) result.resent++;
     else {

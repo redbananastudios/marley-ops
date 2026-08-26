@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { REVIEW_LINKS, hasGoogleMailbox, selectReviewLink } from "@/lib/comms/review-platform";
+import * as platformModule from "@/lib/comms/review-platform";
 
 /**
  * Review-platform routing (Peter, 2026-08-19): Google-mailbox customers get
@@ -60,5 +61,36 @@ describe("selectReviewLink", () => {
   it("Checkatrade lead → Checkatrade, even with a gmail address", () => {
     expect(selectReviewLink("jane@gmail.com", "checkatrade", GOOGLE_URL).platform).toBe("Checkatrade");
     expect(selectReviewLink("jane@outlook.com", "checkatrade", GOOGLE_URL).platform).toBe("Checkatrade");
+  });
+});
+
+describe("selectBrandReviewLink — multi-brand routing (PRD §3.5)", () => {
+  const { selectBrandReviewLink } = platformModule;
+
+  it("the default brand keeps today's mailbox/channel routing exactly", () => {
+    expect(selectBrandReviewLink({ slug: "marley", reviewUrl: null }, "marley", "jane@gmail.com", "website", GOOGLE_URL)).toEqual(
+      selectReviewLink("jane@gmail.com", "website", GOOGLE_URL),
+    );
+    expect(selectBrandReviewLink({ slug: "marley", reviewUrl: null }, "marley", "jane@outlook.com", "checkatrade", GOOGLE_URL)?.platform).toBe(
+      "Checkatrade",
+    );
+  });
+
+  it("a non-default brand routes ONLY to its own review URL", () => {
+    const link = selectBrandReviewLink(
+      { slug: "pitmans", reviewUrl: "https://g.page/r/PITMANS/review" },
+      "marley",
+      // Even a Checkatrade-channel gmail customer: Marley's platform profiles
+      // must never receive a Pitmans review.
+      "jane@gmail.com",
+      "checkatrade",
+      GOOGLE_URL,
+    );
+    expect(link).toEqual({ platform: "Google", url: "https://g.page/r/PITMANS/review" });
+  });
+
+  it("a non-default brand with no review URL gets NO ask — never Marley's Settings URL", () => {
+    expect(selectBrandReviewLink({ slug: "pitmans", reviewUrl: null }, "marley", "jane@gmail.com", "website", GOOGLE_URL)).toBeNull();
+    expect(selectBrandReviewLink({ slug: "pitmans", reviewUrl: "   " }, "marley", "jane@gmail.com", "website", GOOGLE_URL)).toBeNull();
   });
 });
