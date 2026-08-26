@@ -4,6 +4,10 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-26T00:33Z — escalation repair sweep (scheduled): nothing escalated
+
+No open finding carries `escalate: opus-5` (`grep -rn "escalate" qa/findings/` → matches only in `qa/REPAIR.md` prose and older `qa/LOG.md` entries, none in any finding file). Verified against `origin/staging` @ `b770aab`. Queue holds three findings, none of them escalation-tier work: **QA-20260825-03** (high, `class: risky` — Pitmans-brand quotes mint `MMR###`/`MMC###` refs instead of `PMR###`/`PMC###`; money/bank-reconciliation, never in scope for either automated tier, and PR **#90** "gate 6 — PM/MM ref issuance + bank-feed matcher widening [Peter review]" is open against `staging` and looks like the intended fix awaiting Peter's review — left entirely untouched); **QA-20260826-01** (medium, `class: risky` — `/bookings` "Balance outstanding" £5,100 vs `/payments` Due "Owed right now" £5,550, a £450 gap that opens whenever an unpaid commitment invoice exists; money/reconciliation, not mine); and **QA-20260826-02** (medium, `class: safe-fix` — removals diary "New" dialog never offers bare clients, so the gate-11 brand picker is dead code there) which is **`status: fixing`, `branch: qa-repair/QA-20260826-02`, claimed 2 minutes before this sweep fired** (`b770aab`, 00:30:58Z) — an in-flight first-pass run owns it, and per `qa/REPAIR.md` §2 a `fixing` finding is not the escalation tier's to take. Nothing claimed, no branch cut, no PR opened, nothing left in `status: fixing` by me, no `escalate: human` needed, `master` untouched, no DB or browser access used. Time spent: ~4 min.
+
 ## 2026-08-26T00:09Z — OVERNIGHT DEEP audit: 4 role agents (Sonnet), gate-11/12 fresh code + deep truth/handoff, 1 verified closure, 2 new findings, 1 new spec (live-validated)
 
 - sha at checkout: `8f9475b` (`git fetch origin staging && git checkout -B staging origin/staging`). Credentials: all three `QA_STAGING_*` present.
