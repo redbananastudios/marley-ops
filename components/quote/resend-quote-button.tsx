@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { Mail } from "lucide-react";
 import { computeQuote, type PricingConfig } from "@/lib/quote/pricing";
 import { deriveInputs, type QuoteFormValues } from "@/lib/quote/form-types";
+import type { Brand } from "@/lib/brand";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
 import { useRouter } from "next/navigation";
 
@@ -28,6 +29,7 @@ export function ResendQuoteButton({
   vatNumber,
   depositAmount,
   acceptUrl,
+  brand,
   open: openProp,
   onOpenChange,
 }: {
@@ -43,6 +45,9 @@ export function ResendQuoteButton({
   vatNumber?: string;
   depositAmount?: number;
   acceptUrl?: string;
+  /** The quote's brand row (multi-brand PRD §3.5) — absent/marley sends
+   *  today's exact email. */
+  brand?: Brand | null;
   /** Controlled mode: when `open`/`onOpenChange` are supplied the built-in
    *  trigger is suppressed and the dialog is driven from outside (the quote
    *  header opens it from its "⋯ More" overflow menu). */
@@ -73,6 +78,7 @@ export function ResendQuoteButton({
         onOpenChange={setOpen}
         quoteId={quoteId}
         quoteRef={quoteRef}
+        brand={brand}
         values={values}
         breakdown={breakdown}
         leadId={leadId}

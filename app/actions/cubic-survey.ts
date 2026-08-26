@@ -23,6 +23,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { computeCubicTotals, reconcileCubicLineProvenance, sanitizeCubicLines } from "@/lib/cubic-survey";
 import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { helloFromFor } from "@/lib/comms/sender";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 
 const FROM = "Marley Moves <hello@marleymoves.co.uk>";
@@ -210,7 +212,7 @@ export async function emailCubicShareLinkAction(leadId: string): Promise<Dispatc
   const admin = createAdminClient();
   const { data: lead } = await admin
     .from("leads")
-    .select("id, name, email, client_id")
+    .select("id, name, email, client_id, brand")
     .eq("id", leadId)
     .maybeSingle();
   if (!lead) return { ok: false, error: "Lead not found." };
@@ -222,24 +224,34 @@ export async function emailCubicShareLinkAction(leadId: string): Promise<Dispatc
   if (!link.ok) return { ok: false, error: link.error };
 
   const firstName = (lead.name ?? "").trim().split(/\s+/)[0] || undefined;
+  // The lead's brand drives the shell chrome, copy and From (multi-brand PRD
+  // §3.5); marley/absent composes today's exact email.
+  const brand = await getBrandOrDefault(admin, (lead as { brand?: string }).brand ?? DEFAULT_BRAND);
+  const isDefaultBrand = brand.slug === DEFAULT_BRAND;
+  const brandName = isDefaultBrand ? "Marley Moves" : brand.name;
+  const brandPhone = isDefaultBrand ? "01747 637070" : (brand.phone ?? "01747 637070");
   const bodyHtml = brandedEmailHtml({
-    preheader: "Fill in a quick inventory of your move so your Marley Moves quote covers everything.",
+    preheader: `Fill in a quick inventory of your move so your ${brandName} quote covers everything.`,
     greeting: firstName,
     headline: "Your moving inventory",
     paragraphs: [
       "To make sure your quote covers everything, please fill in a quick inventory of what's moving, room by room, tapping what you have.",
       "It only takes a few minutes on your phone, and you can save and come back any time.",
-      "Any questions, just reply to this email or call us on 01747 637070.",
+      `Any questions, just reply to this email or call us on ${brandPhone}.`,
     ],
     cta: { label: "Fill in your inventory", url: link.url },
+    brand,
   });
 
   const sb = await createClient();
   const result = await dispatchComm(sb, prof.id, {
     channel: "email",
     to: email,
-    from: FROM,
-    subject: "Your Marley Moves moving inventory",
+    // A non-default brand fronts its own door — dispatch/send default to the
+    // Marley house identity when From is absent, which must never happen here.
+    from: isDefaultBrand ? FROM : helloFromFor(brand),
+    brand,
+    subject: `Your ${brandName} moving inventory`,
     bodyText: `Fill in a quick inventory of your move so we can quote accurately: ${link.url}`,
     bodyHtml,
     clientId: lead.client_id ?? undefined,

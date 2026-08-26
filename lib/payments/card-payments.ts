@@ -21,7 +21,8 @@ import { getBusinessSettings } from "@/lib/settings";
 import { log } from "@/lib/log";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
-import { accountsAddress, accountsFrom } from "@/lib/comms/sender";
+import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
 import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
 import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
 import {
@@ -664,6 +665,11 @@ export async function refundCardPayment(
   // copy must differ from a settled refund or the customer waits for a line
   // that never arrives.
   if (quote?.customer_email) {
+    // ONE brand resolve per send (multi-brand PRD §3.5); marley = today.
+    const brand = await getBrandOrDefault(sb, quote.brand);
+    const isDefaultBrand = brand.slug === DEFAULT_BRAND;
+    const brandName = isDefaultBrand ? "Marley Moves" : brand.name;
+    const brandPhone = isDefaultBrand ? "01747 637070" : (brand.phone ?? "01747 637070");
     const firstName = (quote.customer_name ?? "").trim().split(/\s+/)[0] || undefined;
     const endsLine = row.card_number_mask ? ` ending ${row.card_number_mask.slice(-4)}` : "";
     const bodyPara = voided
@@ -673,19 +679,21 @@ export async function refundCardPayment(
       channel: "email",
       // Money desk identity (docs/email-identity-plan.md) — refund questions
       // go back to accounts, like every other money email.
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       replyTo: accountsAddress(),
       to: quote.customer_email,
       subject: voided
         ? `Your ${label} card payment has been cancelled (${quote.quote_ref})`
-        : `Your ${label} refund from Marley Moves (${quote.quote_ref})`,
-      bodyText: `${bodyPara} Any questions, call us on 01747 637070.`,
+        : `Your ${label} refund from ${brandName} (${quote.quote_ref})`,
+      bodyText: `${bodyPara} Any questions, call us on ${brandPhone}.`,
       bodyHtml: brandedEmailHtml({
         preheader: voided ? `${label} card payment cancelled` : `${label} refunded to your card`,
         greeting: firstName,
         headline: voided ? "Your payment has been cancelled" : "Your refund is on its way",
-        paragraphs: [bodyPara, `Any questions at all, just reply to this email or call us on 01747 637070.`],
+        paragraphs: [bodyPara, `Any questions at all, just reply to this email or call us on ${brandPhone}.`],
+        brand,
       }),
+      brand,
       leadId: row.lead_id ?? undefined,
       quoteId: row.quote_id,
       clientId: row.client_id ?? undefined,

@@ -14,6 +14,8 @@ import {
   DEPOSIT_CHASE_DAYS,
 } from "@/lib/quote/chase";
 
+import { pitmans as pitmansBrand } from "../comms/brand-fixture";
+
 const DAY = 24 * 60 * 60 * 1000;
 const iso = (offsetDays: number, from = new Date("2026-07-09T10:00:00Z")) =>
   new Date(from.getTime() + offsetDays * DAY).toISOString();
@@ -232,5 +234,65 @@ describe("deposit amount in chase copy (found by /qa 2026-08-05)", () => {
     expect(depositLabel(187.5)).toBe("£187.50");
     expect(depositLabel(null)).toBe("£100");
     expect(depositLabel(0)).toBe("£100");
+  });
+});
+
+describe("brand threading (multi-brand PRD §3.5)", () => {
+  const ctx = {
+    firstName: "jane",
+    quoteRef: "PMR001",
+    acceptUrl: "https://ops.example/q/tok",
+    expiryLabel: "8 August",
+    ownerName: "Luke James",
+    ownerEmail: "luke@marleymoves.co.uk",
+    brand: pitmansBrand,
+  };
+
+  it("a non-default brand chases in its own voice, phone and From", () => {
+    const email = depositChaseEmail(1, ctx);
+    expect(email.from).toBe("Pitmans Removals & Storage <info@pitmansremovals.co.uk>");
+    expect(email.text).toContain("You can pay by bank transfer from your quote page:");
+    expect(email.text).not.toContain("by card or bank transfer");
+    // Disclosure (a): payment goes to MarleyMoves Ltd, reference named.
+    expect(email.text).toContain("part of MarleyMoves Ltd");
+    expect(email.text).toContain("MARLEYMOVES LTD");
+    expect(email.text).toContain("reference PMR001");
+    const q3 = quoteChaseEmail(3, ctx);
+    expect(q3.text).toContain("call me on 01258 858564");
+    expect(q3.text).not.toContain("01747 637070");
+  });
+
+  it("the team fallback signs as the brand's team", () => {
+    const unowned = { ...ctx, ownerName: null, ownerEmail: null };
+    expect(quoteChaseEmail(1, unowned).text).toContain("The Pitmans Removals & Storage Team");
+  });
+
+  it("marley chases are unchanged: personal From, card copy, no disclosure", () => {
+    const marleyCtx = { ...ctx, brand: undefined, quoteRef: "MMR001" };
+    const email = depositChaseEmail(1, marleyCtx);
+    expect(email.from).toBe("Luke at Marley Moves <luke@marleymoves.co.uk>");
+    expect(email.text).toContain("You can pay by card or bank transfer from your quote page:");
+    expect(email.text).not.toContain("part of MarleyMoves Ltd");
+  });
+
+  it("chaseTextToHtml swaps signature + link colour per brand, marley bytes unchanged", () => {
+    const text = "Hi Jane,\n\nYour quote: https://ops.example/q/tok\n\nBest regards,\nLuke";
+    const marley = chaseTextToHtml(text);
+    expect(marley).toContain("The Marley Moves Team");
+    expect(marley).toContain("#C03838");
+    const pit = chaseTextToHtml(text, pitmansBrand);
+    expect(pit).toContain("The Pitmans Removals &amp; Storage Team");
+    expect(pit).toContain("Part of the Marley Group");
+    expect(pit).toContain("#2B2B76");
+    expect(pit).not.toContain("marleymoves.co.uk");
+    expect(pit).not.toContain("01747 637070");
+  });
+
+  it("replyAddressFor takes a display name but keeps the Marley reply domain", () => {
+    expect(replyAddressFor("tok123456789")).toBe("Marley Moves <q-tok123456789@reply.marleymoves.co.uk>");
+    const pit = replyAddressFor("tok123456789", "Pitmans Removals & Storage");
+    expect(pit).toContain("Pitmans Removals & Storage <q-tok123456789@");
+    expect(pit).toContain("@reply.marleymoves.co.uk>");
+    expect(tokenFromReplyAddress(pit)).toBe("tok123456789");
   });
 });

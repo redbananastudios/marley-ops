@@ -40,7 +40,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { dayDelta } from "@/lib/schedule/pack-days";
 import { shiftPackDays } from "@/lib/schedule/pack-days-io";
-import { accountsFrom } from "@/lib/comms/sender";
+import { accountsFromFor } from "@/lib/comms/sender";
+import { getBrandOrDefault, type Brand } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
 import { voidInvoice } from "@/lib/zoho";
 import { balanceDueDate, moveDateLabel } from "@/lib/quote/payments";
@@ -74,11 +76,13 @@ const isRealZohoId = (v: string | null | undefined): boolean => !!v && v !== "pe
 
 /** The quote columns every flow here needs off the money quote. */
 const MONEY_QUOTE_COLS =
-  "id, quote_ref, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number";
+  "id, quote_ref, brand, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number";
 
 interface MoneyQuote {
   id: string;
   quote_ref: string;
+  /** Brand slug — resolves each customer email's copy, From and template set (§3.5). */
+  brand: string;
   customer_name: string | null;
   customer_email: string | null;
   accept_token: string | null;
@@ -224,18 +228,21 @@ export async function changeBookingDateAction(
   const [{ data: leadRow }, quote] = await Promise.all([
     admin
       .from("leads")
-      .select("id, name, email, client_id, date_confirmed_at")
+      .select("id, name, email, client_id, date_confirmed_at, brand")
       .eq("id", leadId)
       .maybeSingle(),
     acceptedQuoteFor(admin, leadId),
   ]);
   const lead = leadRow as
-    | { id: string; name: string | null; email: string | null; client_id: string | null; date_confirmed_at: string | null }
+    | { id: string; name: string | null; email: string | null; client_id: string | null; date_confirmed_at: string | null; brand: string }
     | null;
   if (!lead) return { ok: false, error: "Lead not found." };
 
   const customerEmail = quote?.customer_email ?? lead.email ?? null;
-  const replyTo = quote?.accept_token ? replyAddressFor(quote.accept_token) : undefined;
+  // ONE brand resolve per flow (multi-brand PRD §3.5) — the money quote's
+  // brand wins, the lead's brand covers a quote-less edge; marley = today.
+  const brand: Brand = await getBrandOrDefault(admin, quote?.brand ?? lead.brand);
+  const replyTo = quote?.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined;
 
   /* ----------------------------- OUTSIDE the window: free reschedule ------ */
   if (bookingChangeMode(oldMoveDay) === "reschedule") {
@@ -260,11 +267,12 @@ export async function changeBookingDateAction(
         heldLines: heldLines(snapshot.held),
         commitmentAmount: unpaidCommitment ? Number(quote?.commitment_invoice_amount ?? 0) : null,
         commitmentDueLabel: unpaidCommitment ? dayLabel(commitmentDueDate(newMoveDay)) : null,
+        brand,
       };
-      const templateId = process.env.RESEND_TEMPLATE_DATE_CHANGE_CONFIRMATION;
+      const templateId = templateIdFor(brand, "RESEND_TEMPLATE_DATE_CHANGE_CONFIRMATION");
       const sent = await dispatchComm(admin, office.id, {
         channel: "email",
-        from: accountsFrom(),
+        from: accountsFromFor(brand),
         to: customerEmail,
         subject: dateChangeConfirmationSubject(meta),
         bodyText: dateChangeConfirmationText(meta),
@@ -275,6 +283,7 @@ export async function changeBookingDateAction(
         leadId,
         quoteId: quote?.id,
         clientId: lead.client_id ?? undefined,
+        brand,
       }).catch(() => ({ ok: false as const, error: "send crashed" }));
       emailed = ("ok" in sent && sent.ok) || "duplicate" in sent;
       if (!emailed) {
@@ -507,11 +516,12 @@ export async function changeBookingDateAction(
       unconditionalAmount: amounts.unconditional,
       heldLines: heldLines(snapshot.held),
       dateConfirmed,
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_CANCELLATION_ACK;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_CANCELLATION_ACK");
     const sent = await dispatchComm(admin, office.id, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: customerEmail,
       subject: cancellationAckSubject(meta),
       bodyText: cancellationAckText(meta),
@@ -522,6 +532,7 @@ export async function changeBookingDateAction(
       leadId,
       quoteId: quote?.id,
       clientId: lead.client_id ?? undefined,
+      brand,
     }).catch(() => ({ ok: false as const, error: "send crashed" }));
     emailed = ("ok" in sent && sent.ok) || "duplicate" in sent;
     if (!emailed) {
@@ -635,11 +646,11 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
 
   const { data: leadRow } = await admin
     .from("leads")
-    .select("id, name, email, client_id, status, balance_paid_at, date_confirmed_at")
+    .select("id, name, email, client_id, status, balance_paid_at, date_confirmed_at, brand")
     .eq("id", leadId)
     .maybeSingle();
   const lead = leadRow as
-    | { id: string; name: string | null; email: string | null; client_id: string | null; status: string; balance_paid_at: string | null; date_confirmed_at: string | null }
+    | { id: string; name: string | null; email: string | null; client_id: string | null; status: string; balance_paid_at: string | null; date_confirmed_at: string | null; brand: string }
     | null;
   if (!lead) return { ok: false, error: "Lead not found." };
 
@@ -784,27 +795,30 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
   // Apology email — full-refund copy when money is held (fail-soft).
   const customerEmail = quote?.customer_email ?? lead.email ?? null;
   if (customerEmail) {
+    const brand: Brand = await getBrandOrDefault(admin, quote?.brand ?? lead.brand);
     const meta = {
       firstName: lead.name ?? quote?.customer_name,
       quoteRef: quote?.quote_ref ?? "your booking",
       moveDateLabel: dayLabel(quote?.moving_date ?? ukDayOf(cancelledRemoval?.starts_at ?? null)),
       refundTotal: snapshot.split.total,
       heldLines: heldLines(snapshot.held),
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_MARLEY_CANCEL;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_MARLEY_CANCEL");
     const sent = await dispatchComm(admin, office.id, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: customerEmail,
       subject: marleyCancelSubject(meta),
       bodyText: marleyCancelText(meta),
       ...(templateId
         ? { template: { id: templateId, variables: marleyCancelTemplateVars(meta) }, bodyHtml: buildMarleyCancelEmailHtml(meta) }
         : { bodyHtml: buildMarleyCancelEmailHtml(meta) }),
-      replyTo: quote?.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      replyTo: quote?.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
       leadId,
       quoteId: quote?.id,
       clientId: lead.client_id ?? undefined,
+      brand,
     }).catch(() => ({ ok: false as const, error: "send crashed" }));
     const emailed = ("ok" in sent && sent.ok) || "duplicate" in sent;
     if (!emailed) {

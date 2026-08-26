@@ -14,7 +14,8 @@ import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createClient } from "@/lib/supabase/server";
 import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
-import { ownerFrom } from "@/lib/comms/sender";
+import { helloFromFor, ownerFrom } from "@/lib/comms/sender";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
 import { replyAddressFor } from "@/lib/quote/chase";
 
 const schema = z.object({
@@ -50,13 +51,24 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
   }
   const v = parsed.data;
 
+  const sb = await createClient();
+
+  // The record's brand, resolved server-side from the lead (falling back to
+  // the client's latest lead is overkill here — an unlinked compose is a
+  // marley send, exactly as today). Multi-brand PRD §3.5.
+  let brandSlug: string | null = null;
+  if (v.leadId) {
+    const { data: l } = await sb.from("leads").select("brand").eq("id", v.leadId).maybeSingle();
+    brandSlug = (l?.brand as string | null) ?? null;
+  }
+  const brand = await getBrandOrDefault(sb, brandSlug ?? DEFAULT_BRAND);
+
   const paragraphs = toParagraphs(v.message);
   const bodyHtml = brandedEmailHtml({
     preheader: v.subject,
     paragraphs,
+    brand,
   });
-
-  const sb = await createClient();
 
   // A composed one-off routes replies back through the panel relay when the
   // lead has a quote token (chase pause + Comms log), like every other
@@ -71,7 +83,7 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-    if (q?.accept_token) replyTo = replyAddressFor(q.accept_token);
+    if (q?.accept_token) replyTo = replyAddressFor(q.accept_token, brand.name);
   }
   // No relay token → replies go to the composer's own company mailbox (their
   // From address), keeping the conversation with the person who wrote it.
@@ -83,11 +95,14 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
     channel: "email",
     to: v.to,
     // The person writing it signs it — the composer sends as themselves.
-    from: ownerFrom(office.fullName, office.email),
+    // Composer identities are Marley logins, so a non-default brand's mail
+    // fronts its own door instead (PRD §3.5).
+    from: brand.slug === DEFAULT_BRAND ? ownerFrom(office.fullName, office.email) : helloFromFor(brand),
     replyTo,
     subject: v.subject,
     bodyText: v.message, // drives the duplicate hash + the Comms-tab preview
     bodyHtml,
+    brand,
     leadId: v.leadId,
     clientId: v.clientId,
     override: v.override,

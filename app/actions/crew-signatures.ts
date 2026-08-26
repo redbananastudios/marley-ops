@@ -18,7 +18,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireOfficeProfile } from "@/lib/ai/auth";
 import { requireAppointmentAccess } from "@/lib/job-access";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
-import { HELLO_FROM, latestReplyAddressForLead } from "@/lib/comms/sender";
+import { helloFromFor, latestReplyAddressForLead } from "@/lib/comms/sender";
+import { getBrandOrDefault } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { ukParts, ukTimeAt } from "@/lib/uk-time";
 import {
   buildCompletionEmailHtml,
@@ -150,7 +152,7 @@ export async function completeJobAction(
   if (appt.appt_type !== "removal") return { ok: false, error: "Completion sign-off is for removal jobs." };
 
   const { data: lead } = appt.lead_id
-    ? await admin.from("leads").select("id, name, email, client_id").eq("id", appt.lead_id).single()
+    ? await admin.from("leads").select("id, name, email, client_id, brand").eq("id", appt.lead_id).single()
     : { data: null };
 
   // Link the signed-in user to their staff record for the completion row.
@@ -336,8 +338,10 @@ export async function completeJobAction(
       hasExceptions: exceptionsNote.length > 0,
       exceptions: exceptionsNote,
       customerAbsent: v.customerAbsent,
+      brand: await getBrandOrDefault(admin, (lead as { brand?: string }).brand ?? "marley"),
     };
-    const templateId = process.env.RESEND_TEMPLATE_COMPLETION_CERT;
+    const brand = emailInput.brand!;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_COMPLETION_CERT");
     const res = await dispatchComm(admin, prof.id, {
       channel: "email",
       to: lead.email,
@@ -347,11 +351,16 @@ export async function completeJobAction(
         ? { template: { id: templateId, variables: completionEmailVariables(emailInput) } }
         : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
       attachmentBase64: v.certificatePdfBase64 ?? undefined,
-      attachmentName: v.certificatePdfBase64 ? "marley-moves-completion-certificate.pdf" : undefined,
-      from: HELLO_FROM,
-      replyTo: await latestReplyAddressForLead(admin, appt.lead_id),
+      attachmentName: v.certificatePdfBase64
+        ? brand.slug === "marley"
+          ? "marley-moves-completion-certificate.pdf"
+          : `${brand.slug}-completion-certificate.pdf`
+        : undefined,
+      from: helloFromFor(brand),
+      replyTo: await latestReplyAddressForLead(admin, appt.lead_id, brand.name),
       leadId: appt.lead_id ?? undefined,
       clientId: lead.client_id ?? undefined,
+      brand,
     });
     emailed = "ok" in res && res.ok === true;
     if (!emailed) {
@@ -407,7 +416,7 @@ export async function resendCertificateAction(
   if (!comp.certificate_path) return { ok: false, error: "No stored certificate PDF for this completion." };
 
   const { data: lead } = comp.lead_id
-    ? await admin.from("leads").select("id, name, email, client_id").eq("id", comp.lead_id).single()
+    ? await admin.from("leads").select("id, name, email, client_id, brand").eq("id", comp.lead_id).single()
     : { data: null };
   if (!lead?.email) return { ok: false, error: "No email address on the customer's record." };
 
@@ -444,8 +453,10 @@ export async function resendCertificateAction(
     hasExceptions: exceptionsNote.length > 0,
     exceptions: exceptionsNote,
     customerAbsent: comp.customer_absent,
+    brand: await getBrandOrDefault(admin, (lead as { brand?: string }).brand ?? "marley"),
   };
-  const templateId = process.env.RESEND_TEMPLATE_COMPLETION_CERT;
+  const brand = emailInput.brand!;
+  const templateId = templateIdFor(brand, "RESEND_TEMPLATE_COMPLETION_CERT");
   const res = await dispatchComm(admin, prof.id, {
     channel: "email",
     to: lead.email,
@@ -455,11 +466,15 @@ export async function resendCertificateAction(
       ? { template: { id: templateId, variables: completionEmailVariables(emailInput) } }
       : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
     attachmentBase64: pdfB64,
-    attachmentName: "marley-moves-completion-certificate.pdf",
-    from: HELLO_FROM,
-    replyTo: await latestReplyAddressForLead(admin, lead.id),
+    attachmentName:
+      brand.slug === "marley"
+        ? "marley-moves-completion-certificate.pdf"
+        : `${brand.slug}-completion-certificate.pdf`,
+    from: helloFromFor(brand),
+    replyTo: await latestReplyAddressForLead(admin, lead.id, brand.name),
     leadId: lead.id,
     clientId: lead.client_id ?? undefined,
+    brand,
     override: true,
     overrideReason: "Certificate resend from the office",
   });

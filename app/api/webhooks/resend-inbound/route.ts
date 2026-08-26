@@ -8,7 +8,8 @@ import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { classifyBounce, suppressesAddress } from "@/lib/comms/bounce";
 import { flagLeadEmailInvalid } from "@/lib/comms/invalid-email";
 import { htmlToText, splitReply } from "@/lib/comms/extract-reply";
-import { leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
+import { brandInboundDomains, leadOwnerIdentity, shouldForwardUnmatched } from "@/lib/comms/sender";
+import { listAllBrands } from "@/lib/brand";
 import { tokenFromReplyAddress } from "@/lib/quote/chase";
 import { fetchQuoteByToken } from "@/lib/quote/accept-flow";
 import { errorContext, log } from "@/lib/log";
@@ -248,10 +249,15 @@ async function processInbound(
   const from = data.from ?? "unknown sender";
   const subject = data.subject ?? "(no subject)";
   const emailId = data.email_id ?? data.id;
+  // WIDEN own-domain recognition to every brand's domains (PRD §11.7 trap 3 —
+  // substituting per-brand would silently stop Marley recognising its own
+  // reply addresses). A failed read yields [] and shouldForwardUnmatched
+  // falls back to the always-present Marley set.
+  const ourDomains = brandInboundDomains(await listAllBrands(sb));
   const quote = token ? await fetchQuoteByToken(sb, token) : null;
 
   if (!quote) {
-    if (shouldForwardUnmatched(from)) {
+    if (shouldForwardUnmatched(from, ourDomains)) {
       const content = emailId ? await fetchReceivedEmail(emailId) : null;
       const rawUnmatched = replyBodySource(content);
       const parts = splitReply(rawUnmatched);
@@ -361,7 +367,7 @@ async function processInbound(
   const owner = await leadOwnerIdentity(sb, quote.lead_id, quote.estimator_id);
   const ownerMailbox = owner.email?.toLowerCase().endsWith("@marleymoves.co.uk") ? owner.email : null;
   const forwardTo = ownerMailbox || process.env.INBOUND_FORWARD_EMAIL || "hello@marleymoves.co.uk";
-  const robotSender = !shouldForwardUnmatched(from);
+  const robotSender = !shouldForwardUnmatched(from, ourDomains);
   if (!robotSender) {
     const leadLink = quote.lead_id
       ? ` · <a href="https://ops.marleymoves.co.uk/leads/${quote.lead_id}" style="color:#c03838;">Open the lead in Marley Ops</a>`

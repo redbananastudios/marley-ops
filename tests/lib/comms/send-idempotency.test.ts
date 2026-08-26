@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { emailPayloadHash, sendEmail, sendSms } from "@/lib/comms/send";
+import { emailPayloadHash, sendEmail, sendSms, smsSenderFor } from "@/lib/comms/send";
 
 describe("provider delivery safety", () => {
   beforeEach(() => {
@@ -50,6 +50,25 @@ describe("provider delivery safety", () => {
       .resolves.toMatchObject({ ok: false, outcomeUnknown: true });
     await expect(sendSms({ to: "07000000000", body: "x" }))
       .resolves.toMatchObject({ ok: false, outcomeUnknown: true });
+  });
+
+  it("smsSenderFor: brands.sms_sender fronts a non-default brand; everything else is today's env chain (trap 7)", () => {
+    // beforeEach seeds WEBEX_SMS_SENDER_MARLEY_MOVES = "Marley"
+    expect(smsSenderFor()).toBe("Marley");
+    expect(smsSenderFor(null)).toBe("Marley");
+    expect(smsSenderFor({ slug: "marley", smsSender: "NeverUsed" })).toBe("Marley");
+    expect(smsSenderFor({ slug: "pitmans", smsSender: "Pitmans" })).toBe("Pitmans");
+    // a Phase 0 blank sms_sender falls back to the Marley chain, not to nothing
+    expect(smsSenderFor({ slug: "pitmans", smsSender: null })).toBe("Marley");
+  });
+
+  it("a branded sendSms puts the brand sender on the wire; unbranded stays byte-identical", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ messages: [{ transaction_id: "t1" }] }) });
+    vi.stubGlobal("fetch", fetchMock);
+    await sendSms({ to: "07000000000", body: "x", brand: { slug: "pitmans", smsSender: "Pitmans" } });
+    await sendSms({ to: "07000000000", body: "x" });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).from).toBe("Pitmans");
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).from).toBe("Marley");
   });
 });
 

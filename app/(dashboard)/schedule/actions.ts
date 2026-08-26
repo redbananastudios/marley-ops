@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
-import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrands } from "@/lib/brand";
 import { balanceDueDate } from "@/lib/quote/payments";
 import { commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
@@ -12,6 +12,7 @@ import { sendCommunication } from "@/app/(dashboard)/comms-actions";
 import { dayDelta } from "@/lib/schedule/pack-days";
 import { shiftPackDays } from "@/lib/schedule/pack-days-io";
 import { ownerFrom } from "@/lib/comms/sender";
+import { templateIdFor } from "@/lib/comms/template-id";
 import {
   surveyConfirmEmailHtml,
   surveyConfirmEmailText,
@@ -88,6 +89,8 @@ type LeadForNotice = {
   email: string | null;
   from_address: string | null;
   from_postcode: string | null;
+  /** Brand slug (multi-brand PRD §3.5) — absent means marley (older callers). */
+  brand?: string | null;
 };
 
 /**
@@ -120,6 +123,9 @@ async function sendSurveyCustomerNotice(
   const estimator = opts.estimatorId
     ? (await sb.from("profiles").select("full_name, email, active").eq("id", opts.estimatorId).maybeSingle()).data
     : null;
+  // ONE brand resolve per notice (multi-brand PRD §3.5) — copy, template set
+  // and From all derive from the lead's brand; marley/absent = today's bytes.
+  const brand = await getBrandOrDefault(sb, lead.brand ?? DEFAULT_BRAND);
   const confirm = {
     customerName: lead.name,
     dateLabel: starts.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
@@ -127,6 +133,7 @@ async function sendSurveyCustomerNotice(
     estimatorName: estimator?.full_name ?? null,
     address: opts.location || lead.from_address || lead.from_postcode || null,
     previousLabel: ukSlotLabel(opts.previousStartsAt) ?? null,
+    brand,
   };
 
   const copy = {
@@ -135,21 +142,21 @@ async function sendSurveyCustomerNotice(
       html: surveyConfirmEmailHtml,
       text: surveyConfirmEmailText,
       sms: surveyConfirmSms,
-      templateId: process.env.RESEND_TEMPLATE_SURVEY_CONFIRMATION,
+      templateId: templateIdFor(brand, "RESEND_TEMPLATE_SURVEY_CONFIRMATION"),
     },
     moved: {
       subject: surveyRescheduleSubject,
       html: surveyRescheduleEmailHtml,
       text: surveyRescheduleEmailText,
       sms: surveyRescheduleSms,
-      templateId: process.env.RESEND_TEMPLATE_SURVEY_RESCHEDULED,
+      templateId: templateIdFor(brand, "RESEND_TEMPLATE_SURVEY_RESCHEDULED"),
     },
     cancelled: {
       subject: surveyCancelledSubject,
       html: surveyCancelledEmailHtml,
       text: surveyCancelledEmailText,
       sms: surveyCancelledSms,
-      templateId: process.env.RESEND_TEMPLATE_SURVEY_CANCELLED,
+      templateId: templateIdFor(brand, "RESEND_TEMPLATE_SURVEY_CANCELLED"),
     },
   }[kind];
 
@@ -161,8 +168,13 @@ async function sendSurveyCustomerNotice(
       channel: "email",
       // From the SURVEYING estimator (who the customer will actually meet) —
       // at booking time the lead often has no explicit owner yet, so the
-      // generic owner injection would miss.
-      from: estimator?.active ? ownerFrom(estimator.full_name, estimator.email) : undefined,
+      // generic owner injection would miss. Personal identities are Marley
+      // logins, so a non-default brand leaves From unset and sendCommunication
+      // fronts the brand's own door instead (PRD §3.5).
+      from:
+        brand.slug === DEFAULT_BRAND && estimator?.active
+          ? ownerFrom(estimator.full_name, estimator.email)
+          : undefined,
       to: lead.email,
       subject: copy.subject(confirm),
       bodyText: copy.text(confirm),
@@ -757,7 +769,7 @@ export async function rescheduleAppointment(
   if (appt?.appt_type === "survey" && appt.lead_id && appt.status !== "cancelled" && startMoved) {
     const { data: lead } = await sb
       .from("leads")
-      .select("id, client_id, name, phone, email, from_address, from_postcode")
+      .select("id, client_id, name, phone, email, from_address, from_postcode, brand")
       .eq("id", appt.lead_id)
       .maybeSingle();
     if (lead) {
@@ -887,7 +899,7 @@ export async function updateAppointment(
     if (prior.appt_type === "survey" && prior.lead_id) {
       const { data: lead } = await sb
         .from("leads")
-        .select("id, client_id, status, name, phone, email, from_address, from_postcode")
+        .select("id, client_id, status, name, phone, email, from_address, from_postcode, brand")
         .eq("id", prior.lead_id)
         .maybeSingle();
       if (lead) {

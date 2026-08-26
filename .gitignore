@@ -54,3 +54,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Resend template previews (create-resend-templates.mjs --preview-dir) — local render evidence, never committed
+/.resend-preview/

@@ -28,6 +28,7 @@ import { quotePdfBase64 } from "@/lib/quote/pdf-client";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
+import type { Brand } from "@/lib/brand";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -52,6 +53,7 @@ export function SendQuoteDialog({
   vatNumber,
   depositAmount,
   acceptUrl,
+  brand,
   resend,
   onSent,
 }: {
@@ -74,6 +76,9 @@ export function SendQuoteDialog({
   depositAmount?: number;
   /** Customer accept page (/q/<token>) — email CTA + the PDF's QR codes. */
   acceptUrl?: string;
+  /** The quote's brand row (multi-brand PRD §3.5). Absent/marley composes
+   *  today's exact email; another brand gets its own chrome and subject. */
+  brand?: Brand | null;
   /** Re-send of an already-sent/accepted quote (customer asked again). Preserves
    *  the quote's status — a re-send must never bump an accepted quote back to
    *  "sent" — and the duplicate override is reasoned "customer requested re-send". */
@@ -146,7 +151,7 @@ export function SendQuoteDialog({
         }
       }
 
-      const emailMeta = { quoteRef, acceptUrl, depositAmount };
+      const emailMeta = { quoteRef, acceptUrl, depositAmount, brand };
       const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
       // Server prefers the published Resend template (dashboard-editable copy)
       // when its env id is set; bodyHtml stays as the fallback body.
@@ -162,12 +167,15 @@ export function SendQuoteDialog({
       const result = await sendCommunication({
         channel: "email",
         to: email.trim(),
-        subject: `Your removal quote from Marley Moves — ${quoteRef}`,
+        subject: `Your removal quote from ${brand && brand.slug !== "marley" ? brand.name : "Marley Moves"} — ${quoteRef}`,
         bodyHtml,
         ...(templateVariables ? { templateKey: "quote-email" as const, templateVariables } : {}),
         bodyText: "Your removal quote is attached.",
         attachmentBase64,
-        attachmentName: `MarleyMoves-Quote-${quoteRef}.pdf`,
+        attachmentName:
+          brand && brand.slug !== "marley"
+            ? `${brand.name.replace(/[^A-Za-z0-9]+/g, "")}-Quote-${quoteRef}.pdf`
+            : `MarleyMoves-Quote-${quoteRef}.pdf`,
         quoteId,
         leadId: leadId ?? undefined,
         clientId: clientId ?? undefined,

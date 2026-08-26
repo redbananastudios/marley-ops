@@ -21,6 +21,11 @@
  * because that file is "use server" and may only export async actions — pure
  * synchronous logic must sit in a lib module to stay unit-testable.
  *
+ * Multi-brand (docs/multi-brand-prd.md §3.5): metas take an optional `brand`;
+ * absent/marley renders today's exact bytes via the default theme in
+ * lib/comms/email-brand.ts. The date-change confirmations are pre-move comms,
+ * so non-default brands carry the Marley-crew-may-attend disclosure.
+ *
  * Pure server utils — no React, no DOM, no IO. UK English, no em-dashes.
  */
 
@@ -32,6 +37,8 @@ import {
   type HeldSplit,
   type PaymentRail,
 } from "@/lib/payments-policy";
+import type { Brand } from "@/lib/brand";
+import { emailTheme, themedEmailShell, themedPill, type EmailTheme } from "@/lib/comms/email-brand";
 
 /* ---------------------------------------------------- pure planning helpers */
 
@@ -101,50 +108,13 @@ export const CANCEL_UNCONFIRMED_NOTE =
 export const MARLEY_CANCEL_NOTE =
   "We are cancelling, so everything the customer has paid is refunded in full — no re-booking question. An apology email goes out and unpaid invoices are voided.";
 
-/* ------------------------------------------------------------- email shell */
-
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+/* ------------------------------------------------------------- email rows
+   The shell and pill render through the shared brand-aware fragments in
+   lib/comms/email-brand.ts — the default theme is byte-identical to the old
+   self-contained shell. */
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function shell(preheader: string, inner: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title></head>
-<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${preheader}</div>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
-<tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
-  <tr><td align="center" style="padding:34px 36px 8px;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
-  </td></tr>
-${inner}
-  <tr><td style="background:#FAFAFA;border-top:1px solid #EAE7E2;padding:20px 36px;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
-        <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
-      </td>
-      <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
-        <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
-      </td>
-    </tr></table>
-  </td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
-}
-
-function pill(label: string): string {
-  return `  <tr><td align="center" style="padding:0 36px 24px;">
-    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">${label}</div>
-  </td></tr>`;
 }
 
 function headline(text: string): string {
@@ -168,14 +138,19 @@ function subline(html: string): string {
  * so the fragment is indistinguishable from the template's own cards — keep
  * the two in lockstep like the branded-shell constants.
  */
-export function templateAmountCard(caption: string, amount: number, lines: string[]): string {
+export function templateAmountCard(
+  caption: string,
+  amount: number,
+  lines: string[],
+  t: EmailTheme = emailTheme(),
+): string {
   const font = "'Montserrat','Segoe UI',Helvetica,Arial,sans-serif";
   const note = lines.length
     ? `\n        <div style="font-size:11px;color:#8A857E;margin-top:8px;">${lines.map((l) => escapeHtml(l)).join("<br>")}</div>`
     : "";
   return `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E7E4DE;border-radius:8px;overflow:hidden;">
-      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+      <tr><td style="padding:20px 26px;border-left:4px solid ${t.accent};">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#8A857E;margin-bottom:6px;">${escapeHtml(caption)}</div>
         <div style="font-family:${font};font-size:34px;font-weight:300;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(amount)}</div>${note}
       </td></tr>
@@ -183,7 +158,7 @@ export function templateAmountCard(caption: string, amount: number, lines: strin
   </td></tr>`;
 }
 
-function amountCard(caption: string, amount: number, lines: string[]): string {
+function amountCard(caption: string, amount: number, lines: string[], t: EmailTheme): string {
   const lineHtml = lines.length
     ? `<div style="font-size:12px;color:#6E6A65;margin-top:8px;line-height:1.8;">${lines
         .map((l) => escapeHtml(l))
@@ -191,7 +166,7 @@ function amountCard(caption: string, amount: number, lines: string[]): string {
     : "";
   return `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
-      <tr><td style="padding:20px 26px;border-left:4px solid #C03838;">
+      <tr><td style="padding:20px 26px;border-left:4px solid ${t.accent};">
         <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">${escapeHtml(caption)}</div>
         <div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(amount)}</div>
         ${lineHtml}
@@ -224,6 +199,8 @@ export interface CancellationAckMeta {
   heldLines: string[];
   /** Whether the customer had confirmed the date (drives the held framing). */
   dateConfirmed: boolean;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 export function cancellationAckSubject(m: CancellationAckMeta): string {
@@ -252,6 +229,7 @@ function ackHeldSentences(m: CancellationAckMeta): string[] {
 }
 
 export function cancellationAckText(m: CancellationAckMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   return [
     `Hi ${name || "there"},`,
@@ -262,17 +240,19 @@ export function cancellationAckText(m: CancellationAckMeta): string {
       m.heldLines.length ? ` (${m.heldLines.join(", ")})` : ""
     } and it still counts towards your move.`,
     ...ackHeldSentences(m),
-    `Any questions, call Connor on 01747 637070 or just reply to this email.`,
+    ...(t.attendNoteText ? [t.attendNoteText] : []),
+    `Any questions, ${t.callText} or just reply to this email.`,
   ].join("\n\n");
 }
 
 export function cancellationAckTemplateVars(m: CancellationAckMeta): Record<string, string> {
+  const t = emailTheme(m.brand);
   return {
     CUSTOMER_FIRST_NAME: escapeHtml(firstNameOf(m.firstName) || "there"),
     QUOTE_REF: escapeHtml(m.quoteRef),
     OLD_DATE_LABEL: escapeHtml(m.oldDateLabel ?? "your original date"),
     NEW_DATE_LABEL: escapeHtml(m.newDateLabel ?? "your new date"),
-    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines) : "",
+    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines, t) : "",
     HELD_SENTENCES: ackHeldSentences(m)
       .map((s) => escapeHtml(s))
       .join(" "),
@@ -280,9 +260,10 @@ export function cancellationAckTemplateVars(m: CancellationAckMeta): Record<stri
 }
 
 export function buildCancellationAckEmailHtml(m: CancellationAckMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const inner = [
-    pill(`Date changed · ${escapeHtml(m.quoteRef)}`),
+    themedPill(`Date changed · ${escapeHtml(m.quoteRef)}`, t),
     headline(`Your move date has changed${name ? ", " + escapeHtml(name) : ""}`),
     subline(
       `We've released your original date${
@@ -291,17 +272,20 @@ export function buildCancellationAckEmailHtml(m: CancellationAckMeta): string {
         m.newDateLabel ? ` for <strong style="color:#1A1A1A;">${escapeHtml(m.newDateLabel)}</strong>` : " for your new date"
       }. No new deposit is needed. Everything you've already paid still counts towards your move.`,
     ),
-    m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines) : "",
+    m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines, t) : "",
     subline(ackHeldSentences(m).map((s) => escapeHtml(s)).join(" ")),
+    // Disclosure (b) — the booking rolls to a new date, so this is pre-move.
+    t.attendNoteHtml ? subline(t.attendNoteHtml) : "",
     subline(
-      `Any questions, call Connor on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.`,
+      `Any questions, ${t.callHtml} or just reply to this email.`,
     ),
   ]
     .filter(Boolean)
     .join("\n");
-  return shell(
+  return themedEmailShell(
     `Your move date has changed. Everything you've paid still counts towards your move.`,
     inner,
+    t,
   );
 }
 
@@ -314,6 +298,8 @@ export interface MarleyCancelMeta {
   /** Everything held — refunded in full. */
   refundTotal: number;
   heldLines: string[];
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 export function marleyCancelSubject(m: MarleyCancelMeta): string {
@@ -321,6 +307,7 @@ export function marleyCancelSubject(m: MarleyCancelMeta): string {
 }
 
 export function marleyCancelText(m: MarleyCancelMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const refund =
     m.refundTotal > 0
@@ -334,7 +321,7 @@ export function marleyCancelText(m: MarleyCancelMeta): string {
       m.moveDateLabel ? ` on ${m.moveDateLabel}` : ""
     } and have had to cancel your booking (${m.quoteRef}). This one is on us.`,
     refund,
-    `If we can help with your move on another date, call Connor on 01747 637070. We'd like to make it right.`,
+    `If we can help with your move on another date, ${t.callText}. We'd like to make it right.`,
   ].join("\n\n");
 }
 
@@ -345,7 +332,7 @@ export function marleyCancelTemplateVars(m: MarleyCancelMeta): Record<string, st
     MOVE_DATE_CLAUSE: m.moveDateLabel
       ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
       : "",
-    REFUND_CARD: m.refundTotal > 0 ? templateAmountCard("Refunded in full", m.refundTotal, m.heldLines) : "",
+    REFUND_CARD: m.refundTotal > 0 ? templateAmountCard("Refunded in full", m.refundTotal, m.heldLines, emailTheme(m.brand)) : "",
     REFUND_SENTENCE:
       m.refundTotal > 0
         ? `Everything you've paid comes back to you in full, the same way you paid it, within ${REFUND_CUSTOMER_SLA_DAYS} days. There's nothing you need to do.`
@@ -354,28 +341,29 @@ export function marleyCancelTemplateVars(m: MarleyCancelMeta): Record<string, st
 }
 
 export function buildMarleyCancelEmailHtml(m: MarleyCancelMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const inner = [
-    pill(`Booking cancelled · ${escapeHtml(m.quoteRef)}`),
+    themedPill(`Booking cancelled · ${escapeHtml(m.quoteRef)}`, t),
     headline(`We're sorry${name ? ", " + escapeHtml(name) : ""}`),
     subline(
       `We can't do your move${
         m.moveDateLabel ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>` : ""
       } and have had to cancel your booking. This one is on us, and we're sorry for the disruption.`,
     ),
-    m.refundTotal > 0 ? amountCard("Refunded in full", m.refundTotal, m.heldLines) : "",
+    m.refundTotal > 0 ? amountCard("Refunded in full", m.refundTotal, m.heldLines, t) : "",
     subline(
       m.refundTotal > 0
         ? `Everything you've paid comes back to you in full, the same way you paid it, within ${REFUND_CUSTOMER_SLA_DAYS} days. There's nothing you need to do.`
         : `You haven't paid anything towards this move, so there's nothing owed either way.`,
     ),
     subline(
-      `If we can help with your move on another date, call Connor on <strong style="color:#C03838;">01747 637070</strong>. We'd like to make it right.`,
+      `If we can help with your move on another date, ${t.callHtml}. We'd like to make it right.`,
     ),
   ]
     .filter(Boolean)
     .join("\n");
-  return shell(`We're sorry: we've had to cancel your move. Everything you've paid is refunded in full.`, inner);
+  return themedEmailShell(`We're sorry: we've had to cancel your move. Everything you've paid is refunded in full.`, inner, t);
 }
 
 /* --------------------------------- date-change-confirmation (outside window) */
@@ -390,6 +378,8 @@ export interface DateChangeConfirmationMeta {
   /** Unpaid commitment restated (null/0 = nothing due yet on that ladder rung). */
   commitmentAmount?: number | null;
   commitmentDueLabel?: string | null;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 export function dateChangeConfirmationSubject(m: DateChangeConfirmationMeta): string {
@@ -404,6 +394,7 @@ function commitmentSentence(m: DateChangeConfirmationMeta): string | null {
 }
 
 export function dateChangeConfirmationText(m: DateChangeConfirmationMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const commitment = commitmentSentence(m);
   return [
@@ -417,7 +408,8 @@ export function dateChangeConfirmationText(m: DateChangeConfirmationMeta): strin
         } and it all still counts towards your move.`
       : null,
     commitment,
-    `Any questions, call Connor on 01747 637070 or just reply to this email.`,
+    t.attendNoteText || null,
+    `Any questions, ${t.callText} or just reply to this email.`,
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -432,7 +424,7 @@ export function dateChangeConfirmationTemplateVars(
     QUOTE_REF: escapeHtml(m.quoteRef),
     OLD_DATE_LABEL: escapeHtml(m.oldDateLabel ?? "your original date"),
     NEW_DATE_LABEL: escapeHtml(m.newDateLabel ?? "your new date"),
-    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines) : "",
+    HELD_CARD: m.heldTotal > 0 ? templateAmountCard("Already paid", m.heldTotal, m.heldLines, emailTheme(m.brand)) : "",
     HELD_SENTENCE:
       m.heldTotal > 0
         ? `You've paid ${gbp(m.heldTotal)} and it all still counts towards your move.`
@@ -442,10 +434,11 @@ export function dateChangeConfirmationTemplateVars(
 }
 
 export function buildDateChangeConfirmationEmailHtml(m: DateChangeConfirmationMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const commitment = commitmentSentence(m);
   const inner = [
-    pill(`Date changed · ${escapeHtml(m.quoteRef)}`),
+    themedPill(`Date changed · ${escapeHtml(m.quoteRef)}`, t),
     headline(
       m.newDateLabel
         ? `You're booked for ${escapeHtml(m.newDateLabel)}`
@@ -458,19 +451,22 @@ export function buildDateChangeConfirmationEmailHtml(m: DateChangeConfirmationMe
         m.newDateLabel ?? "your new date",
       )}</strong>. Your booking carries straight over: same team, same price, nothing to re-do.`,
     ),
-    m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines) : "",
+    m.heldTotal > 0 ? amountCard("Already paid", m.heldTotal, m.heldLines, t) : "",
     m.heldTotal > 0
       ? subline(`It all still counts towards your move. Nothing extra is taken for the change.`)
       : "",
     commitment ? subline(escapeHtml(commitment)) : "",
+    // Disclosure (b) — pre-move: a Marley vehicle or crew may attend.
+    t.attendNoteHtml ? subline(t.attendNoteHtml) : "",
     subline(
-      `Any questions, call Connor on <strong style="color:#C03838;">01747 637070</strong> or just reply to this email.`,
+      `Any questions, ${t.callHtml} or just reply to this email.`,
     ),
   ]
     .filter(Boolean)
     .join("\n");
-  return shell(
+  return themedEmailShell(
     `Your new move date is confirmed. Your booking and everything you've paid roll straight over.`,
     inner,
+    t,
   );
 }

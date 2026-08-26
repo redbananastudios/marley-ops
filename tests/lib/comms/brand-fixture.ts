@@ -1,0 +1,32 @@
+import type { Brand } from "@/lib/brand";
+
+/** A seeded-Pitmans-shaped row (PRD §10) — stub fields null like Phase 0. */
+export const pitmans: Brand = {
+  slug: "pitmans",
+  name: "Pitmans Removals & Storage",
+  shortName: "Pitmans",
+  initial: "P",
+  groupLine: "Part of the Marley Group",
+  legalLine: "Pitmans Removals & Storage is a trading name of MarleyMoves Ltd. Company No. 15914266. VAT 520 2213 58.",
+  refPrefix: "PM",
+  colourPrimary: "#2B2B76",
+  colourAccent: "#FFCC00",
+  logoUrl: null,
+  groupLogoUrl: null,
+  emailDomain: "pitmansremovals.co.uk",
+  helloFrom: "info@pitmansremovals.co.uk",
+  accountsFrom: "accounts@pitmansremovals.co.uk",
+  replyDomain: null,
+  smsSender: null,
+  phone: "01258 858564",
+  address: "Uplands Business Park, Blandford Heights, Shaftesbury Road, Blandford Forum, Dorset DT11 7UZ",
+  websiteUrl: "https://pitmansremovals.co.uk",
+  reviewUrl: null,
+  termsUrl: null,
+  baseLocation: null,
+  cardPaymentsEnabled: false,
+  ledgerBrandingId: null,
+  resendTemplateIds: {},
+  active: true,
+  sortOrder: 2,
+};

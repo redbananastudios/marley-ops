@@ -6,13 +6,18 @@
  * grandTotal, route arrow collect -> dest, "What happens next" (incl. the
  * £100 deposit step), and a reply-to-confirm CTA. UK English, no em-dash.
  *
+ * Multi-brand (docs/multi-brand-prd.md §3.5): the meta takes an optional
+ * `brand`; absent/marley renders BYTE-IDENTICAL to today via the default
+ * theme in lib/comms/email-brand.ts. A non-default brand's chrome, phone,
+ * reply address and card wording come from its row.
+ *
  * Pure server util — no React, no DOM. Returns an HTML string.
  */
 
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
-
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+import type { Brand } from "@/lib/brand";
+import { emailTheme, themedPill } from "@/lib/comms/email-brand";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -59,6 +64,23 @@ export interface QuoteEmailMeta {
   acceptUrl?: string;
   /** Booking deposit £ (Settings) — used in the "what happens next" copy. */
   depositAmount?: number;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
+  /** Card-at-accept availability for NON-default brands (global AND brand
+   *  card switches, PRD §11.10). Ignored for marley — its literals stand. */
+  offerCard?: boolean;
+}
+
+/** The deposit-step copy for the accept-link path: today's literal for
+ *  marley, card wording gated by the brand's card switches otherwise. */
+function depositStepCopy(m: QuoteEmailMeta): string {
+  const t = emailTheme(m.brand);
+  if (t.isDefault) {
+    return "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in.";
+  }
+  return m.offerCard === true
+    ? "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in."
+    : "Pay by bank transfer straight after accepting. This secures your booking; confirming your date then locks it in.";
 }
 
 /**
@@ -73,6 +95,7 @@ export function quoteEmailTemplateVars(
   meta: QuoteEmailMeta,
 ): Record<string, string> | null {
   if (!meta.acceptUrl) return null;
+  const t = emailTheme(meta.brand);
   const UK = "Europe/London";
   const job = values.job;
   const parseDate = (s: string) => new Date(s + (s.length === 10 ? "T00:00:00" : ""));
@@ -115,7 +138,7 @@ export function quoteEmailTemplateVars(
     VEHICLE: escapeHtml(VEHICLE_LABEL[values.vehicle] || "—"),
     PACKING: escapeHtml(PACKING_LABEL[values.packing] || "—"),
     ACCEPT_URL: meta.acceptUrl,
-    REPLY_HREF: `mailto:hello@marleymoves.co.uk?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`,
+    REPLY_HREF: `mailto:${t.helloAddress}?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`,
     DEPOSIT_AMOUNT: gbp(meta.depositAmount ?? 100),
     ISSUED_DATE: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric", timeZone: UK }),
   };
@@ -126,6 +149,7 @@ export function buildQuoteEmailHtml(
   b: QuoteBreakdown,
   meta: QuoteEmailMeta,
 ): string {
+  const t = emailTheme(meta.brand);
   const ref = escapeHtml(meta.quoteRef || "");
   const customer = values.customer;
   const job = values.job;
@@ -161,8 +185,8 @@ export function buildQuoteEmailHtml(
   const subline = moveDateForSubline
     ? `Here is the full price for your move on <strong style="color:#1A1A1A;">${moveDateForSubline}${
         job.moveDateEstimated ? " (estimated)" : ""
-      }</strong>. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`
-    : `Here is the full price for your move. ${lockIn}, or call Connor on <strong style="color:#C03838;">01747 637070</strong> if anything needs changing.`;
+      }</strong>. ${lockIn}, or ${t.callHtml} if anything needs changing.`
+    : `Here is the full price for your move. ${lockIn}, or ${t.callHtml} if anything needs changing.`;
 
   const totalCostNote = b.vatEnabled ? "Fixed price, all inclusive · VAT @ 20%" : "Fixed price, all inclusive";
 
@@ -176,28 +200,29 @@ export function buildQuoteEmailHtml(
   const vehicleLabel = VEHICLE_LABEL[values.vehicle] || "—";
   const packingLabel = PACKING_LABEL[values.packing] || "—";
 
-  const replyHref = `mailto:hello@marleymoves.co.uk?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`;
+  const replyHref = `mailto:${t.helloAddress}?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`;
   const ctaHref = meta.acceptUrl ?? replyHref;
   const ctaLabel = meta.acceptUrl ? "Accept your quote online &rarr;" : "Reply to confirm this quote &rarr;";
   const depositLabel = gbp(meta.depositAmount ?? 100);
+  const groupRow = t.groupLine
+    ? `\n          <div style="margin-top:2px;">${escapeHtml(t.groupLine)}</div>`
+    : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Quote from Marley Moves</title></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Your Quote from ${escapeHtml(t.name)}</title></head>
 <body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your removal quote from Marley Moves: ${gbp(b.grandTotal)}. PDF attached.</div>
+<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">Your removal quote from ${escapeHtml(t.name)}: ${gbp(b.grandTotal)}. PDF attached.</div>
 
 <table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
 <tr><td align="center">
 <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
 
   <tr><td align="center" style="padding:34px 36px 8px;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
+    ${t.logoHtml}
   </td></tr>
 
-  <tr><td align="center" style="padding:0 36px 24px;">
-    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">Ref ${ref}</div>
-  </td></tr>
+${themedPill(`Ref ${ref}`, t)}
 
   <tr><td align="center" style="padding:0 36px 6px;">
     <h1 style="font-family:Georgia,'Times New Roman',serif;font-size:32px;font-weight:600;color:#1A1A1A;letter-spacing:-0.02em;line-height:1.18;margin:0;">Your move is quoted${headlineName}</h1>
@@ -209,7 +234,7 @@ export function buildQuoteEmailHtml(
   <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
       <tr>
-        <td style="padding:22px 26px;border-left:4px solid #C03838;">
+        <td style="padding:22px 26px;border-left:4px solid ${t.accent};">
           <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">Total Move Cost</div>
           <div style="font-family:Georgia,'Times New Roman',serif;font-size:42px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(b.grandTotal)}</div>
           <div style="font-size:11px;color:#6E6A65;margin-top:6px;">${totalCostNote}</div>
@@ -231,7 +256,7 @@ export function buildQuoteEmailHtml(
             <div style="font-size:10px;color:#6E6A65;letter-spacing:0.1em;text-transform:uppercase;">Collection</div>
             <div style="font-size:13px;color:#1A1A1A;font-weight:600;margin-top:4px;line-height:1.45;">${ce}${ce2 ? "<br>" + ce2 : ""}</div>
           </td>
-          <td align="center" valign="middle" style="width:8%;font-size:18px;color:#C03838;font-weight:600;">&rarr;</td>
+          <td align="center" valign="middle" style="width:8%;font-size:18px;color:${t.accent};font-weight:600;">&rarr;</td>
           <td valign="top" style="width:46%;">
             <div style="font-size:10px;color:#6E6A65;letter-spacing:0.1em;text-transform:uppercase;">Destination</div>
             <div style="font-size:13px;color:#1A1A1A;font-weight:600;margin-top:4px;line-height:1.45;">${de}${de2 ? "<br>" + de2 : ""}</div>
@@ -256,8 +281,8 @@ export function buildQuoteEmailHtml(
   </td></tr>
 
   <tr><td align="center" style="padding:0 36px ${meta.acceptUrl ? "10px" : "22px"};">
-    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="#C03838" style="border-radius:6px;">
-      <a href="${ctaHref}" style="display:inline-block;padding:15px 38px;background:#C03838;color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">${ctaLabel}</a>
+    <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${t.accent}" style="border-radius:6px;">
+      <a href="${ctaHref}" style="display:inline-block;padding:15px 38px;background:${t.accent};color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">${ctaLabel}</a>
     </td></tr></table>
   </td></tr>${
     meta.acceptUrl
@@ -285,7 +310,7 @@ export function buildQuoteEmailHtml(
         <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${depositLabel} deposit</div>
         <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
           meta.acceptUrl
-            ? "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in."
+            ? depositStepCopy(meta)
             : "Secures your booking and the team. Bank details are on the attached PDF."
         }</div>
       </td>
@@ -301,12 +326,12 @@ export function buildQuoteEmailHtml(
     <table width="100%" cellpadding="0" cellspacing="0">
       <tr>
         <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
-          <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
-          <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
+          <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">${t.footerIdentityHtml}</div>${groupRow}
+          <div style="margin-top:2px;">${t.footerMetaHtml}</div>
         </td>
         <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
-          <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
-          <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
+          <div><a href="${t.telHref}" style="color:#1A1A1A;text-decoration:none;font-weight:600;">${escapeHtml(t.phone)}</a></div>
+          <div><a href="${t.websiteUrl}" style="color:#6E6A65;text-decoration:none;">${escapeHtml(t.websiteLabel)}</a></div>
         </td>
       </tr>
       <tr>

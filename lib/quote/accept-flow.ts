@@ -26,7 +26,9 @@ import { ukTimeAt, ukInstant } from "@/lib/uk-time";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
-import { accountsFrom, ownerIdentity } from "@/lib/comms/sender";
+import { accountsFromFor, ownerIdentity } from "@/lib/comms/sender";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { ensureRemovalAppointment } from "@/lib/schedule/ensure-removal-appointment";
 import { log } from "@/lib/log";
 import { sendPushForEvent } from "@/lib/push/send";
@@ -102,13 +104,16 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, brand, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
 
 export type AcceptQuoteRow = {
   id: string;
   quote_ref: string;
   status: string;
   source: string;
+  /** Brand slug (multi-brand PRD §3.1) — every customer send resolves its
+   *  copy, From and template set from this, once per send. */
+  brand: string;
   standard_comms_at: string | null;
   lead_id: string | null;
   client_id: string | null;
@@ -1147,6 +1152,9 @@ async function sendDepositRequestEmail(
 ): Promise<boolean> {
   if (!quote.customer_email) return false;
   const owner = await ownerIdentity(sb, quote.estimator_id);
+  // ONE brand resolve per send — copy, From, signature and template set all
+  // derive from it (multi-brand PRD §3.5); marley/absent is byte-identical.
+  const brand = await getBrandOrDefault(sb, quote.brand);
   const email = depositChaseEmail(1, {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -1158,21 +1166,23 @@ async function sendDepositRequestEmail(
     // must read the same here as on /q and the Zoho invoice (/qa 2026-08-05:
     // a £300 ask whose payment email said £100).
     depositAmount: depositLabel(deposit),
+    brand,
   });
-  const templateId = process.env.RESEND_TEMPLATE_CHASE_DEPOSIT_1;
+  const templateId = templateIdFor(brand, "RESEND_TEMPLATE_CHASE_DEPOSIT_1");
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
     to: quote.customer_email,
     subject: email.subject,
     bodyText: email.text,
     ...(templateId
-      ? { template: { id: templateId, variables: email.variables }, bodyHtml: chaseTextToHtml(email.text) }
-      : { bodyHtml: chaseTextToHtml(email.text) }),
-    replyTo: replyAddressFor(token),
+      ? { template: { id: templateId, variables: email.variables }, bodyHtml: chaseTextToHtml(email.text, brand) }
+      : { bodyHtml: chaseTextToHtml(email.text, brand) }),
+    replyTo: replyAddressFor(token, brand.name),
     from: email.from,
     leadId: quote.lead_id ?? undefined,
     quoteId: quote.id,
     clientId: quote.client_id ?? undefined,
+    brand,
     ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
   });
   return "ok" in res && res.ok;
@@ -1407,6 +1417,7 @@ export async function markDepositPaid(
       forLabel: "Booking deposit",
       amount: deposit,
     };
+    const brand = await getBrandOrDefault(sb, quote.brand);
     const meta: DepositReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
@@ -1414,16 +1425,17 @@ export async function markDepositPaid(
       moveDateLabel: moveDateLabel(quote.moving_date),
       balanceAmount: balanceDue(agreed, deposit),
       receipt,
+      brand,
     };
     // New RECEIPT template var (falls back to the in-repo builder, which now
     // renders the receipt). The old RESEND_TEMPLATE_DEPOSIT_RECEIVED template
     // lacks the receipt panel, so it is deliberately no longer read here.
-    const templateId = process.env.RESEND_TEMPLATE_DEPOSIT_RECEIPT;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_DEPOSIT_RECEIPT");
     receiptSend = await dispatchComm(sb, opts.actorId, {
       channel: "email",
       // Money desk identity — receipts come from accounts@, not the salesperson
       // (docs/email-identity-plan.md); replies still route via the token relay.
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: quote.customer_email,
       subject: `Deposit received. You're booked in (${quote.quote_ref})`,
       bodyText: `Deposit of £${deposit.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method, opts.cardLast4).toLowerCase()} on ${receipt.paidAtLabel}. Your move date is secured.`,
@@ -1431,10 +1443,11 @@ export async function markDepositPaid(
         ? { template: { id: templateId, variables: depositReceivedTemplateVars(meta) }, bodyHtml: buildDepositReceivedEmailHtml(meta) }
         : { bodyHtml: buildDepositReceivedEmailHtml(meta) }),
       // Replies route back into the panel (pause chase, log, follow-up).
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
       leadId: quote.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
+      brand,
     });
   }
 
@@ -1567,12 +1580,20 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
           phone: quote.customer_phone,
         });
       }
+      // Invoice notes are customer-visible: a non-default brand's clause drops
+      // the phone-card mention (its card channel is off at launch, §11.10) and
+      // carries disclosure (a) — payment goes to MarleyMoves Ltd (§3.5).
+      const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      const payClause =
+        notesBrand.slug === DEFAULT_BRAND
+          ? `Payable by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`
+          : `Payable by bank transfer (reference ${quote.quote_ref}) or cash. ${notesBrand.name} is part of MarleyMoves Ltd, so your payment goes to the MARLEYMOVES LTD account. Please use reference ${quote.quote_ref} so we can match it to your booking.`;
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
         description: `Booking commitment — removal quote ${quote.quote_ref} (25% of your move price, less your £${deposit.toFixed(2)} deposit)`,
         amount,
-        notes: `Commitment payment for your confirmed move date, quote ${quote.quote_ref}. Due by ${dueDate}. It counts towards your final bill; the remaining balance is due in full before move day. Payable by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`,
+        notes: `Commitment payment for your confirmed move date, quote ${quote.quote_ref}. Due by ${dueDate}. It counts towards your final bill; the remaining balance is due in full before move day. ${payClause}`,
         disableOnlinePayments: true, // commitment is BACS/cash only — never card
       });
     }
@@ -1721,27 +1742,30 @@ export async function markCommitmentPaid(
       forLabel: "Booking commitment",
       amount,
     };
+    const brand = await getBrandOrDefault(sb, quote.brand);
     const meta: CommitmentReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       amount,
       moveDateLabel: moveDateLabel(quote.moving_date),
       receipt,
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_COMMITMENT_RECEIPT;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_COMMITMENT_RECEIPT");
     await dispatchComm(sb, opts.actorId, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: quote.customer_email,
       subject: `Payment received: commitment for your move (${quote.quote_ref})`,
       bodyText: `Commitment payment of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(opts.method).toLowerCase()} on ${receipt.paidAtLabel}. It counts towards your final bill; the remaining balance is due before move day.`,
       ...(templateId
         ? { template: { id: templateId, variables: commitmentReceivedTemplateVars(meta) }, bodyHtml: buildCommitmentReceivedEmailHtml(meta) }
         : { bodyHtml: buildCommitmentReceivedEmailHtml(meta) }),
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
       leadId: quote.lead_id ?? undefined,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
+      brand,
     });
   }
 
@@ -2083,6 +2107,7 @@ async function sendDateConfirmationEmail(
       pdfBase64 = undefined; // send without the attachment rather than not at all
     }
   }
+  const brand = await getBrandOrDefault(sb, quote.brand);
   const meta: DateConfirmationMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2092,11 +2117,12 @@ async function sendDateConfirmationEmail(
     commitmentDueLabel: c.commitmentDueLabel,
     invoiceNumber: c.invoiceNumber,
     invoiceUrl: c.invoiceUrl,
+    brand,
   };
-  const templateId = process.env.RESEND_TEMPLATE_DATE_CONFIRMATION;
+  const templateId = templateIdFor(brand, "RESEND_TEMPLATE_DATE_CONFIRMATION");
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
-    from: accountsFrom(),
+    from: accountsFromFor(brand),
     to: quote.customer_email,
     subject: `Move date confirmed (${quote.quote_ref})`,
     bodyText:
@@ -2110,10 +2136,11 @@ async function sendDateConfirmationEmail(
     attachmentName: pdfBase64
       ? `MarleyMoves-Invoice-${c.invoiceNumber ?? "commitment"}.pdf`
       : undefined,
-    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
     leadId: quote.lead_id ?? undefined,
     quoteId: quote.id,
     clientId: quote.client_id ?? undefined,
+    brand,
     ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
   });
   return "ok" in res && res.ok;
@@ -2293,6 +2320,7 @@ async function sendBalanceInvoiceEmail(
   } catch {
     pdfBase64 = undefined; // send without the attachment rather than not at all
   }
+  const brand = await getBrandOrDefault(sb, quote.brand);
   const meta: BalanceInvoiceMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2300,11 +2328,12 @@ async function sendBalanceInvoiceEmail(
     moveDateLabel: moveDateLabel(quote.moving_date),
     invoiceUrl: inv.invoiceUrl,
     invoiceNumber: inv.invoiceNumber,
+    brand,
   };
-  const templateId = process.env.RESEND_TEMPLATE_BALANCE_INVOICE;
+  const templateId = templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE");
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
-    from: accountsFrom(),
+    from: accountsFromFor(brand),
     to: quote.customer_email,
     subject: `Your final balance: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`,
     bodyText: `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
@@ -2313,10 +2342,11 @@ async function sendBalanceInvoiceEmail(
       : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
     attachmentBase64: pdfBase64,
     attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
-    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+    replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
     leadId: quote.lead_id ?? undefined,
     quoteId: quote.id,
     clientId: quote.client_id ?? undefined,
+    brand,
     ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
   });
   return "ok" in res && res.ok;
@@ -2496,12 +2526,19 @@ export async function createBalanceInvoiceFlow(
           : "";
       const creditsClause =
         (credits.length ? ` less ${credits.join(" and ")} already received` : "") + forfeitClause;
+      // Same customer-visible notes rule as the commitment invoice: no card
+      // mention for a non-default brand, plus disclosure (a) — MarleyMoves Ltd.
+      const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      const payClause =
+        notesBrand.slug === DEFAULT_BRAND
+          ? `Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`
+          : `Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash. ${notesBrand.name} is part of MarleyMoves Ltd, so your payment goes to the MARLEYMOVES LTD account. Please use reference ${quote.quote_ref} so we can match it to your booking.`;
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
         description: `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`,
+        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
@@ -2684,27 +2721,30 @@ export async function markBalancePaid(
       forLabel: "Final balance",
       amount,
     };
+    const brand = await getBrandOrDefault(sb, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
       amount,
       moveDateLabel: moveDateLabel(quote.moving_date),
       receipt,
+      brand,
     };
-    const templateId = process.env.RESEND_TEMPLATE_BALANCE_RECEIPT;
+    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_RECEIPT");
     await dispatchComm(sb, actorId, {
       channel: "email",
-      from: accountsFrom(),
+      from: accountsFromFor(brand),
       to: quote.customer_email,
       subject: `Payment received — all settled (${quote.quote_ref})`,
       bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay.`,
       ...(templateId
         ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) }, bodyHtml: buildBalanceReceivedEmailHtml(meta) }
         : { bodyHtml: buildBalanceReceivedEmailHtml(meta) }),
-      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token) : undefined,
+      replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
       leadId: quote.lead_id,
       quoteId: quote.id,
       clientId: quote.client_id ?? undefined,
+      brand,
     });
   }
 

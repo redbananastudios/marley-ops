@@ -15,9 +15,15 @@
  * Each email prefers its published Resend template (env ids, editable in the
  * dashboard, no deploy); the builders below are the in-repo fallback. The
  * variable helpers keep the two paths in step.
+ *
+ * Multi-brand (docs/multi-brand-prd.md §3.5): metas take an optional `brand`;
+ * absent/marley renders today's exact bytes via the default theme in
+ * lib/comms/email-brand.ts (the shell and pill are the shared brand-aware
+ * fragments there).
  */
 
-const LOGO_URL = "https://quotes.marleymoves.co.uk/logo.png";
+import type { Brand } from "@/lib/brand";
+import { emailTheme, themedEmailShell, themedPill, type EmailTheme } from "@/lib/comms/email-brand";
 
 const gbp = (n: number): string =>
   "£" +
@@ -32,44 +38,6 @@ function escapeHtml(s: string): string {
 
 const firstNameOf = (name: string | null | undefined): string =>
   (name ?? "").trim().split(/\s+/)[0] || "there";
-
-function shell(preheader: string, inner: string): string {
-  return `<!DOCTYPE html>
-<html lang="en">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Marley Moves</title></head>
-<body style="margin:0;padding:0;background:#F6F5F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1A1A1A;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;font-size:1px;color:#F6F5F3;">${preheader}</div>
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#F6F5F3;padding:32px 0;">
-<tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#FFFFFF;border-radius:8px;overflow:hidden;border:1px solid #E8E4DD;">
-  <tr><td align="center" style="padding:34px 36px 8px;">
-    <img src="${LOGO_URL}" alt="Marley Moves" width="180" style="display:block;margin:0 auto;max-width:60%;border:0;outline:none;text-decoration:none;">
-  </td></tr>
-${inner}
-  <tr><td style="background:#FAFAFA;border-top:1px solid #EAE7E2;padding:20px 36px;">
-    <table width="100%" cellpadding="0" cellspacing="0"><tr>
-      <td style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div style="font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:600;color:#1A1A1A;">Marley <span style="color:#C03838;">Moves</span></div>
-        <div style="margin-top:2px;">Shaftesbury, SP7 · Company No. 15914266</div>
-      </td>
-      <td align="right" style="font-size:11px;color:#6E6A65;line-height:1.7;">
-        <div><a href="tel:01747637070" style="color:#1A1A1A;text-decoration:none;font-weight:600;">01747 637070</a></div>
-        <div><a href="https://marleymoves.co.uk" style="color:#6E6A65;text-decoration:none;">marleymoves.co.uk</a></div>
-      </td>
-    </tr></table>
-  </td></tr>
-</table>
-</td></tr>
-</table>
-</body>
-</html>`;
-}
-
-function pill(label: string): string {
-  return `  <tr><td align="center" style="padding:0 36px 24px;">
-    <div style="display:inline-block;padding:6px 14px;background:#FFF3F1;border:1px solid #F5C9C4;border-radius:999px;font-size:11px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#C03838;">${label}</div>
-  </td></tr>`;
-}
 
 function headline(text: string): string {
   return `  <tr><td align="center" style="padding:0 36px 6px;">
@@ -105,7 +73,7 @@ function lineRows(lines: RefundLine[]): string {
     .join("\n");
 }
 
-function amountsCard(title: string, lines: RefundLine[], totalLabel: string, total: number): string {
+function amountsCard(title: string, lines: RefundLine[], totalLabel: string, total: number, t: EmailTheme): string {
   return `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAFAFA;border-radius:8px;overflow:hidden;">
       <tr><td style="padding:20px 24px;">
@@ -114,7 +82,7 @@ function amountsCard(title: string, lines: RefundLine[], totalLabel: string, tot
           ${lineRows(lines)}
           <tr>
             <td style="padding:10px 0 0;font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#8A857E;">${totalLabel}</td>
-            <td align="right" style="padding:10px 0 0;font-size:16px;color:#C03838;font-weight:700;white-space:nowrap;">${gbp(total)}</td>
+            <td align="right" style="padding:10px 0 0;font-size:16px;color:${t.accent};font-weight:700;white-space:nowrap;">${gbp(total)}</td>
           </tr>
         </table>
       </td></tr>
@@ -133,6 +101,8 @@ export interface RefundExecutedMeta {
   quoteRef: string;
   lines: RefundLine[];
   totalRefund: number;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 export function refundExecutedTemplateVars(m: RefundExecutedMeta): Record<string, string> {
@@ -146,20 +116,21 @@ export function refundExecutedTemplateVars(m: RefundExecutedMeta): Record<string
 }
 
 export function buildRefundExecutedEmailHtml(m: RefundExecutedMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const inner = [
-    pill(`Refund complete · ${escapeHtml(m.quoteRef)}`),
+    themedPill(`Refund complete · ${escapeHtml(m.quoteRef)}`, t),
     headline(`Your refund is on its way${name !== "there" ? ", " + escapeHtml(name) : ""}`),
     subline(
       `We have now returned everything due back to you for booking ${escapeHtml(m.quoteRef)}. Each payment goes back the way it came in.`,
     ),
-    amountsCard("Refunded to you", m.lines, "Total refunded", m.totalRefund),
+    amountsCard("Refunded to you", m.lines, "Total refunded", m.totalRefund, t),
     subline(REFUND_SLA_LINE),
     subline(
-      `Any questions at all, just reply to this email or call us on <strong style="color:#C03838;">01747 637070</strong>.`,
+      `Any questions at all, just reply to this email or ${t.callUsHtml}.`,
     ),
   ].join("\n");
-  return shell(`Your ${gbp(m.totalRefund)} refund from Marley Moves is on its way.`, inner);
+  return themedEmailShell(`Your ${gbp(m.totalRefund)} refund from ${t.name} is on its way.`, inner, t);
 }
 
 /* ------------------------------------------------------ retained outcome */
@@ -173,9 +144,12 @@ export interface RetainedOutcomeMeta {
   /** Anything refunded above the 25% held — may be empty. */
   refundLines: RefundLine[];
   refundTotal: number;
+  /** Sending brand — absent/marley renders today's exact bytes. */
+  brand?: Brand | null;
 }
 
 export function retainedOutcomeTemplateVars(m: RetainedOutcomeMeta): Record<string, string> {
+  const t = emailTheme(m.brand);
   const dateClause = m.originalDateLabel
     ? ` of <strong style="color:#1A1A1A;">${escapeHtml(m.originalDateLabel)}</strong>`
     : "";
@@ -186,7 +160,7 @@ export function retainedOutcomeTemplateVars(m: RetainedOutcomeMeta): Record<stri
     RETAINED_AMOUNT: gbp(m.retainedTotal),
     REFUND_SECTION:
       m.refundLines.length > 0
-        ? amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal) +
+        ? amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal, t) +
           "\n" +
           subline(REFUND_SLA_LINE)
         : "",
@@ -194,6 +168,7 @@ export function retainedOutcomeTemplateVars(m: RetainedOutcomeMeta): Record<stri
 }
 
 export function buildRetainedOutcomeEmailHtml(m: RetainedOutcomeMeta): string {
+  const t = emailTheme(m.brand);
   const name = firstNameOf(m.firstName);
   const dateClause = m.originalDateLabel
     ? ` of <strong style="color:#1A1A1A;">${escapeHtml(m.originalDateLabel)}</strong>`
@@ -204,23 +179,24 @@ export function buildRetainedOutcomeEmailHtml(m: RetainedOutcomeMeta): string {
           subline(
             `Anything you paid above that held amount has been refunded in full, as promised:`,
           ),
-          amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal),
+          amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal, t),
           subline(REFUND_SLA_LINE),
         ]
       : [];
   const inner = [
-    pill(`Booking update · ${escapeHtml(m.quoteRef)}`),
+    themedPill(`Booking update · ${escapeHtml(m.quoteRef)}`, t),
     headline(`About your original move date${name !== "there" ? ", " + escapeHtml(name) : ""}`),
     subline(
       `Despite our best efforts, we were not able to re-book your original move date${dateClause}. As set out in your booking terms, <strong style="color:#1A1A1A;">${gbp(m.retainedTotal)}</strong> of what you had paid has been held against that date. Had the day re-booked, it would have been refunded in full.`,
     ),
     ...refundBits,
     subline(
-      `If anything here does not look right, or you would like to talk it through, just reply to this email or call us on <strong style="color:#C03838;">01747 637070</strong>.`,
+      `If anything here does not look right, or you would like to talk it through, just reply to this email or ${t.callUsHtml}.`,
     ),
   ].join("\n");
-  return shell(
+  return themedEmailShell(
     `An update on your booking ${m.quoteRef} and your original move date.`,
     inner,
+    t,
   );
 }

@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import type { LeadOption } from "@/components/schedule/appointment-dialog";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
+import type { Brand } from "@/lib/brand";
 import type { PricingConfig } from "@/lib/quote/pricing";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
@@ -69,6 +70,9 @@ export interface QuoteHeaderActionsProps {
   estimatorName: string | null;
   vatNumber?: string;
   acceptUrl?: string;
+  /** The quote's brand row — drives the send dialog's subject and chrome
+   *  (multi-brand PRD §3.5); absent/marley renders today's exact email. */
+  brand?: Brand | null;
 }
 
 export function QuoteHeaderActions({
@@ -89,6 +93,7 @@ export function QuoteHeaderActions({
   estimatorName,
   vatNumber,
   acceptUrl,
+  brand,
 }: QuoteHeaderActionsProps) {
   const [resendOpen, setResendOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -200,6 +205,7 @@ export function QuoteHeaderActions({
           vatNumber={vatNumber}
           depositAmount={depositAmount}
           acceptUrl={acceptUrl}
+          brand={brand}
           open={resendOpen}
           onOpenChange={setResendOpen}
         />

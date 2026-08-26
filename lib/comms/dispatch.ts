@@ -18,6 +18,7 @@ import {
   type SendEmailInput,
 } from "@/lib/comms/send";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 import { log } from "@/lib/log";
 import { opsAlertRecipient, type OpsAlertCategory } from "@/lib/comms/sender";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -35,7 +36,10 @@ type CommunicationRow = Database["public"]["Tables"]["communications"]["Row"];
 export interface ProviderRequest {
   channel: "email" | "sms";
   email?: SendEmailInput;
-  sms?: { to: string; body: string };
+  /** The brand snapshot rides INSIDE the stored request so a comms-retry
+   *  re-drive fronts the SAME sender id as the original send (trap 7); it is
+   *  the shape sendSms takes. Absent = today's Marley env chain. */
+  sms?: { to: string; body: string; brand?: Pick<Brand, "slug" | "smsSender"> | null };
 }
 
 export interface DispatchCommInput {
@@ -54,6 +58,10 @@ export interface DispatchCommInput {
   clientId?: string;
   override?: boolean;
   overrideReason?: string;
+  /** Sending brand (multi-brand PRD §3.5) — drives the SMS sender id, the
+   *  default email subject, and the branded-shell chrome of the fallback
+   *  render. Absent/marley behaves byte-identically to today. */
+  brand?: Brand | null;
 }
 
 export type DispatchCommResult =
@@ -184,10 +192,16 @@ export async function dispatchComm(
       fellBack: !useTemplate,
     });
   }
+  // Brand-resolved defaults (multi-brand PRD §3.5): absent/marley yields
+  // exactly today's literals, so every existing caller is byte-unchanged.
+  const brandDefaultSubject =
+    input.brand && input.brand.slug !== DEFAULT_BRAND
+      ? `Message from ${input.brand.name}`
+      : "Message from Marley Moves";
   const emailInput: SendEmailInput | null = input.channel === "email"
     ? {
         to: input.to,
-        subject: input.subject ?? "Message from Marley Moves",
+        subject: input.subject ?? brandDefaultSubject,
         ...(useTemplate
           ? {
               template: input.template!,
@@ -199,6 +213,7 @@ export async function dispatchComm(
                 brandedEmailHtml({
                   preheader: input.subject ?? input.bodyText.slice(0, 120),
                   paragraphs: input.bodyText.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean),
+                  brand: input.brand,
                 }),
             }
           : {
@@ -207,6 +222,7 @@ export async function dispatchComm(
                 brandedEmailHtml({
                   preheader: input.subject ?? input.bodyText.slice(0, 120),
                   paragraphs: input.bodyText.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean),
+                  brand: input.brand,
                 }),
             }),
         attachments: input.attachmentBase64
@@ -221,7 +237,18 @@ export async function dispatchComm(
     : createHash("sha256").update(JSON.stringify({ to: toNorm, body: input.bodyText })).digest("hex");
   const providerRequest: ProviderRequest = emailInput
     ? { channel: "email", email: emailInput }
-    : { channel: "sms", sms: { to: input.to, body: input.bodyText } };
+    : {
+        channel: "sms",
+        sms: {
+          to: input.to,
+          body: input.bodyText,
+          // Snapshot only the two fields sendSms reads, and only for a
+          // non-default brand — Marley rows stay byte-identical to today.
+          ...(input.brand && input.brand.slug !== DEFAULT_BRAND
+            ? { brand: { slug: input.brand.slug, smsSender: input.brand.smsSender } }
+            : {}),
+        },
+      };
   const opsSb = createAdminClient();
   const baseRow = {
     client_id: input.clientId ?? null,

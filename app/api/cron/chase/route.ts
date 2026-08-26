@@ -30,7 +30,9 @@ import { legacyLocked } from "@/lib/legacy";
 import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
 import { requestedDeposit } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
-import { accountsFrom, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
+import { accountsFromFor, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
+import { getBrandOrDefault, type Brand } from "@/lib/brand";
+import { templateIdFor } from "@/lib/comms/template-id";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
 import { isCustomerSendHour, sendWindowReason } from "@/lib/comms/send-window";
@@ -93,6 +95,8 @@ interface QuoteRow {
   lead_id: string;
   quote_ref: string;
   status: string;
+  /** Brand slug — resolves the chase's copy, From and template set (§3.5). */
+  brand: string;
   accept_token: string | null;
   email_sent_at: string | null;
   accepted_at: string | null;
@@ -141,9 +145,10 @@ async function sendChase(
   email: ChaseEmail,
   templateEnv: string,
   replyToken: string,
+  brand: Brand,
 ): Promise<boolean> {
   if (!lead.email) return false;
-  const templateId = process.env[templateEnv];
+  const templateId = templateIdFor(brand, templateEnv);
   const res = await dispatchComm(sb, null, {
     channel: "email",
     to: lead.email,
@@ -151,12 +156,13 @@ async function sendChase(
     bodyText: email.text,
     ...(templateId
       ? { template: { id: templateId, variables: email.variables } }
-      : { bodyHtml: chaseTextToHtml(email.text) }),
-    replyTo: replyAddressFor(replyToken),
+      : { bodyHtml: chaseTextToHtml(email.text, brand) }),
+    replyTo: replyAddressFor(replyToken, brand.name),
     from: email.from,
     leadId: lead.id,
     quoteId: quote.id,
     clientId: lead.client_id ?? undefined,
+    brand,
   });
   // A duplicate-guard hit means a byte-identical message ALREADY went to this
   // customer — i.e. a prior run sent it and died before stamping the step. Treat
@@ -186,6 +192,17 @@ export async function GET(req: Request) {
     const identity = await ownerIdentity(sb, estimatorId);
     ownerCache.set(estimatorId, identity);
     return identity;
+  };
+
+  // ONE brand resolve per slug per run (multi-brand PRD §3.5) — the quote's
+  // brand drives every chase's copy, From, signature and template set.
+  const brandCache = new Map<string, Brand>();
+  const brandFor = async (slug: string | null | undefined): Promise<Brand> => {
+    const key = slug || "marley";
+    if (brandCache.has(key)) return brandCache.get(key)!;
+    const brand = await getBrandOrDefault(sb, key);
+    brandCache.set(key, brand);
+    return brand;
   };
 
   const summary = {
@@ -340,7 +357,7 @@ export async function GET(req: Request) {
 
   const { data: quotes, error: quotesError } = await sb
     .from("quotes")
-    .select("id, lead_id, quote_ref, status, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
+    .select("id, lead_id, quote_ref, status, brand, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
   if (quotesError) {
@@ -529,6 +546,7 @@ export async function GET(req: Request) {
         const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
         if (!token) continue;
         const owner = await leadOwner(lead);
+        const brand = await brandFor(quote.brand);
         const email = quoteChaseEmail(step as 1 | 2 | 3, {
           firstName: lead.name,
           quoteRef: quote.quote_ref,
@@ -537,8 +555,9 @@ export async function GET(req: Request) {
           ownerName: owner.name,
           ownerEmail: owner.email,
           depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
+          brand,
         });
-        const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token);
+        const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token, brand);
         if (sent) {
           // The email is already out. Losing this stamp wedges the lead on this
           // step forever (see sendChase), so a failure is counted and logged
@@ -608,6 +627,7 @@ export async function GET(req: Request) {
         const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
         if (!token) continue;
         const owner = await leadOwner(lead);
+        const brand = await brandFor(quote.brand);
         const email = depositChaseEmail(step as 1 | 2, {
           firstName: lead.name,
           quoteRef: quote.quote_ref,
@@ -616,8 +636,9 @@ export async function GET(req: Request) {
           ownerName: owner.name,
           ownerEmail: owner.email,
           depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
+          brand,
         });
-        const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token);
+        const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token, brand);
         if (sent) {
           const { error: stampError } = await sb
             .from("leads")
@@ -806,7 +827,7 @@ export async function GET(req: Request) {
   const { data: commitmentQuotes, error: commitmentQueryError } = await sb
     .from("quotes")
     .select(
-      "id, lead_id, quote_ref, source, standard_comms_at, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
+      "id, lead_id, quote_ref, source, brand, standard_comms_at, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
@@ -966,6 +987,7 @@ export async function GET(req: Request) {
         if (actions.includes("chase") && sendsAllowed) {
           let delivered = false;
           if (lead.email) {
+            const brand = await brandFor(quote.brand);
             const email = composeCommitmentChaseEmail({
               firstName: lead.name,
               quoteRef: quote.quote_ref,
@@ -975,8 +997,9 @@ export async function GET(req: Request) {
               invoiceUrl: quote.zoho_commitment_invoice_url,
               invoiceNumber: quote.zoho_commitment_invoice_number,
               todayUk: todayDay,
+              brand,
             });
-            const templateId = process.env[COMMITMENT_CHASE_TEMPLATE_ENV];
+            const templateId = templateIdFor(brand, COMMITMENT_CHASE_TEMPLATE_ENV);
             const res = await dispatchComm(sb, null, {
               channel: "email",
               to: lead.email,
@@ -985,11 +1008,12 @@ export async function GET(req: Request) {
               ...(templateId
                 ? { template: { id: templateId, variables: email.variables } }
                 : { bodyHtml: email.html }),
-              ...(quote.accept_token ? { replyTo: replyAddressFor(quote.accept_token) } : {}),
-              from: accountsFrom(),
+              ...(quote.accept_token ? { replyTo: replyAddressFor(quote.accept_token, brand.name) } : {}),
+              from: accountsFromFor(brand),
               leadId: lead.id,
               quoteId: quote.id,
               clientId: lead.client_id ?? undefined,
+              brand,
             });
             // A duplicate-guard hit means this exact email already went out (a
             // prior run sent but crashed before stamping) — safe to stamp now.

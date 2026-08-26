@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
+import { getBrandOrDefault } from "@/lib/brand";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
@@ -59,7 +60,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, brand, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -98,7 +99,13 @@ export default async function QuoteDetailPage({
           job: { ...blobValues.job, moveDate: authoritativeMoveDate, moveDateEstimated: false },
         }
       : blobValues;
-  const [pricing, settings] = await Promise.all([getPricingConfig(sb), getBusinessSettings(sb)]);
+  const [pricing, settings, quoteBrand] = await Promise.all([
+    getPricingConfig(sb),
+    getBusinessSettings(sb),
+    // The quote's brand row for the send dialog — subject, email chrome and
+    // the attachment name all resolve from it (multi-brand PRD §3.5).
+    getBrandOrDefault(sb, quote.brand),
+  ]);
   const emailedCount = quote.email_send_count ?? 0;
 
   // Every quote gets its accept token here (lazily, idempotent) so the PDF QR
@@ -279,6 +286,7 @@ export default async function QuoteDetailPage({
         <QuoteHeaderActions
           quoteId={quote.id}
           quoteRef={quote.quote_ref ?? "—"}
+          brand={quoteBrand}
           status={statusStr}
           grandTotal={Number(quote.grand_total ?? 0)}
           depositAmount={requestedDeposit(
@@ -320,6 +328,7 @@ export default async function QuoteDetailPage({
         <QuoteBuilder
           quoteId={quote.id}
           quoteRef={quote.quote_ref}
+          brand={quoteBrand}
           initialValues={initialValues}
           leadId={quote.lead_id}
           clientId={quote.client_id}

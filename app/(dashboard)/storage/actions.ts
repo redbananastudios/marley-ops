@@ -18,7 +18,8 @@ import {
   STORAGE_ACKS,
 } from "@/lib/signatures";
 import { termsSnapshot } from "@/lib/legal/documents";
-import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrands } from "@/lib/brand";
+import { helloFromFor } from "@/lib/comms/sender";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
 
@@ -818,7 +819,7 @@ export async function emailStorageSignLinkAction(letId: string): Promise<Dispatc
 
   const { data: row } = await sb
     .from("storage_lets")
-    .select("sign_token, client_id, lead_id")
+    .select("sign_token, client_id, lead_id, brand")
     .eq("id", letId)
     .single();
   if (!row) return { ok: false, error: "Let not found." };
@@ -841,23 +842,33 @@ export async function emailStorageSignLinkAction(letId: string): Promise<Dispatc
   }
   const url = `https://ops.marleymoves.co.uk/s/${token}`;
 
+  // The let's brand drives the shell chrome, copy and From (multi-brand PRD
+  // §3.5); marley/absent composes today's exact email.
+  const signBrand = await getBrandOrDefault(sb, (row as { brand?: string }).brand ?? DEFAULT_BRAND);
+  const signIsDefault = signBrand.slug === DEFAULT_BRAND;
+  const signBrandName = signIsDefault ? "Marley Moves" : signBrand.name;
+  const signBrandPhone = signIsDefault ? "01747 637070" : (signBrand.phone ?? "01747 637070");
   const firstName = (client?.display_name ?? "").trim().split(/\s+/)[0] || undefined;
   const bodyHtml = brandedEmailHtml({
-    preheader: "Your Marley Moves storage agreement is ready to review and sign.",
+    preheader: `Your ${signBrandName} storage agreement is ready to review and sign.`,
     greeting: firstName,
     headline: "Your storage agreement",
     paragraphs: [
-      "Your storage agreement with Marley Moves is ready. Please review the terms and add your signature using the button below. It only takes a minute.",
-      "Any questions, just reply to this email or call us on 01747 637070.",
+      `Your storage agreement with ${signBrandName} is ready. Please review the terms and add your signature using the button below. It only takes a minute.`,
+      `Any questions, just reply to this email or call us on ${signBrandPhone}.`,
     ],
     cta: { label: "Review & sign your agreement", url },
+    brand: signBrand,
   });
 
   const result = await dispatchComm(sb, userId, {
     channel: "email",
     to: email,
-    from: FROM,
-    subject: "Your Marley Moves storage agreement",
+    // A non-default brand fronts its own door — dispatch/send default to the
+    // Marley house identity when From is absent, which must never happen here.
+    from: signIsDefault ? FROM : helloFromFor(signBrand),
+    brand: signBrand,
+    subject: `Your ${signBrandName} storage agreement`,
     bodyText: `Your storage agreement is ready to sign: ${url}`,
     bodyHtml,
     clientId: row.client_id,

@@ -15,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { computeQuote, DEFAULT_PRICING, type PricingConfig } from "@/lib/quote/pricing";
 import type { BusinessSettings } from "@/lib/settings";
 import { deriveInputs, defaultQuoteValues, type QuoteFormValues } from "@/lib/quote/form-types";
+import type { Brand } from "@/lib/brand";
 import { saveQuoteDraft } from "@/app/(dashboard)/quotes/actions";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import { downloadQuotePdf, ensureLogoDataUri } from "@/lib/quote/pdf-client";
@@ -92,6 +93,7 @@ export function QuoteBuilder({
   settings,
   acceptUrl,
   cubicHint,
+  brand,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -112,6 +114,9 @@ export function QuoteBuilder({
   acceptUrl?: string;
   /** Cubic-survey van suggestion, shown on the Vehicle step. */
   cubicHint?: CubicQuoteHint | null;
+  /** The quote's brand row (multi-brand PRD §3.5) — absent/marley sends
+   *  today's exact email. */
+  brand?: Brand | null;
 }) {
   const router = useRouter();
   const [values, setValues] = useState<QuoteFormValues>(() => ({
@@ -405,6 +410,7 @@ export function QuoteBuilder({
         onOpenChange={setSendOpen}
         quoteId={quoteId}
         quoteRef={quoteRef}
+        brand={brand}
         values={values}
         breakdown={breakdown}
         leadId={leadId}

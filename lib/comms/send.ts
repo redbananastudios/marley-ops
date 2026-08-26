@@ -2,6 +2,7 @@
  *  success so the panel's send + duplicate-guard flow is testable locally without real sends. */
 
 import { createHash } from "node:crypto";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 
 export interface SendResult {
   ok: boolean;
@@ -215,10 +216,29 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
   return result;
 }
 
-export async function sendSms(input: { to: string; body: string }): Promise<SendResult> {
+/**
+ * The SMS sender id fronting a message (PRD §11.7 trap 7). A non-default brand
+ * with a non-null brands.sms_sender uses it; everything else — brand absent,
+ * marley, or a brand whose sms_sender is still a pending Phase 0 blank —
+ * resolves through EXACTLY today's env chain, so every existing send is
+ * unchanged. Pure and exported so the fallback reasoning stays unit-locked,
+ * like shouldSmtpFallback above.
+ */
+export function smsSenderFor(brand?: Pick<Brand, "slug" | "smsSender"> | null): string | undefined {
+  const brandSender = brand && brand.slug !== DEFAULT_BRAND ? brand.smsSender : null;
+  return brandSender || process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
+}
+
+export async function sendSms(input: {
+  to: string;
+  body: string;
+  /** Brand whose sender id fronts the SMS — absent defaults to Marley, so
+   *  callers that don't thread a brand behave byte-identically to today. */
+  brand?: Pick<Brand, "slug" | "smsSender"> | null;
+}): Promise<SendResult> {
   if (DRYRUN) return { ok: true, providerId: `dryrun-sms-${Date.now()}`, simulated: true };
   const key = process.env.WEBEX_API_KEY;
-  const sender = process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
+  const sender = smsSenderFor(input.brand);
   if (!key) return { ok: false, error: "WebEx API key not configured" };
   if (!sender) return { ok: false, error: "WebEx sender ID not configured" };
   // WebEx wants E.164 — leads often carry the raw UK "07…" form.
