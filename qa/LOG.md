@@ -891,3 +891,15 @@ Four findings in the queue. **QA-20260825-03** (Pitmans quote refs) and **QA-202
 - Pushes: one commit to `staging` (verify-first closures were pushed separately mid-run as `26d303d`; this run's findings evidence + spec + COVERAGE.md + ledger + this log entry land together). No PRs opened, `master` never touched. Rebased onto `origin/staging` before the final push.
 - Cleanup verification (final sweep, all marker columns + `auth.users`): 0 everywhere.
 - Time spent: ~65 min (over the nominal 45-minute box — the bulk of the overrun was sandbox Playwright/proxy flakiness getting the new spec to actually run locally, two full timeouts before the wizard-gate root cause was found; the two role agents themselves ran in parallel in the background, ~12 and ~21 min respectively, overlapping with ledger prep). Recorded honestly rather than cut short mid-cleanup.
+
+## 2026-08-26T06:38Z — escalation repair sweep (scheduled): nothing escalated
+
+No finding carries `escalate: opus-5` — in fact no finding anywhere in `qa/findings/` carries an `escalate:` key at all (`grep -rn "escalate:" qa/findings/` → no matches). Verified against `origin/staging` @ `be83abd`.
+
+The queue holds exactly two findings, both **`class: risky`, `status: open`, no `branch:`** — outside both automated tiers by `qa/REPAIR.md` §1, not merely unclaimed:
+- **QA-20260825-03** (high, risky) — `createDraftQuote` mints `MMR###`/`MMC###` for Pitmans-brand leads instead of `PMR###`/`PMC###`; the customer-facing ref, subject lines, PDF filenames and the bank-reconciliation trail all inherit the wrong prefix. Reproduced by two independent parties 2026-08-25, and corroborated again by the 04:xxZ audit's gate-14 agent (`Pitmans-Quote-MMR101.pdf`). Reference-number minting feeding reconciliation is money-adjacent by the class rule, and the likely fix sits in `next_quote_ref` (migration 0104's code path) — §1a would make it risky in practice even if it were labelled safe-fix. Untouched.
+- **QA-20260826-01** (medium, risky) — `/bookings` "Balance outstanding" (£5,100) and `/payments` Due (£5,550) diverge by exactly the unpaid 25% commitment money; each page is internally correct against its own formula, so the fix is a decision about which figure is the truth, not a defect to patch. Money surface, and the answer is Peter's. Untouched.
+
+First-pass tier is healthy, not stalled: it fired 2026-08-26T05:35Z (`be83abd`) and reached the same read (both open findings risky, nothing eligible), and its 00:3xZ/00:55Z runs before that claimed and shipped QA-20260826-03 unaided (PR #104, since verified and closed). The escalation queue being empty here is the tier working as designed, not the earlier 08-24 hand-off gap.
+
+Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA-20260826-01` on the remote), no PRs opened, no escalations written, nothing left in `status: fixing`, `master` untouched. Time spent: ~3 min.
