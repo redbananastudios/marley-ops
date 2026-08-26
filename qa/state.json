@@ -1,7 +1,7 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "buildInProgress": "Pitmans multi-brand build: gates 1-5 all MERGED as of 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a) - brand foundation, Settings Brands card, chips/filters across leads/board/quotes/jobs/bookings/clients/follow-ups/documents/claims/content/payments/refunds, and the required brand picker on lead creation + BrandChanger pre-quote edit are all LIVE on staging now (brands.pitmans active=true). The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. 2026-08-25 audit found the brand UI itself sound (chips/filters/cascade/lock all correct) but found a real ref-prefix bug in quote creation - see QA-20260825-03.",
-  "lastAuditSha": "8f9475b",
+  "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED this run, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED this run, 0 findings, see dashboard_counts_badges + performance_growth_automations). brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open: QA-20260825-03 (risky) -- Pitmans quotes mint MM-prefixed refs instead of PM; now confirmed to also affect gate 14's brand-prefixed PDF filenames (Pitmans-Quote-MMR101.pdf) and QA-20260826-01 (risky) -- /bookings vs /payments owed-figure divergence, both for Peter.",
+  "lastAuditSha": "c01be21",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T16:26:00Z",
@@ -147,21 +147,24 @@
       ]
     },
     "quote_build_send_supersede": {
-      "lastTestedAt": "2026-08-25T20:45:00Z",
+      "lastTestedAt": "2026-08-26T04:50:00Z",
       "lastResult": "finding",
-      "note": "FRESH CODE this run (gate 3, #86): the build->send->supersede flow itself still works correctly end-to-end (full pass on a marker Pitmans lead: prefill, live route/mileage calc, dry-run send, revision correctly flipped the original to status=superseded) and quotes.brand/chip/filter all read the correct column. BUT found a real defect: QA-20260825-03 (risky, high) -- every quote created for a brand='pitmans' lead mints an MM-prefixed ref (e.g. MMR085/086/087) instead of PM, because nextQuoteRef() in quotes/actions.ts never passes the lead's resolved brand into the next_quote_ref RPC (which already supports it). Independently reproduced by the main loop at the RPC level: next_quote_ref(kind:'R') with no brand arg -> MMR088; next_quote_ref(kind:'R',brand:'pitmans') -> PMR001. Skipped regression spec e2e/office/quote-brand-ref.spec.ts added this run, un-skips in the repair PR.",
+      "note": "FRESH CODE this run (gate 3, #86): the build->send->supersede flow itself still works correctly end-to-end (full pass on a marker Pitmans lead: prefill, live route/mileage calc, dry-run send, revision correctly flipped the original to status=superseded) and quotes.brand/chip/filter all read the correct column. BUT found a real defect: QA-20260825-03 (risky, high) -- every quote created for a brand='pitmans' lead mints an MM-prefixed ref (e.g. MMR085/086/087) instead of PM, because nextQuoteRef() in quotes/actions.ts never passes the lead's resolved brand into the next_quote_ref RPC (which already supports it). Independently reproduced by the main loop at the RPC level: next_quote_ref(kind:'R') with no brand arg -> MMR088; next_quote_ref(kind:'R',brand:'pitmans') -> PMR001. Skipped regression spec e2e/office/quote-brand-ref.spec.ts added that run, un-skips in the repair PR. GATE 14 (daddb44, #105, freshest code) LIVE this run (role-agent, Sonnet): quote PDF branding verified correct for Pitmans (wordmark 'Pitmans Removals & Storage', blue #2B2B76 accent fill confirmed via raw PDF content-stream inspection -- the WCAG override away from Pitmans yellow -- legal line stated once per page, shared 'MARLEYMOVES LTD' bank details) and Marley parity held (red #C03838, logo image draw op, no cross-brand colour bleed). IO proof: real downloads, %PDF magic, non-trivial byte sizes, text-extracted via pypdf. Filename observed: Pitmans quote downloaded as 'Pitmans-Quote-MMR101.pdf' -- confirms QA-20260825-03's exact downstream symptom in gate 14's filename logic (noted on that finding, not filed separately). New permanent spec e2e/office/quote-pdf-brand.spec.ts added this run (filename-prefix + two-hats only -- no PDF-text-extraction dependency exists in this repo yet, so the deeper colour/text checks stay manual-verified, documented here).",
       "watch": [
         "app/(dashboard)/quotes/**",
         "components/quote/**",
         "components/quote/quote-builder.tsx",
         "components/quote/send-quote-dialog.tsx",
-        "lib/quote/accept-flow.ts"
+        "lib/quote/accept-flow.ts",
+        "lib/quote/pdf-client.ts",
+        "lib/pdf/doc-brand.ts",
+        "e2e/office/quote-pdf-brand.spec.ts"
       ]
     },
     "diary_brand_layer_gate11": {
-      "lastTestedAt": "2026-08-26T00:25:00Z",
-      "lastResult": "finding",
-      "note": "NEW surface (gate 11 537b607 + fix b4687f1, freshest code, jumped the queue). Role-agent subagent (Sonnet), all claims artifact-backed: (1) b4687f1 bare-client brand picker VERIFIED on /schedule/surveys -- bare marker client selectable ('client — opens a new enquiry'), brand-picker testid rendered [Marley,Pitmans], no-brand submit blocked with 'Choose which brand this enquiry is for.', Pitmans booking wrote leads.brand+appointments.brand='pitmans' (SQL exact). BUT the same picker is UNREACHABLE on /schedule/removals -- its page never merges bare-client options (leadOptions only, no clientOptions/isClient merge; combobox says 'No matches' for a bare client) => QA-20260826-02 (safe-fix, medium; source claim independently re-verified by main loop). (2) styleFor colour model verified against live computed styles + SQL brand colours: marley confirmed removal = solid #1A1A1A (parity constant), pitmans unconfirmed = hollow (transparent bg, 2px dashed #2B2B76, mm-evt--hollow), date_confirmed_at stamp flips it solid #2B2B76; pitmans survey on an unconfirmed lead = solid #FFCC00 with #2B2B76 text (WCAG yellow-takes-blue rule) proving surveys ignore confirmation. Brand initials (M/P spans) + multi-brand legend incl. 'Dashed outline = date not yet confirmed' all rendered. (3) Truth-of-UI: 3-appointment SQL window diff vs both diaries' DOM -- exact, no truncation.",
+      "lastTestedAt": "2026-08-26T04:19:00Z",
+      "lastResult": "pass",
+      "note": "QA-20260826-02 VERIFIED+CLOSED this run: PR #100's fix (removals page now merges bare-client options, matching surveys) re-run live -- /schedule/removals 'New appointment' -> lead combobox toggle -> searched a bare marker client -> offered (no longer 'No matches') -> selected -> brand picker rendered [Marley,Pitmans] -> booked Pitmans -> SQL exact match on both the new leads row and appointments row (brand='pitmans'). Both marker rows + their activities row deleted and verified gone. Surveys diary unaffected. Prior 2026-08-26T00:25Z run's other findings stand unchanged: (1) styleFor colour model verified against live computed styles + SQL brand colours: marley confirmed removal = solid #1A1A1A (parity constant), pitmans unconfirmed = hollow (transparent bg, 2px dashed #2B2B76, mm-evt--hollow), date_confirmed_at stamp flips it solid #2B2B76; pitmans survey on an unconfirmed lead = solid #FFCC00 with #2B2B76 text (WCAG yellow-takes-blue rule) proving surveys ignore confirmation. Brand initials (M/P spans) + multi-brand legend incl. 'Dashed outline = date not yet confirmed' all rendered. (2) Truth-of-UI: 3-appointment SQL window diff vs both diaries' DOM -- exact, no truncation. 0 findings remaining on this surface.",
       "watch": [
         "components/schedule/scheduler-view.tsx",
         "app/(dashboard)/schedule/removals/page.tsx",
@@ -330,12 +333,16 @@
       ]
     },
     "performance_growth_automations": {
-      "lastTestedAt": "2026-08-24T20:42:00Z",
+      "lastTestedAt": "2026-08-26T04:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: /performance (Overview/Sales/Storage tabs) and /automations all loaded clean. Two independent KPI recomputes matched the render exactly (Overview estimator-fee tile: 1 survey visit x \u00a350 = \u00a350, recomputed from appointments+business_settings.estimator_fee; 'Lost quotes - why' widget: too_expensive=2 recomputed from leads.status='declined'/lost_at in-month). /automations 'Open operational issues (1)' tile also matched a direct operational_issues count. Read-only observation (not triggered by the agent, no /api/cron/* called): every automation on /automations shows 'overdue' as of this run -- latest cron_runs row across all jobs is 2026-08-20T04:18:43Z, ~4.5 days stale, consistent with the already-known 'webhook/cron plumbing outside this repo' issue flagged in AGENTS.md's Current State (first-pass QA repair tier not firing since 2026-08-21) -- this corroborates that staging's scheduled-job plumbing is stalled more broadly, not just for the repair tier. Not self-authorized to act on (infra outside this repo); flagged in this run's log for Peter. 0 app-code findings.",
+      "note": "GATE 21 (c01be21, #107, freshest code, jumped the queue) LIVE this run (role-agent, Sonnet): /performance sales tab brand-split reconciled against an independently-ported buildSalesReport recompute for 4 metrics (revenue generated, potential revenue, projected revenue, conversion) under brand=all/marley/pitmans -- every figure combined=marley-slice+pitmans-slice AND UI=recompute, exact (pitmans slice was correctly \u00a30/0 -- no pitmans quotes exist yet, not a bug). Also click-drove the ACTUAL brand-filter UI control (not just the URL) through a tab switch, a preset click, and a custom date-range form submit -- confirmed '?brand=' survives every navigation and the 'All' option correctly DELETES the param (canonical URL) rather than writing brand=all. Storage/margin tabs and the automations page not re-checked this pass (time-boxed to sales tab + dashboard, which gave clean exact reconciliation). Prior 2026-08-24T20:42Z Overview-tile/automations note stands (unrelated to gate 21, not re-run this pass); its cron-staleness observation for Peter is unchanged.",
       "watch": [
         "app/(dashboard)/performance/**",
-        "app/(dashboard)/automations/**"
+        "app/(dashboard)/automations/**",
+        "lib/sales-report.ts",
+        "lib/storage-report.ts",
+        "lib/estimator.ts",
+        "components/brand/brand-filter.tsx"
       ]
     },
     "routing_retired_routes_pr70": {
@@ -612,12 +619,14 @@
       ]
     },
     "dashboard_counts_badges": {
-      "lastTestedAt": "2026-08-26T00:18:00Z",
+      "lastTestedAt": "2026-08-26T04:50:00Z",
       "lastResult": "pass",
-      "note": "DEEP RECOMPUTE this run (truth agent): Awaiting deposit (8), Balance due (0), Surveys today (1, UK-window-correct), Follow-ups due today (1)/overdue (0), New enquiries (13, confirmed a LIVE count -- moved 12->13 between scrapes tracking concurrent DB writes) all matched SQL replicas with BST=UTC+1 windows from lib/uk-time.ts. Caveat recorded honestly: the one in-window survey (00:30Z=01:30 BST) sits inside both the UK-correct and a naive-UTC window, so this data couldn't discriminate a BST off-by-one either way. NOT recomputed (declared, not silently skipped): funnel/period tiles (buildPeriodStats cohort %s -- too entangled for the time box, and concurrent-agent churn made snapshots unstable) and the non-money 'To allocate' tile. Prior QA-20260820-02/03 closures stand.",
+      "note": "GATE 21 (c01be21, #107, freshest code, jumped the queue) LIVE brand-split reconciliation this run (role-agent, Sonnet): ported buildPeriodStats/buildBrandKpiSplits verbatim into a throwaway recompute script (not reused UI output) and cross-checked the new 'M n · P n' sub-line against independent SQL/JS for 7 KPI tiles (new leads today/week/month, contacted, surveys booked, jobs won today/week/month) -- every one: UI combined = UI Marley + UI Pitmans, AND UI combined = independent recompute, exact. Seeded one throwaway pitmans-brand marker lead to get a non-trivial split (0 pitmans leads existed beforehand), deleted + verified gone after (leads back to 24/24/0). Confirms buildBrandKpiSplits' 'splits re-run buildPeriodStats per brand, so combined=sum-of-slices by construction' claim holds against live data, not just its own unit tests. 0 findings. Prior 2026-08-26T00:18Z deep recompute (Awaiting deposit/Balance due/Surveys today/Follow-ups) still stands, not re-run this pass.",
       "watch": [
         "app/(dashboard)/page.tsx",
-        "lib/dashboard/**"
+        "lib/dashboard/**",
+        "lib/dashboard/compute.ts",
+        "components/dashboard/dashboard-view.tsx"
       ]
     },
     "bookings_money_queues": {

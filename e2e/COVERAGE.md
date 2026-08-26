@@ -26,6 +26,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Quotes — list presets, search, open | ✅ | office/quotes.spec.ts |
 | Quote builder wizard — new quote → 7-step wizard → send dialog | ✅ | office/quote-builder.spec.ts |
 | Quote ref mints the lead's own brand prefix (PM for pitmans, not MM) | 🟡 | office/quote-brand-ref.spec.ts — proven live 2026-08-25 by the admin role agent + independently reproduced by the main loop at the RPC level (`next_quote_ref` already supports `brand`, the app just never passes it); ships `test.skip`'d with the open finding QA-20260825-03, un-skips in the repair PR |
+| Quote PDF filename carries the quote's brand (gate 14, `Pitmans-Quote-<ref>.pdf` / `MarleyMoves-Quote-<ref>.pdf`) | ✅ | office/quote-pdf-brand.spec.ts — passed locally against staging 2026-08-26 (2/2, ~14s). Filename-prefix + two-hats only; the deeper PDF colour/text brand checks (Pitmans blue `#2B2B76`, legal line, shared bank details) were proven live by a role agent this same run but have no permanent spec — no PDF-text-extraction dependency exists in this repo yet |
 | Bookings — sections, mark-paid dialog (balance = P0#1) | ✅ | office/bookings.spec.ts + p0-money |
 | Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
