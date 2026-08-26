@@ -36,6 +36,12 @@ export interface DailyJob {
   /** Latest survey for this job's lead — anchors the survey photos loaded lazily
    *  at render time (PDF data-URIs / web signed URLs). null = no survey. */
   surveyId: string | null;
+  /** The job's brand short name (brands.short_name via appointments.brand) —
+   *  the doc-def's per-job marker, rendered ONLY when a day's jobs span more
+   *  than one distinct brand (multi-brand PRD §3.6: the day sheet is a GROUP
+   *  document; single-brand days render byte-identical). null when the
+   *  brands table couldn't be read — every job null → no markers. */
+  brandShort?: string | null;
   sheet: JobSheetData;
 }
 
@@ -88,7 +94,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   const weekBefore = new Date(new Date(dayStart).getTime() - 7 * 86_400_000).toISOString();
   const { data: apptRows } = await admin
     .from("appointments")
-    .select("id, title, starts_at, ends_at, all_day, appt_type, lead_id, status")
+    .select("id, title, starts_at, ends_at, all_day, appt_type, lead_id, status, brand")
     .neq("status", "cancelled")
     .gte("starts_at", weekBefore)
     .lt("starts_at", nextDay);
@@ -107,7 +113,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   const staffIds = [...new Set(allAssigns.map((a) => a.staff_id).filter(Boolean))] as string[];
   const vehicleIds = [...new Set(allAssigns.map((a) => a.vehicle_id).filter(Boolean))] as string[];
 
-  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }, { data: surveys }] = await Promise.all([
+  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }, { data: surveys }, { data: brandRows }] = await Promise.all([
     leadIds.length
       ? admin.from("leads").select("id, name, phone, from_address, from_postcode, to_address, to_postcode, notes").in("id", leadIds)
       : Promise.resolve({ data: [] }),
@@ -127,6 +133,9 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
     leadIds.length
       ? admin.from("surveys").select("id, lead_id, created_at").in("lead_id", leadIds).order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
+    // Short names for the per-job brand marker on multi-brand days. One read
+    // for the whole run; a failed/absent table yields no markers, never an error.
+    admin.from("brands").select("slug, short_name"),
   ]);
 
   const leadById = new Map(((leads ?? []) as any[]).map((l: any) => [l.id, l])); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -141,6 +150,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   // Latest survey per lead (rows already ordered newest-first).
   const surveyByLead = new Map<string, string>();
   for (const sv of (surveys ?? []) as any[]) if (sv.lead_id && !surveyByLead.has(sv.lead_id)) surveyByLead.set(sv.lead_id, sv.id); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const brandShortBySlug = new Map(((brandRows ?? []) as any[]).map((b: any) => [b.slug, b.short_name as string])); // eslint-disable-line @typescript-eslint/no-explicit-any
 
   // Assignments grouped by appointment (for the crew/vehicle lists on each job).
   const assignsByAppt = new Map<string, typeof allAssigns>();
@@ -175,6 +185,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
       window: apptWindow(appt as ApptLite),
       startsAt: appt.starts_at,
       surveyId: appt.lead_id ? surveyByLead.get(appt.lead_id) ?? null : null,
+      brandShort: brandShortBySlug.get(appt.brand) ?? null,
       sheet,
     });
   }

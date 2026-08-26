@@ -16,11 +16,18 @@
  *
  * Browser-only render: reaches for window.pdfMake (loaded by <PdfLoader/>).
  * buildQuoteDocDef itself is pure so the tests can walk the real doc-def.
+ *
+ * Multi-brand (docs/multi-brand-prd.md §3.6): a quote PDF carries its job's
+ * brand. meta.brand ABSENT (or the default Marley brand, which callers never
+ * pass) renders exactly today's Marley document; a non-default brand swaps the
+ * accent colour, contact rows, legal line, title and wordmark from its brands
+ * row — all data-driven, no slug switches, so brand 3 needs no code here.
  */
 
 import type { QuoteFormValues } from "./form-types";
 import type { QuoteBreakdown } from "./pricing";
 import { customerLineItems } from "./line-items";
+import { tintTowardsWhite, type DocBrand } from "@/lib/pdf/doc-brand";
 
 // pdfMake is loaded from the CDN onto window by <PdfLoader/>; no types ship here.
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -100,24 +107,25 @@ const ICONS: Record<string, string> = {
     '<path d="M8 17h8.5a3 3 0 0 0 .4-6 5 5 0 0 0-9.5-1.7A3.8 3.8 0 0 0 8 17Z"/><path d="M10 20h.01"/><path d="M14 20h.01"/>',
 };
 
-/** Solid red circle badge with a white line icon (cards, callout, strip). */
-function solidBadge(icon: string, size = 28, iconSize = 15, strokeW = 1.8): string {
+/** Solid accent circle badge with a white line icon (cards, callout, strip).
+ *  `colour` defaults to Marley red so the no-brand path stays byte-identical. */
+function solidBadge(icon: string, size = 28, iconSize = 15, strokeW = 1.8, colour = C.red): string {
   const off = (size - iconSize) / 2;
   return (
     `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">` +
-    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${C.red}"/>` +
+    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2}" fill="${colour}"/>` +
     `<g transform="translate(${off},${off}) scale(${iconSize / 24})" fill="none" stroke="${C.white}" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round">${ICONS[icon]}</g>` +
     `</svg>`
   );
 }
 
-/** Outlined badge — white fill, red ring + red line icon (terms rows). */
-function outlineBadge(icon: string, size = 28, iconSize = 14): string {
+/** Outlined badge — white fill, accent ring + accent line icon (terms rows). */
+function outlineBadge(icon: string, size = 28, iconSize = 14, colour = C.red): string {
   const off = (size - iconSize) / 2;
   return (
     `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg">` +
-    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 0.6}" fill="${C.white}" stroke="${C.red}" stroke-width="1.2"/>` +
-    `<g transform="translate(${off},${off}) scale(${iconSize / 24})" fill="none" stroke="${C.red}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[icon]}</g>` +
+    `<circle cx="${size / 2}" cy="${size / 2}" r="${size / 2 - 0.6}" fill="${C.white}" stroke="${colour}" stroke-width="1.2"/>` +
+    `<g transform="translate(${off},${off}) scale(${iconSize / 24})" fill="none" stroke="${colour}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[icon]}</g>` +
     `</svg>`
   );
 }
@@ -162,6 +170,24 @@ export async function ensureLogoDataUri(): Promise<string> {
   return window.MARLEY_LOGO_DATA_URI || "";
 }
 
+/** PDF filename — brand short name prefixes (PRD §10: Pitmans-Quote-PMR001.pdf);
+ *  no/default brand keeps today's exact Marley shape. The brand object is the
+ *  shared DocBrand (lib/pdf/doc-brand.ts) so every gate-14 doc-def speaks one
+ *  slim serialisable shape, resolved at the caller via docBrandFrom (null for
+ *  the default brand — these literals ARE its rendering). */
+export function quotePdfFilename(quoteRef: string, brand?: DocBrand | null): string {
+  return `${brand ? brand.shortName : "MarleyMoves"}-Quote-${quoteRef}.pdf`;
+}
+
+/** "https://www.example.co.uk/" → "www.example.co.uk" for the header row. */
+const displayUrl = (u: string): string => u.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+
+/** Bare address out of "Name <address>" (hello_from tolerates both shapes). */
+const emailAddress = (s: string): string => {
+  const m = /<([^>]+)>/.exec(s);
+  return (m ? m[1] : s).trim();
+};
+
 interface PdfMeta {
   quoteRef: string;
   estimatorName?: string;
@@ -172,6 +198,10 @@ interface PdfMeta {
   depositAmount?: number;
   /** Public accept-page URL — renders the QR slots + "Accept online" line when set. */
   acceptUrl?: string;
+  /** Non-default brand for this quote (PRD §3.6). Absent/null → today's Marley
+   *  document, byte-identical. Resolved at the call site from quotes.brand via
+   *  docBrandFrom (which returns null for the default brand). */
+  brand?: DocBrand | null;
 }
 
 // Static bank details (as the live tool prints them).
@@ -244,7 +274,21 @@ const TERMS: { icon: string; title: string; body: (deposit: string) => string }[
 export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, meta: PdfMeta): any {
   const quoteRef = meta.quoteRef;
   const estimator = meta.estimatorName || "—";
-  const logoDataUri = meta.logoDataUri || "";
+  // ── Brand (PRD §3.6) — absent means Marley, and the Marley path keeps every
+  // literal below untouched. A non-default brand swaps the accent palette
+  // (DocBrand.colour is already WCAG-picked: the accent only when white text is
+  // legible on it, else the primary — Pitmans yellow fails, blue wins), the
+  // contact/legal text and the wordmark; a row with no usable colour arrives as
+  // the Marley red and therefore keeps the literal red palette below.
+  const brand = meta.brand || null;
+  const accent = brand?.colour ?? C.red;
+  const accentSoft = accent === C.red ? C.redSoft : tintTowardsWhite(accent, 0.92);
+  const accentStripBorder = accent === C.red ? C.acceptBorder : tintTowardsWhite(accent, 0.78);
+  const accentBoxBorder = accent === C.red ? C.acceptBoxBorder : tintTowardsWhite(accent, 0.7);
+  // The only embeddable logo is Marley's same-origin /logo.png; a non-default
+  // brand's logo_url is remote (and a Phase-0 stub anyway), so those documents
+  // render a text wordmark in the brand colour instead — never Marley's logo.
+  const logoDataUri = brand ? "" : meta.logoDataUri || "";
   const deposit = fmtGBPWhole(meta.depositAmount != null && meta.depositAmount > 0 ? meta.depositAmount : 100);
   const acceptUrl = (meta.acceptUrl || "").trim();
 
@@ -278,7 +322,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     text: t,
     bold: true,
     fontSize: 7.5,
-    color: C.red,
+    color: accent,
     margin: [0, 0, 0, 2] as number[],
   });
   const cardValue = (t: string, opts: { bold?: boolean } = {}) => ({
@@ -308,7 +352,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
 
   const cardHeading = (icon: string, title: string) => ({
     columns: [
-      { width: 28, svg: solidBadge(icon), margin: [0, 0, 0, 0] },
+      { width: 28, svg: solidBadge(icon, 28, 15, 1.8, accent), margin: [0, 0, 0, 0] },
       { width: "*", text: title, bold: true, fontSize: 10, color: C.ink, characterSpacing: 0.2, margin: [9, 8, 0, 0] },
     ],
     margin: [0, 0, 0, 10],
@@ -333,16 +377,36 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     margin: [0, 0, 0, 5],
   });
 
+  // Brand identity block — logo (Marley) or text wordmark (non-default brands),
+  // plus the group-line disclosure, which the PRD requires wherever the brand
+  // identity appears (§1). The Marley branch renders exactly today's header.
+  const identityStack = (wordmarkSize: number, logoWidth: number): any[] =>
+    brand
+      ? [
+          { text: brand.name, bold: true, fontSize: wordmarkSize, color: accent, margin: [0, 2, 0, 2] },
+          ...(brand.groupLine
+            ? [{ text: brand.groupLine, fontSize: 7.5, color: C.muted, margin: [0, 0, 0, 8] }]
+            : [{ text: "", margin: [0, 0, 0, 8] }]),
+        ]
+      : [logoDataUri ? { image: "marleyLogo", width: logoWidth, margin: [0, 0, 0, 8] } : { text: "", margin: [0, 0, 0, 8] }];
+
+  const brandContactRows = brand
+    ? [
+        ...(brand.phone ? [contactRow("phone", brand.phone)] : []),
+        ...(brand.email ? [contactRow("email", emailAddress(brand.email))] : []),
+        ...(brand.websiteUrl ? [contactRow("web", displayUrl(brand.websiteUrl))] : []),
+      ]
+    : [
+        contactRow("phone", "01747 637070"),
+        contactRow("email", "hello@marleymoves.co.uk"),
+        contactRow("web", "www.marleymoves.co.uk"),
+      ];
+
   content.push({
     columns: [
       {
         width: 250,
-        stack: [
-          logoDataUri ? { image: "marleyLogo", width: 108, margin: [0, 0, 0, 8] } : { text: "", margin: [0, 0, 0, 8] },
-          contactRow("phone", "01747 637070"),
-          contactRow("email", "hello@marleymoves.co.uk"),
-          contactRow("web", "www.marleymoves.co.uk"),
-        ],
+        stack: [...identityStack(15, 108), ...brandContactRows],
       },
       {
         width: "*",
@@ -354,9 +418,9 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
               {
                 width: 200,
                 stack: [
-                  metaRow("Quote Reference:", quoteRef, C.red),
+                  metaRow("Quote Reference:", quoteRef, accent),
                   metaRow("Date Issued:", fmtDate(now)),
-                  metaRow("Valid Until:", fmtDate(expiry), C.red),
+                  metaRow("Valid Until:", fmtDate(expiry), accent),
                 ],
               },
             ],
@@ -368,7 +432,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     margin: [0, 0, 0, 8],
   });
   content.push({
-    canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: C.red }],
+    canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: accent }],
     margin: [0, 0, 0, 12],
   });
 
@@ -431,7 +495,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   // ═══ QUOTE BREAKDOWN ═════════════════════════════════════════════════
   content.push({
     columns: [
-      { width: 28, svg: solidBadge("breakdown") },
+      { width: 28, svg: solidBadge("breakdown", 28, 15, 1.8, accent) },
       { width: "*", text: "QUOTE BREAKDOWN", bold: true, fontSize: 10.5, color: C.ink, characterSpacing: 0.3, margin: [9, 8, 0, 0] },
     ],
     margin: [0, 0, 0, 9],
@@ -516,7 +580,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
             [
               {
                 columns: [
-                  { width: 20, svg: solidBadge("info", 20, 11) },
+                  { width: 20, svg: solidBadge("info", 20, 11, 1.8, accent) },
                   {
                     width: "*",
                     text: "Mileage is calculated from base to collection, collection to destination, and return to base.",
@@ -557,8 +621,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
               widths: ["*", "auto"],
               body: [
                 [
-                  { text: "TOTAL INCLUDING VAT", bold: true, fontSize: 10, color: C.white, characterSpacing: 0.2, fillColor: C.red, margin: [17, 14, 0, 13], border: [false, false, false, false] },
-                  { text: fmtGBP(b.grandTotal), bold: true, fontSize: 19, color: C.white, alignment: "right", fillColor: C.red, margin: [0, 9, 17, 8], border: [false, false, false, false] },
+                  { text: "TOTAL INCLUDING VAT", bold: true, fontSize: 10, color: C.white, characterSpacing: 0.2, fillColor: accent, margin: [17, 14, 0, 13], border: [false, false, false, false] },
+                  { text: fmtGBP(b.grandTotal), bold: true, fontSize: 19, color: C.white, alignment: "right", fillColor: accent, margin: [0, 9, 17, 8], border: [false, false, false, false] },
                 ],
               ],
             },
@@ -593,7 +657,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
         [
           {
             columns: [
-              { width: 28, svg: solidBadge("tick", 28, 15, 2.1), margin: [0, acceptUrl ? 6 : 2, 0, 0] },
+              { width: 28, svg: solidBadge("tick", 28, 15, 2.1, accent), margin: [0, acceptUrl ? 6 : 2, 0, 0] },
               stripLeft,
               ...(acceptUrl ? [{ width: 60, qr: acceptUrl, fit: 58, foreground: C.ink, margin: [0, 0, 0, 0] }] : []),
             ],
@@ -605,9 +669,9 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     layout: {
       hLineWidth: () => 0.7,
       vLineWidth: () => 0.7,
-      hLineColor: () => C.acceptBorder,
-      vLineColor: () => C.acceptBorder,
-      fillColor: () => C.redSoft,
+      hLineColor: () => accentStripBorder,
+      vLineColor: () => accentStripBorder,
+      fillColor: () => accentSoft,
       paddingLeft: () => 0,
       paddingRight: () => 0,
       paddingTop: () => 0,
@@ -621,7 +685,12 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     columns: [
       {
         width: 130,
-        stack: [logoDataUri ? { image: "marleyLogo", width: 92 } : { text: "" }],
+        stack: brand
+          ? [
+              { text: brand.name, bold: true, fontSize: 11, color: accent, margin: [0, 20, 0, 1] },
+              ...(brand.groupLine ? [{ text: brand.groupLine, fontSize: 6.5, color: C.muted }] : []),
+            ]
+          : [logoDataUri ? { image: "marleyLogo", width: 92 } : { text: "" }],
       },
       { width: "*", text: "Quote Assumptions & Terms", bold: true, fontSize: 19, color: C.ink, alignment: "right", margin: [0, 26, 0, 0] },
     ],
@@ -629,7 +698,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     margin: [0, 0, 0, 8],
   });
   content.push({
-    canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: C.red }],
+    canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1.4, lineColor: accent }],
     margin: [0, 0, 0, 4],
   });
 
@@ -637,7 +706,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     table: {
       widths: [40, "*"],
       body: TERMS.map((t) => [
-        { svg: outlineBadge(t.icon, 26, 13), border: [false, false, false, false], margin: [2, 6, 0, 6] },
+        { svg: outlineBadge(t.icon, 26, 13, accent), border: [false, false, false, false], margin: [2, 6, 0, 6] },
         {
           stack: [
             { text: t.title, bold: true, fontSize: 9.3, color: C.ink, margin: [0, 0, 0, 2] },
@@ -671,8 +740,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   const bankStack = [
     {
       columns: [
-        { width: 26, svg: solidBadge("bank", 26, 14) },
-        { width: "*", text: "BANK DETAILS", bold: true, fontSize: 8, color: C.red, characterSpacing: 0.3, margin: [8, 8, 0, 0] },
+        { width: 26, svg: solidBadge("bank", 26, 14, 1.8, accent) },
+        { width: "*", text: "BANK DETAILS", bold: true, fontSize: 8, color: accent, characterSpacing: 0.3, margin: [8, 8, 0, 0] },
       ],
       margin: [0, 0, 0, 8],
     },
@@ -693,7 +762,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     margin: [0, 0, 0, 5],
   });
   const acceptanceInner: any[] = [
-    { text: "CUSTOMER ACCEPTANCE", bold: true, fontSize: 8, color: C.red, characterSpacing: 0.3, margin: [0, 0, 0, 5] },
+    { text: "CUSTOMER ACCEPTANCE", bold: true, fontSize: 8, color: accent, characterSpacing: 0.3, margin: [0, 0, 0, 5] },
     {
       text: acceptUrl
         ? "By paying the deposit or accepting online, I accept this quote and agree to the terms and conditions outlined above."
@@ -733,8 +802,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
         layout: {
           hLineWidth: () => 0.8,
           vLineWidth: () => 0.8,
-          hLineColor: () => C.acceptBoxBorder,
-          vLineColor: () => C.acceptBoxBorder,
+          hLineColor: () => accentBoxBorder,
+          vLineColor: () => accentBoxBorder,
           fillColor: () => C.white,
           paddingLeft: () => 0,
           paddingRight: () => 0,
@@ -747,8 +816,26 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     columnGap: 13,
   });
 
+  // Footer legal text. Marley keeps today's exact string; a non-default brand
+  // renders its brands-row legal line (the trading-name wording), which may
+  // already carry the VAT number — only add the "VAT No." segment when it
+  // doesn't (a VAT document's footer must state it exactly once, on every page).
+  const digits = (s: string) => s.replace(/\D/g, "");
+  const legalCarriesVat =
+    !!brand && !!meta.vatNumber && !!digits(meta.vatNumber) && brand.legalLine.replace(/\D/g, "").includes(digits(meta.vatNumber));
+  const footerParts = brand
+    ? [
+        brand.legalLine,
+        ...(legalCarriesVat ? [] : [`VAT No. ${meta.vatNumber || "—"}`]),
+        ...(brand.phone ? [brand.phone] : []),
+        `Ref: ${quoteRef}`,
+      ]
+    : null;
+
   return {
-    info: { title: `MarleyMoves Quote ${quoteRef}`, author: "Marley Moves Ltd", subject: "Removal quote", creator: "Marley Ops" },
+    info: brand
+      ? { title: `${brand.name} Quote ${quoteRef}`, author: brand.name, subject: "Removal quote", creator: "Marley Ops" }
+      : { title: `MarleyMoves Quote ${quoteRef}`, author: "Marley Moves Ltd", subject: "Removal quote", creator: "Marley Ops" },
     images: { marleyLogo: logoDataUri || "" },
     pageSize: "A4",
     pageMargins: [38, 32, 38, 52],
@@ -756,15 +843,17 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
     footer: (currentPage: number, pageCount: number) => ({
       margin: [38, 6, 38, 0],
       stack: [
-        { canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1, lineColor: C.red }] },
+        { canvas: [{ type: "line", x1: 0, y1: 0, x2: CONTENT_W, y2: 0, lineWidth: 1, lineColor: accent }] },
         {
-          text: [
-            "Marley Moves Ltd  |  Company No. 15914266  |  ",
-            `VAT No. ${meta.vatNumber || "—"}`,
-            "  |  01747 637070  |  ",
-            `Ref: ${quoteRef}`,
-            `  |  Page ${currentPage} of ${pageCount}`,
-          ].join(""),
+          text: footerParts
+            ? [...footerParts, `Page ${currentPage} of ${pageCount}`].join("  |  ")
+            : [
+                "Marley Moves Ltd  |  Company No. 15914266  |  ",
+                `VAT No. ${meta.vatNumber || "—"}`,
+                "  |  01747 637070  |  ",
+                `Ref: ${quoteRef}`,
+                `  |  Page ${currentPage} of ${pageCount}`,
+              ].join(""),
           fontSize: 6.8,
           color: C.footer,
           alignment: "center",
@@ -779,7 +868,8 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
 /** Create the PDF and return base64 (no `data:` prefix). */
 export async function quotePdfBase64(values: QuoteFormValues, b: QuoteBreakdown, meta: PdfMeta): Promise<string> {
   const pdfMake = requireBrowserPdfMake();
-  const logoDataUri = meta.logoDataUri ?? (await ensureLogoDataUri());
+  // A non-default brand never embeds Marley's /logo.png — don't fetch it.
+  const logoDataUri = meta.brand ? "" : meta.logoDataUri ?? (await ensureLogoDataUri());
   const docDef = buildQuoteDocDef(values, b, { ...meta, logoDataUri });
   return new Promise<string>((resolve, reject) => {
     try {
@@ -793,7 +883,7 @@ export async function quotePdfBase64(values: QuoteFormValues, b: QuoteBreakdown,
 /** Create the PDF and trigger a browser download. */
 export async function downloadQuotePdf(values: QuoteFormValues, b: QuoteBreakdown, meta: PdfMeta): Promise<void> {
   const pdfMake = requireBrowserPdfMake();
-  const logoDataUri = meta.logoDataUri ?? (await ensureLogoDataUri());
+  const logoDataUri = meta.brand ? "" : meta.logoDataUri ?? (await ensureLogoDataUri());
   const docDef = buildQuoteDocDef(values, b, { ...meta, logoDataUri });
-  pdfMake.createPdf(docDef).download(`MarleyMoves-Quote-${meta.quoteRef}.pdf`);
+  pdfMake.createPdf(docDef).download(quotePdfFilename(meta.quoteRef, meta.brand));
 }

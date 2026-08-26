@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { computeQuote, DEFAULT_PRICING } from "@/lib/quote/pricing";
 import { defaultQuoteValues } from "@/lib/quote/form-types";
-import { buildQuoteDocDef } from "@/lib/quote/pdf-client";
+import { buildQuoteDocDef, quotePdfFilename } from "@/lib/quote/pdf-client";
+import { docBrandFrom, type DocBrand } from "@/lib/pdf/doc-brand";
+import { mapBrand } from "@/lib/brand";
 
 /**
  * The PDF is a VAT document — its visible line items MUST sum exactly to the
@@ -150,5 +152,133 @@ describe("quote PDF doc-def — money correctness", () => {
     });
     const off = JSON.stringify(buildQuoteDocDef(defaultQuoteValues(), offB, { quoteRef: "MM-TEST-003" }));
     expect(off).toContain("VAT (0%)");
+  });
+});
+
+/**
+ * Brand layer (docs/multi-brand-prd.md §3.6): a quote PDF carries its job's
+ * brand. THE headline property — no brand renders exactly today's Marley
+ * document; a non-default brand substitutes its brands-row values with no
+ * slug switches, so these tests drive a Pitmans-shaped plain object.
+ */
+describe("quote PDF doc-def — brand layer (PRD §3.6)", () => {
+  const { values, b } = kitchenSink();
+  const meta = {
+    quoteRef: "PMR001",
+    vatNumber: "520 2213 58",
+    depositAmount: 100,
+    acceptUrl: "https://ops.marleymoves.co.uk/q/abc123",
+  };
+  // Built through the real resolver from a seed-shaped brands row, so these
+  // tests also pin docBrandFrom's contract (WCAG colour pick, default → null).
+  const pitmans = docBrandFrom(
+    mapBrand({
+      slug: "pitmans",
+      name: "Pitmans Removals & Storage",
+      short_name: "Pitmans",
+      group_line: "Part of the Marley Group",
+      legal_line:
+        "Pitmans Removals & Storage is a trading name of MarleyMoves Ltd. Company No. 15914266. VAT 520 2213 58.",
+      phone: "01258 858564",
+      website_url: "https://pitmansremovals.co.uk",
+      hello_from: "info@pitmansremovals.co.uk",
+      colour_primary: "#2B2B76",
+      colour_accent: "#FFCC00",
+    }),
+  ) as DocBrand;
+  const branded = buildQuoteDocDef(values, b, { ...meta, brand: pitmans });
+  const flat = JSON.stringify(branded);
+
+  it("docBrandFrom: default brand resolves to null; Pitmans arrives as data", () => {
+    expect(docBrandFrom(mapBrand({ slug: "marley", name: "Marley Moves", short_name: "Marley" }))).toBeNull();
+    expect(pitmans).not.toBeNull();
+    expect(pitmans.shortName).toBe("Pitmans");
+  });
+
+  it("no brand (undefined or null) renders the identical Marley doc-def", () => {
+    const plain = JSON.stringify(buildQuoteDocDef(values, b, meta));
+    expect(JSON.stringify(buildQuoteDocDef(values, b, { ...meta, brand: undefined }))).toBe(plain);
+    expect(JSON.stringify(buildQuoteDocDef(values, b, { ...meta, brand: null }))).toBe(plain);
+    // and the Marley literals are pinned: red accent, contact rows, title
+    expect(plain).toContain("#C03838");
+    expect(plain).toContain("01747 637070");
+    expect(plain).toContain("hello@marleymoves.co.uk");
+    expect(plain).toContain("www.marleymoves.co.uk");
+    expect(JSON.stringify(buildQuoteDocDef(values, b, meta).info)).toContain("MarleyMoves Quote PMR001");
+  });
+
+  it("a non-default brand carries no Marley identity leaks", () => {
+    // Red accent fully replaced (badge SVGs + text colours; the soft-tint fills
+    // live in layout functions, which JSON.stringify drops — not assertable here).
+    expect(flat).not.toContain("#C03838");
+    expect(flat).not.toContain("01747 637070");
+    expect(flat).not.toContain("hello@marleymoves.co.uk");
+    expect(flat).not.toContain("www.marleymoves.co.uk");
+    expect(flat).not.toContain("MarleyMoves Quote");
+    // no logo image node anywhere — the brand identity renders as a text wordmark
+    expect(flat).not.toContain('"image"');
+  });
+
+  it("WCAG data rule: white text fails on the yellow accent, so blue primary is the accent", () => {
+    expect(pitmans.colour).toBe("#2B2B76");
+    expect(flat).toContain("#2B2B76");
+    expect(flat).not.toContain("#FFCC00");
+  });
+
+  it("brand identity block: wordmark + the group-line disclosure, on both pages", () => {
+    const marks = flat.match(/Pitmans Removals & Storage/g) ?? [];
+    expect(marks.length).toBeGreaterThanOrEqual(2); // page 1 + page 2 wordmarks
+    const group = flat.match(/Part of the Marley Group/g) ?? [];
+    expect(group.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("brand contact rows: phone, contact mailbox, website (protocol stripped)", () => {
+    expect(flat).toContain("01258 858564");
+    expect(flat).toContain("info@pitmansremovals.co.uk");
+    expect(flat).toContain('"pitmansremovals.co.uk"');
+  });
+
+  it("footer renders the brand legal line, VAT stated exactly once per page", () => {
+    const footer = JSON.stringify(branded.footer(1, 2));
+    expect(footer).toContain("is a trading name of MarleyMoves Ltd");
+    expect(footer).toContain("Ref: PMR001");
+    expect(footer).toContain("Page 1 of 2");
+    // the legal line already carries VAT 520 2213 58 — no duplicate "VAT No." segment
+    expect((footer.match(/520 2213 58/g) ?? []).length).toBe(1);
+    expect(footer).not.toContain("VAT No.");
+  });
+
+  it("footer adds the VAT No. segment when the legal line does not carry it", () => {
+    const noVatInLegal = buildQuoteDocDef(values, b, {
+      ...meta,
+      brand: { ...pitmans, legalLine: "Pitmans Removals & Storage is a trading name of MarleyMoves Ltd. Company No. 15914266." },
+    });
+    expect(JSON.stringify(noVatInLegal.footer(1, 2))).toContain("VAT No. 520 2213 58");
+  });
+
+  it("filename: brand short name prefixes; Marley keeps today's exact shape", () => {
+    expect(quotePdfFilename("PMR001", pitmans)).toBe("Pitmans-Quote-PMR001.pdf");
+    expect(quotePdfFilename("MM-TEST-001")).toBe("MarleyMoves-Quote-MM-TEST-001.pdf");
+    expect(quotePdfFilename("MM-TEST-001", null)).toBe("MarleyMoves-Quote-MM-TEST-001.pdf");
+  });
+
+  it("bank details stay MarleyMoves for every brand — one shared account (PRD §2)", () => {
+    expect(flat).toContain("MARLEYMOVES LTD");
+    expect(flat).toContain("04-00-03");
+  });
+
+  it("the VAT-document invariant holds on a branded doc: items sum to the subtotal", () => {
+    const rows = lineItemRows(branded);
+    const sum = rows.reduce((acc, row) => acc + parseGbp(row[4].text), 0);
+    expect(sum).toBeCloseTo(b.subtotal, 2);
+  });
+
+  it("a brand row with no usable colours keeps the Marley red palette, brand text intact", () => {
+    const colourless = JSON.stringify(
+      buildQuoteDocDef(values, b, { ...meta, brand: { ...pitmans, colour: "#C03838" } }),
+    );
+    expect(colourless).toContain("#C03838");
+    expect(colourless).toContain("Pitmans Removals & Storage");
+    expect(colourless).not.toContain("hello@marleymoves.co.uk");
   });
 });
