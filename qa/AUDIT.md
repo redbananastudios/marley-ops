@@ -72,7 +72,7 @@ The test bed is the DEPLOYED staging site: https://staging.ops.marleymoves.co.uk
 
 - New/changed routes join `e2e/fixtures/routes.ts` (access matrix: every route × every role, incl. forbidden lists).
 - Verified flows without coverage become specs in the matching `e2e/<role>/` dir, using the existing `.auth/*.json` role fixtures and seed helpers; handoffs become multi-context specs. Update `e2e/COVERAGE.md` in the same commit.
-- Known gaps to clear first: `office/jobs` (Completed Jobs), `estimator/work` + `estimator/quote`, crew invoicing submit-lines.
+- Known gaps to clear first: `office/jobs` (Completed Jobs), crew invoicing submit-lines, and estimator "book survey → create quote" are all CLOSED (re-verified live 2026-08-26, see `qa/state.json` `spec_gaps`) — this line was stale. Still genuinely open: estimator "Leads scoped to own/Mine preset" and the full 7-step "Build + send a quote" wizard (tracked as `estimator/work.spec.ts` + `estimator/quote.spec.ts`, both ⬜ in `e2e/COVERAGE.md`).
 - A spec must pass locally against staging before it ships. A spec that reveals a bug ships SKIPPED with the finding id in its skip reason, and un-skips in the repair PR.
 
 ## Ledger

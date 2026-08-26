@@ -4,6 +4,22 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-26T08:16Z — full audit: 4 role agents (Sonnet), stalest-item re-verify + 3 named spec-gap checks, 0 findings, ledger corrected
+
+- Checked out `staging`, fetched to latest (`f183fb0`). Credentials: all three `QA_STAGING_*` present.
+- Verify-first: both open findings (`QA-20260825-03`, `QA-20260826-01`) are `class: risky`, `status: open` (not `fixed-pending-verify`) — nothing to re-verify or close, left untouched for Peter.
+- Health gate: deployed `/api/version` = `55340a8`; HEAD `f183fb0` differs only by two `qa/LOG.md`-only commits (docs-skip path — app code identical). `npm ci` (deps were not installed), then all four gates on the untouched tree: lint 0 errors (36 pre-existing warnings) · tsc clean · vitest 2012 passed/7 skipped · build clean.
+- Seed: sweep found 0 leftovers. Minted 3 throwaway users (`qa-sentinel-{admin,estimator,crew}-20260826@marleymoves.test`, random passwords, run-suffix `20260826`) + one marker client+lead+accepted-quote fixture (`QASENT-20260826-001`).
+- Rota (all 4 role agents dispatched in parallel on Sonnet, per-agent `.qa-scratch-<role>-<random>` scratch naming): **crew** — hours+expense re-verify (SQL+IO-proof exact match) → admin handoff on `/finance/statements`, then weekly invoice create/seed/edit/submit (`MMP218`, £147.50, lines sum matches). **admin** — lead duplicate-delete/merge re-verify (dialog copy matches `deleteLeadAction`'s actual re-pointing, no orphans) + Completed Jobs at `/jobs` (6 recomputed fields vs SQL, all match). **estimator** — book-survey→create-quote re-verify (matches `e2e/estimator/work-quote.spec.ts` exactly, 2nd independent live confirmation) + gating (`/finance`,`/finance/statements`,`/refunds` all bounce correctly) + confirmed `/estimator/work` is not a real route. **customer** — day-sheet `/sheet/[token]` re-verify (every field traced to source column) + cubic self-fill `/cv/[token]` (IO-proof upload confirmed a JPEG round-trips through the bucket; also corrected a wrong assumption in the brief — `/cv` has no upload UI by design, gated to office mode only, not a bug).
+- **0 findings filed.** Every re-tested item still passes; nothing broke.
+- **Spec gaps closed 2026-08-20/21/22 already existed** (`office/jobs.spec.ts`, `crew/invoicing-submit-lines.spec.ts`, `estimator/work-quote.spec.ts`) — AUDIT.md's "Known gaps to clear first" line was stale, naming already-closed gaps. Corrected in this run's commit to name the real residual gap (estimator Mine-preset leads scoping + full quote-build wizard, still ⬜ in `e2e/COVERAGE.md`). No new spec files needed — all ops tested this run already have permanent coverage.
+- `qa/state.json` updated: 8 items + 3 `spec_gaps` entries refreshed with fresh `lastTestedAt`/evidence, `lastAuditSha` → `55340a8`.
+- Cleanup: comprehensive marker sweep + explicit id-based teardown (staff → statements/lines/time-entries/agreements/pay/job-sheets → storage object; leads → quotes/surveys/appointments/activities/communications/follow_ups/claims/job_completions/cubic_surveys → clients; 3 auth users). **Verified by query: 0 rows in every touched table, storage folder empty, 0 matching auth users.**
+- Push: staging only, rebased clean, no promote to master.
+- Time spent: ~20 min (well under the 45-min box).
+
+---
+
 ## 2026-08-26T05:35Z — first-pass repair sweep (scheduled): nothing eligible — `qa/findings/open/` holds only QA-20260825-03 (high) and QA-20260826-01 (medium), both `class: risky` (Pitmans quote-ref minting / bookings-vs-payments owed-figure divergence — money and reconciliation, never first-pass work), both `status: open` and left untouched. Verified against `origin/staging` @ `55340a8`; `grep -rn "status: fixing\|escalate:" qa/findings/` empty, so nothing orphaned mid-repair and nothing awaiting escalation either. Nothing claimed, no branch cut, no PR opened, master untouched, no DB or browser access used. Time spent: ~3 min.
 
 ---
