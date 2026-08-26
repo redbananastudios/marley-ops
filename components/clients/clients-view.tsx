@@ -48,6 +48,10 @@ import { EmailComposeDialog } from "@/components/comms/email-compose-dialog";
 import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import { BrandFilter } from "@/components/brand/brand-filter";
 import { SOURCES, type SourceKey } from "@/lib/dashboard/compute";
+// UK_TZ-pinned: this text is server-rendered in UTC then hydrated in the UK —
+// an un-pinned toLocaleDateString flips date near midnight through BST and
+// hydration-mismatches the whole tree (React #418, QA-20260826-03).
+import { ukDateShort as dateShort } from "@/lib/uk-time";
 
 const ALPHABET = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", "#"];
 
@@ -79,13 +83,6 @@ const SOURCE_COLOR: Record<SourceKey, string> = Object.fromEntries(
 const SOURCE_LABEL: Record<SourceKey, string> = Object.fromEntries(
   SOURCES.map((s) => [s.key, s.label]),
 ) as Record<SourceKey, string>;
-
-function dateShort(d: string | null): string {
-  if (!d) return "—";
-  const t = new Date(d);
-  if (Number.isNaN(t.getTime())) return "—";
-  return t.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
-}
 
 function OriginBadge({ origin }: { origin: SourceKey }) {
   return (
