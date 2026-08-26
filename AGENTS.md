@@ -28,6 +28,17 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
 
 - **Page shell (2026-07-16, Peter caught /content hugging the edge):** every `app/(dashboard)/**` page's top-level element must be `<main className="flex-1 p-6 md:p-8">` (or the deliberate `page-shell` variant used by the dashboard/estimator views). The shared layout adds NO padding on purpose — a bare `<div>` root renders flush against the viewport. Full 34-page audit passed 2026-07-16; keep it true for new pages.
 
+- **A red `gate` check on a guard-tripping PR tells you NOTHING about the tests (2026-08-26).**
+  `qa-auto-merge.yml`'s first real step is the risky-path guard, which `exit 1`s several
+  steps before `npm ci`, let alone `npm test`. So any PR touching
+  `supabase/migrations/**`, `lib/payments/**`, `lib/comms/**`, `app/api/card/**` or
+  `lib/supabase/proxy-session.ts` shows a red badge that means only "a human must merge
+  this" — the suite may be green, or may be badly broken, and the badge cannot tell them
+  apart. PR #91 sat guard-red for a day carrying a genuinely failing pricing snapshot that
+  nobody had seen. **Before merging any guard-queued PR, merge staging into it locally and
+  run all four gates on the MERGED tree** (`npm run lint && npm run typecheck && npm test
+  && npm run build`) — not on the branch alone, since staging moves underneath it.
+
 ## Current State (2026-08-25 — prod live on `6ae3ba3`; master == staging; zero open QA findings)
 
 Last touched: 2026-08-25 on i9 — **prod, `master` and `staging` are all `6ae3ba3`.** The QA loop now runs end to end on its own: audits on **Sonnet**, first-pass repair firing and fixing findings unaided.
