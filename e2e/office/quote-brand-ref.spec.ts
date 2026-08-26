@@ -12,20 +12,18 @@ import { E2E_DB_READY, adminClient } from "../fixtures/db";
  * quote-ref-immutability implications once a naive fix is attempted, since an
  * already-issued MM-prefixed Pitmans ref must never be silently reissued).
  *
- * SKIPPED until the repair PR passes `brand` into `sb.rpc("next_quote_ref", ...)`
- * — un-skip by deleting the KNOWN_BUG guard below once QA-20260825-03 closes.
+ * LIVE since 2026-08-26: PR #90 (gate 6) landed the fix — `nextQuoteRef()` now
+ * takes the lead's brand and passes it into the RPC, and one variable feeds both
+ * the ref and the denormalised `quotes.brand` column so they cannot disagree.
+ * The KNOWN_BUG guard that used to sit here is deleted, which is what CLOSES
+ * QA-20260825-03: until this assertion actually ran, the suite's green badge
+ * said nothing about the bug, because the only test that covers it was skipped.
  *
  * Needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (the CI e2e job
  * exports both) to seed and tear down its own marker fixture — this env
  * usually doesn't have them locally.
  */
 test.skip(!E2E_DB_READY, "needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY to seed the marker pitmans lead");
-
-const KNOWN_BUG_QA_20260825_03 = true;
-test.skip(
-  KNOWN_BUG_QA_20260825_03,
-  "QA-20260825-03: quotes for a pitmans-brand lead mint an MM-prefixed ref instead of PM — un-skip once the repair PR lands",
-);
 
 const MARKER = "E2E-QUOTE-BRAND-REF";
 
