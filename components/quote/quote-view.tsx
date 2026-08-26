@@ -146,14 +146,19 @@ export function QuoteView({ values, money }: { values: QuoteFormValues; money: Q
             <Truck className="size-3.5" strokeWidth={1.75} /> Money
           </p>
           {row("Subtotal", gbp(money.subtotal))}
+          {/* The uplift is already INSIDE subtotal (PRD §3.9 — computeQuote adds it
+              as the last addend), so it must read as a breakdown OF the line above,
+              never as a sibling addend: indented and prefixed "of which", because
+              every other row in this column (Discount, VAT) is a real term of the
+              total and an addend reading would not sum to Quote total. */}
           {Number(money.additional_charges) > 0 ? (
-            <div className="flex items-baseline justify-between gap-3 py-1">
-              <span className="text-sm text-mist-500">Additional charges (internal)</span>
-              <span className="tabular text-sm font-medium text-foreground">{gbp(money.additional_charges)}</span>
+            <div className="flex items-baseline justify-between gap-3 py-1 pl-4">
+              <span className="text-sm text-mist-500">of which additional charges (internal)</span>
+              <span className="tabular text-sm font-medium text-mist-500">{gbp(money.additional_charges)}</span>
             </div>
           ) : null}
           {Number(money.additional_charges) > 0 && money.additional_charges_reason ? (
-            <p className="pb-1 text-right text-xs text-mist-400">{money.additional_charges_reason}</p>
+            <p className="pb-1 pl-4 text-right text-xs text-mist-400">{money.additional_charges_reason}</p>
           ) : null}
           {Number(money.discount) > 0 ? row("Discount", `−${gbp(money.discount)}`) : null}
           {money.vat_enabled ? row("VAT (20%)", gbp(money.vat_amount)) : null}
