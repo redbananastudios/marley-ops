@@ -167,6 +167,172 @@ export const MANIFEST = [
     reason:
       "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
   },
+  // Gate 19: the ingest stack. These three are brand-resolved by contract —
+  // one route serves EVERY brand's website, the pure half derives the brand
+  // from whichever secret matched (never the payload, PRD §3.8), and the
+  // landing path takes brand as data — so they live under scan. The default
+  // brand's name (and, in ingest.ts, its domain) appears only in comments
+  // pinning the pre-brand-layer compatibility contract: the live site posts
+  // with the original `LEAD_INGEST_SECRET` and must see zero change.
+  //
+  // Deliberately NOT listed, because they are PER-BRAND RAILS by design, not
+  // leak surfaces (each rail is one brand's own delivery channel and may name
+  // its brand, exactly as lib/sync/sanity-leads.ts — the default brand's pull
+  // rail — has never been listed): lib/sync/wp-leads.ts and
+  // app/api/cron/wp-leads/route.ts (the second brand's pull rail), and the
+  // WordPress plugin under wordpress/pitmans-lead-bridge/ (PHP shipped to that
+  // brand's own site; a "leak" of its brand into it is the point).
+  {
+    pattern: "lib/leads/ingest.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "comments only: the compatibility contract for the pre-brand-layer LEAD_INGEST_SECRET names whose secret it is and which live site posts with it",
+  },
+  {
+    pattern: "app/api/ingest/lead/route.ts",
+    allow: ["Marley"],
+    reason:
+      "comment only: the route contract doc names whose secret LEAD_INGEST_SECRET is and stays",
+  },
+  {
+    pattern: "lib/leads/website-lead.ts",
+    allow: ["Marley"],
+    reason:
+      "comments only: the brand-field doc and the sanity_id-stays-global rationale name which brand's pull rail carries a Sanity id",
+  },
+  // Gate 14: the JOB-document doc-defs (PRD §3.6). Brand identity, colours and
+  // filenames arrive as a DocBrand from the brands row; the remaining default-
+  // brand literals are the DEFAULT CONSTANTS selected when no brand is passed —
+  // the byte-parity contract, so they are allowed, not leaks. (The GROUP
+  // doc-defs — lib/crew-sheet/daily-docdef.ts, lib/staff/statement-docdef.ts —
+  // are deliberately NOT listed: they carry group/default identity by design
+  // and take no brand parameter.)
+  {
+    pattern: "lib/contract-docdef.ts",
+    allow: ["Marley"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): the wordmark fallback and the in-person device line's default",
+  },
+  {
+    pattern: "lib/completion-cert-docdef.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): wordmark, declaration and footer identity fallbacks",
+  },
+  {
+    pattern: "lib/job-sheet-docdef.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): wordmark and footer fallbacks; 'Marley Ops' in the video-QR copy is the app name — app chrome per PRD §2",
+  },
+  {
+    pattern: "lib/quote/pdf-client.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070", "Pitmans"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): the MarleyMoves filename shape, contact rows, footer legal line, pdf info block and the shared bank card (PRD §2 — one account for every brand); Marley elsewhere + Pitmans appear only in comments documenting the §10 filename shape and the WCAG accent pick",
+  },
+  {
+    pattern: "lib/pdf/doc-brand.ts",
+    allow: ["Marley"],
+    reason:
+      "appears only in a comment documenting the tint data rule the default-brand doc-defs hardcode — the module itself carries no identity, colour fallback #C03838 is the documented brandCtaColour degrade",
+  },
+  // Gate 14 call sites and PDF-triggering components: brand resolution happens
+  // where a supabase client exists (getBrandOrDefault → docBrandFrom), then
+  // travels as a plain DocBrand. The quote/crew UI keeps deliberate mm-red APP
+  // CHROME (PRD §2 — the frame, not the records); remaining name hits are
+  // jsdoc/comments documenting the byte-parity contract. Files with no
+  // forbidden literal at all ride as bare entries so a later edit can never
+  // quietly re-hardcode identity into a branded surface.
+  "app/api/documents/contract/[signatureId]/route.ts",
+  "components/job-sheet-button.tsx",
+  "lib/crew-sheet/daily-data.ts",
+  {
+    pattern: "app/(dashboard)/quotes/[id]/page.tsx",
+    allow: ["Marley"],
+    reason:
+      "appears only in the comment documenting that getBrandOrDefault's bad-slug fallback lands on the default-brand parity rail",
+  },
+  {
+    pattern: "components/quote/quote-builder.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): CTA buttons and wizard step dots; Marley appears only in the header comment and the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "components/quote/quote-header-actions.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): the send button; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "components/quote/resend-quote-button.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): the mail icon tint; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "app/my-jobs/[id]/page.tsx",
+    allow: ["mm-red"],
+    reason: "mm-red app chrome (PRD §2): the removal type chip and the sticky action button",
+  },
+  {
+    pattern: "components/crew/complete-job-button.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): trigger/submit buttons and the confirmation checkbox accent",
+  },
+  {
+    pattern: "lib/job-sheet-load.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "ops.marleymoves.co.uk is the APP's own origin (NEXT_PUBLIC_APP_URL fallback for the crew job link — one app hosts every brand, app chrome per PRD §2, not document identity); Marley appears only in the legacy-iMVE contract comment",
+  },
+  // Gate 21: the /performance reporting surface. The report libs slice by a
+  // brand PARAMETER (rows carry the slug as data, never a literal); the page's
+  // segmented filter, tab links, chips and Brand column are all data-driven
+  // from brands-table rows.
+  "lib/sales-report.ts",
+  "lib/storage-report.ts",
+  "lib/estimator.ts",
+  "components/performance/sales-tab.tsx",
+  {
+    pattern: "components/performance/storage-tab.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red occupancy-bar fill (PRD §4 /storage: occupancy is a physical fact, not a brand one — app chrome per §2)",
+  },
+  {
+    pattern: "app/(dashboard)/performance/page.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red lost-reasons meter fill — report chart chrome (PRD §2), not a brand record",
+  },
+  // Gate 21 continued: the dashboard home. The KPI brand sub-lines, splits
+  // and the section filter are all data-driven (buildBrandKpiSplits over
+  // brands-table slugs; BrandChip/BrandFilter take slim brands rows via
+  // props); only deliberate mm-red APP CHROME and one legacy-business-rule
+  // comment remain — everything else stays forbidden both directions.
+  "lib/dashboard/compute.ts",
+  {
+    pattern: "components/dashboard/dashboard-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): view-all/deep-dive links, KPI accent tiles, decline arrow and drop-percentage tints, stat accents",
+  },
+  {
+    pattern: "app/(dashboard)/page.tsx",
+    allow: ["Marley"],
+    reason:
+      "appears only in the legacy-iMVE contract-suppression comment (same rule lib/job-sheet-load.ts documents) — the unsigned-contracts tile logic, not rendered identity",
+  },
+  // NOT-YET-manifest (2026-08-26): components/quote/send-quote-dialog.tsx and
+  // app/actions/crew-signatures.ts thread the gate-14 brand into their PDF
+  // attachment names, but their EMAIL surfaces (the hardcoded quote subject
+  // line, the cert email body/sender, office notification links) still carry
+  // default-brand identity — that is gate 13 comms work, flagged in that
+  // gate's report. Listing them now would need allows that mask the very
+  // leaks gate 13 exists to fix; add both entries in gate 13's PR instead.
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);

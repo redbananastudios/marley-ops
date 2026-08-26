@@ -433,6 +433,9 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
               fromLine,
               toLine,
               crewNameDefault: myStaff?.full_name ?? profile.full_name ?? "",
+              // The job's brand rides on the sheet data (null = default brand),
+              // so the on-device certificate renders the right identity.
+              brand: d.brand ?? null,
             }}
             triggerClassName="focus-ring inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:bg-mm-red-deep"
           />

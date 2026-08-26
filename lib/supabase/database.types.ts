@@ -2984,6 +2984,8 @@ export type Database = {
           accepted_at: string | null
           accepted_ip: string | null
           accepted_name: string | null
+          additional_charges: number
+          additional_charges_reason: string | null
           agreed_price: number | null
           balance_invoice_amount: number | null
           balance_invoice_created_at: string | null
@@ -3057,6 +3059,8 @@ export type Database = {
           accepted_at?: string | null
           accepted_ip?: string | null
           accepted_name?: string | null
+          additional_charges?: number
+          additional_charges_reason?: string | null
           agreed_price?: number | null
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null
@@ -3130,6 +3134,8 @@ export type Database = {
           accepted_at?: string | null
           accepted_ip?: string | null
           accepted_name?: string | null
+          additional_charges?: number
+          additional_charges_reason?: string | null
           agreed_price?: number | null
           balance_invoice_amount?: number | null
           balance_invoice_created_at?: string | null

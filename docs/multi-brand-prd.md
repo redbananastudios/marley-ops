@@ -559,7 +559,7 @@ None blocking:
 
 1. **Pitmans brand assets** — Peter obtaining; placeholder tokens until then
 2. **Pitmans mailbox list** — pending Mark
-3. **WordPress form stack** — RESOLVED (sampled live 2026-08-25): Contact Form 7 + wpcf7-redirect on the The7 theme (dt-the7 14.4.8). The gate-19 plugin hooks `wpcf7_mail_sent`, with the CF7 form id as config
+3. **WordPress form stack** — RESOLVED (sampled live 2026-08-25): Contact Form 7 + wpcf7-redirect on the The7 theme (dt-the7 14.4.8). The gate-19 plugin hooks `wpcf7_before_send_mail`, with the CF7 form id as config
 4. **Part-load scheduling** — pending Mark. Current expectation is one appointment per customer sharing a van across the run, which works today. Their **weekly recurring England & Wales run** has no recurring-appointment concept in Ops and would be created manually each week
 5. **Blandford depot** — deferred, built either way
 6. **Forward-bookings CSV shape** — template to Mark closer to 21 September

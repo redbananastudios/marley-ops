@@ -275,3 +275,61 @@ describe("buildSalesReport", () => {
     expect(r.funnel.pct).toBeNull();
   });
 });
+
+describe("brand slicing (multi-brand PRD §4 /performance)", () => {
+  // One Marley job end-to-end + one Pitmans quote in flight + a Pitmans
+  // balance payment, all inside July — enough to touch every lens.
+  const quotes = [
+    quote({
+      id: "qm",
+      lead_id: "lm",
+      brand: "marley",
+      status: "accepted",
+      agreed_price: 1000,
+      accepted_at: "2026-07-06T10:00:00+01:00",
+      moving_date: "2026-07-20",
+      deposit_amount: 100,
+      deposit_paid_at: "2026-07-06T12:00:00+01:00",
+    }),
+    quote({ id: "qp", lead_id: "lp", brand: "pitmans", grand_total: 500 }),
+  ];
+  const leads = [
+    lead({ id: "lm", brand: "marley", status: "confirmed" }),
+    lead({ id: "lp", brand: "pitmans" }),
+    lead({ id: "lb", brand: "pitmans", balance_amount: 200, balance_paid_at: "2026-07-08T09:00:00+01:00" }),
+  ];
+  const surveys = [
+    { lead_id: "lm", starts_at: "2026-07-05T14:00:00+01:00", brand: "marley" },
+    { lead_id: "lp", starts_at: "2026-07-09T14:00:00+01:00", brand: "pitmans" },
+  ];
+
+  it("a named brand slices every figure to that brand's rows", () => {
+    const m = buildSalesReport(quotes, leads, surveys, FROM, TO, "marley");
+    expect(m.projected).toEqual({ total: 1000, count: 1 });
+    expect(m.generated).toEqual({ total: 1000, count: 1 });
+    expect(m.paid).toEqual({ total: 100, count: 1 }); // the Pitmans balance is excluded
+    expect(m.enquiries).toBe(1);
+    expect(m.funnel.sent).toBe(1);
+
+    const p = buildSalesReport(quotes, leads, surveys, FROM, TO, "pitmans");
+    expect(p.projected).toEqual({ total: 0, count: 0 });
+    expect(p.potential).toEqual({ total: 500, count: 1 });
+    expect(p.paid).toEqual({ total: 200, count: 1 }); // the Marley deposit is excluded
+    expect(p.enquiries).toBe(2);
+  });
+
+  it("combined equals the sum of the per-brand slices; undefined and 'all' are identical", () => {
+    const all = buildSalesReport(quotes, leads, surveys, FROM, TO);
+    const m = buildSalesReport(quotes, leads, surveys, FROM, TO, "marley");
+    const p = buildSalesReport(quotes, leads, surveys, FROM, TO, "pitmans");
+    expect(all).toEqual(buildSalesReport(quotes, leads, surveys, FROM, TO, "all"));
+    for (const lens of ["generated", "paid", "projected", "potential"] as const) {
+      expect(all[lens].total).toBe(m[lens].total + p[lens].total);
+      expect(all[lens].count).toBe(m[lens].count + p[lens].count);
+    }
+    expect(all.enquiries).toBe(m.enquiries + p.enquiries);
+    expect(all.won).toBe(m.won + p.won);
+    expect(all.funnel.sent).toBe(m.funnel.sent + p.funnel.sent);
+    expect(all.sameDay.of).toBe(m.sameDay.of + p.sameDay.of);
+  });
+});

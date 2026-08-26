@@ -1,11 +1,12 @@
 import { notFound } from "next/navigation";
 import { CheckCircle2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { getBrandOrDefault, listActiveBrands } from "@/lib/brand";
 import { PageHeader } from "@/components/page-header";
+import { BrandChip } from "@/components/brand/brand-chip";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
-import { getBrandOrDefault } from "@/lib/brand";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
@@ -60,7 +61,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, brand, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, vat_enabled, vat_amount, moving_date, estimator_id",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand",
     )
     .eq("id", id)
     .maybeSingle();
@@ -99,12 +100,17 @@ export default async function QuoteDetailPage({
           job: { ...blobValues.job, moveDate: authoritativeMoveDate, moveDateEstimated: false },
         }
       : blobValues;
-  const [pricing, settings, quoteBrand] = await Promise.all([
+  const [pricing, settings, quoteBrand, activeBrands] = await Promise.all([
     getPricingConfig(sb),
     getBusinessSettings(sb),
     // The quote's brand row for the send dialog — subject, email chrome and
-    // the attachment name all resolve from it (multi-brand PRD §3.5).
+    // the attachment name all resolve from it (multi-brand PRD §3.5). The PDF's
+    // slim DocBrand is derived from this same row at the point of use
+    // (docBrandFrom, null for Marley), so one read serves comms and documents.
     getBrandOrDefault(sb, quote.brand),
+    // Multi-brand only: the header chip renders when a second brand row is
+    // active (the single-brand invariant, PRD §1).
+    listActiveBrands(sb),
   ]);
   const emailedCount = quote.email_send_count ?? 0;
 
@@ -245,9 +251,15 @@ export default async function QuoteDetailPage({
   }
 
   const isLegacyImve = quote.source === "imve";
+  const chipBrand =
+    activeBrands.length > 1 ? activeBrands.find((b) => b.slug === quote.brand) : undefined;
   const headerMeta = (
     <>
       <QuoteStatusPill status={statusStr} />
+      {/* Detail-page eyebrows have room, so the chip carries the short name
+          (multi-brand PRD §4 opening rules). Reads the quote's own
+          denormalised brand column — no lead join. */}
+      {chipBrand ? <BrandChip brand={chipBrand} variant="eyebrow" /> : null}
       {isLegacyImve ? (
         <QuoteMetaChip>
           Legacy (iMVE{quote.imve_ref && quote.imve_ref !== quote.quote_ref ? ` ${quote.imve_ref}` : ""})
@@ -347,6 +359,8 @@ export default async function QuoteDetailPage({
             money={{
               subtotal: quote.subtotal,
               discount: quote.discount,
+              additional_charges: quote.additional_charges,
+              additional_charges_reason: quote.additional_charges_reason,
               vat_enabled: quote.vat_enabled,
               vat_amount: quote.vat_amount,
               grand_total: quote.grand_total,

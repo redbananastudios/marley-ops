@@ -63,8 +63,16 @@ function addrBlock(title: string, a: DailyJob["sheet"]["from"]): any {
   };
 }
 
-function jobCard(job: DailyJob, index: number, total: number): any {
+/**
+ * `brandMark` is the per-job brand short name, non-null ONLY when the day's
+ * jobs span more than one distinct brand (multi-brand PRD §3.6): the day sheet
+ * is a GROUP document — no brand parameter, no colour change — but a mixed day
+ * must tell the crew which livery/identity each job is. Single-brand days pass
+ * null everywhere and render byte-identical to today.
+ */
+function jobCard(job: DailyJob, index: number, total: number, brandMark: string | null): any {
   const s = job.sheet;
+  const metaLine = [s.quoteRef, brandMark].filter(Boolean).join(" · ");
   const otherCrew = s.crew.length ? s.crew : [];
   const vehicles = s.vehicles.length ? s.vehicles : s.vehicleLabel ? [`Required: ${s.vehicleLabel}`] : [];
   const inventory = s.items.length ? s.items.map((i) => `${i.label} × ${i.qty}`) : [];
@@ -139,7 +147,7 @@ function jobCard(job: DailyJob, index: number, total: number): any {
                   { width: "auto", text: s.customerPhone ?? "no phone on file", style: "custPhone", alignment: "right" },
                 ],
               },
-              s.quoteRef ? { text: s.quoteRef, style: "meta", margin: [0, 1, 0, 0] } : { text: "" },
+              metaLine ? { text: metaLine, style: "meta", margin: [0, 1, 0, 0] } : { text: "" },
               s.contractSigned === false
                 ? {
                     text: "Contract not yet signed — collect the customer's signature on arrival.",
@@ -179,6 +187,10 @@ function jobCard(job: DailyJob, index: number, total: number): any {
 export function buildDaySheetDocDef(day: CrewDaySheet, meta: DaySheetMeta): any {
   const firstName = (day.crew.fullName || "").trim().split(/\s+/)[0] || day.crew.fullName;
   const total = day.jobs.length;
+  // Per-job brand marker gate: only a day whose jobs span more than one
+  // distinct brand renders markers — a single-brand day (or a run where the
+  // brands lookup yielded nothing, i.e. every value null) stays byte-identical.
+  const multiBrand = new Set(day.jobs.map((j) => j.brandShort ?? "")).size > 1;
 
   const supersedeBanner = meta.supersedes
     ? [
@@ -274,7 +286,7 @@ export function buildDaySheetDocDef(day: CrewDaySheet, meta: DaySheetMeta): any 
 
       ...(total === 0
         ? [{ text: "No jobs assigned for this day.", style: "empty" }]
-        : day.jobs.map((job, i) => jobCard(job, i, total))),
+        : day.jobs.map((job, i) => jobCard(job, i, total, multiBrand ? job.brandShort ?? null : null))),
     ],
   };
 }

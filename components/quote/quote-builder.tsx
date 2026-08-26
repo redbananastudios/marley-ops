@@ -19,6 +19,7 @@ import type { Brand } from "@/lib/brand";
 import { saveQuoteDraft } from "@/app/(dashboard)/quotes/actions";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import { downloadQuotePdf, ensureLogoDataUri } from "@/lib/quote/pdf-client";
+import { docBrandFrom } from "@/lib/pdf/doc-brand";
 import {
   Step1Customer,
   Step2Job,
@@ -114,8 +115,10 @@ export function QuoteBuilder({
   acceptUrl?: string;
   /** Cubic-survey van suggestion, shown on the Vehicle step. */
   cubicHint?: CubicQuoteHint | null;
-  /** The quote's brand row (multi-brand PRD §3.5) — absent/marley sends
-   *  today's exact email. */
+  /** The quote's brand row (multi-brand PRD §3.5 + §3.6). Drives the send
+   *  dialog's subject, chrome and attachment name, and — via docBrandFrom —
+   *  the PDF document itself. Absent/marley sends today's exact email and
+   *  renders today's byte-identical Marley document. */
   brand?: Brand | null;
 }) {
   const router = useRouter();
@@ -189,6 +192,10 @@ export function QuoteBuilder({
         vatNumber: settings?.vatNumber || undefined,
         depositAmount: settings?.defaultDeposit || undefined,
         acceptUrl,
+        // The doc-defs take the slim serialisable DocBrand; docBrandFrom
+        // returns null for the default brand, so Marley still renders from
+        // the doc-def's own literals (gate 14's byte-parity contract).
+        brand: brand ? docBrandFrom(brand) : null,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the PDF.");

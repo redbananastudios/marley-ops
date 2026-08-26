@@ -225,3 +225,32 @@ describe("buildStorageCostReport", () => {
     expect(build({ units: [unit({ id: "k1" })], lets }).containerUtilisationPct).toBeNull();
   });
 });
+
+describe("buildStorageReport brand slicing (multi-brand PRD §4 /performance)", () => {
+  const sites = [{ id: "s1", is_active: true }];
+  const units = [unit({ id: "u1" }), unit({ id: "u2" }), unit({ id: "u3" })];
+  const lets = [
+    let_({ id: "m1", unit_id: "u1", brand: "marley" }), // open, £25/wk, 2 weeks by TODAY
+    let_({ id: "p1", unit_id: "u2", client_id: "c2", brand: "pitmans", rate: 40 }), // open
+    let_({ id: "m2", unit_id: "u3", client_id: "c3", brand: "marley", start_date: "2026-06-01", end_date: "2026-06-15", rate: 10 }), // ended
+  ];
+
+  it("a named brand slices the lets; the site/unit denominators stay whole (shared physical pool)", () => {
+    const m = buildStorageReport(sites, units, lets, TODAY, "marley");
+    expect(m.units).toEqual({ total: 3, occupied: 1, available: 2, occupancyPct: 33 });
+    expect(m.recurring.perWeek).toBe(25);
+    expect(m.customers).toEqual({ current: 1, former: 1 });
+    expect(m.earnedToDate).toBe(70); // m1 2wk×25 + m2 2wk×10
+  });
+
+  it("combined equals the sum of the per-brand slices; undefined and 'all' are identical", () => {
+    const all = buildStorageReport(sites, units, lets, TODAY);
+    const m = buildStorageReport(sites, units, lets, TODAY, "marley");
+    const p = buildStorageReport(sites, units, lets, TODAY, "pitmans");
+    expect(all).toEqual(buildStorageReport(sites, units, lets, TODAY, "all"));
+    expect(all.units.occupied).toBe(m.units.occupied + p.units.occupied);
+    expect(all.recurring.perWeek).toBe(m.recurring.perWeek + p.recurring.perWeek);
+    expect(all.earnedToDate).toBe(m.earnedToDate + p.earnedToDate);
+    expect(all.customers.current).toBe(m.customers.current + p.customers.current);
+  });
+});

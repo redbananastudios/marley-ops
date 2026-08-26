@@ -70,8 +70,10 @@ export interface QuoteHeaderActionsProps {
   estimatorName: string | null;
   vatNumber?: string;
   acceptUrl?: string;
-  /** The quote's brand row — drives the send dialog's subject and chrome
-   *  (multi-brand PRD §3.5); absent/marley renders today's exact email. */
+  /** The quote's brand row (multi-brand PRD §3.5 + §3.6). Pure pass-through:
+   *  the re-send dialog composes the branded email from it AND derives the
+   *  attached PDF's DocBrand via docBrandFrom(), which returns null for the
+   *  default row — so absent/marley renders today's exact email and PDF. */
   brand?: Brand | null;
 }
 

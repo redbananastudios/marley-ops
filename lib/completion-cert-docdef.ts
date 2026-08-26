@@ -11,6 +11,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { DocBrand } from "@/lib/pdf/doc-brand";
+
 const C = {
   red: "#C03838",
   ink: "#1F1D1B",
@@ -37,6 +39,9 @@ export interface CompletionCertData {
   absentReason: string;
   exceptions: string; // "" = nothing to report
   signedAtLabel: string; // "16:42 on Friday, 10 July 2026"
+  /** The job's brand (multi-brand PRD §3.6 — the cert is a JOB document).
+   *  Absent/null renders today's default-brand literals, byte-identical. */
+  brand?: DocBrand | null;
 }
 
 const fmtDate = (d: string | null): string => {
@@ -54,10 +59,10 @@ function fact(label: string, value: string): any[] {
   ];
 }
 
-function signatureBlock(title: string, name: string, dataUri: string | null, note: string): any {
+function signatureBlock(title: string, name: string, dataUri: string | null, note: string, accent: string): any {
   return {
     stack: [
-      { text: title, style: "colHead", color: C.red, margin: [0, 0, 0, 6] },
+      { text: title, style: "colHead", color: accent, margin: [0, 0, 0, 6] },
       dataUri
         ? { image: dataUri, fit: [200, 60], margin: [0, 0, 0, 4] }
         : { text: "Not signed", italics: true, color: C.muted, fontSize: 9, margin: [0, 20, 0, 24] },
@@ -71,6 +76,10 @@ function signatureBlock(title: string, name: string, dataUri: string | null, not
 
 export function buildCompletionCertDocDef(d: CompletionCertData): any {
   const hasExceptions = d.exceptions.trim().length > 0;
+  // Data rule, never a slug switch: no brand → today's constants (byte-parity);
+  // a brand → its WCAG-picked colour and row-sourced identity lines.
+  const accent = d.brand?.colour ?? C.red;
+  const brandName = d.brand?.name ?? "Marley Moves";
 
   return {
     pageSize: "A4",
@@ -86,13 +95,23 @@ export function buildCompletionCertDocDef(d: CompletionCertData): any {
       body: { fontSize: 9.5 },
     },
     content: [
-      // header
+      // header — the two-tone wordmark is the default brand's design; any
+      // other brand renders its full name in its own colour with the group
+      // disclosure beside it (required wherever the brand identity appears).
       {
         columns: [
-          { text: [{ text: "MARLEY ", style: "brand" }, { text: "MOVES", style: "brand", color: C.red }], width: "*" },
+          d.brand
+            ? {
+                stack: [
+                  { text: d.brand.name.toUpperCase(), style: "brand", color: accent },
+                  { text: d.brand.groupLine, style: "meta", margin: [0, 2, 0, 0] },
+                ],
+                width: "*",
+              }
+            : { text: [{ text: "MARLEY ", style: "brand" }, { text: "MOVES", style: "brand", color: C.red }], width: "*" },
           {
             stack: [
-              { text: "CERTIFICATE OF COMPLETION", style: "docTitle", color: C.red, alignment: "right" },
+              { text: "CERTIFICATE OF COMPLETION", style: "docTitle", color: accent, alignment: "right" },
               ...(d.quoteRef
                 ? [{ text: `Quote ${d.quoteRef}`, style: "meta", alignment: "right", margin: [0, 3, 0, 0] }]
                 : []),
@@ -102,7 +121,7 @@ export function buildCompletionCertDocDef(d: CompletionCertData): any {
         ],
         margin: [0, 0, 0, 6],
       },
-      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.25, lineColor: C.red }], margin: [0, 0, 0, 16] },
+      { canvas: [{ type: "line", x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1.25, lineColor: accent }], margin: [0, 0, 0, 16] },
 
       // job facts
       {
@@ -123,8 +142,8 @@ export function buildCompletionCertDocDef(d: CompletionCertData): any {
       // declaration
       {
         text: d.customerAbsent
-          ? "The removal described above has been completed by Marley Moves. No customer or representative was available to sign at the destination — please check your delivered items and reply to the accompanying email within 48 hours if anything is missing or damaged."
-          : "The removal described above has been completed by Marley Moves. By signing, the customer confirms all items were delivered and received, subject only to any exceptions noted below.",
+          ? `The removal described above has been completed by ${brandName}. No customer or representative was available to sign at the destination — please check your delivered items and reply to the accompanying email within 48 hours if anything is missing or damaged.`
+          : `The removal described above has been completed by ${brandName}. By signing, the customer confirms all items were delivered and received, subject only to any exceptions noted below.`,
         style: "body",
         margin: [0, 0, 0, 12],
       },
@@ -177,9 +196,10 @@ export function buildCompletionCertDocDef(d: CompletionCertData): any {
                 d.customerAbsent ? "Not present" : d.customerName,
                 d.customerAbsent ? null : d.customerSignature,
                 d.customerAbsent ? "" : `Signed ${d.signedAtLabel}`,
+                accent,
               ),
               { text: "", border: [false, false, false, false] },
-              signatureBlock("CREW LEAD — MARLEY MOVES", d.crewName, d.crewSignature, `Signed ${d.signedAtLabel}`),
+              signatureBlock(`CREW LEAD — ${brandName.toUpperCase()}`, d.crewName, d.crewSignature, `Signed ${d.signedAtLabel}`, accent),
             ],
           ],
         },
@@ -187,9 +207,12 @@ export function buildCompletionCertDocDef(d: CompletionCertData): any {
         margin: [0, 6, 0, 0],
       },
 
-      // footer
+      // footer — legal-entity line + contact from the brands row; the default
+      // brand keeps today's literal exactly.
       {
-        text: "Marley Moves Ltd · Company No. 15914266 · 01747 637070 · hello@marleymoves.co.uk",
+        text: d.brand
+          ? [d.brand.legalLine, d.brand.phone, d.brand.email].filter(Boolean).join(" · ")
+          : "Marley Moves Ltd · Company No. 15914266 · 01747 637070 · hello@marleymoves.co.uk",
         style: "meta",
         alignment: "center",
         margin: [0, 34, 0, 0],

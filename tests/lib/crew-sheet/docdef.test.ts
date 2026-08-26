@@ -99,6 +99,43 @@ describe("buildDaySheetDocDef", () => {
     const text = allText(buildDaySheetDocDef(day({ jobs: [] }), { version: 2, supersedes: true, generatedAtLabel: "x" })).join(" ");
     expect(text).toContain("No jobs assigned");
   });
+
+  // The day sheet is a GROUP document (multi-brand PRD §3.6): no brand
+  // parameter, no colour change — but a mixed day marks each job's brand in
+  // its meta line so the crew know which identity each job is.
+  it("a single-brand day renders NO brand marker — byte-identical to today", () => {
+    const d = day();
+    d.jobs[0].brandShort = "Marley";
+    const text = allText(buildDaySheetDocDef(d, { version: 1, supersedes: false, generatedAtLabel: "x" }));
+    expect(text).toContain("MMR001"); // the ref alone, un-suffixed
+    expect(text.join(" ")).not.toContain("MMR001 · Marley");
+  });
+
+  it("a day spanning two brands marks EVERY job block with its brand short name", () => {
+    const d = day();
+    const second = day().jobs[0];
+    second.appointmentId = "a2";
+    second.sheet = { ...second.sheet, quoteRef: "PMR002", customerName: "Bob Buyer" };
+    second.brandShort = "Pitmans";
+    d.jobs[0].brandShort = "Marley";
+    d.jobs.push(second);
+    const text = allText(buildDaySheetDocDef(d, { version: 1, supersedes: false, generatedAtLabel: "x" }));
+    expect(text).toContain("MMR001 · Marley");
+    expect(text).toContain("PMR002 · Pitmans");
+  });
+
+  it("a run where the brands lookup yielded nothing (all null) stays marker-free", () => {
+    const d = day();
+    const second = day().jobs[0];
+    second.appointmentId = "a2";
+    second.sheet = { ...second.sheet, quoteRef: "MMR003" };
+    d.jobs.push(second);
+    const text = allText(buildDaySheetDocDef(d, { version: 1, supersedes: false, generatedAtLabel: "x" })).join(" ");
+    expect(text).not.toContain("· Marley");
+    expect(text).not.toContain("· Pitmans");
+    expect(text).toContain("MMR001");
+    expect(text).toContain("MMR003");
+  });
 });
 
 describe("renderPdfBase64 (server printer)", () => {

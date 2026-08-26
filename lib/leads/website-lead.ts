@@ -56,8 +56,15 @@ export interface WebsiteLeadAttribution {
 }
 
 export interface WebsiteLeadInput {
+  /** Which brand's website this enquiry belongs to. REQUIRED and never taken
+   *  from the payload: the push route derives it from the matched ingest
+   *  secret, the Sanity pull rail stamps `marley` (it is Marley's site only).
+   *  Scopes the idempotency key — each brand's site mints its own submission
+   *  ids, so the same id under two brands is two different enquiries. */
+  brand: string;
   /** The id the SITE minted for this submission. Stable across delivery
-   *  attempts AND across both delivery routes — the primary idempotency key. */
+   *  attempts AND across both delivery routes — the primary idempotency key,
+   *  unique per brand, not globally (migration 0106). */
   externalLeadId?: string | null;
   /** The Sanity document id. Only the sync path has one. */
   sanityId?: string | null;
@@ -129,16 +136,25 @@ export async function landWebsiteLead(
     // delivery routes carry. Separate `.eq` reads rather than a combined
     // `.or()` — an id is opaque text and a comma in it would break PostgREST's
     // filter grammar, turning a dedupe check into a silent miss.
-    for (const [column, value] of [
-      ["external_lead_id", input.externalLeadId],
-      ["sanity_id", input.sanityId],
+    //
+    // The external_lead_id read is scoped to THIS brand, matching the unique
+    // index (0106): each brand's site mints its own ids, and two sites will
+    // both mint "1234" eventually. Matched on id alone, the second brand's
+    // customer reads as a duplicate of the first — adopted, answered 200, and
+    // never seen again. sanity_id stays global on purpose: Sanity mints
+    // globally-unique document ids and only Marley's pull rail carries one,
+    // so there is no second id space to collide with.
+    for (const [column, value, brandScoped] of [
+      ["external_lead_id", input.externalLeadId, true],
+      ["sanity_id", input.sanityId, false],
     ] as const) {
       if (!value) continue;
-      const { data, error } = await sb
+      let query = sb
         .from("leads")
         .select("id, web_alert_ack_at, created_at")
-        .eq(column, value)
-        .maybeSingle();
+        .eq(column, value);
+      if (brandScoped) query = query.eq("brand", input.brand);
+      const { data, error } = await query.maybeSingle();
       // A failed read is not evidence that the lead is absent. Inserting on it
       // would duplicate a customer who is already in the panel, so throw and
       // let the caller retry.
@@ -170,6 +186,7 @@ export async function landWebsiteLead(
     .from("leads")
     .insert({
       client_id: clientId,
+      brand: input.brand,
       entry_channel: "web",
       source_system: "website",
       external_lead_id: input.externalLeadId ?? null,
@@ -216,7 +233,7 @@ export async function landWebsiteLead(
 
   if (error) {
     // Lost a race with a concurrent delivery of the same submission on one of
-    // the partial unique indexes (leads_external_lead_uq / leads_sanity_uq).
+    // the partial unique indexes (leads_external_lead_brand_uq / leads_sanity_uq).
     // The winner is the same enquiry, so adopt it: a retry that arrives while
     // the first attempt is still committing must read as success, never as a
     // duplicate customer and never as an error the caller would retry again.

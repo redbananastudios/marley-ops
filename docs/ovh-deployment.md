@@ -127,6 +127,35 @@ either — so if enquiries stop appearing, grep the app logs for
 Rotating it needs both sides changed within the same window; leads submitted in
 between fall back to the office email rather than disappearing.
 
+### Pitmans lead bridge (gate 19) — env + cron
+
+The Pitmans WordPress site delivers enquiries down TWO rails that ship together
+(multi-brand PRD §3.8 — push alone loses enquiries silently): the
+`pitmans-lead-bridge` plugin pushes each submission to `/api/ingest/lead`, and
+the `wp-leads` cron polls the plugin's signed read endpoint to land anything the
+push missed. Plugin source + install guide: `wordpress/pitmans-lead-bridge/README.md`.
+
+Three vars in `app.env` (recreate the container after, as above):
+
+| Var | Pairs with |
+|---|---|
+| `LEAD_INGEST_SECRET_PITMANS` | `ops_ingest_secret` in the plugin's `config.php` — the push credential; its suffix IS the brand slug |
+| `PITMANS_WP_PULL_URL` | the plugin's REST route, `https://pitmansremovals.co.uk/wp-json/pitmans-lead-bridge/v1/submissions` |
+| `PITMANS_WP_PULL_SECRET` | `pull_secret` in `config.php` — a DIFFERENT secret from the push one, so one rotation never takes both rails down |
+
+Cron line (add to `cron-hit.sh` / `/etc/cron.d/marley-ops` on the box, per the
+Cron row above — **in the same deploy as the merge**, because the health
+watchdog alerts on a registered job that never runs, which is exactly the
+protection this rail needs):
+
+```
+*/15 * * * *  /api/cron/wp-leads
+```
+
+Until the pull env vars are set the job runs green but reports
+`configured: false` with a loud warning — that state is part of the plugin's
+install checklist, not noise. A half-set pair is a FAILED run on purpose.
+
 ## Rollback
 
 **Vercel is deleted** (2026-07-13) — there is no longer a warm app fallback. Options:

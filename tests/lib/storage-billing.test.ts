@@ -123,6 +123,31 @@ describe("buildStorageBillingStats", () => {
       overdueCount: 1,
     });
   });
+
+  it("a named brand slices to that brand's invoices; combined = sum of slices (multi-brand PRD §4)", async () => {
+    const { buildStorageBillingStats } = await import("@/lib/storage-report");
+    const invoices = [
+      { amount: 25, status: "paid", period_start: "2026-06-01", brand: "marley" },
+      { amount: 10, status: "sent", period_start: "2026-06-08", brand: "marley" }, // >14d → overdue
+      { amount: 40, status: "sent", period_start: "2026-07-08", brand: "pitmans" },
+    ];
+    const all = buildStorageBillingStats(invoices, "2026-07-10");
+    const m = buildStorageBillingStats(invoices, "2026-07-10", "marley");
+    const p = buildStorageBillingStats(invoices, "2026-07-10", "pitmans");
+    expect(all).toEqual(buildStorageBillingStats(invoices, "2026-07-10", "all"));
+    expect(m).toEqual({
+      billed: 35,
+      paid: 25,
+      outstanding: 10,
+      invoiceCount: 2,
+      paidCount: 1,
+      outstandingCount: 1,
+      overdueCount: 1,
+    });
+    expect(p.billed).toBe(40);
+    expect(all.billed).toBe(m.billed + p.billed);
+    expect(all.overdueCount).toBe(m.overdueCount + p.overdueCount);
+  });
 });
 
 describe("storageInvoiceReference", () => {
