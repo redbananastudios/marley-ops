@@ -31,7 +31,9 @@ import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { OverlayChart } from "@/components/dashboard/overlay-chart";
 import { DatesAtRiskCard, type DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
 import { RefundsWaitingCard } from "@/components/dashboard/refunds-waiting-card";
-import type { PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
+import { BrandFilter } from "@/components/brand/brand-filter";
+import type { BrandKpiSplit, PeriodKey, PeriodStats } from "@/lib/dashboard/compute";
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(0).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
@@ -56,6 +58,20 @@ function timeAgo(d: string | null): string {
 }
 
 const PERIODS: PeriodKey[] = ["today", "week", "month"];
+
+/**
+ * The three filter-following sections — estimator performance, "Where leads
+ * came from" and the enquiry→job funnel — recomputed for the `?brand=` slug
+ * (multi-brand PRD §4 Dashboard home). Field types mirror PeriodStats so the
+ * sections render identically from either source.
+ */
+export interface FilteredDashboardSections {
+  newLeads: number;
+  sources: PeriodStats["sources"];
+  funnel: PeriodStats["funnel"];
+  topCampaigns: PeriodStats["topCampaigns"];
+  estimators: PeriodStats["estimators"];
+}
 
 export interface DashboardData {
   periods: Record<PeriodKey, PeriodStats>;
@@ -89,12 +105,32 @@ export interface DashboardData {
   }[];
   recentHeading: string;
   dateLabel: string;
+  /** Active brands (multi-brand PRD §4) — chip + filter data, slimmed by the
+   *  page. Empty or single-entry → no brand UI renders anywhere on this page
+   *  (the single-brand invariant, PRD §1). */
+  brands?: BrandChipData[];
+  /** The estimator / sources / funnel sections recomputed for the `?brand=`
+   *  slug; null/absent with the filter on All. The KPI tiles deliberately
+   *  ignore it — they stay the combined business-truth headline (PRD §4). */
+  filteredSections?: Record<PeriodKey, FilteredDashboardSections> | null;
 }
 
 export function DashboardView({ data }: { data: DashboardData }) {
   const [period, setPeriod] = useState<PeriodKey>("today");
   const s = data.periods[period];
   const delta = s.newLeads - s.prevNewLeads;
+  // Brand layer (multi-brand PRD §4 Dashboard home). `f` is non-null only when
+  // multi-brand AND the ?brand= filter names one brand — the three sections it
+  // feeds fall back to the combined stats otherwise, so single-brand mode
+  // renders byte-identically to today.
+  const brands = data.brands ?? [];
+  const multi = brands.length > 1;
+  const f = multi ? (data.filteredSections?.[period] ?? null) : null;
+  /* The three filter-following sections read from `f` when the ?brand= filter
+     names one brand, the combined stats otherwise. Nothing else follows the
+     filter (multi-brand PRD §4 Dashboard home). */
+  const estimators = f ? f.estimators : s.estimators;
+  const src = f ?? s;
 
   return (
     <main className="page-shell flex-1 space-y-6">
@@ -120,15 +156,24 @@ export function DashboardView({ data }: { data: DashboardData }) {
         </div>
       </header>
 
-      {/* headline KPI strip */}
+      {/* headline KPI strip — each tile keeps its ONE combined headline (the
+          business truth: cash, crew and the bank account are shared) with a
+          quiet per-brand monogram sub-line beneath in multi-brand mode only
+          (multi-brand PRD §4 Dashboard home). The tiles never follow the
+          ?brand= filter — the sub-line always shows every active brand. */}
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Kpi label="New leads" value={s.newLeads} icon={UserPlus} tone="red" accent href="/leads">
+        <Kpi label="New leads" value={s.newLeads} icon={UserPlus} tone="red" accent href="/leads"
+          brandSub={<BrandKpiSubLine splits={s.brandSplits} brands={brands} value={(b) => String(b.newLeads)} />}>
           <Delta delta={delta} sub={s.vsLabel} />
         </Kpi>
-        <Kpi label="Contacted" value={s.contacted} icon={PhoneCall} tone="blue" sub={`${pctOf(s.contacted, s.newLeads)} of leads`} href="/leads" />
-        <Kpi label="Surveys booked" value={s.surveys} icon={CalendarCheck2} tone="teal" sub={`${s.leadToSurveyPct}% of leads`} href="/schedule/surveys" />
-        <Kpi label="Jobs won" value={s.jobs} icon={Trophy} tone="green" sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} href="/bookings" />
-        <Kpi label="Median response" value={fmtDuration(s.medianRespMins)} icon={Clock3} tone="amber" href="/performance">
+        <Kpi label="Contacted" value={s.contacted} icon={PhoneCall} tone="blue" sub={`${pctOf(s.contacted, s.newLeads)} of leads`} href="/leads"
+          brandSub={<BrandKpiSubLine splits={s.brandSplits} brands={brands} value={(b) => String(b.contacted)} />} />
+        <Kpi label="Surveys booked" value={s.surveys} icon={CalendarCheck2} tone="teal" sub={`${s.leadToSurveyPct}% of leads`} href="/schedule/surveys"
+          brandSub={<BrandKpiSubLine splits={s.brandSplits} brands={brands} value={(b) => String(b.surveys)} />} />
+        <Kpi label="Jobs won" value={s.jobs} icon={Trophy} tone="green" sub={s.wonValue > 0 ? gbp(s.wonValue) : `${s.leadToJobPct}% of leads`} good={s.jobs > 0} href="/bookings"
+          brandSub={<BrandKpiSubLine splits={s.brandSplits} brands={brands} value={(b) => String(b.jobs)} />} />
+        <Kpi label="Median response" value={fmtDuration(s.medianRespMins)} icon={Clock3} tone="amber" href="/performance"
+          brandSub={<BrandKpiSubLine splits={s.brandSplits} brands={brands} value={(b) => fmtDuration(b.medianRespMins)} />}>
           <span className="text-xs text-mist-400">to first contact</span>
         </Kpi>
       </section>
@@ -144,6 +189,10 @@ export function DashboardView({ data }: { data: DashboardData }) {
           <ActionCard label="Quotes awaiting reply" count={data.needsAction.quotesAwaiting} href="/quotes" empty="No quotes pending" />
           <ActionCard label="Awaiting deposit" count={data.needsAction.awaitingDeposit} href="/bookings" accent empty="No deposits outstanding" />
           <ActionCard label="Balance due" count={data.needsAction.balanceDue} href="/bookings" empty="No balances outstanding" />
+          {/* Fleet docs due + Unsigned contracts stay COMBINED across brands
+              (multi-brand PRD §4 Dashboard home): they're operational, and
+              splitting them would risk one brand's overdue MOT being
+              overlooked. */}
           <ActionCard label="Fleet docs due" count={data.needsAction.fleetDocsDue} href="/resources?tab=vehicles" empty="Fleet in date" />
           <ActionCard label="Unsigned contracts" count={data.needsAction.unsignedContracts} href="/documents?tab=unsigned" accent empty="All contracts signed" />
           <ActionCard label="Open claims" count={data.needsAction.openClaims} href="/claims" accent empty="No open claims" />
@@ -203,6 +252,19 @@ export function DashboardView({ data }: { data: DashboardData }) {
       {/* paid performance */}
       <PaidCard adSpend={s.adSpend} paidLeads={s.paidLeads} paidWonValue={s.paidWonValue} />
 
+      {/* Brand filter (multi-brand PRD §4 Dashboard home): ONE control for the
+          run of three sections below it — estimator performance, "Where leads
+          came from" and the enquiry→job funnel — placed where that run begins
+          rather than repeated per card. The KPI tiles above deliberately do
+          NOT follow it: they are the combined business-truth headline. Absent
+          entirely in single-brand mode (PRD §1 invariant). */}
+      {multi ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="eyebrow">Estimators · sources · funnel</p>
+          <BrandFilter brands={brands} />
+        </div>
+      ) : null}
+
       {/* estimator performance */}
       <Card className="p-5">
         <div className="mb-4 flex items-center justify-between">
@@ -211,7 +273,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
             Payroll →
           </Link>
         </div>
-        {s.estimators.length === 0 ? (
+        {estimators.length === 0 ? (
           <p className="py-4 text-center text-sm text-mist-400">No completed visits this period.</p>
         ) : (
           <div className="overflow-x-auto">
@@ -227,7 +289,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {s.estimators.map((e) => (
+                {estimators.map((e) => (
                   <tr key={e.id}>
                     <td className="py-2 font-medium text-foreground">{e.name}</td>
                     <td className="tabular py-2 text-right text-foreground">{e.visits}</td>
@@ -250,12 +312,12 @@ export function DashboardView({ data }: { data: DashboardData }) {
             <p className="eyebrow">Where leads came from</p>
             <span className="text-xs text-mist-400 capitalize">{s.label.toLowerCase()}</span>
           </div>
-          <SourceBars sources={s.sources} total={s.newLeads} />
-          {s.topCampaigns.length > 0 ? (
+          <SourceBars sources={src.sources} total={src.newLeads} />
+          {src.topCampaigns.length > 0 ? (
             <div className="mt-5 border-t border-border pt-4">
               <p className="eyebrow mb-2">Top campaigns</p>
               <ul className="space-y-1.5">
-                {s.topCampaigns.map((c) => (
+                {src.topCampaigns.map((c) => (
                   <li key={c.campaign} className="flex items-center justify-between gap-3 text-sm">
                     <span className="truncate text-mist-500">{c.campaign}</span>
                     <span className="tabular shrink-0 text-foreground">{c.count}</span>
@@ -269,7 +331,7 @@ export function DashboardView({ data }: { data: DashboardData }) {
         {/* funnel */}
         <Card className="p-5">
           <p className="eyebrow mb-4">Enquiry → job funnel</p>
-          <Funnel stats={s} />
+          <Funnel funnel={src.funnel} />
         </Card>
       </div>
 
@@ -314,6 +376,7 @@ function Kpi({
   icon,
   tone = "neutral",
   href,
+  brandSub,
   children,
 }: {
   label: string;
@@ -325,6 +388,10 @@ function Kpi({
   tone?: "red" | "blue" | "teal" | "green" | "amber" | "violet" | "neutral";
   /** When set, the whole tile is a link through to the list/page it summarises. */
   href?: string;
+  /** The per-brand monogram sub-line (multi-brand PRD §4 Dashboard home) —
+   *  rendered bare, beneath sub/children. BrandKpiSubLine self-gates to null
+   *  in single-brand mode, so the tile's DOM stays byte-identical to today. */
+  brandSub?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const card = (
@@ -360,6 +427,7 @@ function Kpi({
             {value}
           </p>
           {children ? <div className="mt-1">{children}</div> : sub ? <p className="mt-1 text-xs text-mist-400">{sub}</p> : null}
+          {brandSub}
         </div>
       </div>
     </Card>
@@ -388,6 +456,46 @@ function Delta({ delta, sub }: { delta: number; sub: string }) {
         {delta}
       </span>
       <span>· {sub}</span>
+    </p>
+  );
+}
+
+/**
+ * The quiet per-brand share line beneath a combined KPI headline — 16px
+ * monogram squares, each followed by that brand's share of the tile's metric
+ * (multi-brand PRD §4 Dashboard home). Zero-count brands still render: a
+ * visible 0 says "no leads for that brand", where an absent chip is ambiguous
+ * during ramp-up. Self-gates to null outside multi-brand mode (belt-and-braces
+ * on the PRD §1 invariant — callers pass it unconditionally), and renders
+ * bare inside the tile so single-brand DOM is byte-identical to today.
+ */
+function BrandKpiSubLine({
+  splits,
+  brands,
+  value,
+}: {
+  splits: BrandKpiSplit[] | undefined;
+  brands: BrandChipData[];
+  /** Formats one brand's share of this tile's metric. */
+  value: (split: BrandKpiSplit) => string;
+}) {
+  if (!splits || brands.length < 2) return null;
+  const bySlug = new Map(brands.map((b) => [b.slug, b]));
+  const shown = splits.filter((split) => bySlug.has(split.slug));
+  if (shown.length < 2) return null;
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-mist-400">
+      {shown.map((split, i) => (
+        <span key={split.slug} className="flex items-center gap-1.5">
+          {i > 0 ? (
+            <span aria-hidden className="text-mist-300">
+              ·
+            </span>
+          ) : null}
+          <BrandChip brand={bySlug.get(split.slug)!} size={16} />
+          <span className="tabular">{value(split)}</span>
+        </span>
+      ))}
     </p>
   );
 }
@@ -580,8 +688,7 @@ const FUNNEL_COLORS: Record<string, string> = {
   job: "#3F9B6B",
 };
 
-function Funnel({ stats }: { stats: PeriodStats }) {
-  const { funnel } = stats;
+function Funnel({ funnel }: { funnel: PeriodStats["funnel"] }) {
   const base = Math.max(1, funnel[0].count);
   return (
     <ul className="space-y-2.5">

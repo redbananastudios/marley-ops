@@ -37,6 +37,10 @@ export const SOURCES: SourceMeta[] = [
 
 export interface LeadLite {
   id: string;
+  /** Brand slug (leads.brand — NOT NULL in the DB, migration 0104). Optional
+   *  here so pre-brand callers and fixtures stay valid; rows without it simply
+   *  never match a split (multi-brand PRD §4 Dashboard home). */
+  brand?: string | null;
   name: string | null;
   status: string;
   entry_channel: string;
@@ -106,6 +110,11 @@ export interface PeriodStats {
   posthog: WebsiteFunnel | null;
   /** per-estimator visits/won/fee for this period — filled by the page. */
   estimators: EstimatorStat[];
+  /** Per-brand shares of the headline KPI counts — filled by the page in
+   *  multi-brand mode only (multi-brand PRD §4 Dashboard home; absent in
+   *  single-brand mode, the PRD §1 invariant). Additive: every existing
+   *  consumer of PeriodStats is untouched. */
+  brandSplits?: BrandKpiSplit[];
 }
 
 const DAY = 86_400_000;
@@ -387,4 +396,52 @@ export function buildPeriodStats(
 export function periodWindow(key: PeriodKey, now: number): { from: Date; to: Date } {
   const w = windowFor(key, now);
   return { from: new Date(w.curFrom), to: new Date(w.curTo) };
+}
+
+/* ------------------------------------------------------------ brand layer */
+
+/**
+ * One brand's share of the headline KPI counts (multi-brand PRD §4 Dashboard
+ * home). Each tile keeps its ONE combined headline — cash, crew and the bank
+ * account are shared, so the combined number is the business truth — and these
+ * shares feed the quiet monogram sub-line rendered beneath it.
+ */
+export interface BrandKpiSplit {
+  slug: string;
+  newLeads: number;
+  contacted: number;
+  surveys: number;
+  jobs: number;
+  /** Per-brand median first-response over this cohort; null when none contacted. */
+  medianRespMins: number | null;
+}
+
+/**
+ * Per-brand KPI shares, one per `brandSlugs` entry, in the given (sort) order.
+ * Zero-count brands still yield a row — a rendered 0 reads as "no leads for
+ * that brand", while an absent chip is ambiguous during ramp-up. Reuses
+ * buildPeriodStats over each brand's own leads, so every predicate (cohort
+ * window, survey/quoted/won logic, the median) matches the combined headline
+ * by construction. A lead whose brand matches no listed slug (deactivated
+ * brand, pre-brand fixture) stays in the combined number and out of every
+ * split — honest, never a best guess.
+ */
+export function buildBrandKpiSplits(
+  key: PeriodKey,
+  leads: LeadLite[],
+  prog: ProgressSets,
+  now: number,
+  brandSlugs: string[],
+): BrandKpiSplit[] {
+  return brandSlugs.map((slug) => {
+    const s = buildPeriodStats(key, leads.filter((l) => l.brand === slug), prog, now, null);
+    return {
+      slug,
+      newLeads: s.newLeads,
+      contacted: s.contacted,
+      surveys: s.surveys,
+      jobs: s.jobs,
+      medianRespMins: s.medianRespMins,
+    };
+  });
 }

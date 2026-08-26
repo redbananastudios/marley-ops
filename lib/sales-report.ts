@@ -34,6 +34,9 @@ export interface SalesQuote {
    *  status='accepted' (the unwind only stamps this), so every "is this won"
    *  test must read it or refunded jobs count as revenue. */
   booking_cancelled_at?: string | null;
+  /** Brand slug (quotes.brand) — the quote-side carrier for the optional
+   *  per-brand slice (multi-brand PRD §4 /performance). */
+  brand?: string | null;
 }
 
 export interface SalesLead {
@@ -51,12 +54,17 @@ export interface SalesLead {
   fbclid: string | null;
   utm_source: string | null;
   utm_medium: string | null;
+  /** Brand slug (leads.brand) — the lead-side carrier for the optional
+   *  per-brand slice (enquiries, conversion, balance money, sources). */
+  brand?: string | null;
 }
 
 /** Completed survey appointment (lead_id + when it happened). */
 export interface SalesSurvey {
   lead_id: string | null;
   starts_at: string | null;
+  /** Brand slug (appointments.brand, stamped from the lead at creation). */
+  brand?: string | null;
 }
 
 export interface Money {
@@ -122,14 +130,26 @@ export function dedupePerLead(quotes: SalesQuote[]): SalesQuote[] {
   return [...byLead.values(), ...orphans];
 }
 
-/** fromDay/toDay are inclusive UK calendar days ("2026-07-01".."2026-07-31"). */
+/** fromDay/toDay are inclusive UK calendar days ("2026-07-01".."2026-07-31").
+ *
+ *  `brand` (multi-brand PRD §4 /performance): undefined or `'all'` narrows
+ *  nothing — the report is byte-identical to the pre-brand build. A named slug
+ *  slices every figure to that brand's rows (quotes.brand / leads.brand /
+ *  appointments.brand), so combined always equals the sum of the per-brand
+ *  slices — plain TypeScript filtering, never a query rewrite. */
 export function buildSalesReport(
   quotes: SalesQuote[],
   leads: SalesLead[],
   surveys: SalesSurvey[],
   fromDay: string,
   toDay: string,
+  brand?: string,
 ): SalesReport {
+  if (brand && brand !== "all") {
+    quotes = quotes.filter((q) => q.brand === brand);
+    leads = leads.filter((l) => l.brand === brand);
+    surveys = surveys.filter((s) => s.brand === brand);
+  }
   const inRange = (day: string | null): boolean => day != null && day >= fromDay && day <= toDay;
   const leadById = new Map(leads.map((l) => [l.id, l]));
   const live = quotes.filter((q) => q.status !== "superseded" && q.status !== "draft");

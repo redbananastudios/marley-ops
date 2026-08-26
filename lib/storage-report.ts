@@ -33,6 +33,9 @@ export interface ReportLet {
   end_date: string | null;
   rate: number | null;
   rate_period: string; // day | week | month
+  /** Brand slug (storage_lets.brand) — the carrier for the optional per-brand
+   *  slice (multi-brand PRD §4 /performance). Sites and units stay physical. */
+  brand?: string | null;
 }
 
 export interface StorageReport {
@@ -54,6 +57,9 @@ export interface ReportInvoice {
   amount: number;
   status: string; // pending | sent | paid | void | error
   period_start: string;
+  /** Brand slug, resolved by the CALLER from the invoice's let (storage_invoices
+   *  carries let_id, not brand — the let is the brand's system of record). */
+  brand?: string | null;
 }
 
 export interface StorageBillingStats {
@@ -69,8 +75,16 @@ export interface StorageBillingStats {
 }
 
 /** Real invoicing analytics (phase 2) — replaces the earned-to-date estimate
- *  as the number to trust once billing runs. */
-export function buildStorageBillingStats(invoices: ReportInvoice[], todayIso: string): StorageBillingStats {
+ *  as the number to trust once billing runs.
+ *
+ *  `brand`: undefined or `'all'` narrows nothing (byte-identical to today); a
+ *  named slug slices to that brand's invoices, so combined = sum of slices. */
+export function buildStorageBillingStats(
+  invoices: ReportInvoice[],
+  todayIso: string,
+  brand?: string,
+): StorageBillingStats {
+  if (brand && brand !== "all") invoices = invoices.filter((i) => i.brand === brand);
   let billed = 0,
     paid = 0,
     outstanding = 0,
@@ -135,12 +149,19 @@ export function weeklyRate(l: { rate: number | null; rate_period: string }): num
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 
+/** `brand` (multi-brand PRD §4 /performance): undefined or `'all'` narrows
+ *  nothing. A named slug slices the LETS only (storage_lets.brand is the
+ *  carrier) — sites and units are shared physical infrastructure, so the
+ *  denominators stay whole and "occupied" reads as "occupied by this brand".
+ *  Combined = sum of the per-brand slices for every let-derived figure. */
 export function buildStorageReport(
   sites: ReportSite[],
   units: ReportUnit[],
   lets: ReportLet[],
   today: string,
+  brand?: string,
 ): StorageReport {
+  if (brand && brand !== "all") lets = lets.filter((l) => l.brand === brand);
   const open = lets.filter((l) => l.end_date == null);
   const ended = lets.filter((l) => l.end_date != null);
   const occupiedIds = new Set(open.map((l) => l.unit_id));
@@ -254,6 +275,12 @@ function overlapDaysInclusive(start: string, end: string, winFrom: string, winTo
  * `monthEndIso` as the accrual cut-off — today for the current month, the last
  * calendar day for a closed month. Handling costs use the CURRENT supplier
  * rate: `storage_handling_events.amount` is the customer charge, not the cost.
+ *
+ * DELIBERATELY takes no `brand` argument (multi-brand PRD §4): this is ONE
+ * supplier bill for shared physical infrastructure — container rent is fixed
+ * regardless of whose goods sit in it, so splitting it per brand would invent
+ * an attribution the ledger doesn't have. The card stays combined under a
+ * brand filter, same rationale as the /payments ExceptionsStrip.
  */
 export function buildStorageCostReport(input: {
   lets: CostReportLet[];

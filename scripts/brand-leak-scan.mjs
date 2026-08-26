@@ -255,6 +255,44 @@ export const MANIFEST = [
     reason:
       "ops.marleymoves.co.uk is the APP's own origin (NEXT_PUBLIC_APP_URL fallback for the crew job link — one app hosts every brand, app chrome per PRD §2, not document identity); Marley appears only in the legacy-iMVE contract comment",
   },
+  // Gate 21: the /performance reporting surface. The report libs slice by a
+  // brand PARAMETER (rows carry the slug as data, never a literal); the page's
+  // segmented filter, tab links, chips and Brand column are all data-driven
+  // from brands-table rows.
+  "lib/sales-report.ts",
+  "lib/storage-report.ts",
+  "lib/estimator.ts",
+  "components/performance/sales-tab.tsx",
+  {
+    pattern: "components/performance/storage-tab.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red occupancy-bar fill (PRD §4 /storage: occupancy is a physical fact, not a brand one — app chrome per §2)",
+  },
+  {
+    pattern: "app/(dashboard)/performance/page.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red lost-reasons meter fill — report chart chrome (PRD §2), not a brand record",
+  },
+  // Gate 21 continued: the dashboard home. The KPI brand sub-lines, splits
+  // and the section filter are all data-driven (buildBrandKpiSplits over
+  // brands-table slugs; BrandChip/BrandFilter take slim brands rows via
+  // props); only deliberate mm-red APP CHROME and one legacy-business-rule
+  // comment remain — everything else stays forbidden both directions.
+  "lib/dashboard/compute.ts",
+  {
+    pattern: "components/dashboard/dashboard-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): view-all/deep-dive links, KPI accent tiles, decline arrow and drop-percentage tints, stat accents",
+  },
+  {
+    pattern: "app/(dashboard)/page.tsx",
+    allow: ["Marley"],
+    reason:
+      "appears only in the legacy-iMVE contract-suppression comment (same rule lib/job-sheet-load.ts documents) — the unsigned-contracts tile logic, not rendered identity",
+  },
   // NOT-YET-manifest (2026-08-26): components/quote/send-quote-dialog.tsx and
   // app/actions/crew-signatures.ts thread the gate-14 brand into their PDF
   // attachment names, but their EMAIL surfaces (the hardcoded quote subject
