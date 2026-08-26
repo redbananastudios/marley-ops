@@ -102,6 +102,23 @@ describe("brand-leak scan — the manifest is alive", () => {
       expect(files, `${f} must be under scan`).toContain(f);
     }
   });
+
+  it("expands the gate-19 ingest entries to the brand-resolved ingest stack", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "lib/leads/ingest.ts",
+      "app/api/ingest/lead/route.ts",
+      "lib/leads/website-lead.ts",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+    // The per-brand rails are deliberately NOT scanned (each rail is one
+    // brand's own delivery channel — see the manifest comment); assert the
+    // exclusion so a future entry is a conscious decision, not drift.
+    for (const f of ["lib/sync/wp-leads.ts", "app/api/cron/wp-leads/route.ts"]) {
+      expect(files, `${f} is a per-brand rail and must NOT be under scan`).not.toContain(f);
+    }
+  });
 });
 
 describe("brand-leak scan — shared-surface allows are evidence-disciplined", () => {

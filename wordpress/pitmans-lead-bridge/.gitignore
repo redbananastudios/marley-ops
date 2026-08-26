@@ -1,0 +1,2 @@
+# The live config carries secrets and exists only on the WordPress box.
+config.php

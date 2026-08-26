@@ -13,6 +13,13 @@ import { landWebsiteLead, toDateOrNull, toTimestampOrNull } from "@/lib/leads/we
  * every lead that exists today, so if the lookup ever stopped falling back to
  * `sanity_id`, the very next sync run would re-insert the entire recent history
  * as duplicate customers.
+ *
+ * Since gate 19 the site-id key is scoped per BRAND (multi-brand PRD §3.8,
+ * migration 0106): each brand's website mints its own submission ids, so the
+ * same id under two brands is two different customers — matched on id alone,
+ * the second brand's enquiry would be silently adopted as a duplicate of the
+ * first. The fake below therefore records EVERY `.eq` of a lookup, so a test
+ * asserting brand separation fails if the brand ever drops out of the read.
  */
 
 const CLIENT = "c0000000-0000-4000-8000-000000000001";
@@ -26,9 +33,10 @@ vi.mock("@/lib/leads/resolver", () => ({
 type Row = { id: string; web_alert_ack_at: string | null; created_at: string };
 
 /**
- * Minimal Supabase stand-in. `rows` maps "<column>=<value>" to the row a lookup
- * on that column should find; `readError` forces the failure case; `insert`
- * captures the payload (or replays a Postgres error code).
+ * Minimal Supabase stand-in. `rows` maps a lookup's `.eq` filters, in call
+ * order ("external_lead_id=abc&brand=marley"), to the row it should find;
+ * `readError` forces the failure case; `insert` captures the payload (or
+ * replays a Postgres error code).
  */
 function fakeSb(opts: {
   rows?: Record<string, Row>;
@@ -45,7 +53,7 @@ function fakeSb(opts: {
       let key = "";
       const q: Record<string, unknown> = {};
       q.select = () => q;
-      q.eq = (col: string, val: string) => ((key = `${col}=${val}`), q);
+      q.eq = (col: string, val: string) => ((key = key ? `${key}&${col}=${val}` : `${col}=${val}`), q);
       q.maybeSingle = async () =>
         opts.readError ? { data: null, error: opts.readError } : { data: current()[key] ?? null, error: null };
       q.insert = (payload: Record<string, unknown>) => {
@@ -67,13 +75,33 @@ function fakeSb(opts: {
 }
 
 const NOW = new Date("2026-08-20T12:00:00.000Z");
-const base = { name: "paul betty", phone: "07700900123", fromPostcode: "bh218nb" };
+const base = { brand: "marley", name: "paul betty", phone: "07700900123", fromPostcode: "bh218nb" };
 const row = (id: string): Row => ({ id, web_alert_ack_at: null, created_at: "2026-08-19T09:00:00.000Z" });
 
 describe("landWebsiteLead — dedupe", () => {
-  it("finds an existing lead by the site's own id", async () => {
-    const sb = fakeSb({ rows: { "external_lead_id=abc": row(EXISTING) } });
+  it("finds an existing lead by the site's own id WITHIN the same brand", async () => {
+    const sb = fakeSb({ rows: { "external_lead_id=abc&brand=marley": row(EXISTING) } });
     const res = await landWebsiteLead(sb, { ...base, externalLeadId: "abc" }, NOW);
+    expect(res).toMatchObject({ leadId: EXISTING, created: false });
+  });
+
+  it("keeps brands' id spaces apart — the same id under another brand is a NEW lead", async () => {
+    // Two independent sites will both mint "1234" eventually. Before 0106 the
+    // second brand's customer was silently adopted as a duplicate of the
+    // first — answered 200 and never seen again.
+    let payload: Record<string, unknown> = {};
+    const sb = fakeSb({
+      rows: { "external_lead_id=1234&brand=marley": row(EXISTING) },
+      onInsert: (p) => (payload = p),
+    });
+    const res = await landWebsiteLead(sb, { ...base, brand: "pitmans", externalLeadId: "1234" }, NOW);
+    expect(res).toMatchObject({ leadId: INSERTED, created: true });
+    expect(payload.brand).toBe("pitmans");
+  });
+
+  it("still adopts the same id within ONE brand — a retry is not a new customer", async () => {
+    const sb = fakeSb({ rows: { "external_lead_id=1234&brand=pitmans": row(EXISTING) } });
+    const res = await landWebsiteLead(sb, { ...base, brand: "pitmans", externalLeadId: "1234" }, NOW);
     expect(res).toMatchObject({ leadId: EXISTING, created: false });
   });
 
@@ -112,7 +140,7 @@ describe("landWebsiteLead — failure handling", () => {
     const sb = fakeSb({
       rows: {},
       insertError: { code: "23505", message: "duplicate key" },
-      rowsAfterInsert: { "external_lead_id=race": row(EXISTING) },
+      rowsAfterInsert: { "external_lead_id=race&brand=marley": row(EXISTING) },
     });
     const res = await landWebsiteLead(sb, { ...base, externalLeadId: "race" }, NOW);
     expect(res).toMatchObject({ leadId: EXISTING, created: false });
@@ -144,6 +172,8 @@ describe("landWebsiteLead — what gets written", () => {
     expect(payload.sanity_id).toBe("doc-9");
     expect(payload.entry_channel).toBe("web");
     expect(payload.status).toBe("website_enquiry");
+    // The caller's derived brand, never the payload's — see WebsiteLeadInput.
+    expect(payload.brand).toBe("marley");
   });
 
   it("leaves a FRESH enquiry unacknowledged so the office alarm fires", async () => {

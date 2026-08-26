@@ -181,6 +181,9 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
       const landed = await landWebsiteLead(
         admin,
         {
+          // The pull rail is Marley's website only — the brand is stamped
+          // explicitly, never inferred (multi-brand PRD §10).
+          brand: "marley",
           externalLeadId: doc.leadId ?? null,
           sanityId: doc._id,
           name: doc.name,
