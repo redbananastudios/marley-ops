@@ -1,7 +1,7 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
-  "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open (risky, all Peter's, none touched this run): QA-20260826-01 (/bookings vs /payments owed-figure divergence) and QA-20260826-04..09 (gate 13/19 pre-merge findings: storage-invoice footer legal identity, WP pull-rail cursor loss, resend-inbound own-domain widening hitting live Marley today, dead card-payments toggle, cross-brand SMS sender fallback, lead-ingest secret hygiene).",
-  "lastAuditSha": "50f05ec",
+  "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open (risky, all Peter's, none touched this run): QA-20260826-01 (/bookings vs /payments owed-figure divergence) and QA-20260826-04..09 (gate 13/19 pre-merge findings: storage-invoice footer legal identity, WP pull-rail cursor loss, resend-inbound own-domain widening hitting live Marley today, dead card-payments toggle, cross-brand SMS sender fallback, lead-ingest secret hygiene). 2026-08-26T16:38Z run: 4 role agents (Sonnet) live-verified 10 stalest-queue surfaces (crew agreement/job-note-photo/job-sheet-pdf, admin cubic-survey/removal-changedate-cancel/staff-vehicle-crud+join-approve handoff leg, estimator cockpit/pay-statement, customer join-signup/q-accept-bank-transfer) -- 0 new findings, all spot-checked independently by the main loop. HEAD 1bb64ce is docs-only over deployed feeab6f (270-line ledger-adapter design doc), confirmed via diff --stat before treating the health gate as passed.",
+  "lastAuditSha": "1bb64ce",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T16:26:00Z",
@@ -55,9 +55,9 @@
       ]
     },
     "job_note_photo": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: real TUS upload of a generated PNG through the actual file input, storage object + job_notes.photo_paths exact match, re-opened in a FRESH browser context and confirmed the <img> genuinely decoded (naturalWidth/naturalHeight/complete via page.evaluate). 0 findings. NEW permanent spec added this run: e2e/crew/job-detail.spec.ts gained a second test covering this exact flow (upload -> save -> fresh-context image-load proof) -- closes the standing crew_job_photo_spec gap.",
+      "note": "Re-verified live (Sonnet role-agent): real PNG uploaded through the file input on the seeded QA-SENTINEL crew job, job_notes row + job-photos storage object exact match, fresh-context re-login + naturalWidth/naturalHeight/complete decode proof. Two-hats: addJobNoteAction's written columns == loadJobNotesForAppointment's read columns. 0 findings. Independently spot-checked by main loop via direct SQL + storage.list \u2014 exact match to reported evidence.",
       "watch": [
         "components/crew/job-notes.tsx",
         "app/actions/job-notes.ts",
@@ -76,9 +76,9 @@
       ]
     },
     "contractor_agreement_sign": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: CONTRACTOR_AGREEMENT_VERSION re-confirmed by fresh grep (v1-2026-07-18), signed live, gate cleared on same-session nav AND a fresh page reload, DB row exact match. 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): signed via /my-jobs/agreement, contractor_agreements row exact match (version v1-2026-07-18, all 5 acks true), gate stayed cleared on a fresh page.goto reload. Two-hats: sign-action's written column == status/gate's read column. 0 findings. Spot-checked independently by main loop (job_notes/storage sibling checks) \u2014 consistent.",
       "watch": [
         "app/my-jobs/agreement/**",
         "components/contractor/agreement-sign.tsx"
@@ -87,7 +87,7 @@
     "weekly_invoice_create_seed_submit": {
       "lastTestedAt": "2026-08-26T08:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (also closes spec_gaps.crew_invoicing_submit_lines_spec's live-recipe check): logged Wed 26 Aug 08:00-16:30 -> agreement signed -> statement MMP218 -> 'Add my hours this period' seeded job+expense lines (£140.00) -> edited job line 8.5h->9h (SQL: SUM(lines.amount)=147.50 matches statement.total exactly, edited value persisted as typed) -> submitted (Draft->Submitted). Admin handoff: fresh /login as admin, /finance/statements showed ref MMP218 £147.50 Submitted with both lines matching SQL exactly. 0 findings.",
+      "note": "Re-verified live (also closes spec_gaps.crew_invoicing_submit_lines_spec's live-recipe check): logged Wed 26 Aug 08:00-16:30 -> agreement signed -> statement MMP218 -> 'Add my hours this period' seeded job+expense lines (\u00a3140.00) -> edited job line 8.5h->9h (SQL: SUM(lines.amount)=147.50 matches statement.total exactly, edited value persisted as typed) -> submitted (Draft->Submitted). Admin handoff: fresh /login as admin, /finance/statements showed ref MMP218 \u00a3147.50 Submitted with both lines matching SQL exactly. 0 findings.",
       "watch": [
         "app/my-jobs/pay/**",
         "components/my-jobs/statement-editor.tsx",
@@ -95,9 +95,9 @@
       ]
     },
     "job_sheet_pdf": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet): real download event captured, 21,717B/%PDF- magic, and a custom PDF-text extraction cross-checked customer name/phone/date/times/addresses byte-exact against the seeded leads/appointments row. 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): downloaded PDF from the seeded QA-SENTINEL crew job, %PDF magic + 23,127 bytes, custom ToUnicode-CMap text extractor recovered the seeded addresses/postcodes/quote ref byte-exact from the content stream (not an image). Two-hats: PDF and on-screen job sheet share the same loadJobSheet() read path. 0 findings.",
       "watch": [
         "components/job-sheet-button.tsx",
         "lib/job-sheet-*.ts",
@@ -186,9 +186,9 @@
       ]
     },
     "removal_book_changedate_cancel": {
-      "lastTestedAt": "2026-08-23T16:20:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "QA-20260823-01 VERIFIED+CLOSED this run: re-ran the exact repro (in-window Change date cancel+rebook, then logged in as the previously-assigned crew member). /my-jobs now shows a 'Called off' section/card naming the old date instead of silence -- PR #54's shipped direction (b): assignment still deliberately not carried to the new appointment (office re-allocates via Day Allocation), but the crew member now gets a positive signal instead of nothing. SQL matches design: old appointment cancelled with its assignment rows orphaned, new appointment has 0 assignment rows pending office re-allocation. 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent), fuller pass than 2026-08-23: paid the deposit to unlock the policy buttons, then Change-date (7-day-window destructive rebook path) and Cancel driven end-to-end on the SAME booking. SQL exact match at each step incl. the deliberate non-carry-over of assignments to the rebooked appointment (matches documented design), refund_queue row created on cancel with unconditional=100/conditional=0 matching dialog copy. 0 findings.",
       "watch": [
         "components/bookings/change-date-dialog.tsx",
         "components/bookings/cancel-booking-dialog.tsx",
@@ -208,7 +208,7 @@
     "mark_deposit_balance_paid": {
       "lastTestedAt": "2026-08-25T16:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: seeded accepted quote (agreed £500, deposit £100, moving_date set) -> Deposit received -> Bank transfer on /bookings. SQL exact match (deposit_paid_at/deposit_paid_method), leads.status funnel-advanced quoted->confirmed, and the paid-deposit flow auto-created the removal appointment since moving_date was already set (expected markDepositPaid behavior, not a defect -- row correctly landed in 'Booked - all set' not 'no date'). Dry-run confirmation email confirmed (provider_id=dryrun-...). /payments Received/today cross-check matched the same £100/bank-transfer exactly. Held after reload. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent: seeded accepted quote (agreed \u00a3500, deposit \u00a3100, moving_date set) -> Deposit received -> Bank transfer on /bookings. SQL exact match (deposit_paid_at/deposit_paid_method), leads.status funnel-advanced quoted->confirmed, and the paid-deposit flow auto-created the removal appointment since moving_date was already set (expected markDepositPaid behavior, not a defect -- row correctly landed in 'Booked - all set' not 'no date'). Dry-run confirmation email confirmed (provider_id=dryrun-...). /payments Received/today cross-check matched the same \u00a3100/bank-transfer exactly. Held after reload. 0 findings.",
       "watch": [
         "app/(dashboard)/bookings/**",
         "app/(dashboard)/invoicing/**"
@@ -259,9 +259,9 @@
       ]
     },
     "staff_vehicle_crud_join_approve": {
-      "lastTestedAt": "2026-08-23T16:20:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live on freshest code (app/(dashboard)/resources/actions.ts, components/resources/resources-view.tsx both touched since last audit sha by the Job Board removal commit, comment/reference cleanup only): staff add/edit + vehicle add/edit + approve a seeded staff_submissions row all via real /resources UI. SQL exact match incl. two-hats on hourly_rate (staff_pay.hourly_rate written by saveStaffAction, same column resources-view.tsx reads). Approve: staff_submissions.status='approved', reviewed_by=admin profile id, new staff row (crew role) created, no auth.users/profiles row for the applicant (matches h5). 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): staff add+edit and vehicle add+edit two-hats confirmed (staff_pay.hourly_rate, vehicles.registration/cost_per_month). HANDOFF h5 (approve leg only): approved a live QA-SENTINEL /join submission from a concurrent customer-role agent \u2014 staff_submissions.status=approved, reviewed_by=admin id, new staff row (crew role, full_name copied verbatim incl. QA-SENTINEL) created, no auth.users/profiles row (matches documented 3-step approve/activate/invite design \u2014 invite/login leg NOT exercised this run, h5's fuller 2026-08-20 pass already covers that leg). 0 findings. Independently spot-checked by main loop.",
       "watch": [
         "app/(dashboard)/resources/**",
         "components/resources/**"
@@ -288,9 +288,9 @@
       ]
     },
     "cubic_survey_review": {
-      "lastTestedAt": "2026-08-23T12:20Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: /leads/[id]/cubic get-or-creates the survey row on visit; added 'Sofa 3 seater' via search+tap -> UI updated to 50 ft3/1 item with autosave. SQL exact match: items array shape correct (key/qty/title/unitFt3/category/flags), total_ft3=50, status=draft. Confirmed still a different feature from /cubic/review (AI video-scan). 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): /leads/<id>/cubic get-or-created the survey, added 'Sofa 2 seater' via search+tap, pure autosave (no manual save), fresh reload persisted. SQL exact match (total_ft3=35, status=draft). 0 findings.",
       "watch": [
         "app/(dashboard)/leads/[id]/cubic/**",
         "app/actions/ai-survey-review.ts"
@@ -357,9 +357,9 @@
   },
   "estimator": {
     "cockpit": {
-      "lastTestedAt": "2026-08-25T20:45:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: seeded 5 marker leads (owned via estimator_id=own profile id, staff-id mixup re-ruled-out) across today's surveys/later-this-week/overdue-follow-up/quote-awaiting-reply. Every tile matched SQL exactly incl. UK/BST time conversion and the needs-attention 4-lead set in the same order. Reload confirmed server-backed, not stale client state. Process note: mid-run a concurrent role-agent's over-broad cleanup (bare 'QA-SENTINEL' substring match, not scoped to its own run suffix) deleted this agent's round-1 marker rows before use -- recovered by reseeding with a distinguishing suffix; not a product defect, see this run's LOG entry for the process fix. 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): 2 seeded QA-SENTINEL leads recomputed straight from SQL (estimator_id scoping, status bucketing, submitted_at ordering) matched the rendered 'Needs attention' tile exactly, incl. order. Gating re-confirmed: /finance, /finance/statements, /refunds all bounce to estimator-appropriate pages (200 + redirect chain, not raw 403). 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/**"
       ]
@@ -367,7 +367,7 @@
     "book_survey_quote_from_visit": {
       "lastTestedAt": "2026-08-26T08:24:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet): lead created -> survey booked (past slot) -> Create Quote from the lead's Quotes tab landed on /quotes/<id> with a real draft (quote_ref MMR114, £1,020) -- matches e2e/estimator/work-quote.spec.ts's recipe exactly, a second independent live confirmation of that skipped spec. SQL: leads.status='survey_booked', appointments row (estimator_id=profiles.id, matches the documented gotcha), quotes row matched UI exactly. 0 findings.",
+      "note": "Re-verified live by a role-agent subagent (Sonnet): lead created -> survey booked (past slot) -> Create Quote from the lead's Quotes tab landed on /quotes/<id> with a real draft (quote_ref MMR114, \u00a31,020) -- matches e2e/estimator/work-quote.spec.ts's recipe exactly, a second independent live confirmation of that skipped spec. SQL: leads.status='survey_booked', appointments row (estimator_id=profiles.id, matches the documented gotcha), quotes row matched UI exactly. 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -379,9 +379,9 @@
       ]
     },
     "estimator_pay_statement": {
-      "lastTestedAt": "2026-08-26T00:40:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "QA-20260825-04 VERIFIED+CLOSED this run (main loop, real Chromium against deployed bf678a9 which carries fix 6acb72f/PR #94): '/estimator/pay/<draft>' -> 'Add a line' -> getByLabel('Description')=1, getByLabel(/Amount/)=1, DOM shows useId()-based htmlFor/id pairs (_r_0_-description/-amount). Crew twin also verified same run (see crew.weekly_invoice_create_seed_submit). Scope note: this re-test covered the label fix assertion only; the full create->seed->submit flow's last full pass was 2026-08-25T20:45Z.",
+      "note": "Re-verified live (Sonnet role-agent): full flow incl. first signing the contractor agreement to clear the pay gate, start invoice -> add line (desc+amount) -> save -> submit. SQL exact match: staff_statements draft->submitted, total=37.5, staff_statement_lines exact text/amount. Two-hats: upsertMyEstimatorLineAction's written columns == statement-detail page's read columns. 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
@@ -400,9 +400,9 @@
   },
   "customer": {
     "q_accept_sandbox_card": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: full non-card /q/<token> accept flow -- 3 acks -> accept -> quotes.status=accepted, accepted_name/agreed_price(£1500)/deposit_amount(£100) exact match, signatures row (kind=contract) with a real 79,599-byte PNG (valid magic number, not empty/placeholder). Fresh reload still showed accepted state. STILL BLOCKED, unchanged: business_settings.card_payments_enabled=false in this environment, bank-transfer path used and reported as before, no attempt to bypass. Self-healed a Zoho sandbox deposit invoice (INV-000371), expected, not a DB row so outside teardown scope. 0 findings.",
+      "note": "Re-verified live (Sonnet role-agent): card_payments_enabled still false on this environment -> bank-transfer path exercised (unchanged, expected). Full accept flow on a seeded SENT quote: quotes.status=accepted, accepted_name/agreed_price/deposit_amount exact match, signatures row with a genuine ~81KB decoded PNG (not a stub), fresh reload confirmed server-persisted. No new client/lead rows created (pre-seeded ids correctly reused). 0 findings.",
       "watch": [
         "app/q/**",
         "app/actions/card-payments.ts",
@@ -439,9 +439,9 @@
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "FRESH CODE this run (6ae3ba3/#82 de-duplicated the postcode transform -- lib/staff/onboarding.ts now calls the SAME formatUkPostcode helper lib/leads/format.ts already used, instead of a second hand-rolled regex; intended as a no-behaviour-change refactor, not previously live-verified post-refactor). Role-agent subagent read formatUkPostcode's actual logic first, then drove 3 real /join/e2e-join-token-0001 submissions to catch a refactor regression: (a) 'sp71ab' -> 'SP7 1AB' (the original QA-20260825-01 case), (b) already-correct 'SP7 1AB' -> unchanged (not double-spaced/mangled), (c) a different postcode shape 'bh211aa' -> 'BH21 1AA' (3-char outward code, proving the transform generalizes). All 3 staff_submissions.address_postcode rows matched exactly by SQL, re-confirmed by a second query. 0 findings -- the de-dup refactor is behavior-identical to the original fix.",
+      "note": "Re-verified live (Sonnet role-agent): submitted /join/e2e-join-token-0001 with a deliberately messy postcode ('sp78ab') to re-probe the formatUkPostcode two-hats fix \u2014 normalised to 'SP7 8AB' identically in both staff_submissions.address_postcode and the legacy one-line address field. Also served as the customer leg of handoff h5 (approved by the concurrent admin-role agent same run). 0 findings.",
       "watch": [
         "app/join/**",
         "lib/staff/onboarding.ts"
@@ -489,9 +489,9 @@
       ]
     },
     "h5_join_to_admin_approve_to_login": {
-      "lastTestedAt": "2026-08-20T04:30:00Z",
+      "lastTestedAt": "2026-08-26T16:38:00Z",
       "lastResult": "pass",
-      "note": "full chain verified end-to-end incl. real /login as the newly-activated crew user; approve/activate/invite is a deliberate 3-step design, not a bug; self-cleaned (0/0/0/404 after)",
+      "note": "full chain verified end-to-end incl. real /login as the newly-activated crew user; approve/activate/invite is a deliberate 3-step design, not a bug; self-cleaned (0/0/0/404 after) | 2026-08-26: approve leg re-verified live (customer /join submit + admin approve, two concurrent Sonnet role-agents), 0 findings, now has a permanent (skipped-pending-E2E_OFFICE_PASSWORD) spec: e2e/office/join-approve-handoff.spec.ts. The invite/login leg was not re-exercised this run \u2014 the 2026-08-20 pass above already covers it.",
       "watch": [
         "app/join/**",
         "app/(dashboard)/resources/**"
@@ -621,7 +621,7 @@
     "dashboard_counts_badges": {
       "lastTestedAt": "2026-08-26T04:50:00Z",
       "lastResult": "pass",
-      "note": "GATE 21 (c01be21, #107, freshest code, jumped the queue) LIVE brand-split reconciliation this run (role-agent, Sonnet): ported buildPeriodStats/buildBrandKpiSplits verbatim into a throwaway recompute script (not reused UI output) and cross-checked the new 'M n · P n' sub-line against independent SQL/JS for 7 KPI tiles (new leads today/week/month, contacted, surveys booked, jobs won today/week/month) -- every one: UI combined = UI Marley + UI Pitmans, AND UI combined = independent recompute, exact. Seeded one throwaway pitmans-brand marker lead to get a non-trivial split (0 pitmans leads existed beforehand), deleted + verified gone after (leads back to 24/24/0). Confirms buildBrandKpiSplits' 'splits re-run buildPeriodStats per brand, so combined=sum-of-slices by construction' claim holds against live data, not just its own unit tests. 0 findings. Prior 2026-08-26T00:18Z deep recompute (Awaiting deposit/Balance due/Surveys today/Follow-ups) still stands, not re-run this pass.",
+      "note": "GATE 21 (c01be21, #107, freshest code, jumped the queue) LIVE brand-split reconciliation this run (role-agent, Sonnet): ported buildPeriodStats/buildBrandKpiSplits verbatim into a throwaway recompute script (not reused UI output) and cross-checked the new 'M n \u00b7 P n' sub-line against independent SQL/JS for 7 KPI tiles (new leads today/week/month, contacted, surveys booked, jobs won today/week/month) -- every one: UI combined = UI Marley + UI Pitmans, AND UI combined = independent recompute, exact. Seeded one throwaway pitmans-brand marker lead to get a non-trivial split (0 pitmans leads existed beforehand), deleted + verified gone after (leads back to 24/24/0). Confirms buildBrandKpiSplits' 'splits re-run buildPeriodStats per brand, so combined=sum-of-slices by construction' claim holds against live data, not just its own unit tests. 0 findings. Prior 2026-08-26T00:18Z deep recompute (Awaiting deposit/Balance due/Surveys today/Follow-ups) still stands, not re-run this pass.",
       "watch": [
         "app/(dashboard)/page.tsx",
         "lib/dashboard/**",
@@ -632,7 +632,7 @@
     "bookings_money_queues": {
       "lastTestedAt": "2026-08-26T00:18:00Z",
       "lastResult": "finding",
-      "note": "DEEP RECOMPUTE this run (truth agent, read-only, real staging rows as fixture): every bucket count and £ figure on /bookings AND /payments Due recomputed from an exact SQL replica of classifyBooking/owedNow -- all individually MATCH (deposits 8/£800 on both pages, buckets all correct). BUT the prior note's cross-page invariant ('/bookings Balance outstanding == /payments Due exactly') is FALSE whenever any unpaid commitment invoice exists: /bookings sums owed.balance only (£5,100), Due tab sums owed.total = commitment+balance (£5,550), gap = the £450 unpaid commitment on E2E-RRACE-COM-001 (bucketed no_date -- no removal appt -- yet owedNow correctly reports its commitment). The 2026-08-20 'matched exactly' was a coincidence of a £0-commitment day. Filed QA-20260826-01 (risky, medium) for Peter to rule design-intent vs regression; do NOT re-assert that invariant in specs until ruled.",
+      "note": "DEEP RECOMPUTE this run (truth agent, read-only, real staging rows as fixture): every bucket count and \u00a3 figure on /bookings AND /payments Due recomputed from an exact SQL replica of classifyBooking/owedNow -- all individually MATCH (deposits 8/\u00a3800 on both pages, buckets all correct). BUT the prior note's cross-page invariant ('/bookings Balance outstanding == /payments Due exactly') is FALSE whenever any unpaid commitment invoice exists: /bookings sums owed.balance only (\u00a35,100), Due tab sums owed.total = commitment+balance (\u00a35,550), gap = the \u00a3450 unpaid commitment on E2E-RRACE-COM-001 (bucketed no_date -- no removal appt -- yet owedNow correctly reports its commitment). The 2026-08-20 'matched exactly' was a coincidence of a \u00a30-commitment day. Filed QA-20260826-01 (risky, medium) for Peter to rule design-intent vs regression; do NOT re-assert that invariant in specs until ruled.",
       "watch": [
         "lib/bookings/**",
         "app/(dashboard)/bookings/**"
