@@ -19,6 +19,7 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 1 | `supabase/migrations/0104_brands.sql` | brands table + seed (pitmans `active=false`), brand columns on leads/quotes/appointments/storage_sites/storage_lets/vehicles, `brand_ref_counters`, `next_quote_ref(kind, brand default 'marley')` (drops the one-arg) | **YES** — counter seed races live quote acceptance; also DROPs the RPC signature PostgREST has cached |
 | 2 | `supabase/migrations/0105_additional_charges.sql` | `quotes.additional_charges numeric(10,2) not null default 0` + `quotes.additional_charges_reason text` — internal uplift (PRD §3.9), folded inside the customer's "Your Removal" line; default 0 backfills every existing quote as "no uplift" | No — additive columns with defaults; existing rows and totals untouched |
 | 3 | `supabase/migrations/0106_ingest_brand.sql` | replaces 0102's global unique index on `leads.external_lead_id` with `leads_external_lead_brand_uq` on `(brand, external_lead_id)` — two brands' websites can mint the same submission id without the second being silently swallowed as a duplicate of the first | No — index swap on a small table; creates the new index before dropping the old, so uniqueness never lapses |
+| 4 | `supabase/migrations/0107_pitmans_sms_sender.sql` | sets `brands.sms_sender = 'Pitmans'` on the pitmans row — the WebEx alphanumeric sender id, created 2026-08-26, that 0104 had to seed NULL. Until it lands every Pitmans SMS (including the deposit/balance money chases, whose bodies already say "Pitmans Removals & Storage here") is delivered fronted by MARLEY'S sender id, and replies land on Marley's rail | No — one-row data UPDATE, slug-scoped; Marley cannot be affected (smsSenderFor ignores the column for the default brand). No `notify pgrst` needed: no schema change |
 
 *(rows appended per gate)*
 
@@ -102,6 +103,24 @@ where tablename = 'leads'
 Expected: one row, `leads_external_lead_brand_uq`, whose `indexdef` reads `(brand, external_lead_id)` and carries `WHERE (external_lead_id IS NOT NULL)`. If `leads_external_lead_uq` still appears, 0106 did not complete — re-run it before taking Pitmans website traffic.
 
 Cross-brand duplicate-id check — **described, not executed** (prod leads are real customers; do not insert test rows): the property this index guarantees is that two leads may share an `external_lead_id` when their `brand` differs, and never when it matches. It is proven by the unit suite that runs against every promoted build (`tests/lib/leads/website-lead.test.ts` — same id under two brands lands two leads; same id under one brand adopts the existing row). On prod, the index definition above IS the guarantee — no insert test adds evidence it doesn't already give.
+
+### 0107
+
+```sql
+-- The Pitmans WebEx sender id landed, and ONLY on the pitmans row.
+select slug, coalesce(sms_sender, '<null>') as sms_sender from brands order by slug;
+```
+
+Expected exactly: `pitmans` = `Pitmans`; `marley` and `group` both `<null>`. Marley's
+sender is NOT read from this column at all — `smsSenderFor()` short-circuits the default
+brand to the `WEBEX_SMS_SENDER_MARLEY_MOVES` env chain — so a null there is correct, not
+a missing value to go and fill in.
+
+No app-side check is needed beyond this: the code path is already locked by
+`tests/lib/comms/send-idempotency.test.ts`, which asserts both that
+`smsSenderFor({slug:"pitmans", smsSender:"Pitmans"})` returns `Pitmans` and that the
+WebEx request body carries `from: "Pitmans"` while an unbranded send still carries
+`from: "Marley"`. What was missing was only the data.
 
 ---
 
