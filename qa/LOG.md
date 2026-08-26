@@ -4,6 +4,27 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-26T20:08Z — scheduled QA audit: stalest-queue rota, 4 role agents, 0 findings, 1 new permanent spec
+
+- sha at checkout: `7dfba2e` (`git fetch origin staging && git checkout -B staging origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
+- Verify-first: all 7 open findings (QA-20260826-01, 04–09) are `status: open` (none `fixed-pending-verify`) — nothing to re-verify or close this run.
+- Health gate: deployed staging `/api/version` = `7dfba2e`, exact match to HEAD (no deploy wait needed). Read-only prod check: `ops.marleymoves.co.uk/api/version` = 200, not touched beyond that. Fresh `npm ci` (~24s), all four gates green on the untouched tree: lint 0 errors (36 pre-existing warnings, unchanged) · `tsc --noEmit` clean · vitest 2122 passed/7 skipped · build clean.
+- Seed sweep: 0 leftovers across `clients`/`leads`/`appointments`/`staff` notes/name columns, `quotes.state_blob`, and `auth.users` before dispatch.
+- Rota: no fresh non-qa code landed since `lastAuditSha` (only this ledger's own prior-run spec/COVERAGE commits) — normal stalest-queue picks, no queue-jump. Dispatched 4 parallel role-agent subagents (Sonnet tier), ~9 operations total:
+  - **Crew agent**: `job_list_detail` (seeded lead→quote→appointment→assignment, list+detail matched exactly) · `availability_set_remove` (set/clear an override, DB agreed at both steps). 0 findings.
+  - **Admin agent**: `refunds_queue` (empty on staging, UI/SQL reconcile at 0/0) · `lead_status_lost_noreply` (both branches exact match) · `invoice_resend_deposit_commitment` (deposit rail legacy-locked/blocked, balance rail deliberately not locked and sends — confirms `resendBalanceInvoiceFlow`'s hard-coded `commsLocked:false`, matches this item's existing 2026-08-24 note exactly, no regression). 0 findings.
+  - **Estimator agent**: `book_survey_quote_from_visit` (3rd independent confirmation) · `gating_forbidden_surfaces` (/finance, /finance/statements, /refunds all server-redirect, no data leak) · bonus: confirmed the leads "Mine" preset genuinely scopes correctly (still a coverage gap, not a bug). 0 findings.
+  - **Customer agent**: `s_storage_signing` (signing state lives in a new `signatures` row, verified) · `cv_self_fill_survey` (item-picker flow works end to end; flagged as an informational note, not a finding, that `/cv` has no photo-upload input at all — confirmed by design, gated `office && leadId` in `cubic-builder.tsx`, RLS-scoped media pipeline is office/estimator-only).
+  - Main loop independently re-verified one claim per agent plus a full `auth.users` + all marker-column sweep after all four finished (not just trusting self-reports) — grand total leftover: 0.
+- Findings filed: **none** new. All 6 pre-existing open findings (QA-20260825-03, QA-20260826-01, 04–09) untouched, all `risky`/Peter's.
+- Specs added: **1** new — `e2e/office/invoice-resend-lock.spec.ts` (closes `spec_gaps.admin_invoice_resend_lock_spec`): deposit rail refuses on the legacy iMVE comms lock, balance rail deliberately does not. Seed shapes/locators cross-verified against `lib/legacy.ts` + `lib/quote/accept-flow.ts` + the resend-invoice-button/balance-invoice-button components; tsc/eslint clean; `playwright test --list --project=office` loads both tests. Underlying flow proven live this run by the admin role-agent. Shipped `test.skip`'d — no `E2E_OFFICE_PASSWORD` in this environment, same standing gap as every other DB-seeded spec here, not blocked by any bug. `e2e/COVERAGE.md` updated in the same commit.
+- Ledger: `crew.job_list_detail`/`availability_set_remove`, `admin.refunds_queue`/`lead_status_lost_noreply`/`invoice_resend_deposit_commitment`, `estimator.book_survey_quote_from_visit`/`gating_forbidden_surfaces`, `customer.s_storage_signing`/`cv_self_fill_survey`, and `spec_gaps.admin_invoice_resend_lock_spec` all updated with this run's evidence. `lastAuditSha` → `7dfba2e`.
+- Pushes: one commit to `staging` (findings ledger untouched since 0 new; spec + COVERAGE.md + state.json + this log entry land together). No PRs opened, `master` never touched. Rebased onto `origin/staging` before the final push.
+- Cleanup verification (final sweep, all marker columns + `auth.users` + `survey-media` bucket): 0 everywhere, independently re-queried by the main loop (not just agent self-reports).
+- Time spent: ~35 min (well under the 45-minute box).
+
+---
+
 ## 2026-08-26T16:12Z — scheduled QA audit: stalest-queue rota, 4 role agents, 0 new findings
 
 - sha at checkout: `1bb64ce` (`git fetch origin staging && git checkout -B staging origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.

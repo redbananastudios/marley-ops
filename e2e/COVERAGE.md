@@ -31,6 +31,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Payments — day view, stat sections | ✅ | office/payments-finance.spec.ts |
 | Finance — Invoices & VAT / FRS (reads staging Zoho) | ✅ | office/payments-finance.spec.ts |
 | Bank feed — whole-quote link (deposit+balance settled in one transfer) | ✅ | office/bank-feed-whole-quote.spec.ts |
+| Invoice resend vs the legacy iMVE comms lock (deposit/commitment locked, balance deliberately not) | 🟡 | office/invoice-resend-lock.spec.ts — closes `admin_invoice_resend_lock_spec`. Underlying flow proven live 2026-08-26 by the QA audit's admin role-agent (both branches, real browser, SQL read-back); this file's own seed shapes/locators were separately verified against `lib/legacy.ts`, `lib/quote/accept-flow.ts` (`resendDepositInvoiceFlow`/`resendBalanceInvoiceFlow`), `components/leads/{resend-invoice-button,balance-invoice-button}.tsx`, tsc/eslint clean, `playwright test --list` loads it under office (2 tests). `test.skip`'d: this env has no `E2E_OFFICE_PASSWORD` so `auth.setup.ts` can't sign in the office fixture — the file itself has never executed here, same standing gap as every other DB-seeded spec — not blocked by any bug |
 | Contractor pay — return a submitted invoice | ✅ | office/contractor-pay.spec.ts |
 | Schedule — survey + removal diary, new-appt dialog | ✅ | office/schedule.spec.ts |
 | Schedule — existing-appointment VIEW dialog (crew/vans, job notes two-hats, price-free) | ✅ | office/appointment-view-dialog.spec.ts |
