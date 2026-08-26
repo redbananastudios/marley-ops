@@ -1,7 +1,7 @@
 {
   "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
   "buildInProgress": "Pitmans multi-brand build: gates 1-5 all MERGED as of 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a) - brand foundation, Settings Brands card, chips/filters across leads/board/quotes/jobs/bookings/clients/follow-ups/documents/claims/content/payments/refunds, and the required brand picker on lead creation + BrandChanger pre-quote edit are all LIVE on staging now (brands.pitmans active=true). The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. 2026-08-25 audit found the brand UI itself sound (chips/filters/cascade/lock all correct) but found a real ref-prefix bug in quote creation - see QA-20260825-03.",
-  "lastAuditSha": "54adc9a",
+  "lastAuditSha": "8f9475b",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-25T16:26:00Z",
@@ -87,7 +87,7 @@
     "weekly_invoice_create_seed_submit": {
       "lastTestedAt": "2026-08-25T20:45:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: logged Tue 25 Aug 08:00-16:30 -> statement MMP184 -> 'Add my hours this period' seeded a line -> edited qty 8.5h->6h (SQL: amount recomputed server-side to 90=6x15, not client-trusted) -> submitted (status=submitted, edit/delete buttons gone post-submit, genuine transition not a UI-only flip). RLS independently backstops further writes to a submitted day. Two-hats: /finance/statements selects identical columns. 0 findings. NOTE: the sibling estimator surface found a real accessibility gap in its own 'Add a line' inputs (QA-20260825-04) which likely also applies to this crew statement-editor.tsx (same unlinked-label pattern per the finding's suspected-cause) -- not independently verified on the crew surface this run, flagged for next run to check directly.",
+      "note": "Re-verified live: logged Tue 25 Aug 08:00-16:30 -> statement MMP184 -> 'Add my hours this period' seeded a line -> edited qty 8.5h->6h (SQL: amount recomputed server-side to 90=6x15, not client-trusted) -> submitted (status=submitted, edit/delete buttons gone post-submit, genuine transition not a UI-only flip). RLS independently backstops further writes to a submitted day. Two-hats: /finance/statements selects identical columns. 0 findings. FOLLOW-UP RESOLVED 2026-08-26T00:40Z: the QA-20260825-04 label gap's crew twin was fixed by the same PR #94 and verified live this run -- '/my-jobs/pay/<draft>' 'Add a line' sheet now resolves getByLabel Description/Hours/Rate/Date (ids _r_0_-description/-hours/-rate/-date, all label-linked).",
       "watch": [
         "app/my-jobs/pay/**",
         "components/my-jobs/statement-editor.tsx",
@@ -156,6 +156,18 @@
         "components/quote/quote-builder.tsx",
         "components/quote/send-quote-dialog.tsx",
         "lib/quote/accept-flow.ts"
+      ]
+    },
+    "diary_brand_layer_gate11": {
+      "lastTestedAt": "2026-08-26T00:25:00Z",
+      "lastResult": "finding",
+      "note": "NEW surface (gate 11 537b607 + fix b4687f1, freshest code, jumped the queue). Role-agent subagent (Sonnet), all claims artifact-backed: (1) b4687f1 bare-client brand picker VERIFIED on /schedule/surveys -- bare marker client selectable ('client — opens a new enquiry'), brand-picker testid rendered [Marley,Pitmans], no-brand submit blocked with 'Choose which brand this enquiry is for.', Pitmans booking wrote leads.brand+appointments.brand='pitmans' (SQL exact). BUT the same picker is UNREACHABLE on /schedule/removals -- its page never merges bare-client options (leadOptions only, no clientOptions/isClient merge; combobox says 'No matches' for a bare client) => QA-20260826-02 (safe-fix, medium; source claim independently re-verified by main loop). (2) styleFor colour model verified against live computed styles + SQL brand colours: marley confirmed removal = solid #1A1A1A (parity constant), pitmans unconfirmed = hollow (transparent bg, 2px dashed #2B2B76, mm-evt--hollow), date_confirmed_at stamp flips it solid #2B2B76; pitmans survey on an unconfirmed lead = solid #FFCC00 with #2B2B76 text (WCAG yellow-takes-blue rule) proving surveys ignore confirmation. Brand initials (M/P spans) + multi-brand legend incl. 'Dashed outline = date not yet confirmed' all rendered. (3) Truth-of-UI: 3-appointment SQL window diff vs both diaries' DOM -- exact, no truncation.",
+      "watch": [
+        "components/schedule/scheduler-view.tsx",
+        "app/(dashboard)/schedule/removals/page.tsx",
+        "app/(dashboard)/schedule/surveys/page.tsx",
+        "components/schedule/appointment-dialog.tsx",
+        "e2e/parity/single-brand.spec.ts"
       ]
     },
     "survey_book_reschedule_cancel": {
@@ -235,9 +247,9 @@
       ]
     },
     "storage_sites_units_lets": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-26T00:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: create site -> add unit (20ft container, code re-scoped via the site card per the known 'Add unit defaults to first site' quirk) -> start let against a marker client (Occupied) -> end let (unit back to Available, storage_lets.end_date set, settlement invoice INV-000372 raised in staging's Zoho DEMO org -- host confirmed zohoinvoicepay.eu/.../demoremovals, not Connor's live books). Held after reload. NOTE for the record: for a non-crate (period-billed) unit the action button reads 'End let', not the crate-only literal 'Release & raise final invoice' -- both still raise a settlement invoice via billNow; not a defect, just a label divergence by unit type worth knowing if a future spec asserts the literal string. 0 findings.",
+      "note": "GATE 12 FRESH CODE this run (bf678a9, storage brand + let stamping, never audited before): role-agent (Sonnet), all claims artifact-backed, 5/5 PASS, 0 findings. (1) Site created with brand=pitmans via #ss-brand -> SQL exact; brand-chip data-brand=pitmans on card under All; ?brand=pitmans shows / ?brand=marley hides (DB-level narrowing). (2) startLetAction brand resolution chain: ALL THREE branches proven -- no-override with client-lead=marley -> let brand='marley' (lead wins over pitmans site); explicit override -> 'pitmans'; client-with-NO-leads -> site fallback 'pitmans' (the fail-LOUD path resolved, no silent default). Dialog pre-fill matched the resolution each time. (3) Manage dialog #let-brand pre-fills stored value, correction saved -> SQL exact (two-hats). (4) Vehicle livery: #vh-brand defaults 'Unbranded / shared', set pitmans -> vehicles.brand='pitmans', card chip renders, reload re-seeds form from the same column (two-hats). (5) Filter-visibility contract verified byte-for-byte: under ?brand= a filtered-out let keeps 'Occupied' pill with details/actions replaced by literal 'Let under another brand'; chips are All-filter-only (0 chips under a named filter even for matching lets). Teardown incl. auto-created storage_handling_events (3): all counts 0. NOTE from prior run still true: non-crate end-let button reads 'End let' not 'Release & raise final invoice'. UNTESTED gate-12 slice: the allocation job-card livery-mismatch note (van livery != job brand) -- needs an assigned job fixture, next run.",
       "watch": [
         "app/(dashboard)/storage/**",
         "components/storage/**"
@@ -360,9 +372,9 @@
       ]
     },
     "estimator_pay_statement": {
-      "lastTestedAt": "2026-08-25T20:45:00Z",
-      "lastResult": "finding",
-      "note": "Re-verified live by a role-agent subagent: seeded contractor agreement -> statement MMP182 -> 'Add my work this week' pulled the attended survey in as a line (£50, source=survey) -> added a manual £12.34 line -> submitted, total=£62.34 matched SQL exactly, genuine draft->submitted transition. Gating re-check also PASS (/finance, /finance/statements, /refunds all redirect correctly). BUT found QA-20260825-04 (safe-fix, low): the 'Add a line' sheet's Description/Amount inputs have no id/aria-label/htmlFor -- page.getByLabel() finds nothing, confirmed via live DOM inspection. Likely also affects the crew twin (components/my-jobs/statement-editor.tsx) per the same unlinked-label pattern, not independently verified there this run.",
+      "lastTestedAt": "2026-08-26T00:40:00Z",
+      "lastResult": "pass",
+      "note": "QA-20260825-04 VERIFIED+CLOSED this run (main loop, real Chromium against deployed bf678a9 which carries fix 6acb72f/PR #94): '/estimator/pay/<draft>' -> 'Add a line' -> getByLabel('Description')=1, getByLabel(/Amount/)=1, DOM shows useId()-based htmlFor/id pairs (_r_0_-description/-amount). Crew twin also verified same run (see crew.weekly_invoice_create_seed_submit). Scope note: this re-test covered the label fix assertion only; the full create->seed->submit flow's last full pass was 2026-08-25T20:45Z.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
@@ -479,9 +491,9 @@
       ]
     },
     "h6_admin_survey_to_estimator_diary": {
-      "lastTestedAt": "2026-08-21T00:30:00Z",
+      "lastTestedAt": "2026-08-26T00:30:00Z",
       "lastResult": "pass",
-      "note": "Full end-to-end: admin booked a survey (tomorrow 10:00, estimator assigned, customer-notify UNticked) via /schedule/surveys -> appointments.estimator_id set (NOT an appointment_assignments row), 0 customer comms (unticked held to the data layer). Then logged in as THAT estimator and loaded /estimator: cockpit rendered the survey with the correct lead name + slot. estimator sees the admin-booked survey in its own browser.",
+      "note": "DEEP re-run this run (role-agent, Sonnet, on the gate-11-fresh surveys diary): full book half re-passed (booking dialog with brand picker, estimator_id exact, 10:00 UK = 09:00Z with timezoneId Europe/London, notify-unticked => 0 communications, toast 'Nothing sent to the customer'), AND the RESCHEDULE half live-verified for the FIRST time: reschedule-dialog moved the SAME appointment row in place (id unchanged, starts_at 2026-08-28T13:00Z = 14:00 BST, updated_at bumped, still 0 comms with notify unchecked) and the estimator's cockpit + diary both dropped the old Thu-27 10:00 strings and rendered Fri-28 14:00 (absent-old/present-new asserted on captured text, fresh estimator context with identity chip verified). Truth bonus: estimator 7-day appointment count recomputed from SQL (1) == rendered (1). CAVEATS worth knowing: reschedule dialog's 'Tell the customer the new time' DEFAULTS CHECKED (untick deliberately when testing); Playwright contexts default to UTC so datetime-local entry needs timezoneId:'Europe/London' or saved times shift an hour (agent caught this in its own harness before trusting results). 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "app/(dashboard)/estimator/**"
@@ -523,7 +535,7 @@
     "uploads_5_buckets": {
       "lastTestedAt": "2026-08-23T08:15:00Z",
       "lastResult": "pass",
-      "note": "3/5 buckets now IO-proven across this and prior runs: expense-receipts (2026-08-20/21, crew agent), job-photos (this run, crew.job_note_photo -- fresh-context rendered <img> proof), job-docs (this run, crew.complete_job completion certificate, %PDF- magic verified). Remaining unproven: job-media (used in content review, not proven bucket-object-exists this run) and whichever 5th bucket exists (contract PDFs are served via /api/documents, not confirmed as a distinct storage bucket vs generated-on-demand) -- next run should identify the actual 5-bucket list from lib/storage/** and close the gap explicitly.",
+      "note": "3/5 buckets now IO-proven across this and prior runs: expense-receipts (2026-08-20/21, crew agent), job-photos (this run, crew.job_note_photo -- fresh-context rendered <img> proof), job-docs (this run, crew.complete_job completion certificate, %PDF- magic verified). Remaining unproven: job-media (used in content review, not proven bucket-object-exists this run) and whichever 5th bucket exists (contract PDFs are served via /api/documents, not confirmed as a distinct storage bucket vs generated-on-demand). BUCKET LIST IDENTIFIED 2026-08-26 (main loop, codebase-wide literal grep): the five bucket-name literals are expense-receipts, survey-photos, job-photos, job-media, job-docs (plus 'survey-media' as a LOGICAL bucket name in lib/storage/media-store.ts -- a key prefix inside the one R2 bucket for AI media, not a Supabase storage bucket). Still to IO-prove: job-media and survey-photos.",
       "watch": [
         "lib/storage/**",
         "components/capture/**"
@@ -600,18 +612,18 @@
       ]
     },
     "dashboard_counts_badges": {
-      "lastTestedAt": "2026-08-20T13:24:00Z",
+      "lastTestedAt": "2026-08-26T00:18:00Z",
       "lastResult": "pass",
-      "note": "QA-20260820-02 CLOSED prior run, QA-20260820-03 CLOSED this run: 'Surveys booked' tile verified live to read 0 for a cohort with 0 real survey appointments (was previously inflated to the status-rank count)",
+      "note": "DEEP RECOMPUTE this run (truth agent): Awaiting deposit (8), Balance due (0), Surveys today (1, UK-window-correct), Follow-ups due today (1)/overdue (0), New enquiries (13, confirmed a LIVE count -- moved 12->13 between scrapes tracking concurrent DB writes) all matched SQL replicas with BST=UTC+1 windows from lib/uk-time.ts. Caveat recorded honestly: the one in-window survey (00:30Z=01:30 BST) sits inside both the UK-correct and a naive-UTC window, so this data couldn't discriminate a BST off-by-one either way. NOT recomputed (declared, not silently skipped): funnel/period tiles (buildPeriodStats cohort %s -- too entangled for the time box, and concurrent-agent churn made snapshots unstable) and the non-money 'To allocate' tile. Prior QA-20260820-02/03 closures stand.",
       "watch": [
         "app/(dashboard)/page.tsx",
         "lib/dashboard/**"
       ]
     },
     "bookings_money_queues": {
-      "lastTestedAt": "2026-08-20T13:24:00Z",
-      "lastResult": "pass",
-      "note": "shares QA-20260820-02 + QA-20260820-04, both closed now; /bookings Balance outstanding verified live matching /payments Due tab exactly",
+      "lastTestedAt": "2026-08-26T00:18:00Z",
+      "lastResult": "finding",
+      "note": "DEEP RECOMPUTE this run (truth agent, read-only, real staging rows as fixture): every bucket count and £ figure on /bookings AND /payments Due recomputed from an exact SQL replica of classifyBooking/owedNow -- all individually MATCH (deposits 8/£800 on both pages, buckets all correct). BUT the prior note's cross-page invariant ('/bookings Balance outstanding == /payments Due exactly') is FALSE whenever any unpaid commitment invoice exists: /bookings sums owed.balance only (£5,100), Due tab sums owed.total = commitment+balance (£5,550), gap = the £450 unpaid commitment on E2E-RRACE-COM-001 (bucketed no_date -- no removal appt -- yet owedNow correctly reports its commitment). The 2026-08-20 'matched exactly' was a coincidence of a £0-commitment day. Filed QA-20260826-01 (risky, medium) for Peter to rule design-intent vs regression; do NOT re-assert that invariant in specs until ruled.",
       "watch": [
         "lib/bookings/**",
         "app/(dashboard)/bookings/**"
@@ -619,6 +631,15 @@
     }
   },
   "spec_gaps": {
+    "office_diary_brand_layer_spec": {
+      "lastTestedAt": "2026-08-26T00:40:00Z",
+      "lastResult": "pass",
+      "note": "e2e/office/diary-brand-layer.spec.ts added this run (gate-11 brand colour model: marley parity constant, data-driven non-default fills, hollow-unconfirmed -> solid flip on date_confirmed_at, survey-always-solid accent, brand initials + legend). Applying the 'must go green before it closes a finding' lesson (3 consecutive audit specs broke on first CI run): every seed shape, locator and assertion was validated LIVE against deployed staging via a byte-identical scratch runner BEFORE shipping -- 20/20 ok including teardown-to-zero -- plus tsc/eslint clean and `playwright test --list` loads it under office. Guarded by E2E_DB_READY (unset here, so the spec binary itself has still never executed -- same standing gap as every DB-seeding spec); runtime-skips gracefully if <2 active brands. Colours read from the brands table at runtime, only the marley constant is hard-coded (parity contract). First CI run should still be watched.",
+      "watch": [
+        "e2e/office/diary-brand-layer.spec.ts",
+        "components/schedule/scheduler-view.tsx"
+      ]
+    },
     "office_jobs_spec": {
       "lastTestedAt": "2026-08-20T00:20:00Z",
       "lastResult": "pass",
