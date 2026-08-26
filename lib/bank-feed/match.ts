@@ -96,7 +96,11 @@ export const claimKey = (quoteId: string, kind: string): string => `${quoteId}:$
 
 /** Quote refs recognisable inside free-text bank references. */
 const REF_PATTERNS = [
-  /MM[RC]\d{3,}/gi, // MMR001 / MMC014 (current scheme)
+  // MMR001 / MMC014 / PMR001 / PMC014 (current scheme). The MM|PM alternation
+  // is deliberately STATIC — this matcher is pure/sync (no DB read), so it
+  // cannot consult brands.ref_prefix, which remains the source of truth.
+  // Extend the alternation by hand when brand 3 lands (gate 6).
+  /(?:MM|PM)[RC]\d{3,}/gi,
   /MM-\d{6}-\d{3}/gi, // legacy MM-YYMMDD-NNN
 ];
 const STORAGE_REF = /MMS-[A-Za-z0-9]{6,}/i;
@@ -113,10 +117,12 @@ const norm = (s: string | null | undefined): string => (s ?? "").toUpperCase();
  */
 const DIGIT_LOOKALIKE: Record<string, string> = { O: "0", I: "1", L: "1", B: "8", S: "5", Z: "2" };
 function canonicalizeQuoteRefs(hay: string): string {
-  // Only ever touch an MM[RC] token whose tail is digits-or-lookalikes; storage
-  // (MMS-…) and legacy MM-YYMMDD-NNN refs never match this and stay untouched.
-  return hay.replace(/\bMM([RC])([0-9OILBSZ]{3,})\b/g, (_m, kind: string, tail: string) =>
-    "MM" + kind + tail.replace(/[OILBSZ]/g, (c) => DIGIT_LOOKALIKE[c] ?? c),
+  // Only ever touch an MM[RC]/PM[RC] token whose tail is digits-or-lookalikes
+  // (a Pitmans customer's "PMRO17" normalises exactly like Marley's "MMRO17");
+  // storage (MMS-…) and legacy MM-YYMMDD-NNN refs never match this and stay
+  // untouched. Static MM|PM for the same reason as REF_PATTERNS above.
+  return hay.replace(/\b(MM|PM)([RC])([0-9OILBSZ]{3,})\b/g, (_m, prefix: string, kind: string, tail: string) =>
+    prefix + kind + tail.replace(/[OILBSZ]/g, (c) => DIGIT_LOOKALIKE[c] ?? c),
   );
 }
 
