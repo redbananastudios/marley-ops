@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boxesFromItems, commissionCost, crewSize, jobCost, marginPct, marginRevenue } from "@/lib/margin";
+import { computeQuote, type QuoteInputs } from "@/lib/quote/pricing";
 import type { BusinessSettings } from "@/lib/settings";
 
 const RATES: BusinessSettings = {
@@ -213,5 +214,57 @@ describe("commissionCost (3rd-party lead referral fee as a job cost)", () => {
   it("reduces the margin exactly by the commission", () => {
     // £1,000 job, £650 rate-card cost, £100 referral fee → 25% not 35%.
     expect(marginPct(1000, 650 + commissionCost(100))).toBe(25);
+  });
+});
+
+describe("additional charges count as revenue exactly ONCE (PRD §3.9, no double-count)", () => {
+  const inputs = (additionalCharges: number): QuoteInputs => ({
+    vehicle: "1luton",
+    packing: "owner",
+    deadMiles: null,
+    jobMiles: null,
+    collectAccessM: 0,
+    destAccessM: 0,
+    collectType: "house",
+    collectFloor: "ground",
+    destType: "house",
+    destFloor: "ground",
+    congestion: false,
+    tolls: 0,
+    parking: 0,
+    additionalCharges,
+    discount: 0,
+    vatEnabled: false,
+  });
+
+  it("margin revenue derives from gross, which already carries the uplift — no separate term", () => {
+    // The uplift lives INSIDE grand_total (computeQuote prices it into the
+    // subtotal), and marginRevenue reads only that gross — so revenue moves by
+    // exactly the uplift, once. A second uplift term anywhere in the margin
+    // maths would make this delta 2× the uplift.
+    const plain = computeQuote(inputs(0));
+    const uplifted = computeQuote(inputs(250));
+    expect(uplifted.grandTotal - plain.grandTotal).toBe(250);
+    const revPlain = marginRevenue(plain.grandTotal, false, RATES);
+    const revUplifted = marginRevenue(uplifted.grandTotal, false, RATES);
+    expect(revUplifted - revPlain).toBeCloseTo(250, 6);
+  });
+
+  it("with VAT on, the uplift's revenue contribution is its ex-VAT-liability share, like every other charge", () => {
+    // Standard scheme: gross moves by 250 × 1.2 = 300; revenue by 300 / 1.2 = 250.
+    const s: BusinessSettings = { ...RATES, vatScheme: "standard" };
+    const plain = computeQuote({ ...inputs(0), vatEnabled: true });
+    const uplifted = computeQuote({ ...inputs(250), vatEnabled: true });
+    expect(uplifted.grandTotal - plain.grandTotal).toBeCloseTo(300, 6);
+    const delta = marginRevenue(uplifted.grandTotal, true, s) - marginRevenue(plain.grandTotal, true, s);
+    expect(delta).toBeCloseTo(250, 6);
+  });
+
+  it("cost side never reads the uplift — jobCost is rate-card only", () => {
+    // Same job shape → same cost, whatever the uplift; the uplift is pure margin.
+    const cost = jobCost({ vehicle: "1luton", sevenFiveT: 0, totalMiles: 0, boxes: 0, days: 1 }, RATES);
+    expect(cost.total).toBeGreaterThan(0);
+    // jobCost's inputs carry no additional-charges field at all — the type makes
+    // the double-count structurally impossible; this test documents that intent.
   });
 });

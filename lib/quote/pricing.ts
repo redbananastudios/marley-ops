@@ -87,6 +87,15 @@ export interface QuoteInputs {
   congestion: boolean;
   tolls: number;
   parking: number;
+  /**
+   * Internal uplift (PRD §3.9) — commercial access, stairs, specialist handling.
+   * Enters the subtotal like any other charge (so discount, VAT, grand total and
+   * everything downstream — commitment, margin, bank matching — include it), but
+   * customerLineItems() absorbs it into the collapsed "Your Removal" line: no
+   * customer surface ever itemises it. Optional so every existing caller and
+   * stored input is unchanged (0 ≡ absent, and x + 0 === x keeps totals bit-identical).
+   */
+  additionalCharges?: number;
   discount: number;
   vatEnabled: boolean;
 }
@@ -125,6 +134,10 @@ export interface QuoteBreakdown {
   congestion: number;
   tolls: number;
   parking: number;
+  /** Internal uplift (PRD §3.9) — inside the subtotal; folded into "Your Removal"
+   *  on customer surfaces. Mirrored into the stored breakdown JSON so the PDF
+   *  renders from one payload. Old stored breakdowns lack the field — read with ?? 0. */
+  additionalCharges: number;
   discount: number;
   subtotal: number;
   total: number;
@@ -198,6 +211,10 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
   const congestion = i.congestion ? vanCount * pricing.congestionPerVan : 0;
   const tolls = i.tolls || 0;
   const parking = i.parking || 0;
+  // Internal uplift — a plain subtotal term, deliberately the LAST addend so a
+  // zero uplift leaves every pre-existing total bit-identical (x + 0 === x; the
+  // arithmetic above is a locked transcription and must not be reordered).
+  const additionalCharges = Math.max(0, i.additionalCharges || 0);
   const discount = i.discount || 0;
 
   const subtotal =
@@ -215,7 +232,8 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     congestion +
     tolls +
     parking +
-    pricing.adminFee;
+    pricing.adminFee +
+    additionalCharges;
   const total = Math.max(0, subtotal - discount);
   const vatEnabled = i.vatEnabled;
   const vatAmount = vatEnabled ? total * 0.2 : 0;
@@ -250,6 +268,7 @@ export function computeQuote(i: QuoteInputs, pricing: PricingConfig = DEFAULT_PR
     congestion,
     tolls,
     parking,
+    additionalCharges,
     discount,
     subtotal,
     total,

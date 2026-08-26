@@ -118,3 +118,49 @@ describe("customerLineItems — customer-facing quote grouping", () => {
     }
   });
 });
+
+describe("customerLineItems — additional charges fold inside 'Your Removal' (PRD §3.9)", () => {
+  it("(a) rows sum EXACTLY to the subtotal with uplift 0 and non-zero", () => {
+    for (const uplift of [0, 175.5]) {
+      const b = kitchenSink({ additionalCharges: uplift });
+      const sum = customerLineItems(b).reduce((acc, it) => acc + it.amount, 0);
+      expect(sum, `uplift £${uplift}`).toBeCloseTo(b.subtotal, 6);
+    }
+  });
+
+  it("(b) the collapsed line carries the uplift — never a separate or hidden row", () => {
+    const plain = kitchenSink();
+    const uplifted = kitchenSink({ additionalCharges: 175.5 });
+    const plainItems = customerLineItems(plain);
+    const items = customerLineItems(uplifted);
+    // Same rows — the uplift adds NO line the customer could see…
+    expect(items.length).toBe(plainItems.length);
+    expect(items.map((it) => it.label)).toEqual(plainItems.map((it) => it.label));
+    for (const it of items) {
+      expect(`${it.label} ${it.detail}`, `leaked: ${it.label}`).not.toMatch(/additional charge|uplift|internal/i);
+    }
+    // …because "Your Removal" absorbed it, to the penny.
+    const yr = items.find((it) => it.label === "Your Removal")!;
+    const yrPlain = plainItems.find((it) => it.label === "Your Removal")!;
+    expect(yr.amount - yrPlain.amount).toBeCloseTo(175.5, 6);
+    expect(yr.unit).toBeCloseTo(yr.amount, 6);
+  });
+
+  it("(c) discount + uplift together still reconcile through to the grand total", () => {
+    // kitchenSink carries discount 100; add the uplift on top.
+    const b = kitchenSink({ additionalCharges: 250 });
+    expect(b.discount).toBe(100);
+    const sum = customerLineItems(b).reduce((acc, it) => acc + it.amount, 0);
+    expect(sum).toBeCloseTo(b.subtotal, 6);
+    expect((sum - b.discount) * (b.vatEnabled ? 1.2 : 1)).toBeCloseTo(b.grandTotal, 6);
+  });
+
+  it("a breakdown stored BEFORE migration 0105 (no additionalCharges field) still renders", () => {
+    // The PDF renders from the stored breakdown JSON; old quotes lack the field.
+    const { additionalCharges: _drop, ...legacy } = kitchenSink();
+    const items = customerLineItems(legacy as Parameters<typeof customerLineItems>[0]);
+    const sum = items.reduce((acc, it) => acc + it.amount, 0);
+    expect(Number.isNaN(sum)).toBe(false);
+    expect(sum).toBeCloseTo(legacy.subtotal, 6);
+  });
+});
