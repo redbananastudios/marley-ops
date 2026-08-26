@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import { buildCompletionCertDocDef, type CompletionCertData } from "@/lib/completion-cert-docdef";
+import type { DocBrand } from "@/lib/pdf/doc-brand";
 import { completeJobAction } from "@/app/actions/crew-signatures";
 import { useOutbox } from "@/components/offline/outbox-provider";
 import { PendingSyncBadge } from "@/components/offline/offline-sync-bar";
@@ -66,6 +67,9 @@ export interface CompletionJobInfo {
   fromLine: string;
   toLine: string;
   crewNameDefault: string;
+  /** The job's brand, resolved server-side (multi-brand PRD §3.6) — the cert
+   *  is a JOB document. Absent/null renders today's default-brand cert. */
+  brand?: DocBrand | null;
 }
 
 export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJobInfo; triggerClassName?: string }) {
@@ -115,6 +119,7 @@ export function CompleteJobButton({ job, triggerClassName }: { job: CompletionJo
               year: "numeric",
               timeZone: "Europe/London",
             }),
+            brand: job.brand ?? null,
           };
           certB64 = await pdfToBase64(buildCompletionCertDocDef(cert));
         }

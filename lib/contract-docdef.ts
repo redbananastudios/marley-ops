@@ -22,6 +22,8 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import type { DocBrand } from "@/lib/pdf/doc-brand";
+
 const C = {
   red: "#C03838",
   ink: "#1F1D1B",
@@ -57,6 +59,9 @@ export interface ContractDocData {
   termsBody: string;
   /** True when the terms have not yet been through a solicitor. */
   legalReviewPending: boolean;
+  /** The job's brand (multi-brand PRD §3.6 — a contract is a JOB document).
+   *  Absent/null renders today's default-brand literals, byte-identical. */
+  brand?: DocBrand | null;
 }
 
 const fmtDate = (d: string | null): string => {
@@ -109,9 +114,12 @@ export function termsToContent(markdown: string): any[] {
 }
 
 export function buildContractDocDef(d: ContractDocData): any {
+  // Data rule, never a slug switch: no brand → today's constants (byte-parity);
+  // a brand → its WCAG-picked colour and row-sourced identity lines.
+  const accent = d.brand?.colour ?? C.red;
   const tick = (ok: boolean) => ({
     text: ok ? "YES" : "NOT TICKED",
-    color: ok ? C.ink : C.red,
+    color: ok ? C.ink : accent,
     bold: true,
     fontSize: 8,
   });
@@ -128,7 +136,18 @@ export function buildContractDocDef(d: ContractDocData): any {
       margin: [40, 16, 40, 0],
     }),
     content: [
-      { text: "MARLEY MOVES", font: "Cormorant", fontSize: 20, color: C.red, margin: [0, 0, 0, 2] },
+      { text: (d.brand?.name ?? "MARLEY MOVES").toUpperCase(), font: "Cormorant", fontSize: 20, color: accent, margin: [0, 0, 0, 2] },
+      // Group disclosure + legal-entity line beside the brand identity — a
+      // second brand is a trading name, and a contract must say whose.
+      ...(d.brand
+        ? [
+            {
+              text: [d.brand.groupLine, d.brand.legalLine].filter(Boolean).join("  ·  "),
+              style: "meta",
+              margin: [0, 0, 0, 6],
+            },
+          ]
+        : []),
       { text: d.documentTitle.toUpperCase(), style: "docTitle", margin: [0, 0, 0, 10] },
 
       // What was agreed, at a glance.
@@ -159,7 +178,7 @@ export function buildContractDocDef(d: ContractDocData): any {
             [
               {
                 stack: [
-                  { text: "SIGNATURE", style: "colHead", color: C.red, margin: [0, 0, 0, 6] },
+                  { text: "SIGNATURE", style: "colHead", color: accent, margin: [0, 0, 0, 6] },
                   d.signatureImage
                     ? { image: d.signatureImage, fit: [200, 55], margin: [0, 0, 0, 4] }
                     : { text: d.signerName, font: "Cormorant", fontSize: 20, margin: [0, 2, 0, 6] },
@@ -167,7 +186,7 @@ export function buildContractDocDef(d: ContractDocData): any {
                   { text: d.signerName, bold: true, fontSize: 10, margin: [0, 4, 0, 1] },
                   {
                     text:
-                      `Signed ${d.channel === "in_person" ? "in person on a Marley Moves device" : "online"}` +
+                      `Signed ${d.channel === "in_person" ? `in person on a ${d.brand?.shortName ?? "Marley Moves"} device` : "online"}` +
                       `${d.collectedByName ? ` (collected by ${d.collectedByName})` : ""}` +
                       ` · ${d.method === "drawn" ? "drawn" : "typed"} signature · ${d.signedAtLabel}` +
                       `${d.ip ? ` · from ${d.ip}` : ""}`,
@@ -199,7 +218,7 @@ export function buildContractDocDef(d: ContractDocData): any {
       // The tick-boxes, in the wording shown at the time.
       ...(d.acknowledgments.length
         ? [
-            { text: "WHAT THE CUSTOMER CONFIRMED", style: "colHead", color: C.red, margin: [0, 0, 0, 5] },
+            { text: "WHAT THE CUSTOMER CONFIRMED", style: "colHead", color: accent, margin: [0, 0, 0, 5] },
             {
               table: {
                 widths: ["auto", "*"],

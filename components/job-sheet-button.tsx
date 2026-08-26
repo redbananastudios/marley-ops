@@ -78,7 +78,8 @@ export function JobSheetButton({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `job-sheet-${slug}.pdf`;
+      // Brand-prefixed filename (PRD §10); the default-brand name is unchanged.
+      a.download = res.data.brand ? `${res.data.brand.shortName}-job-sheet-${slug}.pdf` : `job-sheet-${slug}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();

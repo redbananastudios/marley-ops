@@ -56,7 +56,15 @@ export interface QuoteFormValues {
   /** In-person survey capture — notes from the visit. Not priced (informational,
    *  stored with the quote). Photos live in survey_photos, keyed by the lead. */
   survey: { accessNotes: string; largeItemsNotes: string };
-  review: { discount: number; quoteNotes: string };
+  review: {
+    discount: number;
+    /** Internal uplift (PRD §3.9) — priced into the subtotal by computeQuote(),
+     *  folded inside the customer's "Your Removal" line. Never itemised to the customer. */
+    additionalCharges: number;
+    /** Short internal reason for the uplift (commercial access, stairs, …). Internal view only. */
+    additionalChargesReason: string;
+    quoteNotes: string;
+  };
   vatEnabled: boolean;
 }
 
@@ -131,7 +139,7 @@ export function defaultQuoteValues(): QuoteFormValues {
     extras: { congestion: false, tolls: 0, parking: 0 },
     items: { ...ZERO_ITEMS },
     survey: { accessNotes: "", largeItemsNotes: "" },
-    review: { discount: 0, quoteNotes: "" },
+    review: { discount: 0, additionalCharges: 0, additionalChargesReason: "", quoteNotes: "" },
     vatEnabled: false,
   };
 }
@@ -192,6 +200,7 @@ export function deriveInputs(v: QuoteFormValues): QuoteInputs {
     congestion: v.extras.congestion,
     tolls: Number(v.extras.tolls) || 0,
     parking: Number(v.extras.parking) || 0,
+    additionalCharges: Number(v.review.additionalCharges) || 0,
     discount: Number(v.review.discount) || 0,
     vatEnabled: v.vatEnabled,
   };

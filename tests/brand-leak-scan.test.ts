@@ -119,6 +119,48 @@ describe("brand-leak scan — the manifest is alive", () => {
       expect(files, `${f} is a per-brand rail and must NOT be under scan`).not.toContain(f);
     }
   });
+  it("expands the gate-14 entries to the JOB doc-defs, the shared brand module and the call sites", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "lib/contract-docdef.ts",
+      "lib/completion-cert-docdef.ts",
+      "lib/job-sheet-docdef.ts",
+      "lib/quote/pdf-client.ts",
+      "lib/pdf/doc-brand.ts",
+      "app/(dashboard)/quotes/[id]/page.tsx",
+      "app/api/documents/contract/[signatureId]/route.ts",
+      "lib/job-sheet-load.ts",
+      "lib/crew-sheet/daily-data.ts",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+  });
+
+  it("expands the gate-21 entries to the reporting libs, /performance and the dashboard home", () => {
+    const { files } = expandManifest();
+    for (const f of [
+      "lib/sales-report.ts",
+      "lib/storage-report.ts",
+      "lib/estimator.ts",
+      "components/performance/sales-tab.tsx",
+      "components/performance/storage-tab.tsx",
+      "app/(dashboard)/performance/page.tsx",
+      "lib/dashboard/compute.ts",
+      "components/dashboard/dashboard-view.tsx",
+      "app/(dashboard)/page.tsx",
+    ]) {
+      expect(files, `${f} must be under scan`).toContain(f);
+    }
+  });
+
+  it("keeps the GROUP doc-defs OUT of the manifest — they carry default identity by design (PRD §3.6)", () => {
+    // Documents about the GROUP (crew day sheet, contractor statement) render
+    // the group identity on purpose; listing them would force allows for
+    // literals that are the document's actual content, hollowing the scan.
+    const { files } = expandManifest();
+    expect(files).not.toContain("lib/crew-sheet/daily-docdef.ts");
+    expect(files).not.toContain("lib/staff/statement-docdef.ts");
+  });
 });
 
 describe("brand-leak scan — shared-surface allows are evidence-disciplined", () => {

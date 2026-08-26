@@ -17,9 +17,28 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | # | File | What it does | Quiet-window sensitive |
 |---|---|---|---|
 | 1 | `supabase/migrations/0104_brands.sql` | brands table + seed (pitmans `active=false`), brand columns on leads/quotes/appointments/storage_sites/storage_lets/vehicles, `brand_ref_counters`, `next_quote_ref(kind, brand default 'marley')` (drops the one-arg) | **YES** — counter seed races live quote acceptance; also DROPs the RPC signature PostgREST has cached |
-| 2 | `supabase/migrations/0106_ingest_brand.sql` | replaces 0102's global unique index on `leads.external_lead_id` with `leads_external_lead_brand_uq` on `(brand, external_lead_id)` — two brands' websites can mint the same submission id without the second being silently swallowed as a duplicate of the first | No — index swap on a small table; creates the new index before dropping the old, so uniqueness never lapses |
+| 2 | `supabase/migrations/0105_additional_charges.sql` | `quotes.additional_charges numeric(10,2) not null default 0` + `quotes.additional_charges_reason text` — internal uplift (PRD §3.9), folded inside the customer's "Your Removal" line; default 0 backfills every existing quote as "no uplift" | No — additive columns with defaults; existing rows and totals untouched |
+| 3 | `supabase/migrations/0106_ingest_brand.sql` | replaces 0102's global unique index on `leads.external_lead_id` with `leads_external_lead_brand_uq` on `(brand, external_lead_id)` — two brands' websites can mint the same submission id without the second being silently swallowed as a duplicate of the first | No — index swap on a small table; creates the new index before dropping the old, so uniqueness never lapses |
 
 *(rows appended per gate)*
+
+### The image/migration window cuts BOTH ways — keep it inside the quiet window
+
+There is no deploy order that is safe on its own, so do not treat either half as
+the "safe first step":
+
+- **Image first, then migrations** (what "confirm prod == the promoted `master`
+  tip" above implies): between the two, `quotes` has no `additional_charges`
+  column, so `/quotes/[id]` gets a PostgREST 42703. That page drops the error and
+  falls through to `notFound()`, so **every quote in the system renders as a 404**
+  — indistinguishable from a deleted quote, with nothing logged.
+- **Migrations first, then image**: 0104 DROPs the one-arg `next_quote_ref`, so the
+  still-running old image cannot mint a quote reference — **quote creation fails**
+  until the new image is up.
+
+Both windows are minutes, and both are survivable only because nobody is issuing
+quotes. Do the whole operation — image and all migrations — inside the single
+quiet window, and re-check `/quotes/<a real id>` loads before reopening.
 
 ---
 
@@ -53,6 +72,19 @@ update brand_ref_counters set n = greatest(n, (select case when is_called then l
 
 -- Columns landed:
 select count(*) as leads_marley from leads where brand = 'marley';
+```
+
+### 0105
+
+```sql
+-- Columns landed, every existing quote backfilled to a zero uplift (the
+-- migration is inert for live totals — subtotal/grand_total are untouched):
+select count(*) as quotes_total,
+       count(*) filter (where additional_charges = 0) as quotes_zero_uplift,
+       count(*) filter (where additional_charges <> 0) as quotes_with_uplift
+from quotes;
+-- quotes_with_uplift MUST be 0 immediately after the migration; the first
+-- non-zero rows appear only once the office starts using the builder field.
 ```
 
 Then, from the app (not psql): create one draft quote on a test lead and confirm it receives the next `MMR###` in sequence — that proves PostgREST resolved the new function signature. Do NOT call `next_quote_ref` from psql to "test" it: every call mints a real reference.

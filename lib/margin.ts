@@ -106,7 +106,10 @@ export function marginPct(revenue: number, cost: number): number {
  * VAT the business actually hands to HMRC, so pass-through tax isn't read as profit.
  *
  * A quote's agreed_price / grand_total is the GROSS (VAT-inclusive when the quote
- * charged VAT). The rate-card jobCost carries no VAT, so to compare like-for-like we
+ * charged VAT). That gross already contains the internal additional-charges uplift
+ * (PRD §3.9 — computeQuote prices it into the subtotal), so the uplift counts as
+ * revenue here with NO separate term: adding one would double-count it. The
+ * rate-card jobCost carries no VAT, so to compare like-for-like we
  * strip the VAT LIABILITY off revenue (mirrors lib/finance/invoices.ts `vatOwed`):
  *   - vatEnabled false → the price carried no VAT; nothing to strip → net = gross.
  *   - standard scheme  → owe the 20% charged             → net = gross / 1.2.

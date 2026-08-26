@@ -3,6 +3,8 @@ import { requireOfficeProfile } from "@/lib/ai/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildContractDocDef, type ContractDocData } from "@/lib/contract-docdef";
 import { renderPdfBuffer } from "@/lib/pdf/server-pdf";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { docBrandFrom, type DocBrand } from "@/lib/pdf/doc-brand";
 import { versionById } from "@/lib/legal/documents";
 import { signatureKindLabel } from "@/lib/signatures";
 import { errorContext, log } from "@/lib/log";
@@ -81,12 +83,12 @@ export async function GET(_req: Request, ctx: { params: Promise<{ signatureId: s
     sig.quote_id
       ? sb
           .from("quotes")
-          .select("quote_ref, customer_name, moving_date, agreed_price, grand_total")
+          .select("quote_ref, customer_name, moving_date, agreed_price, grand_total, brand")
           .eq("id", sig.quote_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
     sig.lead_id
-      ? sb.from("leads").select("name, from_address, from_postcode, to_address, to_postcode").eq("id", sig.lead_id).maybeSingle()
+      ? sb.from("leads").select("name, from_address, from_postcode, to_address, to_postcode, brand").eq("id", sig.lead_id).maybeSingle()
       : Promise.resolve({ data: null }),
     sig.collected_by
       ? sb.from("profiles").select("full_name").eq("id", sig.collected_by).maybeSingle()
@@ -104,6 +106,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ signatureId: s
     : (version?.acknowledgments ?? []).map((a) => [a.key, a.label] as const);
 
   const addr = (a?: string | null, p?: string | null) => [a, p].filter(Boolean).join(", ");
+
+  // A contract is a JOB document — it carries the job's brand (PRD §3.6). The
+  // quote's brand wins (the ref was minted from it); a quote-less signature
+  // falls to the lead's. DEFAULT_BRAND skips the read entirely: the doc-def's
+  // own constants ARE that rendering, byte-identical to today.
+  const brandSlug = quote?.brand ?? lead?.brand ?? DEFAULT_BRAND;
+  const docBrand: DocBrand | null =
+    brandSlug === DEFAULT_BRAND ? null : docBrandFrom(await getBrandOrDefault(sb, brandSlug));
 
   const data: ContractDocData = {
     documentTitle: signatureKindLabel(sig.kind),
@@ -126,11 +136,16 @@ export async function GET(_req: Request, ctx: { params: Promise<{ signatureId: s
     termsSha256: sig.terms_sha256 ?? "",
     termsBody: sig.terms_snapshot,
     legalReviewPending: (version?.legal_review ?? "pending") !== "reviewed",
+    brand: docBrand,
   };
 
   try {
     const pdf = await renderPdfBuffer(buildContractDocDef(data));
-    const name = `marley-moves-${sig.kind.replace("_", "-")}-${quote?.quote_ref ?? sig.id.slice(0, 8)}.pdf`;
+    // Brand-prefixed filename (PRD §10); the default-brand name is unchanged.
+    const ref = quote?.quote_ref ?? sig.id.slice(0, 8);
+    const name = docBrand
+      ? `${docBrand.shortName}-${sig.kind.replace("_", "-")}-${ref}.pdf`
+      : `marley-moves-${sig.kind.replace("_", "-")}-${ref}.pdf`;
     return new NextResponse(new Uint8Array(pdf), {
       headers: {
         "Content-Type": "application/pdf",

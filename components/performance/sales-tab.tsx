@@ -54,14 +54,21 @@ export function SalesTab({
   preset,
   from,
   to,
+  brand = "all",
 }: {
   report: SalesReport;
   rangeLabel: string;
   preset: string;
   from: string;
   to: string;
+  /** `'all'` or an active brand slug (multi-brand PRD §4 /performance). The
+   *  preset links and the custom-range GET form both rebuild the URL from
+   *  scratch, so each must carry the filter forward or switching range would
+   *  silently drop it. `'all'` adds nothing — single-brand stays byte-identical. */
+  brand?: string;
 }) {
   const r = report;
+  const brandQS = brand !== "all" ? `&brand=${encodeURIComponent(brand)}` : "";
   return (
     <div className="space-y-6">
       {/* range picker — links for presets + a plain GET form for custom */}
@@ -70,7 +77,7 @@ export function SalesTab({
           {RANGE_PRESETS.map((p) => (
             <Link
               key={p.key}
-              href={`/performance?tab=sales&range=${p.key}`}
+              href={`/performance?tab=sales&range=${p.key}${brandQS}`}
               aria-current={preset === p.key ? "true" : undefined}
               className={segmentedItemClass(preset === p.key)}
             >
@@ -81,6 +88,7 @@ export function SalesTab({
         <form method="get" action="/performance" className="flex items-center gap-1.5">
           <input type="hidden" name="tab" value="sales" />
           <input type="hidden" name="range" value="custom" />
+          {brand !== "all" ? <input type="hidden" name="brand" value={brand} /> : null}
           <input
             type="date"
             name="from"

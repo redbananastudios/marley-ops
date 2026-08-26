@@ -965,6 +965,32 @@ export function Step7Review({
         help="Subtracted from the total. Goodwill or returning-customer adjustments live here."
       />
 
+      {/* Additional charges — internal uplift (PRD §3.9). Priced into the total
+          but folded inside the customer's "Your Removal" line: the customer sees
+          the number in their total, never as its own line, and the reason never
+          leaves the office. Grouped with the Discount box above by design. */}
+      <div className="mb-5 rounded-md border border-border bg-muted/40 p-4">
+        <div className="mb-3 flex items-baseline justify-between gap-3">
+          <FieldLabel>Additional charges</FieldLabel>
+          <span className="text-xs font-medium text-mist-400">Internal — not shown to the customer.</span>
+        </div>
+        <CurrencyField
+          label="Amount"
+          value={r.additionalCharges}
+          onChange={(v) => set("review", { ...r, additionalCharges: v })}
+          help="Added to the quote total inside “Your Removal” — the customer never sees it itemised."
+        />
+        <FieldLabel>Reason</FieldLabel>
+        <input
+          type="text"
+          value={r.additionalChargesReason}
+          onChange={(e) => set("review", { ...r, additionalChargesReason: e.target.value })}
+          placeholder="e.g. commercial access, stairs, specialist handling"
+          className="h-12 w-full rounded-md border border-input bg-card px-4 text-base text-foreground placeholder:text-mist-300 focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
+        />
+        <p className="mt-1.5 text-xs text-mist-400">Saved with the quote and shown to office and estimator only.</p>
+      </div>
+
       {/* Total card */}
       <div className="mb-6 overflow-hidden rounded-md border border-border">
         <div className="border-l-4 border-mm-red p-5">
