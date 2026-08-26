@@ -311,6 +311,10 @@ Ops, which is the only system that knows what has actually been paid.
 
 ## Decisions needed from Peter before gate 18 can finish
 
+> **Superseded in large part by section 12 (2026-08-26).** Four of the five below
+> were answered by a verified, adversarially-reviewed research pass. Read section 12
+> first and treat the list here as the record of what WAS open, not as outstanding work.
+
 1. **Branding themes** (§2) — two theme ids per brand means a migration widening
    `brands.ledger_branding_id`. Confirm the card-enabled / card-suppressed split.
 2. **Bank account codes** (§3) — the three Xero account codes for bank transfer,
@@ -327,3 +331,252 @@ Ops, which is the only system that knows what has actually been paid.
 `xero` references. Per PRD §12 the adapter is built and fixture-tested without
 them; a live-org test needs `XERO_CLIENT_ID`/`XERO_CLIENT_SECRET` plus the one-off
 authorisation run.
+---
+
+## 12. Answers (2026-08-26) — verified research pass, adversarially reviewed
+
+Nine agents: four Xero-API researchers each independently refuted by a skeptic, plus
+a read-only code analysis of the flip. **No claim survived on prose alone** — every
+one below carries either a quoted Xero doc sentence or a `file:line`. Where a claim
+could not be closed it is marked as such rather than smoothed over.
+
+Two research-process facts worth keeping: `developer.xero.com` and `central.xero.com`
+are fully client-rendered and CAPTCHA-protected respectively, so the doc text was read
+through the Gatsby `page-data.json` payloads and a rendering proxy, not from a plain
+fetch. And the OpenAPI `_autodocs/*` summaries were wrong **again** — a third instance
+after the two §1 already records: context7 gives the contact record-filter path as
+`/Contacts/ContactNumber/{ContactNumber}`, while `xero_accounting.yaml` defines
+`/Contacts/{ContactNumber}`. Implementing from the summary produces a 404. Treat
+`_autodocs` as unusable in this spec.
+
+### 12.1 Card — Xero CAN point "Pay now" at our existing takepayments rail
+
+Xero never processes card money itself; it renders a Pay Now button that hands the
+customer to a payment service attached to the branding theme. The built-in UK options
+are Stripe, GoCardless, PayPal and Square. **takepayments is not one of them** — but a
+fourth type is, and it changes the answer:
+
+> `PaymentServiceUrl` — "The custom payment URL. This URL should contain placeholders
+> that will be replaced with relevant invoice data. These placeholders are
+> `[INVOICENUMBER]`, `[CURRENCY]`, `[AMOUNTDUE]` & `[SHORTCODE]`"
+
+So Xero's button can deep-link into an `ops.marleymoves.co.uk` page that mints the
+signed takepayments form — **one card rail, not two**. It has to be a page of ours
+rather than a direct link because the takepayments HPP "only accepts a browser POST;
+there is no link-minting API" (`app/q/[token]/pay-card-button.tsx:4-7`).
+
+Access caveat, and it decides *who* configures it: creating a payment service **via
+the API** is closed to us — "Payment service details can only be accessed by
+specifically certified payment service partners", gated behind Xero's revenue-share
+agreement and App-partner review. The **UI** route (Settings → Payment Services → Add)
+appears generally available; Xero Central publishes "Add a payment service that uses a
+custom URL", and five independent vendor integration guides describe the same
+self-serve path. The article body itself was CAPTCHA-blocked, so this is
+well-attested but not read from Xero's own words. **Peter configures it once in the
+Xero UI; we never call the PaymentServices API.**
+
+If instead card is left OFF in Xero, nothing needs building: `disableOnlinePayments`
+becomes a no-op and the /q rail is unchanged. **§2's "two branding themes per brand"
+is only required if card is enabled AND must be suppressed per invoice.**
+
+### 12.2 Bank accounts — discover them, do not ask for codes
+
+`PUT /Payments` accepts **either** `Account.Code` or `Account.AccountID`, and the
+account "needs to be either an account of type BANK or have enable payments to this
+accounts switched on".
+
+- **Send `AccountID`, not `Code`.** Xero's own doc says "not all accounts have a code
+  value", and Code is user-editable in the Chart of Accounts UI. AccountID is the
+  stable id — which is also what `context/rules.md`'s "look a record up by its stable
+  id" demands. Keep Code for display only.
+- **The discovery filter is a union: `Type=="BANK" OR EnablePaymentsToAccount==true`.**
+  Filtering on the flag alone drops real bank accounts (Xero's own `GET /Accounts`
+  example returns a `Type: BANK` account with `EnablePaymentsToAccount: false`);
+  filtering on `Type=="BANK"` alone misses a clearing account modelled as a
+  current asset with payments switched on. Fetch `/Accounts` unfiltered — Xero warns
+  to "restrict your queries to simple == operations" — and filter client-side.
+- **There is no method field to write.** `PaymentType` is `readOnly`, and
+  `Details`/`Particulars`/`BankAccountNumber` are supplier/AP fields ("The information
+  to appear on the supplier's bank account"). The account choice *is* the record of
+  the rail. Do not put the rail in `Reference` either: §4 needs `Reference` to stay
+  exactly the quote ref for the `where=Reference=="…"` re-map, and §4 wins.
+- A BANK-type clearing account is the right home for card receipts — Xero Central
+  documents the same shape for Stripe payouts. It must be created as `Type=BANK`, or
+  the payment PUT needs the flag set manually and Xero's payout reconciliation is
+  unavailable.
+- **The mode resolver should be an exhaustive `switch` with a `never` guard**, not a
+  ternary chain. `zohoMode` (`accept-flow.ts:1290`) is a fallback map — anything that
+  is not "cash" or "card" becomes "banktransfer". Correct by construction today
+  because the input unions are closed, but a fourth rail would silently post to the
+  bank account instead of failing to compile.
+
+**Verified in our code:** all three `recordInvoicePayment` call sites derive the mode
+from a closed three-literal union, and the one path without a real method (the poll
+cron) passes `recordInZoho: false`, so it never writes a payment at all.
+
+### 12.3 Contacts — key on `clients.id`, never on a name or a search rank
+
+Peter's "we use email/phone as the key so names may duplicate" is exactly right, and
+Xero agrees about names:
+
+> "We recommend all developers use ContactID to uniquely reference contacts in Xero
+> and do not rely on ContactName as a way to reference contact data uniquely in Xero."
+
+`ContactNumber` is API-settable, max 50 chars, documented as "a custom identifier
+specified from another system", and fetchable as `GET /Contacts/{ContactNumber}`.
+`MMOPS-{clients.id}` is 42 chars and stable across name, email and phone changes —
+which is what our clients dedupe spine already guarantees.
+
+Resolution order (each step exact-match; none returns a ranked list to choose from):
+
+1. stored ContactID → `GET /Contacts/{ContactID}`, assert `ContactStatus == ACTIVE`
+2. `GET /Contacts/MMOPS-{clients.id}`
+3. `GET /Contacts?where=EmailAddress="…"` — adopt **only** on exactly one ACTIVE row;
+   zero → create; two or more → create nothing and alert. Ambiguity yields nothing.
+4. create with **`PUT /Contacts`, never `POST`** — PUT is documented to error on a
+   ContactName/ContactNumber match, while POST is "create or update" and could
+   silently retarget another customer's contact
+5. on a duplicate-name ValidationException, retry once with a **deterministic** suffix
+   from the stable id (`John Smith (a1b2c3d4)`) — never a counter, which mints
+   `(2)`, `(3)`, `(4)` for one customer across crash-retries
+
+Three corrections the skeptic added, all material:
+
+- **Never blind-stamp ContactNumber on an email-matched contact.** Xero's own
+  best-practice page: "please check the existing contacts in Xero to make sure that
+  they don't already have a contact number assigned from another app integration."
+  Read it first and skip when present.
+- Step 3 runs against a default GET, which **excludes archived contacts** — so it can
+  return zero and fall through to a create that then collides on the name.
+- Branch on **HTTP 400 + `Type == "ValidationException"`**, never on the error string:
+  that wording is quoted from third-party integrator docs, not from Xero.
+
+**Interface consequence for gate 17/18:** `findOrCreateContact` must gain the stable
+`clientId`. All five call sites already have it in scope (`accept-flow.ts:1088/1574/2510`,
+`raise-storage-invoices.ts:415`, `refund-vat.ts:249`) — but `quotes.client_id` is
+**nullable**, so the null case needs an explicit answer rather than a fallback to name.
+
+**Two things must be probed against a live org before gate 18 closes**, neither
+expensive, both changing the failure handling: (a) does archiving a contact free its
+name — §5 asserts it does not, Xero's own error text says "unique across all **active**
+contacts", and the two contradict; (b) what `POST /Contacts` actually does on a name
+collision with no id supplied.
+
+### 12.4 Staging — the Demo Company, on a separate app, asserted by CLASS not by id
+
+Xero has no dedicated sandbox. Two non-production options: the **Demo Company** (free,
+API-writable through the ordinary OAuth flow, resets every **28 days**) and a **trial
+org** (30 days then billing required, arrives empty, and explicitly **cannot be
+reset**). Use the Demo Company.
+
+- **Register a separate developer app for staging.** Xero meters connections and API
+  volume per app and apps "cannot share connection counts or API volume used, even if
+  they are from the same developer", so staging can never eat prod's daily limit. It
+  also makes the boundary physical — the same property Zoho gets from a Self Client
+  under a separate login.
+- **Assert `Organisation.Class === "DEMO"` before any write, not a pinned tenant id.**
+  The Zoho pattern hardcodes `DEMO_ORG = "20117092566"`, but a Xero demo tenantId may
+  change on every reset, so a literal would break each cycle and tempt someone to edit
+  it. A class assertion also fails safe against a tenant nobody has seen before.
+- **What the 28-day reset destroys is configuration, not test data:** the bank/cash/
+  clearing accounts (§12.2), any branding themes (§12.1), the VAT rates, and the
+  `ledger_tokens` row's `refresh_token` **and** `tenant_id`. So the re-authorisation
+  script must upsert both, and an idempotent `scripts/xero-demo-bootstrap.mjs` should
+  rebuild the org state — otherwise staging is a manual re-setup every 28 days and
+  someone will eventually skip a step silently.
+- **Read `tenant_id` per call, never latch it.** Xero: "Always treat xero-tenant-id as
+  dynamic per request and never cache it globally across threads." `lib/zoho.ts`
+  latches its auth state in module-level variables; the Xero adapter must not.
+- **Constraint with no workaround:** you "can not invite other users to access your
+  demo company". Connor and Mark cannot be given a login to a Xero staging org the way
+  they could to Zoho's Demo Removals. If anyone but Peter must eyeball staging
+  invoices, that alone forces a trial or paid org.
+- **Check before the cutover window, not inside it:** "each organisation or practice is
+  limited to connecting a maximum of two uncertified apps." If Connor's live org already
+  has two (a bank feed, a receipt scanner), the prod app is refused at consent.
+
+Rate limits are per tenant: 5 concurrent, 60/min, 1,000/day on the free Starter tier.
+Worth noting against §10's finding that /finance already makes up to 40 upstream calls
+per page load.
+
+### 12.5 The flip — per-INVOICE-SLOT provider stamp (sequence B)
+
+Sequence A (drain open Zoho invoices to zero, then flip globally) is **rejected**: the
+open set is not a backlog, it is a flow. The T-7 chase raises a new balance invoice for
+every accepted booking and storage bills every period, so draining means suspending
+invoice raising — an outage, not a window. Its only irreversible cost is worse: every
+invoice voided to force the drain leaves the customer holding a PDF for money they are
+then re-invoiced for under a different number.
+
+**A per-quote stamp is definitively insufficient**, which was not obvious:
+`ensureCommitmentInvoice` (`accept-flow.ts:1604`) and the T-7 balance raise
+(`:2550`, driven by `chase/route.ts:1139-1141`) both mint **new** invoice ids on quotes
+accepted long before the flip, and the supersede path (`:349-357`) copies an old
+provider's deposit invoice id **and contact id** onto a brand-new quote. Zoho deposit
+beside Xero balance on one quote is the **normal** state of every live booking crossing
+the flip, not an edge case. Columns needed: four on `quotes`
+(deposit/commitment/balance/contact), one on `storage_invoices`, one optional on
+`card_payments`, plus a key inside `refund_queue.held` jsonb.
+
+No constraint is in the way — every `zoho_*` id column is bare nullable text with no
+unique index, NOT NULL or FK. Prefer **nullable + a check** (`id is null or provider is
+not null`) over `not null default 'zoho'`: the default is honest for the backfill but
+becomes a silent lie the first time a write forgets the column.
+
+**The contact id is the sharpest edge.** `isRealZohoId` only tests non-null and
+`<> 'pending'` — it has no concept of which provider minted the id — so all three raise
+paths hand a Zoho contact id straight to Xero's `createInvoice`. The commitment path is
+worst: it self-heals from the customer's own `/q` page load, so a customer refreshing
+their booking page generates a fresh failed create and a fresh ops alert every time.
+
+**The scheduling fact that actually decides this:** there is exactly one promotion to
+prod (18 September) and prod migrations are human-run over SSH. The question is not
+"when do we flip" — it is **"does the stamp migration make the 18 September train"**.
+If it does, the flip is a low-drama env edit on any day after the 18th. If it misses,
+the only fallback is routing by id shape (Zoho ids are numeric, Xero ids are GUIDs),
+which is cheap and fails closed but rests on an **inference about an opaque third-party
+id format** sitting on money code. That inference is provable — once the snapshot runs,
+one query over `ledger_invoice_archive` shows whether any stored Zoho id is GUID-shaped.
+
+**Reject explicitly: deriving the provider from a DATE.** `quotes` has
+`balance_invoice_created_at` and `commitment_invoice_created_at` but **no**
+`deposit_invoice_created_at`, and the supersede path copies an old deposit id onto a
+quote whose `created_at` is after any cutover. Cheaper than a column and wrong in
+exactly the rows that matter.
+
+### 12.6 What was fixed immediately, because every sequence needs it
+
+The two automated pollers were **silent**, and design §8 understated it: they did not
+merely fail quietly, they reported healthy runs that then **cleared their own alarm**.
+
+- `syncZohoPayments` had three bare `catch {}` — no log, no counter, no alert. The
+  cron's `checked` counts rows **examined**, not statuses **read**, so a total provider
+  outage returned `{checked: 25, settled: 0}`, byte-identical to a day nobody paid;
+  `runCron` saw no throw and called `resolveOperationalIssue`.
+- `storage-billing` logged a warning the run summary never carried.
+
+Both now count reads and failures separately and surface them, and a sweep in which
+**every** read failed returns `ok: false` via the shared `blindSweepFailure` helper —
+so a blind run is a failed run, while a partial failure stays a visible count rather
+than an alarm people learn to ignore. Without this, the first evidence of a bad flip
+would have been a customer who had already paid receiving a chase.
+
+**One thing that made §8 less alarming than feared:** `syncZohoPayments` passes
+`recordInZoho: false` at all three branches, so it never records a payment against a
+stale id. §8's hazard is real but confined to the **read** direction.
+
+### 12.7 Still genuinely open
+
+1. **Does Marley want card offered on Xero invoices at all?** (§12.1) Peter's call —
+   everything else about card is now settled either way.
+2. **Which three accounts** the picker's rails map to, once credentials exist (§12.2).
+   Not a lookup for Peter: three choices from a list we render.
+3. **Null `quotes.client_id`** at the contact call sites (§12.3).
+4. **`clients.merged_into_id`** — a client row can be tombstoned after its
+   ContactNumber is already stamped into Xero, leaving a contact keyed on a dead id.
+   Needs a rule (follow the merge, or re-stamp).
+5. **Invoice PDFs** — Zoho's own VAT documents die with the account. Archive to a
+   private bucket? UK VAT retention is commonly cited as six years; confirm with the
+   accountant.
+6. **Two live-org probes** before gate 18 closes (§12.3): does archiving free a name,
+   and what does `POST /Contacts` do on a name collision.

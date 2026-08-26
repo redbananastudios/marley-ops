@@ -30,7 +30,7 @@ import { accountsFromFor, ownerIdentity } from "@/lib/comms/sender";
 import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { ensureRemovalAppointment } from "@/lib/schedule/ensure-removal-appointment";
-import { log } from "@/lib/log";
+import { log, errorContext } from "@/lib/log";
 import { sendPushForEvent } from "@/lib/push/send";
 import {
   allAcksConfirmed,
@@ -2758,14 +2758,50 @@ export async function markBalancePaid(
 /* ------------------------------------------------------------- Zoho payment sync */
 
 /**
+ * Tally of ledger status reads for ONE sweep. Exists because a poller that
+ * cannot reach the books must not be indistinguishable from a quiet day.
+ *
+ * The three catches below are deliberately non-fatal — a transient outage
+ * genuinely is caught by the next pass, and throwing would abandon the rest of
+ * the sweep. But swallowing them silently meant the zoho-deposits cron returned
+ * `{checked: 25, settled: 0}` under a TOTAL provider outage, byte-identical to a
+ * day where nobody paid — and `runCron` then RESOLVED the operational issue,
+ * clearing the one surface that would have shown the problem. Counting the reads
+ * separately from the rows is what makes "I could not check" legible.
+ *
+ * This matters most at the ledger flip: a stored Zoho id polled against Xero
+ * fails on every pass, and without this it fails invisibly while customers who
+ * have paid go on being chased.
+ */
+export interface LedgerReadStats {
+  /** Status reads attempted this sweep. */
+  attempted: number;
+  /** Of those, how many could not be completed. */
+  failed: number;
+}
+
+/**
  * Poll Zoho for card (or manually-recorded) payments on this quote's invoices
  * and run the corresponding paid pipeline. Used by the deposit cron and the
  * accept page (instant confirmation when the customer returns after paying).
+ *
+ * `stats`, when passed, accumulates across quotes so the caller can tell a quiet
+ * sweep from a blind one. The /q page omits it: that read self-heals on the next
+ * page load and has a human looking at the result.
  */
-export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<AcceptQuoteRow> {
+export async function syncZohoPayments(
+  sb: Sb,
+  quote: AcceptQuoteRow,
+  stats?: LedgerReadStats,
+): Promise<AcceptQuoteRow> {
   let changed = false;
+  const readFailed = (slot: string, e: unknown) => {
+    if (stats) stats.failed++;
+    log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, ...errorContext(e) });
+  };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
     try {
+      if (stats) stats.attempted++;
       const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
       if (s.status === "paid") {
         // BACS, not card — same reasoning as the commitment branch below. No
@@ -2779,12 +2815,13 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
         await markDepositPaid(sb, quote.id, { method: "bank_transfer", actorId: null, recordInZoho: false });
         changed = true;
       }
-    } catch {
-      /* Zoho unreachable — next pass catches it */
+    } catch (e) {
+      readFailed("deposit", e); // next pass retries; the COUNT is what makes it visible
     }
   }
   if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
     try {
+      if (stats) stats.attempted++;
       const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id);
       if (s.status === "paid") {
         // Commitment is BACS/cash only; a payment Connor records in Zoho lands
@@ -2796,8 +2833,8 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
         });
         changed = true;
       }
-    } catch {
-      /* Zoho unreachable — next pass catches it */
+    } catch (e) {
+      readFailed("commitment", e);
     }
   }
   if (isRealZohoId(quote.zoho_balance_invoice_id) && quote.lead_id) {
@@ -2808,14 +2845,15 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
         .eq("id", quote.lead_id)
         .single();
       if (lead && !lead.balance_paid_at) {
+        if (stats) stats.attempted++;
         const s = await getInvoiceStatus(quote.zoho_balance_invoice_id);
         if (s.status === "paid") {
           await markBalancePaid(sb, quote.id, null);
           changed = true;
         }
       }
-    } catch {
-      /* next pass */
+    } catch (e) {
+      readFailed("balance", e);
     }
   }
   return changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
