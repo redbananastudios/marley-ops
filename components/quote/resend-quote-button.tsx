@@ -13,6 +13,7 @@ import { useMemo, useState } from "react";
 import { Mail } from "lucide-react";
 import { computeQuote, type PricingConfig } from "@/lib/quote/pricing";
 import { deriveInputs, type QuoteFormValues } from "@/lib/quote/form-types";
+import type { DocBrand } from "@/lib/pdf/doc-brand";
 import { SendQuoteDialog } from "@/components/quote/send-quote-dialog";
 import { useRouter } from "next/navigation";
 
@@ -28,6 +29,7 @@ export function ResendQuoteButton({
   vatNumber,
   depositAmount,
   acceptUrl,
+  brand,
   open: openProp,
   onOpenChange,
 }: {
@@ -43,6 +45,8 @@ export function ResendQuoteButton({
   vatNumber?: string;
   depositAmount?: number;
   acceptUrl?: string;
+  /** Non-default brand for the attached PDF (PRD §3.6) — absent means Marley. */
+  brand?: DocBrand | null;
   /** Controlled mode: when `open`/`onOpenChange` are supplied the built-in
    *  trigger is suppressed and the dialog is driven from outside (the quote
    *  header opens it from its "⋯ More" overflow menu). */
@@ -82,6 +86,7 @@ export function ResendQuoteButton({
         vatNumber={vatNumber}
         depositAmount={depositAmount}
         acceptUrl={acceptUrl}
+        brand={brand}
         resend
         onSent={() => router.refresh()}
       />

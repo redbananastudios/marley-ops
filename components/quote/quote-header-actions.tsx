@@ -36,6 +36,7 @@ import {
 import type { LeadOption } from "@/components/schedule/appointment-dialog";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { PricingConfig } from "@/lib/quote/pricing";
+import type { DocBrand } from "@/lib/pdf/doc-brand";
 import { AcceptQuoteButton } from "@/components/quote/accept-quote-button";
 import { RejectQuoteButton } from "@/components/quote/reject-quote-button";
 import { DeleteQuoteButton } from "@/components/quote/delete-quote-button";
@@ -69,6 +70,8 @@ export interface QuoteHeaderActionsProps {
   estimatorName: string | null;
   vatNumber?: string;
   acceptUrl?: string;
+  /** Non-default brand for the re-send's attached PDF (PRD §3.6) — absent means Marley. */
+  brand?: DocBrand | null;
 }
 
 export function QuoteHeaderActions({
@@ -89,6 +92,7 @@ export function QuoteHeaderActions({
   estimatorName,
   vatNumber,
   acceptUrl,
+  brand,
 }: QuoteHeaderActionsProps) {
   const [resendOpen, setResendOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -200,6 +204,7 @@ export function QuoteHeaderActions({
           vatNumber={vatNumber}
           depositAmount={depositAmount}
           acceptUrl={acceptUrl}
+          brand={brand}
           open={resendOpen}
           onOpenChange={setResendOpen}
         />

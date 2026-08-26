@@ -18,6 +18,7 @@ import {
   ChevronLeft,
   ChevronRight,
   GripVertical,
+  Info,
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -45,6 +46,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { JobSheetButton } from "@/components/job-sheet-button";
 import { LEAD_STATUS_META } from "@/components/lead-status-badge";
+import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import {
   apptDays,
   apptWindow,
@@ -66,6 +68,10 @@ import {
 export interface BoardAppt extends ApptLite {
   title: string | null;
   appt_type: string;
+  /** Brand slug (appointments.brand, denormalised from the lead — multi-brand
+   *  PRD §3.2) — resolved to chip data via the caller's active-brand list.
+   *  Optional so pre-brand callers keep compiling; absent → no chip. */
+  brand?: string | null;
   lead_id: string | null;
   lead_name: string | null;
   lead_status: string | null;
@@ -90,6 +96,10 @@ export interface BoardVehicle {
   name: string;
   vehicle_type: string;
   registration: string;
+  /** Livery brand slug (vehicles.brand — multi-brand PRD §4 /resources).
+   *  Null = unbranded/shared, which never mismatches (PRD §11.10). Optional
+   *  so pre-brand callers keep compiling; absent → no mismatch note. */
+  brand?: string | null;
   tax_due: string | null;
   mot_due: string | null;
   insurance_renewal: string | null;
@@ -173,6 +183,9 @@ export function JobBoardView({
   initialWeekStart,
   today,
   hideSurveys,
+  brands = [],
+  showBrandChips = false,
+  brandFilter = "all",
 }: {
   appts: BoardAppt[];
   staff: BoardStaff[];
@@ -186,6 +199,20 @@ export function JobBoardView({
   today: string;
   /** Hide surveys entirely + the Surveys toggle (Schedule & Allocation's Day Allocation is moves-only). */
   hideSurveys?: boolean;
+  /** Active brands (multi-brand PRD §4 /schedule) — chip data only; the
+   *  segmented filter lives with the embedding page. Empty or single-entry →
+   *  no brand UI renders (the single-brand invariant, PRD §1). Mirrors the
+   *  StatusBoard wiring from gate 3. */
+  brands?: BrandChipData[];
+  /** True only in multi-brand mode with the ?brand= filter on All — the chip is
+   *  hidden when the segmented control already names a single brand. */
+  showBrandChips?: boolean;
+  /** `'all'` or an active brand slug (validated server-side via parseBrandParam).
+   *  Narrows the VISIBLE cards only — the capacity strips and clash detection
+   *  deliberately keep every brand's jobs, because crew and vans are one shared
+   *  pool: a filtered board must still count a resource as taken (and warn on
+   *  assign) when the other brand's job has it. */
+  brandFilter?: string;
 }) {
   const router = useRouter();
   const [weekStart, setWeekStart] = useState(initialWeekStart ?? thisWeekStart);
@@ -206,6 +233,12 @@ export function JobBoardView({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const brandBySlug = useMemo(() => new Map(brands.map((b) => [b.slug, b])), [brands]);
+  // Multi-brand mode is server-verified: the embedding page passes brands only
+  // when listActiveBrands().length > 1 (the single-brand invariant, PRD §1).
+  // Gates the livery-mismatch note — a single-brand office can't create a
+  // mismatch and must see zero new UI.
+  const multiBrand = brands.length > 1;
   const apptById = useMemo(() => new Map<string, ApptLite>(appts.map((a) => [a.id, a])), [appts]);
   const cardById = useMemo(() => new Map(appts.map((a) => [a.id, a])), [appts]);
   const byAppt = useMemo(() => {
@@ -239,7 +272,14 @@ export function JobBoardView({
 
   const cardsForDay = (day: string) =>
     appts
-      .filter((a) => ((showSurveys && !hideSurveys) || a.appt_type !== "survey") && (daysByAppt.get(a.id) ?? []).includes(day))
+      .filter(
+        (a) =>
+          ((showSurveys && !hideSurveys) || a.appt_type !== "survey") &&
+          // Brand narrowing hides CARDS only — capacity/clash maps above keep
+          // the full set (shared crew/van pool, see the brandFilter prop).
+          (brandFilter === "all" || a.brand === brandFilter) &&
+          (daysByAppt.get(a.id) ?? []).includes(day),
+      )
       .sort((a, b) => Number(b.all_day) - Number(a.all_day) || (a.starts_at ?? "").localeCompare(b.starts_at ?? ""));
 
   /** "John Farnell (All day, Mon 13 Jul)" labels for clash messages. */
@@ -333,6 +373,8 @@ export function JobBoardView({
               <JobCard
                 key={`${a.id}:${day}`}
                 appt={a}
+                brand={showBrandChips && a.brand ? (brandBySlug.get(a.brand) ?? null) : null}
+                liveryBrands={multiBrand ? brandBySlug : null}
                 multiDay={(daysByAppt.get(a.id) ?? []).length > 1}
                 assigned={byAppt.get(a.id) ?? []}
                 staff={staff}
@@ -692,6 +734,8 @@ function CapacityStrip({
 
 function JobCard({
   appt,
+  brand = null,
+  liveryBrands = null,
   multiDay,
   assigned,
   staff,
@@ -702,6 +746,14 @@ function JobCard({
   onAssign,
 }: {
   appt: BoardAppt;
+  /** Resolved chip data — null hides the chip (single-brand mode, or the
+   *  ?brand= filter already names one brand; multi-brand PRD §4). */
+  brand?: BrandChipData | null;
+  /** Active brands by slug, non-null ONLY in multi-brand mode — drives the
+   *  soft livery-mismatch note (multi-brand PRD §4 /schedule). Unlike the
+   *  chip, the note ignores the ?brand= filter: it is about the assignment,
+   *  not the view. */
+  liveryBrands?: Map<string, BrandChipData> | null;
   multiDay: boolean;
   assigned: BoardAssignment[];
   staff: BoardStaff[];
@@ -739,6 +791,22 @@ function JobCard({
   // Warn-only: a removal with a van assigned needs at least one driver on the crew.
   const assignedDrivers = assignedStaff.filter((a) => staffById.get(a.staff_id!)?.is_driver).length;
   const driverWarn = isRemoval && needsDriverWarning({ assignedVans: assignedVehicles.length, assignedDrivers });
+
+  // Soft livery mismatch (multi-brand PRD §4 /schedule): an assigned van whose
+  // livery brand differs from the job's brand gets a quiet informational note.
+  // NEVER blocking — livery restricts nothing, the fleet is one pool. Null
+  // livery (unbranded/shared) never mismatches (PRD §11.10), and liveryBrands
+  // is null in single-brand mode, so today's rendering is untouched.
+  const liveryNotes = liveryBrands
+    ? assignedVehicles.flatMap((a) => {
+        const v = vehicleById.get(a.vehicle_id!);
+        if (!v?.brand || !appt.brand || v.brand === appt.brand) return [];
+        const livery = liveryBrands.get(v.brand);
+        // A slug we can't resolve (e.g. a since-deactivated brand) still
+        // differs — fall back to generic wording rather than hiding the note.
+        return [`${v.name} is in ${livery?.shortName ?? livery?.name ?? "another brand's"} livery`];
+      })
+    : [];
 
   return (
     <div
@@ -794,6 +862,9 @@ function JobCard({
             >
               {isRemoval ? "Move" : isPack ? "Pack" : appt.appt_type}
             </span>
+            {/* Brand chip beside the type label (multi-brand PRD §4 /schedule) —
+                this board is where two brands' jobs visually collide. */}
+            {brand ? <BrandChip brand={brand} size={16} /> : null}
           </p>
         </div>
         {appt.lead_status ? (
@@ -866,6 +937,13 @@ function JobCard({
             );
           })}
         </div>
+      ) : null}
+
+      {liveryNotes.length > 0 ? (
+        <p className="mt-1 flex items-start gap-1 text-[11px] text-mist-400">
+          <Info className="mt-px size-3 shrink-0" strokeWidth={1.75} />
+          <span>{liveryNotes.join(" · ")}</span>
+        </p>
       ) : null}
 
       <div className="mt-2 flex items-center gap-1">

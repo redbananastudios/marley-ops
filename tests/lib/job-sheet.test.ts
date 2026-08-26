@@ -153,6 +153,47 @@ describe("buildJobSheetDocDef", () => {
     expect(def.defaultStyle.font).toBe("Montserrat");
   });
 
+  it("no brand renders today's default-brand identity — the byte-parity contract", () => {
+    const s = JSON.stringify(buildJobSheetDocDef(data));
+    expect(s).toContain("MARLEY ");
+    expect(s).toContain("#C03838");
+    const footer = JSON.stringify(buildJobSheetDocDef(data).footer(1, 1));
+    expect(footer).toContain("Marley Moves · 01747 637070 · hello@marleymoves.co.uk");
+  });
+
+  it("a brand substitutes its identity, group disclosure, colour and derived tints (PRD §3.6)", () => {
+    const branded = {
+      ...data,
+      brand: {
+        slug: "pitmans",
+        name: "Pitmans Removals & Storage",
+        shortName: "Pitmans",
+        groupLine: "Part of the Marley Group",
+        legalLine: "MarleyMoves Ltd trading as Pitmans Removals & Storage · Company No. 15914266",
+        phone: "01258 000000",
+        email: "info@example.co.uk",
+        websiteUrl: null,
+        colour: "#2B2B76",
+      },
+    };
+    const def = buildJobSheetDocDef(branded);
+    const s = JSON.stringify(def);
+    expect(s).toContain("PITMANS REMOVALS & STORAGE");
+    expect(s).toContain("Part of the Marley Group");
+    expect(s).toContain("#2B2B76");
+    // Soft fills and on-dark subtext are TINTS of the brand colour, not the
+    // default brand's hardcoded pinks.
+    expect(s).toContain("#f2f2f7");
+    expect(def.styles.heroSub.color).toBe("#d7d7e5");
+    expect(s).not.toContain("#C03838");
+    expect(s).not.toContain("#FDF1F1");
+    expect(s).not.toContain("#F4D9D9");
+    expect(s).not.toContain("MARLEY ");
+    const footer = JSON.stringify(def.footer(1, 1));
+    expect(footer).toContain("Pitmans Removals & Storage · 01258 000000 · info@example.co.uk");
+    expect(footer).not.toContain("Marley");
+  });
+
   it("NEVER leaks money — the crew sheet is price-free", () => {
     const s = JSON.stringify(buildJobSheetDocDef(data));
     expect(s).not.toContain("£");

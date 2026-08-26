@@ -54,3 +54,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Rendered Resend template previews (create-resend-templates.mjs --preview-dir)
+.resend-preview/

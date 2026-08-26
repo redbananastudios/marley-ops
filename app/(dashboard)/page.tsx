@@ -5,6 +5,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
 import { fetchAdSpend } from "@/lib/google-ads";
 import {
+  buildBrandKpiSplits,
   buildPeriodStats,
   classifySource,
   isWonQuote,
@@ -15,6 +16,8 @@ import {
   type PeriodStats,
   type ProgressSets,
 } from "@/lib/dashboard/compute";
+import { listActiveBrands } from "@/lib/brand";
+import { parseBrandParam } from "@/lib/brand-filter";
 import { moneyTileCounts } from "@/lib/bookings/queue";
 import { loadBookingRows } from "@/lib/bookings/load-signals";
 import { aggregateEstimators, type EstimatorVisit } from "@/lib/estimator";
@@ -22,7 +25,11 @@ import { vehicleHasExpiryDue } from "@/lib/vehicles";
 import { getBusinessSettings } from "@/lib/settings";
 import { jobCost, boxesFromItems, commissionCost } from "@/lib/margin";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
-import { DashboardView, type DashboardData } from "@/components/dashboard/dashboard-view";
+import {
+  DashboardView,
+  type DashboardData,
+  type FilteredDashboardSections,
+} from "@/components/dashboard/dashboard-view";
 import type { DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
@@ -61,7 +68,12 @@ const fetchExternalPanels = unstable_cache(
   { revalidate: 300 },
 );
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ brand?: string }>;
+}) {
+  const sp = await searchParams;
   const profile = await getSessionProfile();
   if (profile?.role === "estimator") redirect("/estimator");
 
@@ -148,13 +160,13 @@ export default async function DashboardPage() {
   // plain select at 1000 rows and would silently corrupt every all-time KPI).
   // leads keeps submitted_at-desc for the "Latest enquiries" slice(0,6) below,
   // with id as a unique tiebreaker so the range() windows never skip/duplicate.
-  const [leadsData, apptData, quoteData, { data: profilesData }, settings] =
+  const [leadsData, apptData, quoteData, { data: profilesData }, settings, activeBrands] =
     await Promise.all([
       fetchAllRows((f, t) =>
         supabase
           .from("leads")
           .select(
-            "id, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, referral_commission, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
+            "id, brand, name, status, entry_channel, from_postcode, to_postcode, submitted_at, created_at, first_contacted_at, balance_paid_at, referral_commission, gclid, gbraid, wbraid, fbclid, utm_source, utm_medium, utm_campaign",
           )
           .order("submitted_at", { ascending: false })
           .order("id")
@@ -175,6 +187,7 @@ export default async function DashboardPage() {
       ),
       supabase.from("profiles").select("id, full_name"),
       getBusinessSettings(supabase),
+      listActiveBrands(supabase),
     ]);
   const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
   const estimatorFee = settings.estimatorFee;
@@ -182,6 +195,16 @@ export default async function DashboardPage() {
   const leads = (leadsData ?? []) as LeadLite[];
   const appts = apptData ?? [];
   const quotes = quoteData ?? [];
+
+  // Brand layer (multi-brand PRD §4 Dashboard home): with one active brand no
+  // brand UI renders and the page is byte-identical to today (the single-brand
+  // invariant, PRD §1). The ?brand= filter re-scopes ONLY the estimator /
+  // sources / funnel sections — the KPI tiles keep the combined headline (the
+  // business truth: cash, crew and the bank account are shared) with per-brand
+  // sub-line shares beneath.
+  const multi = activeBrands.length > 1;
+  const brandFilter = parseBrandParam(sp, activeBrands);
+  const brandSlugs = activeBrands.map((b) => b.slug);
 
   // Lead-level 3rd-party referral fees (numeric arrives as a string) — folded
   // into each won job's cost below so margin reflects what the job really made.
@@ -241,9 +264,44 @@ export default async function DashboardPage() {
     PERIOD_KEYS.map((k, i) => {
       const stats = buildPeriodStats(k, leads, prog, now, phResults[i]);
       stats.adSpend = spendResults[i] ? spendResults[i]!.costGbp : null;
+      // Per-brand shares for the KPI sub-lines — never computed (or shipped to
+      // the client) in single-brand mode (PRD §1 invariant).
+      if (multi) stats.brandSplits = buildBrandKpiSplits(k, leads, prog, now, brandSlugs);
       return [k, stats];
     }),
   ) as Record<PeriodKey, PeriodStats>;
+
+  /* Filter-following sections (multi-brand PRD §4 Dashboard home): "Where
+     leads came from", the enquiry→job funnel and the estimator table recompute
+     for the ?brand= slug; everything else stays combined. Reuses
+     buildPeriodStats over the brand's own leads so every predicate matches the
+     combined numbers by construction; estimators are filled in the visit loop
+     below. */
+  const filteredSections =
+    multi && brandFilter !== "all"
+      ? (Object.fromEntries(
+          PERIOD_KEYS.map((k): [PeriodKey, FilteredDashboardSections] => {
+            const stats = buildPeriodStats(
+              k,
+              leads.filter((l) => l.brand === brandFilter),
+              prog,
+              now,
+              null,
+            );
+            return [
+              k,
+              {
+                newLeads: stats.newLeads,
+                sources: stats.sources,
+                funnel: stats.funnel,
+                topCampaigns: stats.topCampaigns,
+                estimators: [],
+              },
+            ];
+          }),
+        ) as Record<PeriodKey, FilteredDashboardSections>)
+      : null;
+  const brandOfLead = filteredSections ? new Map(leads.map((l) => [l.id, l.brand ?? null])) : null;
 
   /* estimator performance per period — attended (completed) survey visits */
   const leadName = new Map(leads.map((l) => [l.id, l.name ?? "—"]));
@@ -270,6 +328,15 @@ export default async function DashboardPage() {
         value: a.lead_id ? prog.won.get(a.lead_id) ?? null : null,
       }));
     periods[k].estimators = aggregateEstimators(visits, estimatorFee);
+    if (filteredSections && brandOfLead) {
+      // Estimator table under the brand filter: visits restricted to the
+      // brand's own leads (a survey with no lead can't be attributed, so it
+      // drops out of the filtered view — never a best guess).
+      filteredSections[k].estimators = aggregateEstimators(
+        visits.filter((v) => v.leadId != null && brandOfLead.get(v.leadId) === brandFilter),
+        estimatorFee,
+      );
+    }
   }
 
   /* needs-action (now) */
@@ -331,6 +398,19 @@ export default async function DashboardPage() {
     when: l.submitted_at || l.created_at,
   }));
 
+  // Minimal serialisable brand shape for the client — satisfies both
+  // BrandChipData and BrandFilterOption; keeps brand config (emails, phone
+  // numbers, template ids) out of the client payload.
+  const brandOptions = multi
+    ? activeBrands.map((b) => ({
+        slug: b.slug,
+        name: b.name,
+        shortName: b.shortName,
+        initial: b.initial,
+        colourPrimary: b.colourPrimary,
+      }))
+    : [];
+
   const data: DashboardData = {
     periods,
     needsAction,
@@ -338,6 +418,8 @@ export default async function DashboardPage() {
     recent,
     recentHeading: todays.length ? "Today's enquiries" : "Latest enquiries",
     dateLabel: new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ }),
+    brands: brandOptions,
+    filteredSections,
   };
 
   return <DashboardView data={data} />;

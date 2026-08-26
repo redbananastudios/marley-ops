@@ -21,6 +21,20 @@
  * green — fix the leak (PRD §10: leak hits in existing code are findings to
  * fix in the same gate).
  *
+ * SHARED-SURFACE ENTRIES: some brand-resolved files are shared surfaces —
+ * both brands' records render through them — that deliberately keep Marley
+ * APP CHROME (PRD §2 "App chrome — unchanged": the mm-red toolbar, today
+ * ring, now-indicator and control tints belong to the frame, not the
+ * records). A blanket literal ban would flag chrome the PRD mandates, so a
+ * manifest entry may be `{ pattern, allow, reason }`: the named literals are
+ * exempt IN THAT ENTRY'S FILES ONLY, everything else stays forbidden both
+ * directions. The exemption is evidence-disciplined, mirroring the
+ * dead-pattern rule: an allow literal that is not in FORBIDDEN is an ERROR
+ * (a typo would otherwise suppress nothing, silently, forever), and an allow
+ * literal that no longer occurs under its pattern is an ERROR — so fixing
+ * the underlying literal forces the allow's removal in the same change, and
+ * an exemption can never outlive its justification.
+ *
  * THE SPLIT (PRD §10): this script is the source grep. The RENDERED-PAGE half
  * — a Playwright assertion over the second brand's pages on staging, catching
  * what a grep can't see through a token — lands with gate 16 as an e2e spec.
@@ -73,6 +87,8 @@ export const FORBIDDEN = [
  * Brand-resolved source globs, repo-relative with forward slashes. Grows gate
  * by gate — see THE MANIFEST GROWTH CONTRACT above. Supported forms: an exact
  * file path, `dir/**` (every file beneath), and `*` single-segment wildcards.
+ * An entry is either a bare pattern string or a shared-surface object
+ * `{ pattern, allow, reason }` — see SHARED-SURFACE ENTRIES above.
  */
 export const MANIFEST = [
   "components/brand/**",
@@ -80,6 +96,210 @@ export const MANIFEST = [
   // Gate 5: the lead page's change-brand control — fully data-driven (names
   // and colours arrive as brands-table rows via props).
   "app/(dashboard)/leads/[id]/brand-changer.tsx",
+  // Gate 11: the diary surfaces. Event styling is brand-resolved (styleFor()
+  // over the slim brands prop; the brand picker and chips are data-driven),
+  // but each keeps deliberate mm-red APP CHROME per PRD §2, plus comments
+  // naming brands to document the parity contract — hence the allows.
+  // Domains, phone numbers, Connor and mailboxes stay forbidden here, as
+  // does every literal not named in `allow`.
+  {
+    pattern: "components/schedule/scheduler-view.tsx",
+    allow: ["mm-red", "Marley", "Pitmans"],
+    reason:
+      "mm-red toolbar/today-ring/now-indicator/FAB app chrome (PRD §2); Marley + Pitmans appear only in comments documenting the parity contract and the accent-colour data rule",
+  },
+  {
+    pattern: "components/schedule/schedule-allocation-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red tab/board/day-strip app chrome (PRD §2). (The soft-demand copy's hardcoded 'Marley' was the §10 leak this gate fixed — now brand-neutral, so no 'Marley' allow.)",
+  },
+  {
+    pattern: "components/schedule/appointment-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): icon tints, required-field marker, radio accent, destructive-action button",
+  },
+  // Gate 11 residual: the client-record "Book survey" flows. Their brand
+  // picker is data-driven (slim brands-table rows via props); only deliberate
+  // mm-red APP CHROME remains per PRD §2 — everything else stays forbidden
+  // both directions.
+  {
+    pattern: "components/clients/book-survey-button.tsx",
+    allow: ["mm-red"],
+    reason: "mm-red app chrome (PRD §2): the Book survey button fill and the required-field marker",
+  },
+  {
+    pattern: "components/clients/add-client-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): checkbox accent, required-field markers, address section tint",
+  },
+  // Gate 12: resources + storage. The vehicle livery chip and Livery select,
+  // the job-board livery-mismatch note, storage site/let chips, the brand
+  // filter and the site/let/manage dialogs' brand selects are all data-driven
+  // (slim brands-table rows via props); only deliberate mm-red APP CHROME
+  // remains per PRD §2 — everything else stays forbidden both directions.
+  // (app/(dashboard)/storage/actions.ts is deliberately NOT listed: its
+  // agreement email still hardcodes default-brand identity — that is gate 13
+  // comms work, and listing the file before then would just be a red scan.)
+  {
+    pattern: "components/resources/resources-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): active-toggle fill, working-days selected state, dialog save buttons",
+  },
+  {
+    pattern: "components/job-board/job-board-view.tsx",
+    allow: ["mm-red", "Marley"],
+    reason:
+      "mm-red app chrome (PRD §2): today-column highlight, surveys toggle, assign-modal selection states, save buttons and the vehicle icon-tile tint; Marley appears only in the comment naming that tile tint — the livery-mismatch note itself is data-driven",
+  },
+  {
+    pattern: "components/storage/storage-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): occupancy pill and segmented occupancy filter, selected-site/unit accents, checkbox accents, action/save buttons",
+  },
+  {
+    pattern: "components/storage/manage-let-dialog.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
+  },
+  // Gate 14: the JOB-document doc-defs (PRD §3.6). Brand identity, colours and
+  // filenames arrive as a DocBrand from the brands row; the remaining default-
+  // brand literals are the DEFAULT CONSTANTS selected when no brand is passed —
+  // the byte-parity contract, so they are allowed, not leaks. (The GROUP
+  // doc-defs — lib/crew-sheet/daily-docdef.ts, lib/staff/statement-docdef.ts —
+  // are deliberately NOT listed: they carry group/default identity by design
+  // and take no brand parameter.)
+  {
+    pattern: "lib/contract-docdef.ts",
+    allow: ["Marley"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): the wordmark fallback and the in-person device line's default",
+  },
+  {
+    pattern: "lib/completion-cert-docdef.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): wordmark, declaration and footer identity fallbacks",
+  },
+  {
+    pattern: "lib/job-sheet-docdef.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): wordmark and footer fallbacks; 'Marley Ops' in the video-QR copy is the app name — app chrome per PRD §2",
+  },
+  {
+    pattern: "lib/quote/pdf-client.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070", "Pitmans"],
+    reason:
+      "default-brand constants (byte-parity, PRD §3.6): the MarleyMoves filename shape, contact rows, footer legal line, pdf info block and the shared bank card (PRD §2 — one account for every brand); Marley elsewhere + Pitmans appear only in comments documenting the §10 filename shape and the WCAG accent pick",
+  },
+  {
+    pattern: "lib/pdf/doc-brand.ts",
+    allow: ["Marley"],
+    reason:
+      "appears only in a comment documenting the tint data rule the default-brand doc-defs hardcode — the module itself carries no identity, colour fallback #C03838 is the documented brandCtaColour degrade",
+  },
+  // Gate 14 call sites and PDF-triggering components: brand resolution happens
+  // where a supabase client exists (getBrandOrDefault → docBrandFrom), then
+  // travels as a plain DocBrand. The quote/crew UI keeps deliberate mm-red APP
+  // CHROME (PRD §2 — the frame, not the records); remaining name hits are
+  // jsdoc/comments documenting the byte-parity contract. Files with no
+  // forbidden literal at all ride as bare entries so a later edit can never
+  // quietly re-hardcode identity into a branded surface.
+  "app/api/documents/contract/[signatureId]/route.ts",
+  "components/job-sheet-button.tsx",
+  "lib/crew-sheet/daily-data.ts",
+  {
+    pattern: "app/(dashboard)/quotes/[id]/page.tsx",
+    allow: ["Marley"],
+    reason:
+      "appears only in the comment documenting that getBrandOrDefault's bad-slug fallback lands on the default-brand parity rail",
+  },
+  {
+    pattern: "components/quote/quote-builder.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): CTA buttons and wizard step dots; Marley appears only in the header comment and the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "components/quote/quote-header-actions.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): the send button; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "components/quote/resend-quote-button.tsx",
+    allow: ["Marley", "mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): the mail icon tint; Marley appears only in the brand-prop jsdoc documenting the parity contract",
+  },
+  {
+    pattern: "app/my-jobs/[id]/page.tsx",
+    allow: ["mm-red"],
+    reason: "mm-red app chrome (PRD §2): the removal type chip and the sticky action button",
+  },
+  {
+    pattern: "components/crew/complete-job-button.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): trigger/submit buttons and the confirmation checkbox accent",
+  },
+  {
+    pattern: "lib/job-sheet-load.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "ops.marleymoves.co.uk is the APP's own origin (NEXT_PUBLIC_APP_URL fallback for the crew job link — one app hosts every brand, app chrome per PRD §2, not document identity); Marley appears only in the legacy-iMVE contract comment",
+  },
+  // Gate 21: the /performance reporting surface. The report libs slice by a
+  // brand PARAMETER (rows carry the slug as data, never a literal); the page's
+  // segmented filter, tab links, chips and Brand column are all data-driven
+  // from brands-table rows.
+  "lib/sales-report.ts",
+  "lib/storage-report.ts",
+  "lib/estimator.ts",
+  "components/performance/sales-tab.tsx",
+  {
+    pattern: "components/performance/storage-tab.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red occupancy-bar fill (PRD §4 /storage: occupancy is a physical fact, not a brand one — app chrome per §2)",
+  },
+  {
+    pattern: "app/(dashboard)/performance/page.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red lost-reasons meter fill — report chart chrome (PRD §2), not a brand record",
+  },
+  // Gate 21 continued: the dashboard home. The KPI brand sub-lines, splits
+  // and the section filter are all data-driven (buildBrandKpiSplits over
+  // brands-table slugs; BrandChip/BrandFilter take slim brands rows via
+  // props); only deliberate mm-red APP CHROME and one legacy-business-rule
+  // comment remain — everything else stays forbidden both directions.
+  "lib/dashboard/compute.ts",
+  {
+    pattern: "components/dashboard/dashboard-view.tsx",
+    allow: ["mm-red"],
+    reason:
+      "mm-red app chrome (PRD §2): view-all/deep-dive links, KPI accent tiles, decline arrow and drop-percentage tints, stat accents",
+  },
+  {
+    pattern: "app/(dashboard)/page.tsx",
+    allow: ["Marley"],
+    reason:
+      "appears only in the legacy-iMVE contract-suppression comment (same rule lib/job-sheet-load.ts documents) — the unsigned-contracts tile logic, not rendered identity",
+  },
+  // NOT-YET-manifest (2026-08-26): components/quote/send-quote-dialog.tsx and
+  // app/actions/crew-signatures.ts thread the gate-14 brand into their PDF
+  // attachment names, but their EMAIL surfaces (the hardcoded quote subject
+  // line, the cert email body/sender, office notification links) still carry
+  // default-brand identity — that is gate 13 comms work, flagged in that
+  // gate's report. Listing them now would need allows that mask the very
+  // leaks gate 13 exists to fix; add both entries in gate 13's PR instead.
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);
@@ -141,13 +361,28 @@ function rel(root, file) {
 
 /**
  * Expand MANIFEST-style patterns to concrete files.
- * Returns { files, errors } — a pattern matching nothing is an error, never a
- * silent skip (a renamed directory must not quietly blind the scan).
+ * Returns { files, errors, entries } — `files` is the deduplicated union,
+ * `entries` keeps the per-entry breakdown ({ pattern, allow, files }) so
+ * shared-surface allows can be checked against exactly the files they cover.
+ * A pattern matching nothing is an error, never a silent skip (a renamed
+ * directory must not quietly blind the scan); an allow literal that is not
+ * in FORBIDDEN is an error too (a typo must not suppress nothing, silently).
  */
 export function expandManifest(manifest = MANIFEST, root = ROOT) {
   const files = new Set();
   const errors = [];
-  for (const pattern of manifest) {
+  const entries = [];
+  const knownLiterals = new Set(FORBIDDEN.map((f) => f.literal));
+  for (const entry of manifest) {
+    const pattern = typeof entry === "string" ? entry : entry.pattern;
+    const allow = typeof entry === "string" ? [] : (entry.allow ?? []);
+    for (const literal of allow) {
+      if (!knownLiterals.has(literal)) {
+        errors.push(
+          `allow literal is not in FORBIDDEN (typo? exact case matters): "${literal}" under ${pattern}`,
+        );
+      }
+    }
     const magicIndex = pattern.indexOf("*");
     let matched = [];
     if (magicIndex === -1) {
@@ -168,8 +403,9 @@ export function expandManifest(manifest = MANIFEST, root = ROOT) {
       errors.push(`manifest pattern matched no files: ${pattern}`);
     }
     for (const f of matched) files.add(f);
+    entries.push({ pattern, allow, files: matched });
   }
-  return { files: [...files].sort(), errors };
+  return { files: [...files].sort(), errors, entries };
 }
 
 /**
@@ -195,19 +431,47 @@ export function findLeaksInContent(content, file = "<content>") {
 
 /**
  * Scan every manifest-matched file. Returns { files, findings, errors };
- * clean means files.length > 0, findings empty AND errors empty.
+ * clean means files.length > 0, findings empty AND errors empty. Findings
+ * for a shared-surface entry's allowed literals are suppressed — but a dead
+ * allow (a literal with zero suppressed hits under its own pattern) is an
+ * ERROR, so the exemption disappears in the same change as the literal.
  */
 export function scanRepo({ manifest = MANIFEST, root = ROOT } = {}) {
-  const { files, errors } = expandManifest(manifest, root);
+  const { files, errors, entries } = expandManifest(manifest, root);
   if (files.length === 0) {
     errors.push(
       "brand-leak scan matched no files at all — a scan that scanned nothing must fail, not pass",
     );
   }
+  const allowByFile = new Map();
+  for (const { allow, files: entryFiles } of entries) {
+    for (const f of entryFiles) {
+      if (allow.length === 0) continue;
+      const set = allowByFile.get(f) ?? new Set();
+      for (const literal of allow) set.add(literal);
+      allowByFile.set(f, set);
+    }
+  }
   const findings = [];
+  const rawByFile = new Map();
   for (const file of files) {
     const content = readFileSync(path.join(root, file), "utf8");
-    findings.push(...findLeaksInContent(content, file));
+    const raw = findLeaksInContent(content, file);
+    rawByFile.set(file, raw);
+    const allowed = allowByFile.get(file);
+    findings.push(...(allowed ? raw.filter((f) => !allowed.has(f.literal)) : raw));
+  }
+  for (const { pattern, allow, files: entryFiles } of entries) {
+    for (const literal of allow) {
+      const occurs = entryFiles.some((f) =>
+        (rawByFile.get(f) ?? []).some((hit) => hit.literal === literal),
+      );
+      if (!occurs) {
+        errors.push(
+          `dead allow: "${literal}" never occurs under ${pattern} — the exemption has outlived its justification, remove it`,
+        );
+      }
+    }
   }
   return { files, findings, errors };
 }

@@ -621,3 +621,149 @@ describe("matchTransactionLedger — open items keep primacy, settled explains t
     ).toEqual({ type: "storage" });
   });
 });
+
+/* -------------------------------------------- gate 6: Pitmans (PM) refs */
+
+// The PM prefix (brands.ref_prefix, migration 0104) must behave byte-for-byte
+// like MM through the matcher: extraction, -DEP/-COM/-BAL suffixes, typo
+// normalisation, near-misses, reconcile. MM cases are re-pinned here with
+// EXACT expected outputs so a PM-motivated regex change can never silently
+// move them.
+describe("PM refs — extraction and suffix handling mirror MM exactly", () => {
+  it("plain + suffixed PMR/PMC refs extract (suffix not part of the ref, like MM)", () => {
+    expect(refsInText("PMR001", null)).toEqual(["PMR001"]);
+    expect(refsInText("PMC014", null)).toEqual(["PMC014"]);
+    expect(refsInText("PMR001-DEP", null)).toEqual(["PMR001"]);
+    expect(refsInText("PMR034-COM", null)).toEqual(["PMR034"]);
+    expect(refsInText("PMR034-BAL", null)).toEqual(["PMR034"]);
+    expect(refsInText("PMR001-DEP", "JANE PMR001 dep")).toEqual(["PMR001"]);
+  });
+
+  it("PM reference + exact amount → confirmable suggestion carrying the item amount", () => {
+    const m = matchTransaction(
+      { amount: 100, reference: "PMR001-DEP", description: null },
+      [open({ quoteRef: "PMR001" }), open({ quoteId: "q2", quoteRef: "PMR002" })],
+    );
+    expect(m).toMatchObject({
+      type: "suggestion",
+      kind: "deposit",
+      confidence: "reference",
+      quoteId: "q1",
+      amount: 100,
+    });
+  });
+
+  it("right PM quote, WRONG amount → mismatch, never a suggestion", () => {
+    expect(
+      matchTransaction({ amount: 500, reference: "PMR001", description: null }, [
+        open({ quoteRef: "PMR001", kind: "balance", amount: 1100 }),
+      ]),
+    ).toMatchObject({ type: "mismatch", kind: "balance", quoteId: "q1", quoteRef: "PMR001" });
+  });
+
+  it("the Zoho suffix breaks a same-amount tie on a PM quote, exactly as on MM", () => {
+    const tied = [
+      open({ quoteRef: "PMR001", kind: "deposit", amount: 100 }),
+      open({ quoteRef: "PMR001", kind: "commitment", amount: 100 }),
+    ];
+    expect(matchTransaction({ amount: 100, reference: "PMR001-COM", description: null }, tied)).toMatchObject({
+      type: "suggestion",
+      kind: "commitment",
+    });
+    // suffix-less keeps the deposit-first pick (open-items order), like MM:
+    expect(matchTransaction({ amount: 100, reference: "PMR001", description: null }, tied)).toMatchObject({
+      type: "suggestion",
+      kind: "deposit",
+    });
+  });
+
+  it("PM typo normalisation mirrors MM: PMRO17 → PMR017, PMCl04 → PMC104", () => {
+    expect(refsInText("PMRO17", null)).toEqual(["PMR017"]);
+    expect(refsInText("PMCl04", null)).toEqual(["PMC104"]);
+    expect(refsInText("PMR017-DEP", null)).toEqual(["PMR017"]);
+    // …and the typo'd ref matches BY REFERENCE, not via the weak amount path:
+    const m = matchTransaction(
+      { amount: 100, reference: "PMRO17", description: null, counterparty: "ELDRED R A" },
+      [open({ quoteRef: "PMR017", customer: "Rebecca Eldred" })],
+    );
+    expect(m).toMatchObject({ type: "suggestion", confidence: "reference", quoteRef: "PMR017" });
+  });
+
+  it("MM behaviour UNCHANGED — exact re-pins of the pre-PM outputs", () => {
+    expect(refsInText("MMR001-DEP", null)).toEqual(["MMR001"]);
+    expect(refsInText("MMRO17", null)).toEqual(["MMR017"]);
+    expect(refsInText("MMR017-DEP", null)).toEqual(["MMR017"]);
+    expect(refsInText("MM-260708-009", null)).toEqual(["MM-260708-009"]); // legacy stays MM-only
+    expect(
+      matchTransaction(
+        { amount: 100, reference: "MMR001-DEP", description: null },
+        [open({}), open({ quoteId: "q2", quoteRef: "MMR002" })],
+      ),
+    ).toMatchObject({
+      type: "suggestion",
+      kind: "deposit",
+      confidence: "reference",
+      quoteId: "q1",
+      amount: 100,
+    });
+    expect(
+      matchTransaction({ amount: 500, reference: "MMR001", description: null }, [
+        open({ kind: "balance", amount: 1100 }),
+      ]),
+    ).toMatchObject({ type: "mismatch", kind: "balance", quoteId: "q1", quoteRef: "MMR001" });
+    // storage refs stay storage — the PM alternation must not swallow MMS-:
+    expect(
+      matchTransaction({ amount: 25, reference: "MMS-1A2B3C4D-2026-07", description: null }, [open({})]),
+    ).toEqual({ type: "storage" });
+  });
+
+  it("a mixed string naming BOTH brands' refs extracts both; exact amount picks", () => {
+    expect(refsInText("MMR001 PMR002", null).sort()).toEqual(["MMR001", "PMR002"]);
+    expect(refsInText("paid MMR001-DEP and PMR002-BAL thanks", null).sort()).toEqual(["MMR001", "PMR002"]);
+    const items = [
+      open({ kind: "deposit", amount: 100 }), // MMR001
+      open({ quoteId: "qP", quoteRef: "PMR002", kind: "balance", amount: 920 }),
+    ];
+    expect(
+      matchTransaction({ amount: 920, reference: "MMR001 PMR002", description: null }, items),
+    ).toMatchObject({ type: "suggestion", quoteId: "qP", kind: "balance", amount: 920 });
+    expect(
+      matchTransaction({ amount: 100, reference: "MMR001 PMR002", description: null }, items),
+    ).toMatchObject({ type: "suggestion", quoteId: "q1", kind: "deposit", amount: 100 });
+  });
+
+  it("near-misses: PM pinned to today's MM behaviour, case by case", () => {
+    // A wrong kind letter never extracts (MM verified first, PM matches it):
+    expect(refsInText("MMX123", null)).toEqual([]);
+    expect(refsInText("PMX123", null)).toEqual([]);
+    // An EMBEDDED clean token DOES extract — the extraction pattern is
+    // deliberately unanchored because bank refs glue words together — and MM
+    // already behaves this way, so PM must too:
+    expect(refsInText("XMMR123", null)).toEqual(["MMR123"]);
+    expect(refsInText("XPMR123", null)).toEqual(["PMR123"]);
+    // …but typo normalisation requires a clean word boundary, so an embedded
+    // LOOKALIKE tail stays unnormalised (hence unextracted) for both brands:
+    expect(refsInText("XMMRO17", null)).toEqual([]);
+    expect(refsInText("XPMRO17", null)).toEqual([]);
+  });
+
+  it("PM refs flow through reconcileSettled + matchTransactionLedger like MM", () => {
+    const pm = settledItem({ quoteId: "qP", quoteRef: "PMR034", amount: 450, kind: "balance" });
+    expect(
+      reconcileSettled({ amount: 450, reference: "PMR034-BAL", description: null }, [pm]),
+    ).toEqual({ type: "reconciled", kind: "balance", quoteId: "qP", quoteRef: "PMR034" });
+    // wrong amount still refuses to reconcile:
+    expect(
+      reconcileSettled({ amount: 400, reference: "PMR034-BAL", description: null }, [pm]),
+    ).toBeNull();
+    // a second transfer against an already-claimed PM payment is a duplicate:
+    expect(
+      matchTransactionLedger(
+        { amount: 450, reference: "PMR034-BAL", description: null },
+        [],
+        [pm],
+        new Set(["qP:balance"]),
+      ),
+    ).toMatchObject({ type: "duplicate", quoteRef: "PMR034" });
+  });
+});

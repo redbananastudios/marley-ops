@@ -66,6 +66,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   const activeBrands = await listActiveBrands(sb);
   const multi = activeBrands.length > 1;
   const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
+  // GATE 11: "Book survey" opens an enquiry, so in multi-brand mode its dialog
+  // needs the brand picker's options — the same read as the chips, slimmed to
+  // the serialisable picker shape. Empty in single-brand mode: the picker never
+  // renders and the button stays byte-identical to today.
+  const bookSurveyBrands = multi
+    ? activeBrands.map((b) => ({ slug: b.slug, name: b.name, shortName: b.shortName }))
+    : [];
 
   const [{ data: leads }, { data: quotes }] = await Promise.all([
     sb
@@ -174,7 +181,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
         </div>
 
         <div className="flex flex-wrap gap-2 border-t px-5 py-4">
-          <BookSurveyButton clientId={client.id} openLeadId={openLead?.id ?? null} />
+          <BookSurveyButton clientId={client.id} openLeadId={openLead?.id ?? null} brands={bookSurveyBrands} />
           {/* Repeat business: start a fresh enquiry + quote for THIS customer
               without re-typing them — lands on /quotes/new pre-selected. */}
           <Link

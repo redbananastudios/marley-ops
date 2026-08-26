@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
 import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
 import { gbpInc, type StorageRates } from "@/lib/storage-rates";
+import type { BrandChipData } from "@/components/brand/brand-chip";
 import {
   deleteHandlingEventAction,
   editLetAction,
@@ -58,11 +59,15 @@ export function ManageLetDialog({
   unit,
   let_,
   rates,
+  brands = [],
   onClose,
 }: {
   unit: UnitRow;
   let_: LetRow;
   rates: StorageRates;
+  /** Slim brands rows — the brand selector renders only with two or more
+   *  (the single-brand invariant, multi-brand PRD §1). */
+  brands?: BrandChipData[];
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -84,6 +89,9 @@ export function ManageLetDialog({
   const [rate, setRate] = useState(let_.rate == null ? "" : String(let_.rate));
   const [period, setPeriod] = useState(let_.rate_period);
   const [startDate, setStartDate] = useState(let_.start_date.slice(0, 10));
+  // Pre-filled with the stamp from creation (lead first, then site — PRD §2);
+  // overridable here because attribution is all the brand does this gate.
+  const [brand, setBrand] = useState(let_.brand);
   const [notes, setNotes] = useState(let_.notes ?? "");
   const [pending, start] = useTransition();
 
@@ -154,6 +162,9 @@ export function ManageLetDialog({
         rate: rate === "" ? "" : Number(rate),
         rate_period: period as "week" | "month" | "day",
         start_date: startDate,
+        // Only a real change travels — "" leaves the stamp untouched (and
+        // sidesteps validation if the stored brand has since been retired).
+        brand: brand !== let_.brand ? brand : "",
         notes,
       });
       if (!res.ok) return void toast.error(res.error);
@@ -368,6 +379,26 @@ export function ManageLetDialog({
                 className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
               />
             </div>
+            {brands.length > 1 ? (
+              <div>
+                <label htmlFor="let-brand" className="eyebrow mb-1.5 block">
+                  Brand
+                </label>
+                <select
+                  id="let-brand"
+                  value={brand}
+                  onChange={(e) => setBrand(e.target.value)}
+                  className="focus-ring h-11 w-full rounded-md border border-input bg-card px-3 text-sm"
+                >
+                  {brands.some((b) => b.slug === brand) ? null : <option value={brand}>{brand}</option>}
+                  {brands.map((b) => (
+                    <option key={b.slug} value={b.slug}>
+                      {b.shortName ?? b.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
             <div className="col-span-2">
               <label htmlFor="let-notes" className="eyebrow mb-1.5 block">
                 Notes

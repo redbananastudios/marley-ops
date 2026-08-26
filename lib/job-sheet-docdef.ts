@@ -11,6 +11,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import type { SurveyInventoryRoom } from "@/lib/cubic-survey";
+import { tintTowardsWhite, type DocBrand } from "@/lib/pdf/doc-brand";
 
 const C = {
   red: "#C03838",
@@ -73,6 +74,10 @@ export interface JobSheetData {
   /** Contract signature state: false = accepted quote with NO signature yet
    *  (crew must collect on arrival); null/undefined = no accepted quote. */
   contractSigned?: boolean | null;
+  /** The job's brand (multi-brand PRD §3.6 — the sheet is a JOB document),
+   *  resolved by the loader. Absent/null renders today's default-brand sheet,
+   *  byte-identical. Serialisable — crosses the server-action wire. */
+  brand?: DocBrand | null;
 }
 
 const fmtDate = (d: string | null): string => {
@@ -153,6 +158,16 @@ function listCard(title: string, lines: string[], empty: string): any {
 }
 
 export function buildJobSheetDocDef(d: JobSheetData): any {
+  // Data rule, never a slug switch: no brand → today's literal constants
+  // (byte-parity); a brand → its WCAG-picked colour, the soft-fill and
+  // on-dark-subtext tints derived from it, and row-sourced identity lines.
+  const accent = d.brand?.colour ?? C.red;
+  const accentSoft = d.brand ? tintTowardsWhite(accent, 0.94) : C.redSoft;
+  const subOnDark = d.brand ? tintTowardsWhite(accent, 0.81) : "#F4D9D9";
+  const footerLine = d.brand
+    ? [d.brand.name, d.brand.phone, d.brand.email].filter(Boolean).join(" · ")
+    : "Marley Moves · 01747 637070 · hello@marleymoves.co.uk";
+
   const cellM = [10, 4, 10, 4];
   // NOTE: the colSpan filler MUST stay a bare {} — giving it any property
   // (even just a margin) sends pdfmake's layout into an infinite loop.
@@ -189,7 +204,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
   }
   const photoSection: any[] = photos.length
     ? [
-        { text: "SURVEY PHOTOS", style: "colHead", color: C.red, pageBreak: "before" as const, margin: [0, 0, 0, 10] },
+        { text: "SURVEY PHOTOS", style: "colHead", color: accent, pageBreak: "before" as const, margin: [0, 0, 0, 10] },
         ...photoRows,
       ]
     : [];
@@ -214,7 +229,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
   ];
   for (const grp of surveyRooms) {
     surveyBody.push([
-      { text: grp.room, style: "colHead", color: C.red, fillColor: C.softPanel, colSpan: 4, margin: [10, 5, 10, 5] },
+      { text: grp.room, style: "colHead", color: accent, fillColor: C.softPanel, colSpan: 4, margin: [10, 5, 10, 5] },
       {},
       {},
       {},
@@ -268,19 +283,19 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
                 [
                   {
                     stack: [
-                      { text: "SURVEY WALKTHROUGH VIDEOS", style: "colHead", color: C.red },
+                      { text: "SURVEY WALKTHROUGH VIDEOS", style: "colHead", color: accent },
                       {
                         text: `${videoCount} video${videoCount === 1 ? "" : "s"} on file. Scan to open this job in Marley Ops on your phone and watch the walkthrough.`,
                         style: "body",
                         margin: [0, 4, 0, 0],
                       },
                     ],
-                    fillColor: C.redSoft,
+                    fillColor: accentSoft,
                     margin: [10, 9, 10, 9],
                   },
                   {
                     stack: [{ qr: d.jobUrl, fit: 90, foreground: C.ink }],
-                    fillColor: C.redSoft,
+                    fillColor: accentSoft,
                     alignment: "center",
                     margin: [10, 8, 12, 8],
                   },
@@ -301,32 +316,41 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
     defaultStyle: { font: "Montserrat", fontSize: 9.5, color: C.ink, lineHeight: 1.25 },
     footer: (page: number, pages: number) => ({
       columns: [
-        { text: "Marley Moves · 01747 637070 · hello@marleymoves.co.uk", style: "footerText" },
+        { text: footerLine, style: "footerText" },
         { text: `Page ${page} of ${pages}`, style: "footerText", alignment: "right" },
       ],
       margin: [38, 12, 38, 0],
     }),
     styles: {
       brand: { font: "Cormorant", fontSize: 22, bold: true, color: C.ink },
-      brandRed: { color: C.red },
+      brandRed: { color: accent },
       docTitle: { fontSize: 11, bold: true, color: C.muted, characterSpacing: 1 },
       hero: { fontSize: 13, bold: true, color: C.white },
-      heroSub: { fontSize: 9.5, color: "#F4D9D9" },
+      heroSub: { fontSize: 9.5, color: subOnDark },
       cardTitle: { fontSize: 8.5, bold: true, color: C.white, characterSpacing: 0.8, margin: [10, 5, 10, 5] },
       addr: { fontSize: 10.5, bold: true, color: C.ink },
-      postcode: { fontSize: 12, bold: true, color: C.red },
+      postcode: { fontSize: 12, bold: true, color: accent },
       body: { fontSize: 9.5, color: C.ink },
       bodyQty: { fontSize: 9.5, bold: true, color: C.ink, alignment: "right" },
       meta: { fontSize: 8.5, color: C.muted },
       colHead: { fontSize: 8.5, bold: true, color: C.white },
-      flagWarn: { fontSize: 8.5, bold: true, color: C.red },
+      flagWarn: { fontSize: 8.5, bold: true, color: accent },
       footerText: { fontSize: 7.5, color: C.muted },
     },
     content: [
-      /* header */
+      /* header — the two-tone wordmark is the default brand's design; any
+         other brand renders its full name in its own colour with the group
+         disclosure beside it (required wherever the brand identity appears) */
       {
         columns: [
-          { text: [{ text: "MARLEY ", style: "brand" }, { text: "MOVES", style: ["brand", "brandRed"] }] },
+          d.brand
+            ? {
+                stack: [
+                  { text: d.brand.name.toUpperCase(), style: "brand", color: accent },
+                  { text: d.brand.groupLine, style: "meta", margin: [0, 2, 0, 0] },
+                ],
+              }
+            : { text: [{ text: "MARLEY ", style: "brand" }, { text: "MOVES", style: ["brand", "brandRed"] }] },
           { text: "JOB SHEET", style: "docTitle", alignment: "right", margin: [0, 7, 0, 0] },
         ],
       },
@@ -344,8 +368,8 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
                       text: "CONTRACT NOT YET SIGNED — collect the customer's signature on arrival (My jobs → this job → Collect signature now).",
                       fontSize: 9,
                       bold: true,
-                      color: C.red,
-                      fillColor: C.redSoft,
+                      color: accent,
+                      fillColor: accentSoft,
                       margin: [10, 7, 10, 7],
                     },
                   ],
@@ -437,10 +461,10 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
             [
               {
                 text: [
-                  { text: "JOB SPEC   ", style: "colHead", color: C.red },
+                  { text: "JOB SPEC   ", style: "colHead", color: accent },
                   { text: [d.vehicleLabel, d.packingLabel].filter(Boolean).join("  ·  "), style: "body", bold: true },
                 ],
-                fillColor: C.redSoft,
+                fillColor: accentSoft,
                 margin: [10, 7, 10, 7],
               },
             ],
@@ -478,7 +502,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
 
       /* survey inventory — full room-grouped item list from the survey */
       ...(surveyInventorySection.length
-        ? [{ text: "SURVEY INVENTORY", style: "colHead", color: C.red, margin: [0, 0, 0, 8] }]
+        ? [{ text: "SURVEY INVENTORY", style: "colHead", color: accent, margin: [0, 0, 0, 8] }]
         : []),
       ...surveyInventorySection,
 
@@ -497,7 +521,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
             [
               {
                 stack: [
-                  { text: "CUSTOMER SIGN-OFF", style: "colHead", color: C.red, margin: [0, 0, 0, 14] },
+                  { text: "CUSTOMER SIGN-OFF", style: "colHead", color: accent, margin: [0, 0, 0, 14] },
                   { canvas: [{ type: "line", x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.75, lineColor: C.ink }] },
                   { text: "Signature — goods received in good order", style: "meta", margin: [0, 3, 0, 0] },
                 ],
@@ -506,7 +530,7 @@ export function buildJobSheetDocDef(d: JobSheetData): any {
               { text: "", border: [false, false, false, false] },
               {
                 stack: [
-                  { text: "CREW LEAD", style: "colHead", color: C.red, margin: [0, 0, 0, 14] },
+                  { text: "CREW LEAD", style: "colHead", color: accent, margin: [0, 0, 0, 14] },
                   { canvas: [{ type: "line", x1: 0, y1: 0, x2: 200, y2: 0, lineWidth: 0.75, lineColor: C.ink }] },
                   { text: "Name + signature on completion", style: "meta", margin: [0, 3, 0, 0] },
                 ],

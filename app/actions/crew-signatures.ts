@@ -32,6 +32,20 @@ import { termsSnapshot } from "@/lib/legal/documents";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { exceptionsWarrantReviewSuppression } from "@/lib/comms/review-suppression";
 import { claimRef } from "@/lib/claims";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { docBrandFrom } from "@/lib/pdf/doc-brand";
+
+/** Brand-prefixed certificate attachment name (PRD §10); the default brand's
+ *  filename is unchanged. The read is skipped entirely for DEFAULT_BRAND. */
+async function certificateAttachmentName(
+  admin: ReturnType<typeof createAdminClient>,
+  apptBrand: string | null | undefined,
+): Promise<string> {
+  const fallback = "marley-moves-completion-certificate.pdf";
+  if (!apptBrand || apptBrand === DEFAULT_BRAND) return fallback;
+  const brand = docBrandFrom(await getBrandOrDefault(admin, apptBrand));
+  return brand ? `${brand.shortName}-completion-certificate.pdf` : fallback;
+}
 
 /* ------------------------------------------------- in-person contract */
 
@@ -143,7 +157,7 @@ export async function completeJobAction(
 
   const { data: appt } = await admin
     .from("appointments")
-    .select("id, lead_id, starts_at, appt_type, status")
+    .select("id, lead_id, starts_at, appt_type, status, brand")
     .eq("id", appointmentId)
     .single();
   if (!appt) return { ok: false, error: "Appointment not found." };
@@ -347,7 +361,7 @@ export async function completeJobAction(
         ? { template: { id: templateId, variables: completionEmailVariables(emailInput) } }
         : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
       attachmentBase64: v.certificatePdfBase64 ?? undefined,
-      attachmentName: v.certificatePdfBase64 ? "marley-moves-completion-certificate.pdf" : undefined,
+      attachmentName: v.certificatePdfBase64 ? await certificateAttachmentName(admin, appt.brand) : undefined,
       from: HELLO_FROM,
       replyTo: await latestReplyAddressForLead(admin, appt.lead_id),
       leadId: appt.lead_id ?? undefined,
@@ -425,7 +439,7 @@ export async function resendCertificateAction(
 
   const { data: appt } = await admin
     .from("appointments")
-    .select("starts_at")
+    .select("starts_at, brand")
     .eq("id", comp.appointment_id)
     .maybeSingle();
   const moveDay = appt?.starts_at ? appt.starts_at.slice(0, 10) : null;
@@ -455,7 +469,7 @@ export async function resendCertificateAction(
       ? { template: { id: templateId, variables: completionEmailVariables(emailInput) } }
       : { bodyHtml: buildCompletionEmailHtml(emailInput) }),
     attachmentBase64: pdfB64,
-    attachmentName: "marley-moves-completion-certificate.pdf",
+    attachmentName: await certificateAttachmentName(admin, appt?.brand),
     from: HELLO_FROM,
     replyTo: await latestReplyAddressForLead(admin, lead.id),
     leadId: lead.id,

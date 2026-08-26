@@ -1,0 +1,7 @@
+# .mjs files MUST check out with LF on every platform: vitest's transform
+# pipeline fails with "SyntaxError: Invalid or unexpected token" when an
+# imported .mjs (tests/brand-leak-scan.test.ts -> scripts/brand-leak-scan.mjs)
+# is materialised with CRLF, which core.autocrlf=true does on Windows.
+# Verified A/B/A on i9 2026-08-25: CRLF fails, LF passes, byte-identical
+# otherwise. CI (Linux) always saw LF, so only local Windows runs broke.
+*.mjs text eol=lf

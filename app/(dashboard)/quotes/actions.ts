@@ -32,16 +32,21 @@ async function ctx() {
 }
 
 /**
- * Allocate the next quote reference — MMR### (residential) or MMC### (commercial),
- * an ever-growing per-kind counter minted by the DB sequence via next_quote_ref()
- * (migration 0037). Collision-proof even when quotes are deleted (unlike the old
- * count-of-rows-today scheme). Throws only on a genuine RPC failure.
+ * Allocate the next quote reference — e.g. MMR###/PMR### (residential) or
+ * MMC###/PMC### (commercial), an ever-growing per-brand × per-kind counter
+ * minted by the DB via next_quote_ref() (migration 0104, replacing 0037's
+ * sequences). The MM/PM prefix is derived IN THE DB from brands.ref_prefix —
+ * never duplicated in TS — and an unknown or mint-nothing brand ('group')
+ * errors loudly rather than inventing a prefix. Collision-proof even when
+ * quotes are deleted (unlike the old count-of-rows-today scheme). Throws only
+ * on a genuine RPC failure.
  */
 async function nextQuoteRef(
   sb: Awaited<ReturnType<typeof createClient>>,
   kind: "R" | "C",
+  brand: string,
 ): Promise<string> {
-  const { data, error } = await sb.rpc("next_quote_ref", { kind });
+  const { data, error } = await sb.rpc("next_quote_ref", { kind, brand });
   if (error || typeof data !== "string") {
     throw new Error(error?.message ?? "Could not allocate a quote reference");
   }
@@ -143,15 +148,19 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
   const pricing = await getPricingConfig(sb);
   const breakdown = computeQuote(deriveInputs(seed), pricing);
 
-  // Residential vs commercial reference (MMR###/MMC###), from the lead's move type.
+  // Residential vs commercial reference kind (R/C), from the lead's move type.
   const kind = quoteRefKind(lead?.property_size);
+  // The ref's brand prefix (MM/PM) follows the lead's brand, with the same
+  // DEFAULT_BRAND fallback as the denormalised `brand` column in the insert
+  // below — one variable feeds both so the ref and the row can never disagree.
+  const brand = lead?.brand ?? DEFAULT_BRAND;
 
   // Retry once on the unlikely ref collision (a fresh sequence value each pass
   // can never collide — this is a belt-and-braces backstop).
   for (let attempt = 0; attempt < 2; attempt++) {
     let quote_ref: string;
     try {
-      quote_ref = await nextQuoteRef(sb, kind);
+      quote_ref = await nextQuoteRef(sb, kind, brand);
     } catch (e) {
       return { ok: false as const, error: e instanceof Error ? e.message : "Could not allocate a quote reference" };
     }
@@ -162,7 +171,7 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
         // Denormalised from the parent lead at insert (PRD §3.2) — lists and
         // the diary colour a quote without a join. A lead-less draft (no
         // leadId seed) falls back to DEFAULT_BRAND, matching the DB default.
-        brand: lead?.brand ?? DEFAULT_BRAND,
+        brand,
         // New quotes start UNASSIGNED — NOT owned by whoever clicked "New quote".
         // The estimator is set deliberately on the review step (EstimatorPicker),
         // so an un-triaged quote emails from the Accounts money desk rather than

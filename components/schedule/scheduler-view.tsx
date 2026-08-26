@@ -2,9 +2,28 @@
 
 /**
  * FullCalendar wrapper for the schedule surfaces (surveys / removals; the
- * removals view can overlay surveys to spot clashes). Colour-codes by type:
- *   - survey  -> white bg, 1px mm-red border, mm-red text (outline chip)
- *   - removal -> solid charcoal (#1A1A1A) bg, white text
+ * removals view can overlay surveys to spot clashes).
+ *
+ * Colour model (multi-brand PRD §4 + §10): fill encodes brand × appt_type,
+ * resolved by styleFor() from the slim `brands` prop:
+ *   - DEFAULT_BRAND, unknown slug, or missing colours -> today's constants:
+ *     removal solid charcoal #1A1A1A / white text; survey AND pack solid
+ *     brand red #C03838 / white text. This arm IS the single-brand parity
+ *     contract — Marley renders byte-identical with the brand layer off.
+ *   - any other brand (a data rule, never a slug switch): removal fills
+ *     colour_primary; survey/pack fills colour_accent (no accent -> the
+ *     primary). Text is white where it passes the WCAG 3:1 large-text bar
+ *     on that fill, else charcoal on a removal and the brand's primary on a
+ *     survey (yellow blocks take blue text) — the lib/brand.ts
+ *     brandCtaColour rule applied to diary fills.
+ *   - hollow-unconfirmed (NOT gated on multi-brand — Marley gets it): a
+ *     removal whose lead has no date_confirmed_at renders transparent with
+ *     a 2px dashed border and text in that brand's removal colour, filling
+ *     solid the moment confirmation lands. Surveys and packs are always
+ *     solid (no confirmation concept).
+ *   - multi-brand only: the brand initial joins the event's time row as a
+ *     second signal that doesn't rely on colour vision, and a per-brand
+ *     legend row renders above the calendar.
  *
  * Interactions:
  *   - dateClick / select  -> open the create dialog prefilled with that time
@@ -12,8 +31,10 @@
  *   - eventDrop / resize  -> confirm() then rescheduleAppointment; revert on !ok
  *
  * Toolbar is restyled minimal to match the Marley shell (hairline borders,
- * today highlighted with a thin mm-red ring, Montserrat). iPad-friendly:
- * on a narrow viewport the default view drops to timeGridDay.
+ * today highlighted with a thin mm-red ring, Montserrat) — the mm-red chrome
+ * (now-indicator, today ring, buttons) is app chrome, not record branding,
+ * and stays Marley red in every mode. iPad-friendly: on a narrow viewport
+ * the default view drops to timeGridDay.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,6 +58,7 @@ import type {
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { rescheduleAppointment } from "@/app/(dashboard)/schedule/actions";
 import { slotRangeFor } from "@/lib/schedule/slot-range";
 import {
@@ -67,6 +89,27 @@ export interface SchedulerEvent {
    *  absent from every schedule page's select, so the dialog seeded blank and
    *  saving wiped whatever was typed at booking time. */
   notes?: string | null;
+  /** appointments.brand — styleFor resolves the fill from it. Absent or
+   *  unknown renders today's Marley constants (the parity contract). */
+  brand?: string;
+  /** Removals only: false while the lead's date_confirmed_at is null →
+   *  hollow rendering. Callers that don't stamp it (the allocation view's
+   *  RescheduleDialog feed) get solid events — decorating fails soft. */
+  dateConfirmed?: boolean;
+}
+
+/** Slim active-brand row for the diary colour lookup + legend — only the
+ *  fields this client actually needs (multi-brand PRD §4). */
+export interface BrandDiaryOption {
+  slug: string;
+  /** Full brand name — structurally satisfies the booking dialog's
+   *  ApptBrandOption, so the same rows feed its bare-client picker. */
+  name: string;
+  shortName: string;
+  /** Diary meta-line letter (brands.initial); null renders no second signal. */
+  initial: string | null;
+  colourPrimary: string | null;
+  colourAccent: string | null;
 }
 
 const CHARCOAL = "#1A1A1A";
@@ -86,6 +129,32 @@ const REMOVAL_STYLE = {
   textColor: "#ffffff",
 } as const;
 
+interface EventStyle {
+  backgroundColor: string;
+  borderColor: string;
+  textColor: string;
+}
+
+/* Local copies of lib/brand.ts's private hex/contrast helpers (the
+   brandCtaColour precedent — same 3:1 WCAG large-text bar). Not exported
+   there; a client bundle shouldn't pull the server brand-reader module for
+   two pure ten-line functions. */
+const parseHex = (v: string | null): [number, number, number] | null => {
+  if (!v) return null;
+  const m = /^#?([0-9a-f]{6})$/i.exec(v.trim());
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+};
+const srgbChannel = (c: number): number => {
+  const s = c / 255;
+  return s <= 0.04045 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+};
+const whiteTextLegible = ([r, g, b]: [number, number, number]): boolean => {
+  const luminance = 0.2126 * srgbChannel(r) + 0.7152 * srgbChannel(g) + 0.0722 * srgbChannel(b);
+  return 1.05 / (luminance + 0.05) >= 3;
+};
+
 function toLocalInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
@@ -103,6 +172,9 @@ export function SchedulerView({
   presetLocation,
   openOnLoad = false,
   baseLocation,
+  brands = [],
+  multiBrand = false,
+  brandFilterSlot,
 }: {
   view: SchedulerKind;
   events: SchedulerEvent[];
@@ -116,6 +188,16 @@ export function SchedulerView({
   openOnLoad?: boolean;
   /** business base address — origin for the view modal's route map */
   baseLocation: string;
+  /** Slim listActiveBrands rows — feeds styleFor, the meta-line initial and
+   *  the legend. Safe to pass single-brand: the UI gates on multiBrand. */
+  brands?: BrandDiaryOption[];
+  /** listActiveBrands().length > 1, computed server-side (the single-brand
+   *  invariant, PRD §1) — every piece of brand UI here hangs off it. */
+  multiBrand?: boolean;
+  /** Multi-brand only: the BrandFilter control. The removals page renders it
+   *  into the toolbar row beside "Show surveys" via this slot (that row
+   *  lives client-side); the surveys page puts it in its PageHeader. */
+  brandFilterSlot?: React.ReactNode;
 }) {
   const calRef = useRef<FullCalendar | null>(null);
   const router = useRouter();
@@ -184,10 +266,63 @@ export function SchedulerView({
     return view === "removal" && !showSurveys ? live.filter((e) => e.appt_type === "removal") : live;
   }, [events, view, showSurveys]);
 
+  // brand × appt_type style lookup. DEFAULT_BRAND is skipped here on purpose
+  // so it can only ever resolve to the constants above — Marley parity by
+  // construction, not by the seeded row happening to carry the right hex.
+  const brandStyles = useMemo(() => {
+    const map = new Map<string, { removal: EventStyle; survey: EventStyle }>();
+    for (const b of brands) {
+      if (b.slug === DEFAULT_BRAND) continue;
+      const primary = parseHex(b.colourPrimary);
+      if (!primary) continue; // no usable primary -> the default constants
+      const removal: EventStyle = {
+        backgroundColor: b.colourPrimary!,
+        borderColor: b.colourPrimary!,
+        textColor: whiteTextLegible(primary) ? "#ffffff" : CHARCOAL,
+      };
+      const accent = parseHex(b.colourAccent);
+      const survey: EventStyle = accent
+        ? {
+            backgroundColor: b.colourAccent!,
+            borderColor: b.colourAccent!,
+            // A light accent (Pitmans yellow) takes the brand's primary as
+            // text — yellow blocks get blue text (PRD §10 Colours).
+            textColor: whiteTextLegible(accent) ? "#ffffff" : b.colourPrimary!,
+          }
+        : removal; // missing accent falls back to the colour_primary fill
+      map.set(b.slug, { removal, survey });
+    }
+    return map;
+  }, [brands]);
+
+  const styleFor = useCallback(
+    (brandSlug: string | null | undefined, apptType: ApptType): EventStyle => {
+      const entry = brandSlug ? brandStyles.get(brandSlug) : undefined;
+      if (!entry) return apptType === "removal" ? REMOVAL_STYLE : SURVEY_STYLE;
+      return apptType === "removal" ? entry.removal : entry.survey;
+    },
+    [brandStyles],
+  );
+
+  const brandInitialBySlug = useMemo(
+    () => new Map(brands.map((b) => [b.slug, b.initial])),
+    [brands],
+  );
+
   const fcEvents: EventInput[] = useMemo(
     () =>
       shown.map((e) => {
-        const style = e.appt_type === "removal" ? REMOVAL_STYLE : SURVEY_STYLE;
+        const style = styleFor(e.brand, e.appt_type);
+        // Hollow-unconfirmed: only an explicit false — a caller that doesn't
+        // stamp dateConfirmed renders solid, and surveys/packs always do.
+        const hollow = e.appt_type === "removal" && e.dateConfirmed === false;
+        const colours = hollow
+          ? {
+              backgroundColor: "transparent",
+              borderColor: style.backgroundColor,
+              textColor: style.backgroundColor,
+            }
+          : style;
         const cancelled = e.status === "cancelled";
         return {
           id: e.id,
@@ -195,8 +330,12 @@ export function SchedulerView({
           start: e.starts_at,
           end: e.ends_at ?? undefined,
           allDay: !!e.all_day,
-          ...style,
-          classNames: [`mm-evt--${e.appt_type}`, ...(cancelled ? ["mm-evt-cancelled"] : [])],
+          ...colours,
+          classNames: [
+            `mm-evt--${e.appt_type}`,
+            ...(hollow ? ["mm-evt--hollow"] : []),
+            ...(cancelled ? ["mm-evt-cancelled"] : []),
+          ],
           extendedProps: {
             apptType: e.appt_type,
             leadId: e.lead_id,
@@ -205,10 +344,11 @@ export function SchedulerView({
             location: e.location,
             title: e.title,
             notes: e.notes ?? null,
+            brand: e.brand ?? null,
           },
         };
       }),
-    [shown],
+    [shown, styleFor],
   );
 
   // The time-grid window. Fixed at 07:00-20:00 this SILENTLY dropped anything
@@ -224,9 +364,17 @@ export function SchedulerView({
   const estimatorById = useMemo(() => new Map(estimators.map((e) => [e.id, e.full_name])), [estimators]);
   const renderEvent = useCallback(
     (arg: EventContentArg) => {
-      const ep = arg.event.extendedProps as { estimatorId: string | null; location: string | null };
+      const ep = arg.event.extendedProps as {
+        estimatorId: string | null;
+        location: string | null;
+        brand: string | null;
+      };
       const estimator = ep.estimatorId ? estimatorById.get(ep.estimatorId) ?? null : null;
       const firstName = estimator ? estimator.split(/\s+/)[0] : null;
+      // Brand initial on the time row (multi-brand only) — the second signal,
+      // so charcoal-vs-blue never rides on colour vision alone (PRD §4).
+      const brandInitial =
+        multiBrand && ep.brand ? brandInitialBySlug.get(ep.brand) ?? null : null;
       const compact = arg.view.type === "dayGridMonth";
       // Titles are system-generated "Survey — Jane Smith" — the card shows just the name.
       const name = (arg.event.title || "").replace(/^(Survey|Removal)\s+—\s+/, "");
@@ -234,6 +382,7 @@ export function SchedulerView({
         <div className="mm-evt-card">
           <div className="mm-evt-top">
             {arg.timeText ? <span className="mm-evt-time">{arg.timeText}</span> : null}
+            {brandInitial ? <span className="mm-evt-brand">{brandInitial}</span> : null}
             {firstName ? (
               <span className="mm-evt-est">
                 <span className="mm-evt-est-chip">{firstName[0]}</span>
@@ -246,7 +395,7 @@ export function SchedulerView({
         </div>
       );
     },
-    [estimatorById],
+    [estimatorById, brandInitialBySlug, multiBrand],
   );
 
   const openCreate = useCallback(
@@ -464,7 +613,9 @@ export function SchedulerView({
           >
             {showSurveys ? "Hide surveys" : "Show surveys"}
           </button>
-          {showSurveys ? (
+          {/* Single-brand only — the multi-brand legend below covers both
+              types per brand, so this two-swatch version would duplicate it. */}
+          {showSurveys && !multiBrand ? (
             <div className="flex items-center gap-4 text-xs text-mist-500">
               <span className="inline-flex items-center gap-1.5">
                 <span className="inline-block size-3 rounded-[3px]" style={{ backgroundColor: EVENT_RED }} />
@@ -475,6 +626,43 @@ export function SchedulerView({
                 Removal
               </span>
             </div>
+          ) : null}
+          {brandFilterSlot}
+        </div>
+      ) : null}
+
+      {/* Multi-brand legend (PRD §4): one group per active brand, swatches
+          for what THIS surface can show, plus the shared hollow note on the
+          removals view. Single-brand renders nothing — the parity contract. */}
+      {multiBrand ? (
+        <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-mist-500">
+          {brands.map((b) => (
+            <span key={b.slug} className="inline-flex items-center gap-1.5">
+              <span className="font-semibold text-foreground">{b.shortName}</span>
+              {view === "removal" ? (
+                <>
+                  <span
+                    className="inline-block size-3 rounded-[3px]"
+                    style={{ backgroundColor: styleFor(b.slug, "removal").backgroundColor }}
+                  />
+                  <span>Removal</span>
+                </>
+              ) : null}
+              <span
+                className="inline-block size-3 rounded-[3px]"
+                style={{ backgroundColor: styleFor(b.slug, "survey").backgroundColor }}
+              />
+              <span>{view === "removal" ? "Survey/Pack" : "Survey"}</span>
+            </span>
+          ))}
+          {view === "removal" ? (
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="inline-block size-3 rounded-[3px] border-2 border-dashed"
+                style={{ borderColor: CHARCOAL }}
+              />
+              <span>Dashed outline = date not yet confirmed</span>
+            </span>
           ) : null}
         </div>
       ) : null}
@@ -608,6 +796,11 @@ export function SchedulerView({
         open={dialogOpen}
         onOpenChange={closeCreateDialog}
         leads={leads}
+        // Feeds the bare-client brand picker — without this the dialog's
+        // brands default ([]) leaves requireBrand permanently false and a
+        // bare-client booking dead-ends on the server's refusal
+        // (QA gate-11 op7, 2026-08-25).
+        brands={brands}
         estimators={estimators}
         defaultEstimatorId={defaultEstimatorId}
         defaultType={defaultType}
@@ -760,6 +953,23 @@ export function SchedulerView({
         .mm-scheduler .fc .mm-evt-cancelled {
           opacity: 0.45;
           text-decoration: line-through;
+        }
+        /* Hollow-unconfirmed removal: FullCalendar inlines background-color,
+           border-color and color from the event's colour props (transparent /
+           removal colour / removal colour here) — width and style, which it
+           has no props for, land via this class. */
+        .mm-scheduler .fc .mm-evt--hollow {
+          border-style: dashed;
+          border-width: 2px;
+        }
+        /* Brand initial — the colour-vision-independent second signal on the
+           time row (multi-brand only). margin-right:auto pins it beside the
+           time and pushes the estimator pill back to the right edge. */
+        .mm-evt-brand {
+          font-size: 0.65rem;
+          font-weight: 700;
+          opacity: 0.9;
+          margin-right: auto;
         }
         .mm-scheduler .fc .fc-toolbar.fc-header-toolbar {
           margin-bottom: 0.75rem;

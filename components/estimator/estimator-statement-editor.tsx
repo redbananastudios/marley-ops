@@ -9,7 +9,7 @@
  * of invoicing). No VAT (not VAT-registered), no weekly guarantee (crew only).
  */
 
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarPlus, Loader2, Plus, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -301,6 +301,7 @@ function LineSheet({
   const [description, setDescription] = useState(line?.description ?? "");
   const [amount, setAmount] = useState(line?.amount != null ? String(line.amount) : "");
   const [busy, setBusy] = useState(false);
+  const fieldId = useId();
 
   async function save() {
     if (!description.trim()) {
@@ -338,16 +339,22 @@ function LineSheet({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border" />
         <h3 className="font-display text-xl font-semibold text-foreground">{line ? "Edit line" : "Add a line"}</h3>
 
-        <label className="mt-4 block text-xs font-medium text-mist-500">Description</label>
+        <label htmlFor={`${fieldId}-description`} className="mt-4 block text-xs font-medium text-mist-500">
+          Description
+        </label>
         <input
+          id={`${fieldId}-description`}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           placeholder="e.g. Agreed adjustment"
           className="focus-ring mt-1 h-12 w-full rounded-md border border-input bg-card px-3 text-base"
         />
 
-        <label className="mt-3 block text-xs font-medium text-mist-500">Amount (£)</label>
+        <label htmlFor={`${fieldId}-amount`} className="mt-3 block text-xs font-medium text-mist-500">
+          Amount (£)
+        </label>
         <input
+          id={`${fieldId}-amount`}
           value={amount}
           onChange={(e) => setAmount(e.target.value)}
           type="number"

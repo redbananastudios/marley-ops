@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { findExistingClient } from "@/lib/leads/resolver";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
+import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
 import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
 
@@ -273,11 +274,25 @@ export async function setClientActiveAction(id: string, isActive: boolean) {
  * opens one (with the phone source they told us), ready to preselect in the
  * survey diary.
  */
-export async function createLeadForClientAction(clientId: string, entryChannel: string) {
+export async function createLeadForClientAction(clientId: string, entryChannel: string, brand?: string) {
   const ALLOWED = ["phone_google", "phone_facebook", "phone_referral", "manual", "referral"];
   const channel = ALLOWED.includes(entryChannel) ? entryChannel : "manual";
   const { sb, userId } = await actor();
-  const res = await ensureLeadForClient(sb, clientId, userId, channel);
+  // GATE 11 — the enquiry's brand, resolved SERVER-SIDE and never trusted from
+  // the client (mirrors createAppointment's bare-client path). Single-brand
+  // mode: the callers' pickers never rendered, so whatever arrived is ignored
+  // and DEFAULT_BRAND is written — today's behaviour. Multi-brand mode:
+  // required with NO default — nothing can be inferred about which brand a
+  // phone customer rang. Validated against listActiveBrands (data, not a
+  // constant list).
+  const activeBrands = await listActiveBrands(sb);
+  let leadBrand: string = DEFAULT_BRAND;
+  if (activeBrands.length > 1) {
+    const picked = brand && activeBrands.some((b) => b.slug === brand) ? brand : null;
+    if (!picked) return { ok: false as const, error: "Choose which brand this enquiry is for." };
+    leadBrand = picked;
+  }
+  const res = await ensureLeadForClient(sb, clientId, userId, channel, leadBrand);
   if (!res.ok) return res;
   revalidatePath("/leads");
   revalidatePath(`/clients/${clientId}`);

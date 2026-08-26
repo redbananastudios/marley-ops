@@ -2,7 +2,10 @@
  * UK wall-clock helpers. The whole system runs on UK time (Peter, 2026-07-08),
  * but Vercel functions always execute in UTC and reserve the TZ env var — so
  * every SERVER-SIDE day boundary or "at 9am" computation must go through these.
- * (Client components are fine as-is: the team's browsers are in the UK.)
+ * (Client components' event handlers are fine as-is — the team's browsers are
+ * in the UK — but anything they RENDER is also server-rendered once in UTC, so
+ * render-time date text must pin UK_TZ or it hydration-mismatches near
+ * midnight through BST: React #418, QA-20260826-03.)
  *
  * Storage stays UTC (timestamptz / toISOString) — these helpers only decide
  * WHICH instant a UK wall-clock time refers to, DST-correct via Intl.
@@ -53,6 +56,23 @@ export function ukCalendarDate(at: string | Date | null | undefined): string | n
   if (Number.isNaN(d.getTime())) return null;
   const { year, month, day } = ukParts(d);
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/**
+ * Short UK display date for an instant — "26 Aug 2026" — pinned to UK_TZ so the
+ * server render (UTC) and the browser (UK) produce the same text. "—" for a
+ * missing or unparseable input, matching the list pages' empty-cell convention.
+ */
+export function ukDateShort(at: string | null | undefined): string {
+  if (!at) return "—";
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: UK_TZ,
+  });
 }
 
 /** Millisecond offset of Europe/London from UTC at the given instant (0 in winter, 3 600 000 in BST). */
