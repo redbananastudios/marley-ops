@@ -104,8 +104,15 @@ export function resolveWpPullConfig(
   if (secret.length < MIN_INGEST_SECRET_LENGTH) {
     return { state: "broken", reason: "PITMANS_WP_PULL_SECRET is shorter than 16 characters — a placeholder, not a credential" };
   }
-  if (!/^https?:\/\//.test(url)) {
-    return { state: "broken", reason: "PITMANS_WP_PULL_URL is not an http(s) URL" };
+  // https ONLY, not http: this endpoint returns whole customer records — name,
+  // phone, email, both addresses — up to WP_PULL_LIMIT rows per poll, and the
+  // request's HMAC signature rides in the query string where an on-path
+  // observer could replay it inside the 300s window. The plugin lives on a
+  // public WordPress host that already serves https, so there is no legitimate
+  // plaintext caller to accommodate; a typo'd http:// URL must fail loudly
+  // rather than quietly downgrade every 15-minute poll to cleartext.
+  if (!/^https:\/\//.test(url)) {
+    return { state: "broken", reason: "PITMANS_WP_PULL_URL is not an https:// URL" };
   }
   return { state: "configured", url, secret };
 }

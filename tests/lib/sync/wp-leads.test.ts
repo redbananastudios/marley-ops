@@ -150,6 +150,24 @@ describe("resolveWpPullConfig", () => {
     const cfg = resolveWpPullConfig({ PITMANS_WP_PULL_URL: URL_ENV, PITMANS_WP_PULL_SECRET: SECRET });
     expect(cfg.state).toBe("configured");
   });
+
+  it("a plaintext http:// URL is 'broken' — this response carries whole customer records", () => {
+    // The poll returns up to WP_PULL_LIMIT rows of name/phone/email/addresses and
+    // signs the request in the query string, so a downgraded URL must fail loudly
+    // rather than quietly ship PII in cleartext every 15 minutes.
+    const cfg = resolveWpPullConfig({
+      PITMANS_WP_PULL_URL: URL_ENV.replace("https://", "http://"),
+      PITMANS_WP_PULL_SECRET: SECRET,
+    });
+    expect(cfg.state).toBe("broken");
+    expect(cfg.state === "broken" && cfg.reason).toContain("https://");
+  });
+
+  it("a non-URL value is still 'broken'", () => {
+    expect(
+      resolveWpPullConfig({ PITMANS_WP_PULL_URL: "pitmansremovals.co.uk", PITMANS_WP_PULL_SECRET: SECRET }).state,
+    ).toBe("broken");
+  });
 });
 
 describe("syncWpLeads", () => {

@@ -67,7 +67,7 @@ Installation is not finished until **both** of these are true:
    confirm: the lead appears in Ops within seconds (push), and the next
    `wp-leads` cron run reports it under `alreadyPresent` (pull).
 
-The plugin is form-stack-generic by design: the CF7 hook (`wpcf7_mail_sent`)
+The plugin is form-stack-generic by design: the CF7 hook (`wpcf7_before_send_mail`)
 is the only CF7-specific line, and every form id and field name is config. If
 the site ever rebuilds its form, edit `config.php`, not the plugin.
 

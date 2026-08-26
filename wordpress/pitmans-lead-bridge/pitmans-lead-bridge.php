@@ -16,7 +16,7 @@
  * plugin without the pull rail configured on the Ops side is a silent-loss
  * configuration — see README.md.
  *
- * The form stack is Contact Form 7 (hook: wpcf7_mail_sent), but every CF7
+ * The form stack is Contact Form 7 (hook: wpcf7_before_send_mail), but every CF7
  * specific — form ids, field names — is CONFIG, not code, so a form rebuild
  * or a different form plugin means editing config.php, not this file.
  *
@@ -427,12 +427,22 @@ function plb_retry_one_unpushed($exclude_id) {
 }
 
 /**
- * The form hook. Fires after CF7 sends its mail, for configured forms only.
- * Persist first, push second, then sweep one straggler. Nothing here may
+ * The form hook. Fires for every VALIDATED, non-spam submission to a configured
+ * form. Persist first, push second, then sweep one straggler. Nothing here may
  * break the customer's submission — every failure is swallowed into the row
  * or the error log.
+ *
+ * MUST stay on wpcf7_before_send_mail, NOT wpcf7_mail_sent. `wpcf7_mail_sent`
+ * fires only when CF7's notification mail succeeded, which would make the
+ * persist-first guarantee this whole design rests on conditional on the very
+ * channel it exists to back up: an SMTP outage (routine on shared WP hosting)
+ * would mean no row written, nothing to push, nothing for the pull rail to
+ * return, and no notification email either — the enquiry destroyed with zero
+ * trace on either side, while the Ops-side poll still reports a clean run.
+ * `wpcf7_before_send_mail` runs after validation and the spam check but before
+ * the mail attempt, so a genuine submission is always recorded.
  */
-function plb_on_mail_sent($contact_form) {
+function plb_on_submission($contact_form) {
     $cfg = plb_config();
     if ($cfg === null) {
         return;
@@ -461,7 +471,7 @@ function plb_on_mail_sent($contact_form) {
     plb_push_row($row_id);
     plb_retry_one_unpushed($row_id);
 }
-add_action('wpcf7_mail_sent', 'plb_on_mail_sent');
+add_action('wpcf7_before_send_mail', 'plb_on_submission');
 
 /**
  * The signed READ endpoint — the disjoint channel Ops polls.
