@@ -5,7 +5,7 @@ import { ukPhone } from "@/lib/phone";
 import { nextInvoiceDateFor, type BillableLet } from "@/lib/storage-billing";
 import { getStorageRates } from "@/lib/storage-rates";
 import { listActiveBrands } from "@/lib/brand";
-import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
+import { parseBrandParam } from "@/lib/brand-filter";
 import {
   StorageView,
   type HandlingEventRow,
@@ -34,7 +34,14 @@ export default async function StoragePage({
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 
   const [sitesRes, { data: units }, lets, clients] = await Promise.all([
-    applyBrandFilter(supabase.from("storage_sites").select("*"), brandFilter)
+    // Sites are read UNFILTERED and narrowed in JS below: a site is visible
+    // under a named filter when its own brand matches OR it CONTAINS a let of
+    // that brand. DB-narrowing on site.brand alone made a Marley site holding
+    // a Pitmans let vanish under ?brand=pitmans, leaving that let unreachable
+    // under its own brand's filter (gate-12 role QA Op5, 2026-08-26).
+    supabase
+      .from("storage_sites")
+      .select("*")
       .order("is_active", { ascending: false })
       .order("name"),
     supabase.from("storage_units").select("*").order("is_active", { ascending: false }).order("code").order("name"),
@@ -67,13 +74,29 @@ export default async function StoragePage({
     ),
   ]);
 
-  // The sites read is the named-brand narrowing read for this page, so it
-  // fails LOUD under a filter — a silently empty site list would look like a
-  // complete answer. On All it keeps today's fail-soft render.
-  const { data: sites, error: sitesError } = sitesRes;
+  // Under a named filter this read feeds the JS narrowing below, so it still
+  // fails LOUD there — a partial site list would render a wrong-narrowed page
+  // that looks complete. On All it keeps today's fail-soft render.
+  const { data: allSites, error: sitesError } = sitesRes;
   if (sitesError && brandFilter !== "all") {
     throw new Error(`Could not load storage sites: ${sitesError.message}`);
   }
+
+  // Site visibility under a named filter: own brand OR a contained let of the
+  // filtered brand (any let, open or ended — history must stay reachable).
+  // The let's brand comes from the customer's lead, so it can legitimately
+  // differ from its site's; the per-let "Let under another brand" handling in
+  // StorageView still hides non-matching lets' details inside a shown site.
+  const unitSiteById = new Map((units ?? []).map((u) => [u.id, u.site_id]));
+  const sitesWithFilteredLet = new Set(
+    brandFilter === "all"
+      ? []
+      : lets.filter((l) => l.brand === brandFilter).map((l) => unitSiteById.get(l.unit_id)).filter(Boolean),
+  );
+  const sites =
+    brandFilter === "all"
+      ? allSites
+      : (allSites ?? []).filter((s) => s.brand === brandFilter || sitesWithFilteredLet.has(s.id));
 
   // Assign-dialog pre-fill (multi-brand only): each client's most recent
   // lead's brand. startLetAction re-resolves this SERVER-SIDE at write time,
