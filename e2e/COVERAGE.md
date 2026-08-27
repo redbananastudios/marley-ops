@@ -14,6 +14,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Crew — /my-jobs routes load (5) + bounced off 10 dashboard routes | ✅ | crew/access.spec.ts |
 | Estimator — every nav route loads (11) | ✅ | estimator/access.spec.ts |
 | Estimator — /finance, /finance/statements, /refunds, / redirect | ✅ | estimator/gating.spec.ts |
+| Estimator — /board, /jobs, /clients, /storage, /performance, /automations, /documents should also redirect | 🟡 | estimator/gating.spec.ts — shipped `test.skip`, QA-20260827-01: these 7 pages have NO role gate at all, confirmed live on staging AND master; un-skips once the fix lands |
 
 ## Office / admin features
 | Flow | Status | Spec |
