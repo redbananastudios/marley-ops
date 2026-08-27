@@ -90,6 +90,8 @@ async function seedDeposit(): Promise<Fixture> {
       source: "imve",
       standard_comms_at: null,
       zoho_deposit_invoice_id: `${MARKER}-ZOHO-DEP`,
+      // A fixture that writes an invoice id is a writer like any other (0109/0110).
+      deposit_invoice_provider: "zoho",
       zoho_deposit_invoice_number: `${MARKER}-DEP-INV`,
       breakdown: { vehicle: "1luton", totalMiles: 20 },
       state_blob: { seeded: MARKER },
@@ -151,6 +153,7 @@ async function seedBalance(): Promise<Fixture> {
       source: "imve",
       standard_comms_at: null,
       zoho_balance_invoice_id: `${MARKER}-ZOHO-BAL`,
+      balance_invoice_provider: "zoho",
       zoho_balance_invoice_number: `${MARKER}-BAL-INV`,
       breakdown: { vehicle: "1luton", totalMiles: 20 },
       state_blob: { seeded: MARKER },
