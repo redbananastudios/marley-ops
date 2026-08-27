@@ -4,6 +4,19 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-27T06:35Z — escalation repair sweep (scheduled): nothing escalated
+
+No finding carries `escalate: opus-5` — `grep -rn "escalate:" qa/findings/` returns no match in any finding file, `open/` or `closed/`, so the first-pass tier has still handed nothing up. Verified against `origin/staging` @ `7949600` (`git fetch origin staging && git checkout -B staging origin/staging`; tree clean).
+
+The queue is now **8 findings, every one `class: risky`, `status: open`, no `branch:`** — outside both automated tiers by `qa/REPAIR.md` §1, and `grep -rl "class: safe-fix" qa/findings/open/` is empty, so there is no first-pass work sitting ahead of me either. Unchanged from the 2026-08-27T00:34Z sweep except for one addition:
+
+- **QA-20260827-01** (high, new — filed by the 04:08Z audit) — an estimator login reads `/jobs`, `/clients`, `/board`, `/storage`, `/performance`, `/automations` and `/documents` fully unredacted: customer PII, cross-staff pay/margin figures, company financials, signed documents. Access control for those 7 routes exists only as omitted nav links; `app/(dashboard)/layout.tsx` blocks `role==='crew'` and nothing else. **The same missing gate is live on `master`/production**, diffed route-by-route by the audit's main loop. Auth/RLS by class, never either tier's to fix. The audit push-notified Peter directly at 04:08Z, so this one has already reached him outside the ledger; not re-notified here.
+- The other seven are carried forward verbatim from the 00:34Z entry: QA-20260826-04 (high, storage-invoice legal identity), -05 (high, cursorless WP pull rail that erases its own loss evidence), -06 (inactive-brand domain suppresses live Marley inbound forwarding), -07 (dead `card_payments_enabled` control), -08 (`smsSenderFor` cross-brand fallback on a money chase), -09 (duplicate/unallowlisted `LEAD_INGEST_SECRET_*`), -01 (bookings-vs-payments £450 owed divergence). Comms sending, payments, auth/credentials, money — all Peter's.
+
+Standing structural note, third sweep running: none of the eight is marked `escalate: human` — that marker is written only by a tier that *took* a finding and failed, and neither tier may take a `risky` one — so a queue that is now 8 deep with 3 high-severity items reaches Peter only through this ledger and the audit entries, never through the morning brief's escalation list. Not self-authorized around: re-tagging a risky finding to make it mine would manufacture my own work order and destroy the class boundary.
+
+Nothing claimed, no branches cut (no `qa-repair/QA-20260826-*` or `qa-repair/QA-20260827-*` on the remote; the 15 `qa-repair/*` branches that exist all map to closed findings — merged leftovers, per the 2026-08-25T06:35Z correction), no PRs opened (the repo's only open PR is #119 `feat/gate-17-ledger`, label `pitmans-gate`, not `qa-repair`), nothing left in `status: fixing` anywhere in `qa/findings/`, `master` untouched, no DB or browser access used. Time spent: ~4 min.
+
 ## 2026-08-27T04:08Z — scheduled QA audit: estimator role-leak found (7 admin routes ungated, also live on master), 0 other findings
 
 - sha at checkout: `928d826` (`git fetch origin staging && git checkout -B staging origin/staging`, tree already clean). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
