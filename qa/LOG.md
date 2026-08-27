@@ -4,6 +4,24 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-27T00:34Z — escalation repair sweep (scheduled): nothing escalated
+
+No finding carries `escalate: opus-5` — `grep -rn "escalate:" qa/findings/` returns no match in any finding file, `open/` or `closed/`, so the first-pass tier has handed nothing up. Verified against `origin/staging` @ `aafd00c` (`git fetch origin staging && git checkout -B staging origin/staging`; tree clean).
+
+The queue grew a lot since the 2026-08-26T06:38Z sweep (2 → 7) but not in a way this tier may act on: **all seven are `class: risky`, `status: open`, no `branch:`** — outside both automated tiers by `qa/REPAIR.md` §1, not merely unclaimed. QA-20260825-03 (the other one open at 06:38Z) closed in #115. Current queue:
+
+- **QA-20260826-04** (high) — `themedDarkFooter` prints MarleyMoves Ltd's company number beside a non-default brand's trading name and drops the VAT number, so that brand's storage *invoice* asserts a different legal identity from its own quote and balance-invoice emails. Comms + legal disclosure on a VAT-bearing document.
+- **QA-20260826-05** (high) — the WordPress pull rail has no cursor, so submissions that fall behind the newest-200 window are unrecoverable by the only backstop, and `failures: 0` then auto-resolves the reconcile issue that would have shown the loss. Lead ingest, with the monitor clearing its own evidence.
+- **QA-20260826-06** (medium) — own-domain recognition is built from `listAllBrands`, so the inactive pitmans row makes live Marley inbound mail from that domain read as robot traffic and stop being forwarded to a human. Comms suppression, and it changes LIVE Marley behaviour on deploy.
+- **QA-20260826-07** (medium) — `brands.card_payments_enabled` is a dead control: read by neither the copy that claims to be gated on it nor `cardPaymentsAvailable()`. Payments.
+- **QA-20260826-08** (medium) — `smsSenderFor` falls back to Marley's WebEx sender id for a brand with `sms_sender` null, so a customer is chased for money under a brand they have no relationship with, and replies route to Marley's rail. Comms sending on a payment chase.
+- **QA-20260826-09** (medium) — duplicate `LEAD_INGEST_SECRET_*` values silently file a second brand's enquiries under Marley (wrong quote-ref prefix, wrong legal line, wrong sending address), and the prefix scan accepts any env var with that prefix as a credential with no allowlist. Auth/credentials, fails open and silent.
+- **QA-20260826-01** (medium) — `/bookings` "Balance outstanding" (£5,100) vs `/payments` Due (£5,550) diverge by exactly the unpaid 25% commitment money; each page is correct against its own formula, so the fix is a decision about which figure is the truth. Money surface, Peter's call.
+
+Flagged, not acted on: six of the seven (04–09) came from the 2026-08-26T09:00Z pre-merge adversarial review of the Pitmans gate PRs, and **gates 13 (#101) and 19 (#106) have since merged into `staging`** (`f06bf46`, `39f56df`) with those findings still open — so the reviewed defects now sit in the staging line rather than in a PR that could have absorbed the fix alongside the code. Every one is `risky` by class (comms sending, payments, auth/credentials, money), so neither automated tier may touch them under §1; they need Peter. None is marked `escalate: human` either — that marker is written only by a tier that took a finding and failed — so they surface through this ledger and the audit entries, not through the morning brief's escalation list.
+
+Nothing claimed, no branches cut (no `qa-repair/QA-20260826-0{1,4,5,6,7,8,9}` on the remote; the 15 `qa-repair/*` branches that do exist were each re-checked against `qa/findings/closed/` and all 15 map to a closed finding — merged leftovers, per the 2026-08-25T06:35Z correction), no PRs opened (the repo's only open PR is #119 `feat/gate-17-ledger`, label `pitmans-gate`, not qa-repair), nothing left in `status: fixing` anywhere in `qa/findings/`, `master` untouched, no DB or browser access used. Time spent: ~5 min.
+
 ## 2026-08-26T20:08Z — scheduled QA audit: stalest-queue rota, 4 role agents, 0 findings, 1 new permanent spec
 
 - sha at checkout: `7dfba2e` (`git fetch origin staging && git checkout -B staging origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
