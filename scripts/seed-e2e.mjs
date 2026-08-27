@@ -435,6 +435,13 @@ await resetCrewContractorState();
 // pipeline gates its Zoho call on a real contact id, so nothing this spec drives
 // can reach a Zoho org even if a guard is broken. The invoice NUMBERS are unique
 // per rail because the spec scopes its assertions to them.
+//
+// Each stub also carries its `*_invoice_provider` stamp (migrations 0109/0110).
+// This script writes invoice ids with the service role, bypassing the app's raise
+// paths, so it is a WRITER the stamp rule applies to just as much as accept-flow
+// is — and the CHECK constraint refuses the row without it. That is how this was
+// found: 0110 would not apply to staging because these three seeded rows violated
+// it. Any future fixture that sets an invoice id must stamp it too.
 {
   const r = SEED.resendRaceDeposit;
   const ids = await makeLead({ name: r.name, status: "confirmed" });
@@ -453,6 +460,7 @@ await resetCrewContractorState();
     .from("quotes")
     .update({
       zoho_deposit_invoice_id: "e2e-zoho-dep-0001",
+      deposit_invoice_provider: "zoho",
       zoho_deposit_invoice_number: r.invoiceNumber,
       accept_token: "e2e-resend-dep-token-0001",
     })
@@ -483,6 +491,7 @@ await resetCrewContractorState();
     .from("quotes")
     .update({
       zoho_commitment_invoice_id: "e2e-zoho-com-0001",
+      commitment_invoice_provider: "zoho",
       zoho_commitment_invoice_number: r.invoiceNumber,
       commitment_invoice_amount: r.amount,
       commitment_due_date: at(7).slice(0, 10),
@@ -514,6 +523,7 @@ await resetCrewContractorState();
     .from("quotes")
     .update({
       zoho_balance_invoice_id: "e2e-zoho-bal-0001",
+      balance_invoice_provider: "zoho",
       zoho_balance_invoice_number: r.invoiceNumber,
       balance_invoice_amount: r.amount,
       deposit_paid_at: at(-19),

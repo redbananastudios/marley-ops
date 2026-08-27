@@ -33,6 +33,43 @@
 -- provider answering. The claim writes its provider anyway, so this clause
 -- covers a half-written future claim rather than an expected state.
 
+-- ## Close the window before locking it
+--
+-- 0109 backfills, then the deploy happens, then this file runs — so anything
+-- written by the OLD image in between carries an id and no stamp, and the
+-- `alter table` below would fail on it. That is the correct behaviour and the
+-- worst possible moment for it: mid-promotion, on prod, with a constraint that
+-- refuses to apply and no obvious next step.
+--
+-- So sweep first. Every row this catches was raised by an image that only ever
+-- talked to Zoho, which is the same reasoning 0109's backfill rests on. Writing
+-- it here rather than telling a human to re-run 0109 keeps the file idempotent:
+-- it is safe whether the window was two minutes or two weeks, and safe to
+-- re-run after a failure.
+--
+-- It also catches fixture writers. `scripts/seed-e2e.mjs` and
+-- `e2e/office/invoice-resend-lock.spec.ts` set invoice ids directly with the
+-- service role, bypassing the app's raise paths entirely — they are writers the
+-- stamp rule applies to just as much as accept-flow is, and both were missed
+-- until this constraint refused to apply to staging on 2026-08-27. Both now
+-- stamp their own rows; this sweep covers any that predate that fix.
+update quotes set deposit_invoice_provider    = 'zoho'
+  where zoho_deposit_invoice_id    is not null and zoho_deposit_invoice_id    <> 'pending'
+    and deposit_invoice_provider    is null;
+update quotes set commitment_invoice_provider = 'zoho'
+  where zoho_commitment_invoice_id is not null and zoho_commitment_invoice_id <> 'pending'
+    and commitment_invoice_provider is null;
+update quotes set balance_invoice_provider    = 'zoho'
+  where zoho_balance_invoice_id    is not null and zoho_balance_invoice_id    <> 'pending'
+    and balance_invoice_provider    is null;
+update quotes set contact_provider            = 'zoho'
+  where zoho_contact_id            is not null and zoho_contact_id            <> 'pending'
+    and contact_provider            is null;
+update storage_invoices set invoice_provider  = 'zoho'
+  where zoho_invoice_id            is not null and invoice_provider          is null;
+update card_payments set credit_note_provider = 'zoho'
+  where zoho_credit_note_id        is not null and credit_note_provider      is null;
+
 alter table quotes
   add constraint quotes_deposit_invoice_provider_ck
     check (ledger_provider_ok(deposit_invoice_provider)
