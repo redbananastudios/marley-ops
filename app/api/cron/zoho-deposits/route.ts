@@ -3,7 +3,7 @@ import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { blindSweepFailure } from "@/lib/cron/blind-sweep";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchQuoteById, syncZohoPayments, type LedgerReadStats } from "@/lib/quote/accept-flow";
+import { fetchQuoteById, syncZohoPayments } from "@/lib/quote/accept-flow";
 
 /**
  * Payment watcher (Vercel cron): polls Zoho for card payments (or payments
@@ -93,12 +93,18 @@ export async function GET(req: Request) {
   // Without this tally a total ledger outage returned {checked: 25, settled: 0}
   // — byte-identical to a day nobody paid — and runCron then RESOLVED this job's
   // operational issue, clearing the only surface that would have shown it.
-  const reads: LedgerReadStats = { attempted: 0, failed: 0 };
+  let statusReads = 0;
+  let unreadable = 0;
+  let accessDenied = false;
   for (const id of ids) {
     const quote = await fetchQuoteById(sb, id);
     if (!quote) continue;
     checked++;
-    const after = await syncZohoPayments(sb, quote, reads);
+    const sync = await syncZohoPayments(sb, quote);
+    const after = sync.quote;
+    statusReads += sync.attempted;
+    unreadable += sync.unreadable;
+    accessDenied ||= sync.accessDenied;
     if (
       (!quote.deposit_paid_at && after.deposit_paid_at) ||
       (!quote.commitment_paid_at && after.commitment_paid_at) ||
@@ -108,16 +114,30 @@ export async function GET(req: Request) {
     }
   }
 
-  return {
-    checked,
-    settled,
-    statusReads: reads.attempted,
-    statusReadFailures: reads.failed,
-    ...(blindSweepFailure("ledger status", reads.attempted, reads.failed) ?? {}),
-  };
+  // `settled: 0` is only good news if the invoices were actually READ, and there
+  // are TWO distinct ways it can be bad news. Both fail the run, because runCron
+  // turns `ok: false` into an error row plus an operational issue and the
+  // watchdog then pages on the missing fresh success.
+  //
+  //  1. A LOCK-OUT is permanent until a human clears it. One is enough.
+  //  2. A run in which EVERY read failed is blind even when no single error was
+  //     classifiable — a total outage returning nothing recognisable would
+  //     otherwise slip through as a green row with a count nobody reads.
+  //
+  // A PARTIAL transient failure stays a green run with a visible count: those
+  // genuinely do clear on the next pass, and failing the run on one timeout in
+  // twenty-five trains people to ignore the alert.
+  const summary = { checked, settled, statusReads, unreadable };
+  if (accessDenied) {
+    return { ok: false, error: "Zoho denied access — invoice states could not be read", ...summary };
+  }
+  const blind = blindSweepFailure("ledger status", statusReads, unreadable);
+  return blind ? { ...blind, ...summary } : { ok: true, ...summary };
   });
   return NextResponse.json(
-    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    // Summary first: it carries its own `ok`, and runCron's verdict is the
+    // authoritative one, so it must win the spread rather than be overwritten.
+    { ...(run.summary ?? {}), ok: run.ok, ...(run.error ? { error: run.error } : {}) },
     { status: run.status },
   );
 }

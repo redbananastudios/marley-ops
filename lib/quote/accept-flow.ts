@@ -102,6 +102,11 @@ import {
   reusableContactId,
   voidInvoice,
 } from "@/lib/ledger";
+// Provider-neutral, and NOT `isZohoAccessDenied` from @/lib/zoho: since gate 17
+// this file's errors arrive as LedgerError, and that function opens by
+// rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
+import { isLedgerAccessDenied } from "@/lib/ledger/access";
+import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
 
 type Sb = SupabaseClient<Database>;
 
@@ -1173,6 +1178,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
         zoho_deposit_error: null,
       } as never)
       .eq("id", quoteId);
+    await resolveZohoAccessDenied(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho deposit invoice failed";
@@ -1182,10 +1188,14 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       .update({ zoho_deposit_invoice_id: null, zoho_deposit_error: msg } as never)
       .eq("id", quoteId)
       .eq("zoho_deposit_invoice_id", "pending");
-    await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-      `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
-    ], "system");
+    // A lock-out is not this quote's problem — it is every quote's. Collapse it
+    // into the one integration-level alert that names the actual remedy.
+    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "deposit invoice" });
+    else
+      await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+        `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
+      ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -1689,10 +1699,12 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .update({ zoho_commitment_invoice_id: null, zoho_commitment_error: msg } as never)
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
-    await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-      `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
-    ], "system");
+    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "commitment invoice" });
+    else
+      await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+        `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
+      ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -2691,9 +2703,11 @@ export async function createBalanceInvoiceFlow(
       .update({ zoho_balance_invoice_id: null } as never)
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
-    await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-    ], "system");
+    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "balance invoice" });
+    else
+      await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+      ], "system");
     return { ok: false, error: msg };
   }
 }
@@ -2839,29 +2853,6 @@ export async function markBalancePaid(
 /* ------------------------------------------------------------- Zoho payment sync */
 
 /**
- * Tally of ledger status reads for ONE sweep. Exists because a poller that
- * cannot reach the books must not be indistinguishable from a quiet day.
- *
- * The three catches below are deliberately non-fatal — a transient outage
- * genuinely is caught by the next pass, and throwing would abandon the rest of
- * the sweep. But swallowing them silently meant the zoho-deposits cron returned
- * `{checked: 25, settled: 0}` under a TOTAL provider outage, byte-identical to a
- * day where nobody paid — and `runCron` then RESOLVED the operational issue,
- * clearing the one surface that would have shown the problem. Counting the reads
- * separately from the rows is what makes "I could not check" legible.
- *
- * This matters most at the ledger flip: a stored Zoho id polled against Xero
- * fails on every pass, and without this it fails invisibly while customers who
- * have paid go on being chased.
- */
-export interface LedgerReadStats {
-  /** Status reads attempted this sweep. */
-  attempted: number;
-  /** Of those, how many could not be completed. */
-  failed: number;
-}
-
-/**
  * Poll Zoho for card (or manually-recorded) payments on this quote's invoices
  * and run the corresponding paid pipeline. Used by the deposit cron and the
  * accept page (instant confirmation when the customer returns after paying).
@@ -2870,19 +2861,43 @@ export interface LedgerReadStats {
  * sweep from a blind one. The /q page omits it: that read self-heals on the next
  * page load and has a human looking at the result.
  */
-export async function syncZohoPayments(
-  sb: Sb,
-  quote: AcceptQuoteRow,
-  stats?: LedgerReadStats,
-): Promise<AcceptQuoteRow> {
+export interface ZohoPaymentSync {
+  quote: AcceptQuoteRow;
+  /** Invoice states this pass TRIED to read. */
+  attempted: number;
+  /** Of those, how many could NOT be read. */
+  unreadable: number;
+  /** At least one of those failures was a permanent lock-out, not a blip. */
+  accessDenied: boolean;
+}
+
+export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<ZohoPaymentSync> {
   let changed = false;
-  const readFailed = (slot: string, e: unknown) => {
-    if (stats) stats.failed++;
-    log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, ...errorContext(e) });
+  // "I could not check" and "nothing has been paid" are DIFFERENT ANSWERS and
+  // must never share a rendering. These catches used to be empty, so while Zoho
+  // had the integration locked out (2026-08-27) the payment watcher reported
+  // `{checked: 9, settled: 0}` every 15 minutes — a clean green that read as
+  // "nine invoices checked, none paid" when in truth nine invoices had not been
+  // read at all.
+  //
+  // TWO different escalations come out of this, and they catch different
+  // failures — which is why the merge of the two independent fixes keeps both:
+  //  - `accessDenied` is the PERMANENT class. One is enough: it will not clear
+  //    on the next pass and a human has to act.
+  //  - `attempted`/`unreadable` feed the blind-sweep test, which fails a run in
+  //    which EVERY read failed even when no single error was classifiable —
+  //    a total outage that never returns a recognisable code.
+  let attempted = 0;
+  let unreadable = 0;
+  let accessDenied = false;
+  const note = (slot: string, err: unknown) => {
+    unreadable++;
+    if (isLedgerAccessDenied(err)) accessDenied = true;
+    log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, ...errorContext(err) });
   };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
     try {
-      if (stats) stats.attempted++;
+      attempted++;
       const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id, asProvider(quote.deposit_invoice_provider));
       if (s.status === "paid") {
         // BACS, not card — same reasoning as the commitment branch below. No
@@ -2896,13 +2911,13 @@ export async function syncZohoPayments(
         await markDepositPaid(sb, quote.id, { method: "bank_transfer", actorId: null, recordInZoho: false });
         changed = true;
       }
-    } catch (e) {
-      readFailed("deposit", e); // next pass retries; the COUNT is what makes it visible
+    } catch (err) {
+      note("deposit", err);
     }
   }
   if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
     try {
-      if (stats) stats.attempted++;
+      attempted++;
       const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id, asProvider(quote.commitment_invoice_provider));
       if (s.status === "paid") {
         // Commitment is BACS/cash only; a payment Connor records in Zoho lands
@@ -2914,8 +2929,8 @@ export async function syncZohoPayments(
         });
         changed = true;
       }
-    } catch (e) {
-      readFailed("commitment", e);
+    } catch (err) {
+      note("commitment", err);
     }
   }
   if (isRealZohoId(quote.zoho_balance_invoice_id) && quote.lead_id) {
@@ -2926,16 +2941,19 @@ export async function syncZohoPayments(
         .eq("id", quote.lead_id)
         .single();
       if (lead && !lead.balance_paid_at) {
-        if (stats) stats.attempted++;
+        attempted++;
         const s = await getInvoiceStatus(quote.zoho_balance_invoice_id, asProvider(quote.balance_invoice_provider));
         if (s.status === "paid") {
           await markBalancePaid(sb, quote.id, null);
           changed = true;
         }
       }
-    } catch (e) {
-      readFailed("balance", e);
+    } catch (err) {
+      note("balance", err);
     }
   }
-  return changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
+  if (accessDenied) await reportZohoAccessDenied(sb, { message: "invoice status unreadable", while: "payment watch" });
+  else if (!unreadable && changed) await resolveZohoAccessDenied(sb);
+  const after = changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
+  return { quote: after, attempted, unreadable, accessDenied };
 }
