@@ -1,12 +1,12 @@
 {
-  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run. 2026-08-27T12:10Z run: sha ba008b6->3e8658f carried a large 'gate 18' ledger-provider refactor (Xero OAuth + multi-provider voidInvoice, migrations 0108-0110) touching accept-flow/card-payments/refund-vat/booking-change/leads-actions/refunds, plus the just-landed estimator-gating fix (QA-20260827-01, requireAdminPage() on 7 pages). Both jumped the queue as freshest-code. 4 role agents (Sonnet) dispatched in parallel: admin agent drove a full lead->quote->send->accept(bank-transfer, unpaid deposit)->mark-lost cycle against a real staging Zoho invoice and confirmed voidInvoice(id, asProvider(deposit_invoice_provider)) routes correctly end-to-end (accept flow writes deposit_invoice_provider='zoho', mark-lost reads the same column, real Zoho invoice voided, activities row + UI toast confirm, no errors) -- PASS, 0 findings. A payments/Due KPI that looked like a truth-of-UI mismatch (headline \u00a35,550 vs itemized \u00a30/\u00a30) was traced to documented-by-design cross-bucket obligation math (owedNow) and reconciled exactly via SQL -- not a bug. Estimator agent re-verified QA-20260827-01's fix live: all 7 previously-leaking URLs (/board /clients /documents /storage /performance /automations /jobs) now 307-redirect to /estimator with zero admin HTML served at any point (redirect-chain inspected, not just DOM text), pre-existing gates and the estimator's own cockpit unaffected -- PASS, spec e2e/estimator/gating.spec.ts already covers all 7 (shipped by the repair loop with the fix), no new spec needed. Customer agent independently confirmed the same ledger-provider stamp on two fresh accept-flow runs (deposit_invoice_provider/contact_provider='zoho', non-null, consistent) -- PASS; sandbox card path still blocked by the pre-existing business_settings.card_payments_enabled=false + unset E2E sandbox PAN env gap (4th+ run to hit it, confirmed not new). Crew agent re-verified job_sheet_pdf (stale rotation, no code changed): downloaded PDF is valid bytes (%PDF magic) and every field byte-matches the seeded DB row including correct UTC->BST conversion -- PASS. Admin agent's booking-cancel void-routing (op 2) was SKIPPED for time -- not evidenced either way, left for a future run. Main-loop spot-check: independently re-verified the admin agent's cleanup claim via a full-table sweep (0 remaining) and spot-checked the customer agent's provider-column claim via a fresh SQL query against staging -- both held. 0 new findings filed this run. One genuine spec gap identified and logged (not rushed): the gate-18 voidInvoice provider-routing regression proven live this run has no permanent spec yet -- see spec_gaps.admin_ledger_void_routing_spec. Full marker teardown verified by query across clients/leads/quotes/staff/appointments/appointment_assignments/activities/communications/follow_ups/signatures/auth.users -- 0 remaining everywhere except the main loop's own long-lived throwaway logins + 1 shared marker fixture, both cleaned up at the very end of the run.",
+  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run. 2026-08-27T12:10Z run: sha ba008b6->3e8658f carried a large 'gate 18' ledger-provider refactor (Xero OAuth + multi-provider voidInvoice, migrations 0108-0110) touching accept-flow/card-payments/refund-vat/booking-change/leads-actions/refunds, plus the just-landed estimator-gating fix (QA-20260827-01, requireAdminPage() on 7 pages). Both jumped the queue as freshest-code. 4 role agents (Sonnet) dispatched in parallel: admin agent drove a full lead->quote->send->accept(bank-transfer, unpaid deposit)->mark-lost cycle against a real staging Zoho invoice and confirmed voidInvoice(id, asProvider(deposit_invoice_provider)) routes correctly end-to-end (accept flow writes deposit_invoice_provider='zoho', mark-lost reads the same column, real Zoho invoice voided, activities row + UI toast confirm, no errors) -- PASS, 0 findings. A payments/Due KPI that looked like a truth-of-UI mismatch (headline \u00a35,550 vs itemized \u00a30/\u00a30) was traced to documented-by-design cross-bucket obligation math (owedNow) and reconciled exactly via SQL -- not a bug. Estimator agent re-verified QA-20260827-01's fix live: all 7 previously-leaking URLs (/board /clients /documents /storage /performance /automations /jobs) now 307-redirect to /estimator with zero admin HTML served at any point (redirect-chain inspected, not just DOM text), pre-existing gates and the estimator's own cockpit unaffected -- PASS, spec e2e/estimator/gating.spec.ts already covers all 7 (shipped by the repair loop with the fix), no new spec needed. Customer agent independently confirmed the same ledger-provider stamp on two fresh accept-flow runs (deposit_invoice_provider/contact_provider='zoho', non-null, consistent) -- PASS; sandbox card path still blocked by the pre-existing business_settings.card_payments_enabled=false + unset E2E sandbox PAN env gap (4th+ run to hit it, confirmed not new). Crew agent re-verified job_sheet_pdf (stale rotation, no code changed): downloaded PDF is valid bytes (%PDF magic) and every field byte-matches the seeded DB row including correct UTC->BST conversion -- PASS. Admin agent's booking-cancel void-routing (op 2) was SKIPPED for time -- not evidenced either way, left for a future run. Main-loop spot-check: independently re-verified the admin agent's cleanup claim via a full-table sweep (0 remaining) and spot-checked the customer agent's provider-column claim via a fresh SQL query against staging -- both held. 0 new findings filed this run. One genuine spec gap identified and logged (not rushed): the gate-18 voidInvoice provider-routing regression proven live this run has no permanent spec yet -- see spec_gaps.admin_ledger_void_routing_spec. Full marker teardown verified by query across clients/leads/quotes/staff/appointments/appointment_assignments/activities/communications/follow_ups/signatures/auth.users -- 0 remaining everywhere except the main loop's own long-lived throwaway logins + 1 shared marker fixture, both cleaned up at the very end of the run. | 2026-08-27T16:xxZ run (sha ba008b6->040b093, qa-only diff since last ledger sha): 4 role agents (Sonnet) dispatched in parallel against the stalest queue items (no app source changed since lastAuditSha so nothing jumped the queue). Crew: 3/3 PASS (contractor_agreement_sign, job_note_photo, availability_set_remove), 0 findings. Admin: 4/4 PASS (claims_open_update_settle, documents_content_review, mark_deposit_balance_paid, handoff h6 admin-survey<->estimator-diary both directions), 0 findings -- flagged it left the shared marker fixture mutated (deposit/balance paid, status confirmed) for other concurrent agents' awareness, cleaned up by the main loop at run end. Estimator: 2/2 PASS (cockpit; 'Leads scoped to own/Mine preset' -- closed a real e2e/COVERAGE.md gap with new permanent spec e2e/estimator/work.spec.ts, 2/2 green, committed+pushed mid-run as 040b093), 0 findings. Customer: 1 PASS (s_storage_signing) + 1 FINDING via handoff h4 (customer /cv submit -> admin review): the customer-facing /cv/<token> page has zero photo-upload affordance (cubic-builder.tsx gates <SurveyPhotos> on office&&leadId, never true in customer mode) -- filed QA-20260827-04 (safe-fix/medium). Main-loop spot-check: independently re-queried the admin agent's cleanup claim (claims/job_completions/appointments/job_media all 0, matched) and the shared fixture's mutated state (matched the admin agent's report exactly). Final cleanup found and removed one orphan marker client ('QA-SENTINEL h8 spec Client', not created by any of this run's 4 agents -- left by an unrelated concurrent process, deleted as a marker row per discipline) plus 6 dry-run communications rows and 9 activities rows tied to the shared fixture that none of the individual agent teardowns had caught (side effects of admin's deposit/balance/survey actions, cascade-blocked lead/client deletion until cleared) -- full final sweep across every marker-bearing table + auth.users: 0 everywhere.",
   "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open (risky, all Peter's, none touched this run): QA-20260826-01 (/bookings vs /payments owed-figure divergence) and QA-20260826-04..09 (gate 13/19 pre-merge findings: storage-invoice footer legal identity, WP pull-rail cursor loss, resend-inbound own-domain widening hitting live Marley today, dead card-payments toggle, cross-brand SMS sender fallback, lead-ingest secret hygiene). 2026-08-26T16:38Z run: 4 role agents (Sonnet) live-verified 10 stalest-queue surfaces (crew agreement/job-note-photo/job-sheet-pdf, admin cubic-survey/removal-changedate-cancel/staff-vehicle-crud+join-approve handoff leg, estimator cockpit/pay-statement, customer join-signup/q-accept-bank-transfer) -- 0 new findings, all spot-checked independently by the main loop. HEAD 1bb64ce is docs-only over deployed feeab6f (270-line ledger-adapter design doc), confirmed via diff --stat before treating the health gate as passed.",
-  "lastAuditSha": "3e8658f",
+  "lastAuditSha": "040b093",
   "crew": {
     "availability_set_remove": {
-      "lastTestedAt": "2026-08-26T20:30:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (crew role agent): set an override on a working day via /my-jobs/availability -> staff_availability row created (status='unavailable', created_by=own profile id) matching the UI's Off state; cleared it -> row deleted, UI reverted to On. UI and DB agreed at both steps, no silent no-op. 0 findings.",
+      "note": "Re-verified live: set an override on /my-jobs/availability for a future date (staff_availability row created, created_by=own profile, matches UI), cleared it, SQL confirms 0 rows after clear. 0 findings.",
       "watch": [
         "app/my-jobs/availability/**",
         "components/my-jobs/availability-editor.tsx"
@@ -55,9 +55,9 @@
       ]
     },
     "job_note_photo": {
-      "lastTestedAt": "2026-08-26T16:38:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (Sonnet role-agent): real PNG uploaded through the file input on the seeded QA-SENTINEL crew job, job_notes row + job-photos storage object exact match, fresh-context re-login + naturalWidth/naturalHeight/complete decode proof. Two-hats: addJobNoteAction's written columns == loadJobNotesForAppointment's read columns. 0 findings. Independently spot-checked by main loop via direct SQL + storage.list \u2014 exact match to reported evidence.",
+      "note": "Re-verified live: seeded a marker appointment+assignment (fresh marker crew had none suitable), added a job note with body+photo via /my-jobs/<id>, SQL exact match on job_notes.body/photo_paths, IO proof the photo object genuinely exists in the job-photos bucket (73B, listed). 0 findings.",
       "watch": [
         "components/crew/job-notes.tsx",
         "app/actions/job-notes.ts",
@@ -76,9 +76,9 @@
       ]
     },
     "contractor_agreement_sign": {
-      "lastTestedAt": "2026-08-26T16:38:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (Sonnet role-agent): signed via /my-jobs/agreement, contractor_agreements row exact match (version v1-2026-07-18, all 5 acks true), gate stayed cleared on a fresh page.goto reload. Two-hats: sign-action's written column == status/gate's read column. 0 findings. Spot-checked independently by main loop (job_notes/storage sibling checks) \u2014 consistent.",
+      "note": "Re-verified live: signed contractor_agreements for a fresh marker crew profile (typed name, all 5 acks) via /my-jobs/agreement, confirmed re-visit shows already-signed, SQL exact match (agreement_version, signer_name, acknowledgments all true, valid PNG signature). 0 findings.",
       "watch": [
         "app/my-jobs/agreement/**",
         "components/contractor/agreement-sign.tsx"
@@ -206,9 +206,9 @@
       ]
     },
     "mark_deposit_balance_paid": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: seeded accepted quote (agreed \u00a3500, deposit \u00a3100, moving_date set) -> Deposit received -> Bank transfer on /bookings. SQL exact match (deposit_paid_at/deposit_paid_method), leads.status funnel-advanced quoted->confirmed, and the paid-deposit flow auto-created the removal appointment since moving_date was already set (expected markDepositPaid behavior, not a defect -- row correctly landed in 'Booked - all set' not 'no date'). Dry-run confirmation email confirmed (provider_id=dryrun-...). /payments Received/today cross-check matched the same \u00a3100/bank-transfer exactly. Held after reload. 0 findings.",
+      "note": "Re-verified live on the marker quote: deposit via /bookings 'Deposit received'->bank transfer, SQL exact match (quotes.deposit_paid_at/method). Balance required zoho_balance_invoice_id/number/provider + agreed_price set as fixture setup (real Zoho call out of scope) before the button rendered per lib/bookings/load-signals.ts gating -- then marked paid, SQL confirms leads.balance_paid_at (two-hats note: MarkPaidButton kind=balance writes leads.balance_paid_at not a quotes column -- bookings-page read matches this correctly, not a bug). leads.status side-effect quoted->confirmed observed, expected. 0 findings.",
       "watch": [
         "app/(dashboard)/bookings/**",
         "app/(dashboard)/invoicing/**"
@@ -268,9 +268,9 @@
       ]
     },
     "claims_open_update_settle": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: open -> Assessing -> Settled (Goodwill payment, \u00a3187.50) all confirmed by reload (server-truth, not optimistic) and SQL read-back exact match. 3 activities rows correctly attributed, 0 communications (expected). 0 findings.",
+      "note": "Re-verified live: seeded a marker completed appointment+job_completion (marker lead had no completion), opened a claim (phone), updated to assessing, settled (resolution=repair, \u00a375), SQL exact match at each transition including closed_at. Noted follow_ups auto-close on terminal claim status was not separately exercised (no matching follow-up existed for this marker lead) -- not a gap, just not applicable this run. 0 findings.",
       "watch": [
         "app/(dashboard)/claims/**",
         "components/claims/**",
@@ -278,9 +278,9 @@
       ]
     },
     "documents_content_review": {
-      "lastTestedAt": "2026-08-25T08:53:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: seeded a real job-media storage object + job_media row (a DB-only row would have silently vanished from the list since loadJobMedia filters out any row whose storage URL sign fails -- worth remembering for future seeds), approved for marketing via /content, SQL read-back showed marketing_approved_by == the approving admin's own profile id (two-hats: actor and record agree). 0 findings.",
+      "note": "Re-verified live: uploaded a real marker photo to job-media bucket + job_media row, approved via /content, confirmed on Approved tab + SQL (marketing_approved_at/by set), undid, confirmed removed + SQL nulled. Two-hats friction noted (not a finding): a job_media row whose storage object can't resolve a signed URL silently vanishes from /content with no error -- worth a future finding if it recurs with real data.",
       "watch": [
         "app/(dashboard)/documents/**",
         "app/(dashboard)/content/**",
@@ -357,9 +357,9 @@
   },
   "estimator": {
     "cockpit": {
-      "lastTestedAt": "2026-08-27T04:24:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet role agent): fixture estimator owns no data, cockpit correctly rendered all-empty state (0 surveys/follow-ups/quotes/leads), matched independently by SQL for every section. Low-signal (zero counts don't stress the .slice() truncation limits) but consistent, 0 findings on this surface.",
+      "note": "Re-verified live: fresh marker estimator's cockpit correctly shows all-empty state, SQL confirms 0 surveys/leads/quotes for that estimator_id -- exact match. Forbidden-surface spot check (/finance, /finance/statements, /refunds) still bounces. 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/**"
       ]
@@ -396,6 +396,16 @@
         "app/(dashboard)/refunds/**",
         "e2e/estimator/gating.spec.ts"
       ]
+    },
+    "leads_scoped_mine_preset": {
+      "lastTestedAt": "2026-08-27T16:50:00Z",
+      "lastResult": "pass",
+      "note": "Closed the estimator/work.spec.ts coverage gap (was tracked only in e2e/COVERAGE.md, no ledger item existed). Seeded two marker leads (one estimator_id=self, one null), confirmed /leads Table view: 'All' preset shows both, 'Mine' preset shows only the assigned one, SQL exact match. Wrote permanent spec e2e/estimator/work.spec.ts (ran 2/2 green against staging with a manually-generated storageState, --no-deps), flipped e2e/COVERAGE.md line 61 \u2b1c->\u2705. Committed+pushed mid-run as 040b093. 0 findings.",
+      "watch": [
+        "app/(dashboard)/leads/page.tsx",
+        "components/leads/leads-board.tsx",
+        "e2e/estimator/work.spec.ts"
+      ]
     }
   },
   "customer": {
@@ -412,19 +422,21 @@
       ]
     },
     "cv_self_fill_survey": {
-      "lastTestedAt": "2026-08-27T08:xx:00Z",
-      "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet role agent): added 3 items via the accessible item cards, filled customer notes, submitted. SQL exact match: items array, total_ft3=98, status='customer_submitted', customer_notes verbatim; internal `notes` field (office-only) correctly untouched by the customer write. Re-confirms the no-photo-input-in-customer-mode by-design note from the prior run. 0 findings.",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
+      "lastResult": "finding",
+      "note": "Handoff h4 (customer /cv submit -> admin cubic review) re-run with a photo-upload attempt for the first time: items/notes/total_ft3 all still exact-match via SQL and admin's review UI (two-hats holds for those fields), BUT the customer-facing /cv/<token> page has NO photo-upload control at all -- components/cubic/cubic-builder.tsx only mounts <SurveyPhotos> when office&&leadId, and app/cv/[token]/page.tsx never passes leadId in customer mode, so the gate is unconditionally false on this route. Filed QA-20260827-04 (safe-fix, medium) -- previous 'pass' results for this item never exercised the photo path.",
       "watch": [
         "app/cv/**",
         "app/actions/cubic-survey.ts",
-        "e2e/public/cubic.spec.ts"
+        "e2e/public/cubic.spec.ts",
+        "components/cubic/cubic-builder.tsx",
+        "app/cv/[token]/page.tsx"
       ]
     },
     "s_storage_signing": {
-      "lastTestedAt": "2026-08-26T20:30:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (customer role agent): seeded an unsigned storage_let with its own remote-signing token, drove /s/<token> end to end (typed signature, 3 acknowledgments), confirmed via SQL that signing state lives entirely in a new `signatures` row (kind='storage', signer_name/method/channel/signed_at/acknowledgments all correct) joined by the page -- storage_lets itself carries no signed flag, by design. Two-hats: greeting reads clients.display_name, matches the seeded value. 0 findings.",
+      "note": "Re-verified live: seeded marker storage_site/unit/let, signed via /s/<token> (no login) with typed name + all 3 acks, SQL exact match on signatures (signer_name, method, channel, acknowledgments, terms_version/sha256/snapshot, signature_data decodes to a valid 65,743-byte PNG). 0 findings.",
       "watch": [
         "app/s/**"
       ]
@@ -480,9 +492,9 @@
       ]
     },
     "h4_customer_cv_to_admin_review": {
-      "lastTestedAt": "2026-08-21T04:18Z",
-      "lastResult": "pass",
-      "note": "Full chain verified: customer /cv submit -> admin (minted, real /login) sees the identical items/notes on /leads/[id]/cubic (office-mode CubicBuilder, NOT the /cubic/review AI-scan page, which is a different feature sharing the URL prefix). Two-hats confirmed exact.",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
+      "lastResult": "finding",
+      "note": "Re-verified live: customer /cv submit (items+notes) -> admin cubic review at /leads/<id>/cubic reconciles exactly via SQL + screenshot for every field EXCEPT photos -- the customer page has no photo-upload control to exercise at all (see QA-20260827-04). The item-count/total_ft3/notes two-hats check still holds cleanly.",
       "watch": [
         "app/cv/**",
         "app/(dashboard)/leads/[id]/cubic/**"
@@ -498,9 +510,9 @@
       ]
     },
     "h6_admin_survey_to_estimator_diary": {
-      "lastTestedAt": "2026-08-26T00:30:00Z",
+      "lastTestedAt": "2026-08-27T16:50:00Z",
       "lastResult": "pass",
-      "note": "DEEP re-run this run (role-agent, Sonnet, on the gate-11-fresh surveys diary): full book half re-passed (booking dialog with brand picker, estimator_id exact, 10:00 UK = 09:00Z with timezoneId Europe/London, notify-unticked => 0 communications, toast 'Nothing sent to the customer'), AND the RESCHEDULE half live-verified for the FIRST time: reschedule-dialog moved the SAME appointment row in place (id unchanged, starts_at 2026-08-28T13:00Z = 14:00 BST, updated_at bumped, still 0 comms with notify unchecked) and the estimator's cockpit + diary both dropped the old Thu-27 10:00 strings and rendered Fri-28 14:00 (absent-old/present-new asserted on captured text, fresh estimator context with identity chip verified). Truth bonus: estimator 7-day appointment count recomputed from SQL (1) == rendered (1). CAVEATS worth knowing: reschedule dialog's 'Tell the customer the new time' DEFAULTS CHECKED (untick deliberately when testing); Playwright contexts default to UTC so datetime-local entry needs timezoneId:'Europe/London' or saved times shift an hour (agent caught this in its own harness before trusting results). 0 findings.",
+      "note": "Re-verified live both directions: admin booked a survey for the marker estimator (appointments row, estimator_id correct), estimator's own /estimator cockpit + /schedule/surveys diary showed it; admin rescheduled via the diary dialog, SQL confirmed starts_at updated (estimator_id unchanged), estimator diary re-checked and showed the new date/time in the correct week. Sandbox note: an intermittent ~1-2min egress hang to the staging Supabase host mid-run, self-recovered, reproduced with plain curl too -- proxy/network blip, not app-specific. 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "app/(dashboard)/estimator/**"
