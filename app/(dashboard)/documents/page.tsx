@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import Link from "next/link";
 import { FileDown, FileText, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
@@ -97,6 +98,8 @@ export default async function DocumentsPage({
   searchParams: Promise<{ q?: string; tab?: string; brand?: string }>;
 }) {
   const sp = await searchParams;
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   const q = (sp.q ?? "").trim().toLowerCase();
   const tab =
     sp.tab === "unsigned" ? "unsigned" : sp.tab === "contractors" ? "contractors" : "all";
