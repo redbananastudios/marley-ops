@@ -526,8 +526,12 @@ export default async function AcceptPage({
     );
   }
 
-  // Card via takepayments — env creds + the Settings kill switch, both on.
-  const cardOk = await cardPaymentsAvailable(sb).catch(() => false);
+  // Card via takepayments — env creds, the global kill switch, AND this quote's
+  // brand switch, all three (PRD §11.10). The brand clause was missing until
+  // 2026-08-27: a brand with card deliberately off still got the button here
+  // while every one of its emails said bank transfer was the only route
+  // (QA-20260826-07). That is exactly the combination Pitmans launches in.
+  const cardOk = await cardPaymentsAvailable(sb, quote.brand).catch(() => false);
 
   return (
     <Shell>

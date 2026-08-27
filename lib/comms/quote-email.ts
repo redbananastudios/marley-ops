@@ -74,11 +74,13 @@ export interface QuoteEmailMeta {
 /** The deposit-step copy for the accept-link path: today's literal for
  *  marley, card wording gated by the brand's card switches otherwise. */
 function depositStepCopy(m: QuoteEmailMeta): string {
-  const t = emailTheme(m.brand);
-  if (t.isDefault) {
-    return "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in.";
-  }
-  return m.offerCard === true
+  // `offerCard` overrides; otherwise the theme derives it from the brand's own
+  // switch. It used to be the ONLY source, and no caller ever set it — so a
+  // non-default brand could never be given card copy however its Settings
+  // toggle was flipped (QA-20260826-07). Marley keeps card copy either way:
+  // its row seeds the switch on, and the default theme reports it true.
+  const t = emailTheme(m.brand, m.offerCard === undefined ? undefined : { cardPhone: m.offerCard });
+  return t.cardPhone
     ? "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in."
     : "Pay by bank transfer straight after accepting. This secures your booking; confirming your date then locks it in.";
 }

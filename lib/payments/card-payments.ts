@@ -23,7 +23,7 @@ import { log } from "@/lib/log";
 import { sendOpsAlert, dispatchComm } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
-import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { DEFAULT_BRAND, getBrand, getBrandOrDefault } from "@/lib/brand";
 import { fetchQuoteByToken, fetchQuoteById, markDepositPaid } from "@/lib/quote/accept-flow";
 import { reverseDepositVatInZoho } from "@/lib/payments/refund-vat";
 import {
@@ -93,15 +93,37 @@ export function refundDeclineMessage(gatewayMessage: string | undefined | null, 
 
 /* ------------------------------------------------------------- availability */
 
-/** Kill switch + env creds — both required before /q renders the card button. */
-export async function cardPaymentsAvailable(sb: Sb): Promise<boolean> {
+/**
+ * Whether the card channel is live for a given brand's quote.
+ *
+ * THREE things must hold, and they are deliberately ANDed (PRD §11.10): the
+ * takepayments env credentials exist, the global kill switch is on, and the
+ * BRAND's own switch is on.
+ *
+ * The brand clause was missing until 2026-08-27 (QA-20260826-07), which made
+ * `brands.card_payments_enabled` a dead control: `/q` rendered the card button
+ * off the global switch alone, so a brand with card deliberately OFF still got
+ * the button while every one of its emails said bank transfer was the only
+ * route. That is the exact combination Pitmans launches in.
+ *
+ * `brandSlug` omitted means the default brand — the single-brand path, where
+ * this is byte-for-byte the old behaviour.
+ */
+export async function cardPaymentsAvailable(sb: Sb, brandSlug?: string | null): Promise<boolean> {
   if (!getTakepaymentsConfig()) return false;
   const { data } = await sb
     .from("business_settings")
     .select("card_payments_enabled")
     .eq("id", true)
     .maybeSingle();
-  return data?.card_payments_enabled === true;
+  if (data?.card_payments_enabled !== true) return false;
+
+  const slug = (brandSlug ?? "").trim();
+  if (!slug || slug === DEFAULT_BRAND) return true;
+  // A brand row that cannot be read is not a brand with card ON. Failing open
+  // here would put a card button on a surface whose copy says bank-only.
+  const brand = await getBrand(sb, slug).catch(() => null);
+  return brand?.cardPaymentsEnabled === true;
 }
 
 /* ------------------------------------------------------------- start */
@@ -125,12 +147,16 @@ export async function startCardPayment(
   opts?: { testAmountPence?: number; isTest?: boolean },
 ): Promise<StartCardPaymentOutcome> {
   const config = getTakepaymentsConfig();
-  if (!config || !(await cardPaymentsAvailable(sb))) {
-    return { ok: false, error: "Card payments aren't available right now." };
-  }
+  if (!config) return { ok: false, error: "Card payments aren't available right now." };
 
+  // The quote is loaded BEFORE the availability check because availability is
+  // per-brand (PRD §11.10) and the brand rides on the quote. Checking first and
+  // reading the brand after is what made the switch inert (QA-20260826-07).
   const quote = await fetchQuoteByToken(sb, token);
   if (!quote || quote.status !== "accepted") return { ok: false, error: "Quote not found." };
+  if (!(await cardPaymentsAvailable(sb, quote.brand))) {
+    return { ok: false, error: "Card payments aren't available right now." };
+  }
   if (quote.deposit_paid_at) return { ok: false, error: "This deposit has already been paid." };
 
   const settings = await getBusinessSettings(sb);

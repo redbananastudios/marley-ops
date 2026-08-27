@@ -27,7 +27,7 @@ import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
 import { accountsFromFor, ownerIdentity } from "@/lib/comms/sender";
-import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { type Brand, DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { ensureRemovalAppointment } from "@/lib/schedule/ensure-removal-appointment";
 import { log, errorContext } from "@/lib/log";
@@ -1059,6 +1059,42 @@ export async function reportDepositSent(
 
 /* ------------------------------------------------------------- deposit invoice */
 
+
+/**
+ * The "how to pay" sentence on a customer-visible invoice note.
+ *
+ * Two independent facts were conflated here until 2026-08-27: whether this is
+ * the default brand (which decides the MarleyMoves Ltd disclosure, §3.5) and
+ * whether the card channel is live (which decides the card mention, §11.10).
+ * Keying both off the slug meant a brand could never be given card even with
+ * its switch on, and the default brand could never have it taken away —
+ * `brands.card_payments_enabled` was a dead control (QA-20260826-07).
+ *
+ * Both existing strings are reproduced byte-for-byte: Marley today has card on,
+ * so it still reads "…(reference X), by card over the phone on 01747 637070, or
+ * cash."; a card-off brand still reads "…(reference X) or cash." with no comma.
+ * The `lead`/`tail` split keeps the two invoice notes' differing wording without
+ * duplicating this logic.
+ */
+export function invoicePayClause(brand: Brand, quoteRef: string, lead: string): string {
+  const phone = (brand.phone ?? "").trim() || "01747 637070";
+  // The default brand's wording is LITERAL, matching `emailTheme` — its own row
+  // flag governs neither, so Marley's invoice note cannot change because a row
+  // read went stale. Marley's Settings toggle therefore stays advisory: the
+  // known remainder of QA-20260826-07, flagged for Peter rather than resolved by
+  // quietly loosening the byte-lock in `email-brand.test.ts`.
+  const cardOn = brand.slug === DEFAULT_BRAND || brand.cardPaymentsEnabled;
+  const card = cardOn ? `, by card over the phone on ${phone}` : "";
+  const bank = card
+    ? `${lead} bank transfer (reference ${quoteRef})${card}, or cash.`
+    : `${lead} bank transfer (reference ${quoteRef}) or cash.`;
+  if (brand.slug === DEFAULT_BRAND) return bank;
+  return (
+    `${bank} ${brand.name} is part of MarleyMoves Ltd, so your payment goes to the ` +
+    `MARLEYMOVES LTD account. Please use reference ${quoteRef} so we can match it to your booking.`
+  );
+}
+
 /**
  * Raise the £deposit invoice in Zoho exactly once. Returns the (possibly
  * pre-existing) invoice fields, or null when creation is impossible right now
@@ -1615,14 +1651,11 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
         });
         contactProvider = ledger;
       }
-      // Invoice notes are customer-visible: a non-default brand's clause drops
-      // the phone-card mention (its card channel is off at launch, §11.10) and
-      // carries disclosure (a) — payment goes to MarleyMoves Ltd (§3.5).
+      // Invoice notes are customer-visible: the card mention follows the brand's
+      // own card switch (§11.10) and the MarleyMoves Ltd disclosure follows
+      // whether this is the default brand (§3.5) — two separate facts.
       const notesBrand = await getBrandOrDefault(sb, quote.brand);
-      const payClause =
-        notesBrand.slug === DEFAULT_BRAND
-          ? `Payable by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`
-          : `Payable by bank transfer (reference ${quote.quote_ref}) or cash. ${notesBrand.name} is part of MarleyMoves Ltd, so your payment goes to the MARLEYMOVES LTD account. Please use reference ${quote.quote_ref} so we can match it to your booking.`;
+      const payClause = invoicePayClause(notesBrand, quote.quote_ref, "Payable by");
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
@@ -2571,13 +2604,14 @@ export async function createBalanceInvoiceFlow(
           : "";
       const creditsClause =
         (credits.length ? ` less ${credits.join(" and ")} already received` : "") + forfeitClause;
-      // Same customer-visible notes rule as the commitment invoice: no card
-      // mention for a non-default brand, plus disclosure (a) — MarleyMoves Ltd.
+      // Same rule as the commitment invoice: card follows the brand's switch,
+      // the disclosure follows the brand's identity.
       const notesBrand = await getBrandOrDefault(sb, quote.brand);
-      const payClause =
-        notesBrand.slug === DEFAULT_BRAND
-          ? `Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}), by card over the phone on 01747 637070, or cash.`
-          : `Payment in full is due before move day, by bank transfer (reference ${quote.quote_ref}) or cash. ${notesBrand.name} is part of MarleyMoves Ltd, so your payment goes to the MARLEYMOVES LTD account. Please use reference ${quote.quote_ref} so we can match it to your booking.`;
+      const payClause = invoicePayClause(
+        notesBrand,
+        quote.quote_ref,
+        "Payment in full is due before move day, by",
+      );
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
