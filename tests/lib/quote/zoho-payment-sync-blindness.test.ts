@@ -14,16 +14,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 
 const statusMock = vi.fn();
-const reportAccessDenied = vi.fn(async () => {});
+const reportAccessDenied = vi.fn<(sb: unknown, input: unknown) => Promise<void>>();
 
 vi.mock("@/lib/zoho", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/zoho")>()),
-  getInvoiceStatus: (...args: unknown[]) => statusMock(...args),
+  getInvoiceStatus: (invoiceId: string) => statusMock(invoiceId),
 }));
 
 vi.mock("@/lib/ops/zoho-access", () => ({
   ZOHO_ACCESS_ISSUE_KEY: "zoho:access-denied",
-  reportZohoAccessDenied: (...args: unknown[]) => reportAccessDenied(...args),
+  reportZohoAccessDenied: (sb: unknown, input: unknown) => reportAccessDenied(sb, input),
   resolveZohoAccessDenied: async () => {},
 }));
 
