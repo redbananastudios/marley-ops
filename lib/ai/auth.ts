@@ -45,3 +45,23 @@ export async function requireOfficeProfile(): Promise<OfficeProfile | null> {
     accessToken: session.access_token,
   };
 }
+
+/**
+ * Active **admin** gate for an API route. Estimators and crew are denied.
+ *
+ * Distinct from {@link requireOfficeProfile}, which admits estimators too —
+ * that is the right gate for survey and quote work, and the wrong one for
+ * anything that speaks for the company as a whole: connecting the accounting
+ * system, reading which organisation the books live in, replacing a credential.
+ *
+ * It exists because those routes previously wrote the check inline, and
+ * `tests/lib/security/api-route-guards.test.ts` can only recognise a guard it
+ * can name. An inline `role !== "admin"` is stricter than anything on that
+ * list, but a scanner cannot tell it apart from no guard at all — and a
+ * security test that cannot see a guard is one refactor away from not having
+ * one.
+ */
+export async function requireAdminApi(): Promise<OfficeProfile | null> {
+  const profile = await requireOfficeProfile();
+  return profile?.role === "admin" ? profile : null;
+}
