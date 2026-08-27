@@ -5,7 +5,7 @@ import { log, errorContext } from "@/lib/log";
 import { blindSweepFailure } from "@/lib/cron/blind-sweep";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { getInvoiceStatus } from "@/lib/ledger";
+import { asProvider, getInvoiceStatus } from "@/lib/ledger";
 import {
   raiseDueStorageInvoices,
   repairPendingStorageClaims,
@@ -119,7 +119,7 @@ export async function GET(req: Request) {
     let statusReadFailures = 0;
     const { data: unpaid } = await admin
       .from("storage_invoices")
-      .select("id, zoho_invoice_id")
+      .select("id, zoho_invoice_id, invoice_provider")
       .eq("status", "sent")
       .not("zoho_invoice_id", "is", null)
       .order("updated_at", { ascending: true })
@@ -127,7 +127,9 @@ export async function GET(req: Request) {
     for (const row of unpaid ?? []) {
       try {
         statusReads++;
-        const status = await getInvoiceStatus(row.zoho_invoice_id!);
+        // Route to the ledger that raised this storage invoice, not to the
+        // one configured today — storage bills across any cutover (0109).
+        const status = await getInvoiceStatus(row.zoho_invoice_id!, asProvider(row.invoice_provider));
         if (status.status === "paid") {
           await admin.from("storage_invoices").update({ status: "paid" } as never).eq("id", row.id);
           statusUpdated++;

@@ -23,6 +23,26 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 5 | `supabase/migrations/0108_ledger.sql` | creates `ledger_tokens` (the persistent OAuth token row the Xero adapter needs, because Xero rotates its refresh token on every use and env-var storage therefore locks the integration out the moment a second container refreshes) and `ledger_invoice_archive` (the pre-cutover snapshot of the outgoing provider's books, so /finance keeps its view of hand-raised invoices after the Zoho account lapses). Both tables land EMPTY and nothing reads them while `LEDGER_PROVIDER` is unset or `zoho` | No — two new tables, no existing table touched, no data written. Carries its own `notify pgrst` |
 
 *(rows appended per gate)*
+| 6 | `supabase/migrations/0109_ledger_provider_stamp.sql` | six nullable `*_provider` columns (four on `quotes`, one on `storage_invoices`, one on `card_payments`) recording WHICH ledger minted each stored document id, backfilled to `zoho` — prod has never run anything else. Without them the Zoho→Xero flip reads every stored Zoho id against Xero: the not-found looks transient, a customer who HAS paid is never marked paid, and the poller keeps reporting healthy runs while the chase emails go out | No — additive nullable columns plus a one-off backfill UPDATE; nothing reads them until the deploy |
+| 7 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE, between 0109 and 0110 | — |
+| 8 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
+
+### 0110 is the one migration that must run AFTER the deploy
+
+Every other file here goes on before the deploy, so a new container never queries a
+column that does not exist. A CHECK constraint inverts that rule: the code **already
+running** does not write the stamp, so applying 0110 first rejects every invoice raise
+until the new containers are up — deposit, commitment, balance and storage alike.
+
+This is not theoretical. On staging (2026-08-27) the constraints were applied ahead of
+the writers and the e2e seed died on the first deposit invoice it tried to raise, with
+a check-constraint error that reads like a bug in the seed rather than a sequencing
+mistake. On prod the same window is live customers accepting quotes.
+
+So the order is: **0109 → deploy → 0110 → `notify pgrst`.** If the deploy has to be
+rolled back after 0110 is on, drop the six constraints first — the old image cannot
+satisfy them.
+
 
 ### The image/migration window cuts BOTH ways — keep it inside the quiet window
 
@@ -155,6 +175,58 @@ Setting the provider first empties all invoice history with no error; setting th
 cutover first puts an unverified archive on the money read path while Zoho is still
 authoritative. Neither is recoverable by re-running the snapshot once a human has
 read a wrong number off the page.
+
+### 0109 + 0110
+
+Two questions, and they are different: did every existing document get a stamp, and
+will a future write without one be refused?
+
+```sql
+-- 1. Backfill completeness. Every stored id must carry a provider. A non-zero
+--    number here means the flip would read that document in the wrong system.
+select
+  (select count(*) from quotes           where zoho_deposit_invoice_id    is not null
+                                           and zoho_deposit_invoice_id    <> 'pending'
+                                           and deposit_invoice_provider    is null) as unstamped_deposit,
+  (select count(*) from quotes           where zoho_commitment_invoice_id is not null
+                                           and zoho_commitment_invoice_id <> 'pending'
+                                           and commitment_invoice_provider is null) as unstamped_commitment,
+  (select count(*) from quotes           where zoho_balance_invoice_id    is not null
+                                           and zoho_balance_invoice_id    <> 'pending'
+                                           and balance_invoice_provider    is null) as unstamped_balance,
+  (select count(*) from quotes           where zoho_contact_id            is not null
+                                           and zoho_contact_id            <> 'pending'
+                                           and contact_provider            is null) as unstamped_contact,
+  (select count(*) from storage_invoices where zoho_invoice_id            is not null
+                                           and invoice_provider           is null) as unstamped_storage,
+  (select count(*) from card_payments    where zoho_credit_note_id        is not null
+                                           and credit_note_provider       is null) as unstamped_credit_note;
+
+-- 2. The constraints are actually on (run AFTER 0110).
+select count(*) as provider_checks from pg_constraint where conname like '%_provider_ck';
+```
+
+Expected: **every count in the first query 0**, and `provider_checks = 6`.
+
+A committed `alter table` is not evidence that a constraint rejects anything, so prove
+it does — this rolls back either way, and the message tells you which branch ran:
+
+```sql
+begin;
+  update quotes
+     set zoho_deposit_invoice_id = 'runbook-probe', deposit_invoice_provider = null
+   where id = (select id from quotes limit 1);
+rollback;
+```
+
+Expected: **the UPDATE fails** with `violates check constraint
+"quotes_deposit_invoice_provider_ck"`. If it succeeds, 0110 did not apply — stop, because
+the stamp is then advisory and the flip is unsafe. (`rollback` is there so the probe
+leaves nothing behind even in that case.)
+
+App-side, after the deploy: accept a real quote and confirm the new row has both
+`zoho_deposit_invoice_id` and `deposit_invoice_provider = 'zoho'`. A stamp that only
+exists on backfilled rows is the failure this whole pair is meant to prevent.
 
 ---
 

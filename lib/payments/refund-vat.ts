@@ -23,14 +23,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import {
-  findOrCreateContact,
-  createCreditNote,
-  refundCreditNote,
-  findCreditNoteByReference,
-  invoiceCarriesVat,
-  type LedgerCreditNoteRef,
-} from "@/lib/ledger";
+import { asProvider, configuredProvider, createCreditNote, findCreditNoteByReference, findOrCreateContact, invoiceCarriesVat, refundCreditNote, reusableContactId, type LedgerCreditNoteRef } from "@/lib/ledger";
 
 type Sb = SupabaseClient<Database>;
 
@@ -180,6 +173,11 @@ export interface ReverseDepositVatInput {
    *  income was declared; its tax treatment is mirrored). Null ⇒ fall back to a
    *  human. */
   zohoDepositInvoiceId: string | null;
+  /** Which ledger minted the two ids above (0109). A stored id carries no
+   *  hint of its own origin, and after the cutover the configured provider is
+   *  the WRONG place to look for either of them. */
+  depositInvoiceProvider?: string | null;
+  contactProvider?: string | null;
   zohoDepositInvoiceNumber: string | null;
   customerName: string | null;
   customerEmail: string | null;
@@ -240,11 +238,17 @@ export async function reverseDepositVatInZoho(
     // re-derive VAT from the org's CURRENT rate: a deposit invoiced before VAT was
     // enabled must reverse with NO VAT even after the rate is switched on, or we'd
     // reclaim VAT that was never declared.
-    const applyVat = await invoiceCarriesVat(realInvoiceId);
+    const applyVat = await invoiceCarriesVat(realInvoiceId, asProvider(input.depositInvoiceProvider));
 
     // 2. Resolve the Zoho contact (reuse the quote's, else find/create by identity).
-    const realContact =
-      input.zohoContactId && input.zohoContactId !== "pending" ? input.zohoContactId : null;
+    // A contact id is reusable only inside the ledger that minted it (0109) —
+    // handing a Zoho contact to Xero's createCreditNote fails a reversal for
+    // money that has ALREADY left the bank.
+    const realContact = reusableContactId(
+      input.zohoContactId,
+      input.contactProvider,
+      configuredProvider(),
+    );
     const contactId =
       realContact ??
       (await findOrCreateContact({

@@ -44,7 +44,7 @@ import { accountsFromFor } from "@/lib/comms/sender";
 import { getBrandOrDefault, type Brand } from "@/lib/brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
-import { voidInvoice } from "@/lib/ledger";
+import { asProvider, voidInvoice } from "@/lib/ledger";
 import { balanceDueDate, moveDateLabel } from "@/lib/quote/payments";
 import { ukInstant } from "@/lib/uk-time";
 import { ukDayOf } from "@/lib/sales-report";
@@ -76,7 +76,7 @@ const isRealZohoId = (v: string | null | undefined): boolean => !!v && v !== "pe
 
 /** The quote columns every flow here needs off the money quote. */
 const MONEY_QUOTE_COLS =
-  "id, quote_ref, brand, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number";
+  "id, quote_ref, brand, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, deposit_invoice_provider, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, commitment_invoice_provider, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_provider";
 
 interface MoneyQuote {
   id: string;
@@ -93,6 +93,10 @@ interface MoneyQuote {
   deposit_amount: number | null;
   deposit_paid_at: string | null;
   zoho_deposit_invoice_id: string | null;
+  /* Which ledger minted each id (0109) — a stored id says nothing about it. */
+  deposit_invoice_provider: string | null;
+  commitment_invoice_provider: string | null;
+  balance_invoice_provider: string | null;
   zoho_deposit_invoice_number: string | null;
   commitment_paid_at: string | null;
   commitment_invoice_amount: number | null;
@@ -742,15 +746,17 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
   // refund queue for a human to execute.
   let voidedInvoices = 0;
   if (quote) {
-    const voidTargets: { id: string | null; number: string | null; label: string; unpaid: boolean }[] = [
-      { id: quote.zoho_deposit_invoice_id, number: quote.zoho_deposit_invoice_number, label: "Deposit", unpaid: !quote.deposit_paid_at },
-      { id: quote.zoho_commitment_invoice_id, number: quote.zoho_commitment_invoice_number, label: "Commitment", unpaid: !quote.commitment_paid_at },
-      { id: quote.zoho_balance_invoice_id, number: quote.zoho_balance_invoice_number, label: "Balance", unpaid: !lead.balance_paid_at },
+    // `provider` travels beside its own id so the two cannot be mismatched —
+    // each void must go to the ledger that minted that document (0109).
+    const voidTargets: { id: string | null; number: string | null; provider: string | null; label: string; unpaid: boolean }[] = [
+      { id: quote.zoho_deposit_invoice_id, number: quote.zoho_deposit_invoice_number, provider: quote.deposit_invoice_provider, label: "Deposit", unpaid: !quote.deposit_paid_at },
+      { id: quote.zoho_commitment_invoice_id, number: quote.zoho_commitment_invoice_number, provider: quote.commitment_invoice_provider, label: "Commitment", unpaid: !quote.commitment_paid_at },
+      { id: quote.zoho_balance_invoice_id, number: quote.zoho_balance_invoice_number, provider: quote.balance_invoice_provider, label: "Balance", unpaid: !lead.balance_paid_at },
     ];
     for (const t of voidTargets) {
       if (!t.unpaid || !isRealZohoId(t.id)) continue;
       try {
-        await voidInvoice(t.id!);
+        await voidInvoice(t.id!, asProvider(t.provider));
         voidedInvoices++;
         await admin.from("activities").insert({
           lead_id: leadId,

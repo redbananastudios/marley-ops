@@ -13,6 +13,7 @@
  */
 
 import { revalidatePath } from "next/cache";
+import { configuredProvider } from "@/lib/ledger";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database, Json } from "@/lib/supabase/database.types";
 import { createClient } from "@/lib/supabase/server";
@@ -110,6 +111,9 @@ interface QueueQuote {
   client_id: string | null;
   accept_token: string | null;
   zoho_contact_id: string | null;
+  /** Which ledger minted the two ids beside them (0109). */
+  contact_provider: string | null;
+  deposit_invoice_provider: string | null;
   zoho_deposit_invoice_id: string | null;
   zoho_deposit_invoice_number: string | null;
   /** Brand slug — resolves the refund emails' copy, From and template set (§3.5). */
@@ -121,7 +125,7 @@ async function loadQuote(admin: Sb, quoteId: string | null): Promise<QueueQuote 
   const { data } = await admin
     .from("quotes")
     .select(
-      "id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, brand",
+      "id, quote_ref, customer_name, customer_email, lead_id, client_id, accept_token, zoho_contact_id, contact_provider, zoho_deposit_invoice_id, deposit_invoice_provider, zoho_deposit_invoice_number, brand",
     )
     .eq("id", quoteId)
     .maybeSingle();
@@ -555,6 +559,8 @@ export async function markRailRefundedAction(
         quoteRef: quote.quote_ref,
         zohoContactId: quote.zoho_contact_id,
         zohoDepositInvoiceId: step.invoiceId,
+        depositInvoiceProvider: quote.deposit_invoice_provider,
+        contactProvider: quote.contact_provider,
         zohoDepositInvoiceNumber: step.invoiceNumber,
         customerName: quote.customer_name,
         customerEmail: quote.customer_email,
@@ -573,7 +579,7 @@ export async function markRailRefundedAction(
               entity_type: "refund_queue",
               entity_id: row.id,
               action: "credit_note_raised",
-              diff: { rail, credit_note_id: creditNoteId, credit_note_number: creditNoteNumber, amount_pence: step.amountPence } as unknown as Json,
+              diff: { rail, credit_note_id: creditNoteId, credit_note_number: creditNoteNumber, credit_note_provider: configuredProvider(), amount_pence: step.amountPence } as unknown as Json,
             });
           } catch {
             /* audit link only; the accounts@ verify email is the primary record */
