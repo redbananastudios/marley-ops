@@ -22,6 +22,7 @@ const API_DIR = join(ROOT, "app/api");
 
 /** Guards that establish the caller is office (or a trusted machine). */
 const ROLE_AWARE = [
+  "requireAdminApi", // active ADMIN only — estimators denied too (lib/ai/auth.ts)
   "requireOfficeProfile", // active admin/estimator, crew denied (lib/ai/auth.ts)
   "requireOfficeOrCronSecret", // cron secret OR active office session
   "requireUserOrCronSecret", // boolean wrapper over the above — office-gated despite the name
