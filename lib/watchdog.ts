@@ -8,8 +8,11 @@ import {
   feedStalenessAlert,
   findOverdueJobs,
   WATCHDOG_JOB,
+  zohoAccessAlert,
   type HealthAlert,
 } from "@/lib/watchdog-rules";
+import { checkZohoAccess } from "@/lib/zoho";
+import { resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
 import {
   checkpointOperationalIssues,
   deliverDailyOperationalIssueDigest,
@@ -94,6 +97,16 @@ export async function runHealthWatchdog(
   const everRan = Boolean(newest?.created_at);
   const stale = feedStalenessAlert((newest?.created_at as string | null) ?? null, everRan, now);
   if (stale) alerts.push(stale);
+
+  // Prove the books integration is reachable rather than merely un-exercised.
+  // Cron freshness cannot answer this: on a quiet day nothing calls Zoho at
+  // all, so a lock-out stays invisible until the next customer accepts a quote
+  // and the office gets the failure as a surprise (2026-08-27). Probing costs
+  // one cheap org-scoped read every 15 minutes.
+  const zoho = await checkZohoAccess();
+  const zohoAlert = zohoAccessAlert(zoho);
+  if (zohoAlert) alerts.push(zohoAlert);
+  else if (zoho.ok) await resolveZohoAccessDenied(sb);
 
   const activeAlertKeys = new Set(alerts.map((alert) => alert.key));
   const { data: existingWatchdogIssues } = await sb

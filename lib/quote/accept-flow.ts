@@ -93,9 +93,11 @@ import {
   findOrCreateContact,
   getInvoicePdfBase64,
   getInvoiceStatus,
+  isZohoAccessDenied,
   recordInvoicePayment,
   voidInvoice,
 } from "@/lib/zoho";
+import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
 
 type Sb = SupabaseClient<Database>;
 
@@ -1105,6 +1107,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
         zoho_deposit_error: null,
       } as never)
       .eq("id", quoteId);
+    await resolveZohoAccessDenied(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho deposit invoice failed";
@@ -1114,10 +1117,14 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       .update({ zoho_deposit_invoice_id: null, zoho_deposit_error: msg } as never)
       .eq("id", quoteId)
       .eq("zoho_deposit_invoice_id", "pending");
-    await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-      `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
-    ], "system");
+    // A lock-out is not this quote's problem — it is every quote's. Collapse it
+    // into the one integration-level alert that names the actual remedy.
+    if (isZohoAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "deposit invoice" });
+    else
+      await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+        `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
+      ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -1598,10 +1605,12 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .update({ zoho_commitment_invoice_id: null, zoho_commitment_error: msg } as never)
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
-    await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-      `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
-    ], "system");
+    if (isZohoAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "commitment invoice" });
+    else
+      await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+        `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
+      ], "system");
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -2573,9 +2582,11 @@ export async function createBalanceInvoiceFlow(
       .update({ zoho_balance_invoice_id: null } as never)
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
-    await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
-      `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
-    ], "system");
+    if (isZohoAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "balance invoice" });
+    else
+      await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
+        `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
+      ], "system");
     return { ok: false, error: msg };
   }
 }
@@ -2722,8 +2733,28 @@ export async function markBalancePaid(
  * and run the corresponding paid pipeline. Used by the deposit cron and the
  * accept page (instant confirmation when the customer returns after paying).
  */
-export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<AcceptQuoteRow> {
+export interface ZohoPaymentSync {
+  quote: AcceptQuoteRow;
+  /** Invoices whose paid/unpaid state could NOT be read this pass. */
+  unreadable: number;
+  /** At least one of those failures was a permanent lock-out, not a blip. */
+  accessDenied: boolean;
+}
+
+export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<ZohoPaymentSync> {
   let changed = false;
+  // "I could not check" and "nothing has been paid" are DIFFERENT ANSWERS and
+  // must never share a rendering. These catches used to be empty, so while Zoho
+  // had the integration locked out (2026-08-27) the payment watcher reported
+  // `{checked: 9, settled: 0}` every 15 minutes — a clean green that read as
+  // "nine invoices checked, none paid" when in truth nine invoices had not been
+  // read at all. Count the failures and let the caller escalate them.
+  let unreadable = 0;
+  let accessDenied = false;
+  const note = (err: unknown) => {
+    unreadable++;
+    if (isZohoAccessDenied(err)) accessDenied = true;
+  };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
     try {
       const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
@@ -2739,8 +2770,8 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
         await markDepositPaid(sb, quote.id, { method: "bank_transfer", actorId: null, recordInZoho: false });
         changed = true;
       }
-    } catch {
-      /* Zoho unreachable — next pass catches it */
+    } catch (err) {
+      note(err);
     }
   }
   if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
@@ -2756,8 +2787,8 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
         });
         changed = true;
       }
-    } catch {
-      /* Zoho unreachable — next pass catches it */
+    } catch (err) {
+      note(err);
     }
   }
   if (isRealZohoId(quote.zoho_balance_invoice_id) && quote.lead_id) {
@@ -2774,9 +2805,12 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<A
           changed = true;
         }
       }
-    } catch {
-      /* next pass */
+    } catch (err) {
+      note(err);
     }
   }
-  return changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
+  if (accessDenied) await reportZohoAccessDenied(sb, { message: "invoice status unreadable", while: "payment watch" });
+  else if (!unreadable && changed) await resolveZohoAccessDenied(sb);
+  const after = changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
+  return { quote: after, unreadable, accessDenied };
 }

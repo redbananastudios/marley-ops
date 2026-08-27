@@ -55,6 +55,21 @@ export function feedStalenessAlert(
   };
 }
 
+/** Zoho refusing us outright — a deactivated org user, a revoked grant, missing
+ *  credentials. Only the PERMANENT class alerts: a timeout or a 5xx clears on
+ *  the next pass and must not page anyone at 3am, whereas a lock-out silently
+ *  stops every invoice and every payment check until a human acts. On
+ *  2026-08-27 that state ran for hours with `alerts: []` on every pass, because
+ *  this watchdog only ever asked whether the CRONS were running — and they
+ *  were, faithfully reporting nothing-to-do. */
+export function zohoAccessAlert(check: { ok: boolean; accessDenied?: boolean }): HealthAlert | null {
+  if (check.ok || !check.accessDenied) return null;
+  return {
+    key: "zoho-access",
+    message: "Zoho is refusing the ops integration — no invoices are being raised. Re-enable the ops user in Zoho",
+  };
+}
+
 /** True when every current alert was already SMS'd inside the cooldown window
  *  (an alert set that GREW re-alerts immediately — new problems page). */
 export function alertsAlreadySent(

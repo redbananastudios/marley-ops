@@ -26,6 +26,58 @@ export class ZohoError extends Error {
   }
 }
 
+/**
+ * Zoho codes that mean "this credential will never work again without a human":
+ *  - 6018 — "You do not have access as your account is disabled" (the org user
+ *    behind our refresh token was deactivated in Zoho; seen live 2026-08-27,
+ *    which killed every invoice write for ~7h while every surface stayed green).
+ *  - 57   — "You are not authorized to perform this operation".
+ */
+const ZOHO_ACCESS_DENIED_CODES = new Set([57, 6018]);
+
+/**
+ * PERMANENT access failure (deactivated user, revoked grant, missing creds) as
+ * opposed to a transient outage (timeout, 5xx, network). The distinction is the
+ * whole point: a transient error is correctly swallowed and retried, while an
+ * access failure retried silently forever is indistinguishable from "there was
+ * nothing to do" — so callers must escalate this class to a human instead.
+ *
+ * Missing credentials count as access-denied deliberately. Gating the alarm on
+ * the same config that feeds the integration means dropping ZOHO_* silences
+ * both the books and the only thing that would have told us — the same
+ * fail-closed reasoning as the bank-feed staleness rule in lib/watchdog.ts.
+ */
+export function isZohoAccessDenied(err: unknown): boolean {
+  if (!(err instanceof ZohoError)) return false;
+  if (err.zohoCode !== undefined && ZOHO_ACCESS_DENIED_CODES.has(err.zohoCode)) return true;
+  if (err.httpStatus === 401 || err.httpStatus === 403) return true;
+  return /credentials not configured|token refresh failed/i.test(err.message);
+}
+
+export type ZohoAccessCheck =
+  | { ok: true }
+  | { ok: false; accessDenied: boolean; message: string };
+
+/**
+ * Cheap org-scoped read used by the health watchdog to prove the books
+ * integration is actually reachable, not merely un-exercised. It must be
+ * ORG-scoped: `GET /organizations` still answers happily for a deactivated
+ * user (it is how we read `user_status: Inactive`), so probing that instead
+ * would report green through exactly this outage.
+ */
+export async function checkZohoAccess(): Promise<ZohoAccessCheck> {
+  try {
+    await zoho("GET", "/settings/currencies");
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      accessDenied: isZohoAccessDenied(err),
+      message: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 function cfg() {
   const c = {
     clientId: process.env.ZOHO_CLIENT_ID,
