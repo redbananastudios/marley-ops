@@ -1,7 +1,7 @@
 {
-  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run. 2026-08-27T08:xxZ run: 4 role agents (Sonnet) live-verified 12 stalest-queue surfaces (crew complete_job/expense_receipt_upload/weekly_invoice; admin bank_feed_link/finance_statements_return/appointment_view/followups_snooze/schedule_week_values; estimator estimator_pay_statement/book_survey_quote_from_visit; customer q_accept_sandbox_card/cv_self_fill_survey) -- 2 NEW findings: QA-20260827-02 (severity:medium, class:safe-fix) appointment-view-dialog.tsx:144 renders the appointment time without Europe/London timezone, off by the DST offset on any non-UK-clock viewer -- appointment_view_job_summary flipped pass->finding. QA-20260827-03 (severity:medium, class:safe-fix) first-time 'Create Quote' from a survey visit crashes the client-side transition to /quotes/new?leadId=... with the generic Next.js error boundary even though the draft quote is created successfully underneath -- book_survey_quote_from_visit flipped pass->finding. Neither is money/RLS/schema/comms/auth so both classed safe-fix for the repair loop. q_accept_sandbox_card re-confirmed the pre-existing, already-documented card_payments_enabled=false env gap (3rd run to hit it, not a new finding, marked lastResult:blocked not finding). All 4 agents' cleanup + one spot-checked claim each independently re-verified by the main loop -- one recurring gap caught (crew's expense-receipt flow leaves an accounts@ communications row its own teardown script doesn't check, same class as 2026-08-24's gap, now hit twice) and fixed by the main loop directly. Full marker teardown verified by query across clients/leads/quotes/staff/profiles/communications/auth.users -- 0 remaining everywhere.",
+  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run. 2026-08-27T12:10Z run: sha ba008b6->3e8658f carried a large 'gate 18' ledger-provider refactor (Xero OAuth + multi-provider voidInvoice, migrations 0108-0110) touching accept-flow/card-payments/refund-vat/booking-change/leads-actions/refunds, plus the just-landed estimator-gating fix (QA-20260827-01, requireAdminPage() on 7 pages). Both jumped the queue as freshest-code. 4 role agents (Sonnet) dispatched in parallel: admin agent drove a full lead->quote->send->accept(bank-transfer, unpaid deposit)->mark-lost cycle against a real staging Zoho invoice and confirmed voidInvoice(id, asProvider(deposit_invoice_provider)) routes correctly end-to-end (accept flow writes deposit_invoice_provider='zoho', mark-lost reads the same column, real Zoho invoice voided, activities row + UI toast confirm, no errors) -- PASS, 0 findings. A payments/Due KPI that looked like a truth-of-UI mismatch (headline \u00a35,550 vs itemized \u00a30/\u00a30) was traced to documented-by-design cross-bucket obligation math (owedNow) and reconciled exactly via SQL -- not a bug. Estimator agent re-verified QA-20260827-01's fix live: all 7 previously-leaking URLs (/board /clients /documents /storage /performance /automations /jobs) now 307-redirect to /estimator with zero admin HTML served at any point (redirect-chain inspected, not just DOM text), pre-existing gates and the estimator's own cockpit unaffected -- PASS, spec e2e/estimator/gating.spec.ts already covers all 7 (shipped by the repair loop with the fix), no new spec needed. Customer agent independently confirmed the same ledger-provider stamp on two fresh accept-flow runs (deposit_invoice_provider/contact_provider='zoho', non-null, consistent) -- PASS; sandbox card path still blocked by the pre-existing business_settings.card_payments_enabled=false + unset E2E sandbox PAN env gap (4th+ run to hit it, confirmed not new). Crew agent re-verified job_sheet_pdf (stale rotation, no code changed): downloaded PDF is valid bytes (%PDF magic) and every field byte-matches the seeded DB row including correct UTC->BST conversion -- PASS. Admin agent's booking-cancel void-routing (op 2) was SKIPPED for time -- not evidenced either way, left for a future run. Main-loop spot-check: independently re-verified the admin agent's cleanup claim via a full-table sweep (0 remaining) and spot-checked the customer agent's provider-column claim via a fresh SQL query against staging -- both held. 0 new findings filed this run. One genuine spec gap identified and logged (not rushed): the gate-18 voidInvoice provider-routing regression proven live this run has no permanent spec yet -- see spec_gaps.admin_ledger_void_routing_spec. Full marker teardown verified by query across clients/leads/quotes/staff/appointments/appointment_assignments/activities/communications/follow_ups/signatures/auth.users -- 0 remaining everywhere except the main loop's own long-lived throwaway logins + 1 shared marker fixture, both cleaned up at the very end of the run.",
   "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open (risky, all Peter's, none touched this run): QA-20260826-01 (/bookings vs /payments owed-figure divergence) and QA-20260826-04..09 (gate 13/19 pre-merge findings: storage-invoice footer legal identity, WP pull-rail cursor loss, resend-inbound own-domain widening hitting live Marley today, dead card-payments toggle, cross-brand SMS sender fallback, lead-ingest secret hygiene). 2026-08-26T16:38Z run: 4 role agents (Sonnet) live-verified 10 stalest-queue surfaces (crew agreement/job-note-photo/job-sheet-pdf, admin cubic-survey/removal-changedate-cancel/staff-vehicle-crud+join-approve handoff leg, estimator cockpit/pay-statement, customer join-signup/q-accept-bank-transfer) -- 0 new findings, all spot-checked independently by the main loop. HEAD 1bb64ce is docs-only over deployed feeab6f (270-line ledger-adapter design doc), confirmed via diff --stat before treating the health gate as passed.",
-  "lastAuditSha": "ba008b6",
+  "lastAuditSha": "3e8658f",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-08-26T20:30:00Z",
@@ -95,9 +95,9 @@
       ]
     },
     "job_sheet_pdf": {
-      "lastTestedAt": "2026-08-26T16:38:00Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (Sonnet role-agent): downloaded PDF from the seeded QA-SENTINEL crew job, %PDF magic + 23,127 bytes, custom ToUnicode-CMap text extractor recovered the seeded addresses/postcodes/quote ref byte-exact from the content stream (not an image). Two-hats: PDF and on-screen job sheet share the same loadJobSheet() read path. 0 findings.",
+      "note": "Re-verified live this run (Sonnet crew role-agent), stale rotation pick (no crew code changed this cycle). Seeded an isolated marker job (client/lead/appointment/appointment_assignment) for the provisioned crew login, opened it on /my-jobs, downloaded the job-sheet PDF: 22,160 bytes, %PDF magic bytes confirmed. Code-path check first (app/actions/job-sheet.ts is a pure DB read, components/job-sheet-button.tsx builds the PDF CLIENT-SIDE via pdfmake -- no server storage object, so IO-proof is the downloaded bytes themselves, not a storage/DB query). Two-hats: extracted the literal PDF text (pdfjs-dist against the actual content stream) and diffed against the seeded DB rows -- customer name/phone/both addresses+postcodes/crew name/notes all exact, including correct UTC->BST conversion (10:00-14:00 UTC rendered as 11:00-15:00 BST). 0 findings.",
       "watch": [
         "components/job-sheet-button.tsx",
         "lib/job-sheet-*.ts",
@@ -127,9 +127,9 @@
       ]
     },
     "lead_status_lost_noreply": {
-      "lastTestedAt": "2026-08-26T20:30:00Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (admin role agent), same result as prior runs: mark-lost -> leads.status='declined', lost_reason/lost_note/lost_at/chase_paused all correct + matching activity row; no-reply action -> follow_ups row (reason='no_answer', status='open', attempt_count=1, due_at=tomorrow 08:00 UTC) + 2 activity rows. 0 findings.",
+      "note": "Re-verified live this run (Sonnet admin role-agent), extending the usual mark-lost check to the gate-18 ledger-provider refactor: full lead->quote wizard->send->accept(bank-transfer, real unpaid Zoho deposit invoice INV-000451 minted)->mark-lost cycle. Toast: \"Marked lost. 1 unpaid invoice voided in Zoho.\" SQL: leads.status='declined', activities row confirms \"Deposit invoice INV-000451 voided\" with meta.invoice_id matching. Two-hats: the column accept-flow WRITES the provider into (quotes.deposit_invoice_provider='zoho') is the exact same column markLeadLostAction READS via asProvider() before calling voidInvoice(id, provider) -- confirmed at both code and live-data level, no drift. 0 findings. See spec_gaps.admin_ledger_void_routing_spec -- this exact regression has no permanent spec yet.",
       "watch": [
         "components/leads/leads-board.tsx",
         "components/leads/lead-action-bar.tsx",
@@ -147,9 +147,9 @@
       ]
     },
     "quote_build_send_supersede": {
-      "lastTestedAt": "2026-08-26T12:30:00Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "pass",
-      "note": "GATE 6 (7357e33, #90) + QA-20260825-03's closing fix (85cb914) INDEPENDENTLY RE-CONFIRMED LIVE this run (Sonnet role-agent, not just re-running the closing spec): fresh marker Pitmans quote via the real createDraftQuote path -> SQL quote_ref='PMR011' (matches ^PM[RC]\\d+$); fresh marker Marley quote -> quote_ref='MMR127'. Two-hats held across quote-detail page body text and the /quotes list -- same DB column, three surfaces, no drift. Bank-feed matcher's 'widened to both prefixes' claim (same PR #90) confirmed at code+DB level (not a live cron/UI drive): lib/bank-feed/match.ts's real refsInText()/matchTransaction() against 'PMR011 DEPOSIT' -> matched reference w/ correct amount; the pre-gate-6 MM-only regex does NOT match the same string, proving the PM alternation is load-bearing. MM parity re-checked, no regression. SEPARATELY this run, a second Sonnet role-agent live-verified the actual SEND action for the first time ever (prior coverage always stopped at the wizard, never fired the mutation): admin sent a real marker Marley quote through the full UI dialog -> quotes.status draft->sent, communications row status='sent', provider_id='dryrun-...' (COMMS_DRYRUN confirmed simulating, not hitting Resend), correct un-contaminated Marley subject line. 0 findings from either agent. SPEC GAPS noted, not written this run (time-boxed): (1) no permanent spec exercises the widened bank-feed matcher against a live PM-prefixed reference -- only unit coverage (tests/lib/bank-feed/feed.test.ts) exists; (2) e2e/office/quote-builder.spec.ts explicitly stops short of the Send click (see its own header comment) -- no permanent spec proves quotes.status/communications.status flip on send.",
+      "note": "Build+send half re-verified live this run as part of the ledger-provider chase (see admin.lead_status_lost_noreply): fresh marker Marley quote MMR161 through the real 7-step wizard, sent via the UI dialog, toast \"Quote sent\". Supersede not separately exercised this run (time-boxed) -- prior runs' coverage stands for that leg. 0 findings.",
       "watch": [
         "app/(dashboard)/quotes/**",
         "components/quote/**",
@@ -367,7 +367,7 @@
     "book_survey_quote_from_visit": {
       "lastTestedAt": "2026-08-27T08:xx:00Z",
       "lastResult": "finding",
-      "note": "Re-verified live this run (Sonnet role agent) -- flipped pass->finding. The booking+quote-numbers half still holds (appointments/surveys/quotes rows linked correctly, quote total £1,183.20 recomputed exact from the breakdown fields, two-hats holds). NEW: QA-20260827-03 -- clicking 'Create Quote' on a visit for a lead with no prior quote (a router.push client-side transition from appointment-view-dialog.tsx:210 to /quotes/new?leadId=) renders the generic Next.js error boundary the FIRST time, reproduced on two separate fresh leads. The underlying write still succeeds silently (draft quote + completed appointment both land correctly, confirmed by SQL and by a subsequent direct page.goto of /quotes/{id}) -- only the client-side redirect delivery on that transition crashes. Suspected: double-render of app/(dashboard)/quotes/new/page.tsx (already documented in quotes/actions.ts as firing twice per nav) interacting badly with router.push specifically vs a full page load. safe-fix, regression test to be added by the repair PR.",
+      "note": "Re-verified live this run (Sonnet role agent) -- flipped pass->finding. The booking+quote-numbers half still holds (appointments/surveys/quotes rows linked correctly, quote total \u00a31,183.20 recomputed exact from the breakdown fields, two-hats holds). NEW: QA-20260827-03 -- clicking 'Create Quote' on a visit for a lead with no prior quote (a router.push client-side transition from appointment-view-dialog.tsx:210 to /quotes/new?leadId=) renders the generic Next.js error boundary the FIRST time, reproduced on two separate fresh leads. The underlying write still succeeds silently (draft quote + completed appointment both land correctly, confirmed by SQL and by a subsequent direct page.goto of /quotes/{id}) -- only the client-side redirect delivery on that transition crashes. Suspected: double-render of app/(dashboard)/quotes/new/page.tsx (already documented in quotes/actions.ts as firing twice per nav) interacting badly with router.push specifically vs a full page load. safe-fix, regression test to be added by the repair PR.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -381,16 +381,16 @@
     "estimator_pay_statement": {
       "lastTestedAt": "2026-08-27T08:31:54Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet role agent): signed contractor agreement -> booked+completed 2 survey visits as the estimator -> statement lines auto-sourced from the completed visits (source=survey, £50 each) -> submitted. SQL exact match: staff_statements total=£100, 2 staff_statement_lines matching the completed appointments. Recomputed sum from scratch = £100, matches stored total. 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent): signed contractor agreement -> booked+completed 2 survey visits as the estimator -> statement lines auto-sourced from the completed visits (source=survey, \u00a350 each) -> submitted. SQL exact match: staff_statements total=\u00a3100, 2 staff_statement_lines matching the completed appointments. Recomputed sum from scratch = \u00a3100, matches stored total. 0 findings.",
       "watch": [
         "app/(dashboard)/estimator/pay/**",
         "components/estimator/**"
       ]
     },
     "gating_forbidden_surfaces": {
-      "lastTestedAt": "2026-08-27T04:24:00Z",
-      "lastResult": "finding",
-      "note": "BROKEN, this run (Sonnet role agent + main-loop independent source verification): /finance, /finance/statements, /refunds still correctly bounce estimator server-side. But /board, /jobs, /clients, /storage, /performance, /automations, /documents have NO role gate at all -- app/(dashboard)/layout.tsx only blocks role==='crew', and none of these 7 page.tsx files call requireOfficeProfile(). Estimator reads full unredacted content: all customer PII, cross-staff pay/margin figures, company financials, signed documents. CONFIRMED same missing gate exists on origin/master (production) via direct source diff -- this is live today, not staging-only. Filed QA-20260827-01 (class:risky/severity:high -- RLS/permissions, Peter's fix). Permanent spec added: e2e/estimator/gating.spec.ts now has a skipped block asserting all 7 should bounce, referencing the finding id; un-skips once the gate is added.",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
+      "lastResult": "pass",
+      "note": "FIXED and re-verified live this run (Sonnet estimator role-agent, plus main-loop confirmation the fix is on this sha). requireAdminPage() (lib/auth.ts:38-47) now runs as the first statement of all 7 previously-ungated page.tsx files (board/clients/documents/storage/performance/automations/jobs). Live check on deployed staging: all 7 URLs return a genuine 307 to /estimator with the redirect-chain inspected (not just DOM text) -- the admin route itself never returns 200, so no admin byte is served even transiently. Pre-existing gates (/finance, /finance/statements, /refunds) still correctly bounce; the estimator's own /estimator cockpit is unaffected (no over-gating regression). Permanent spec e2e/estimator/gating.spec.ts already covers all 7 routes (shipped alongside the fix) -- confirmed present and matching, no new spec needed. QA-20260827-01 closed by this verification. Flipped finding->pass.",
       "watch": [
         "app/(dashboard)/finance/**",
         "app/(dashboard)/refunds/**",
@@ -400,9 +400,9 @@
   },
   "customer": {
     "q_accept_sandbox_card": {
-      "lastTestedAt": "2026-08-27T08:20:41Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "blocked",
-      "note": "Re-verified live this run (Sonnet role agent) -- accept-to-deposit-invoice half PASS again (quotes.status sent->accepted, accepted_at/accepted_name exact match, Zoho sandbox deposit invoice self-healed onto the page). Sandbox CARD payment itself still cannot be exercised on this environment: business_settings.card_payments_enabled=false gates the 'Pay by card' button off entirely (button never renders, confirmed by screenshot + source read of lib/payments/card-payments.ts's cardPaymentsAvailable()), and E2E_CARD_APPROVED/DECLINED sandbox PANs are unset in this shell -- matches the app's own e2e/office/p0-money.spec.ts #6, still `test.fixme` there ('deferred until the merchant id + sandbox land'). Not a new finding -- a pre-existing, already-documented environment gap, third run running to hit the same wall. Did not flip the global card_payments_enabled flag (non-marker-scoped) or attempt a real card against the live gateway domain.",
+      "note": "Re-verified live this run (Sonnet customer role-agent) with explicit focus on the gate-18 ledger-provider refactor touching lib/quote/accept-flow.ts + lib/payments/card-payments.ts directly. Bank-transfer accept path: PASS on 2 independent marker quotes -- quotes.deposit_invoice_provider and contact_provider both populated 'zoho' (non-null, matching the ledger that actually minted the invoice), real Zoho invoice ids/numbers/urls round-tripped (e.g. INV-000449, INV-000450), no drift on the two-hats risk (a provider column left null/stale post-migration) that prompted this check. Sandbox CARD path: still BLOCKED -- business_settings.card_payments_enabled=false gates the button off entirely (0 card buttons rendered, confirmed both by DOM query and by reading lib/payments/card-payments.ts's cardPaymentsAvailable()), E2E_CARD_APPROVED/DECLINED unset. Matches the app's own e2e/office/p0-money.spec.ts #6 test.fixme. 4th+ run in a row to hit this same pre-existing environment gap -- not a new finding.",
       "watch": [
         "app/q/**",
         "app/actions/card-payments.ts",
@@ -549,9 +549,9 @@
       ]
     },
     "pdf_jobsheet_contract_daysheet": {
-      "lastTestedAt": "2026-08-22T20:30Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "pass",
-      "note": "QA-20260821-01 (crew could fetch the office-only contract PDF, already closed prior to this run via 8c88f27) re-confirmed live for the first time since closure: admin GET /api/documents/contract/<sigId> -> 200 application/pdf %PDF magic; the SAME url as a crew session -> 403. jobsheet/daysheet PDF paths not re-proven this run (daysheet is an emailed attachment inside the crew-job-sheets cron, no standalone endpoint; jobsheet PDF re-proven separately under crew.job_sheet_pdf this run). 0 findings.",
+      "note": "jobsheet leg re-confirmed live this run via crew.job_sheet_pdf (see that entry for full evidence: %PDF magic, 22,160 bytes, byte-exact field match including BST conversion). Contract-PDF and day-sheet legs not independently re-exercised this run (time-boxed) -- prior runs' coverage stands for those two.",
       "watch": [
         "lib/pdf/**",
         "lib/job-sheet-docdef.ts",
@@ -600,9 +600,9 @@
   },
   "truth": {
     "payments_tabs_totals": {
-      "lastTestedAt": "2026-08-23T04:21:00Z",
+      "lastTestedAt": "2026-08-27T12:36:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: /payments?range=today Received/Card/Bank-transfer/Cash totals + the payments-received list line recomputed independently from SQL for the UK-today window (quotes.deposit_paid_at + commitment_paid_at, leads.balance_paid_at, card_payments) -- exact match (\u00a3100 bank transfer, our marker deposit was the only payment in-window). 0 diff, 0 findings.",
+      "note": "Re-verified live this run (Sonnet admin role-agent) after lib/payments/card-payments.ts and lib/payments/refund-vat.ts changed under gate 18. /payments Due tab initially looked like a truth-of-UI mismatch (headline 'Owed right now' = \u00a35,550.00 vs both itemized sections showing \u00a30.00/'Nothing here'). Traced through lib/bookings/queue.ts (owedNow) and lib/bookings/load-signals.ts before reporting: this is deliberate, documented cross-bucket obligation math (fixed for QA-20260820-04, code comment references it) -- a booking can sit in one display bucket while its balance is independently 'owed now' inside the 7-day BALANCE_WINDOW_DAYS. Reconstructed the exact figure from source rows (3\u00d7\u00a31,700 unpaid deposits within a day of move date + \u00a3450 unpaid commitment) = \u00a35,550.00 exact. Not a bug, not filed. Second /bookings data point not independently re-verified this run (time-boxed) -- only /payments.",
       "watch": [
         "app/(dashboard)/payments/**",
         "lib/payments/**",
@@ -761,6 +761,18 @@
         "e2e/fixtures/db.ts",
         "lib/bank-feed/whole-quote.ts",
         "app/actions/bank-feed.ts"
+      ]
+    },
+    "admin_ledger_void_routing_spec": {
+      "lastTestedAt": "2026-08-27T12:36:00Z",
+      "lastResult": null,
+      "note": "NOT written yet. Gate-18's voidInvoice(id, provider) provider-routing was proven live this run (admin.lead_status_lost_noreply op above): a real accept -> unpaid Zoho deposit invoice -> mark-lost cycle round-tripped deposit_invoice_provider correctly with no errors and a real Zoho void. e2e/office/mark-lost.spec.ts exists but only exercises the reason-gated dialog UI against SEED.markLost, which is a 'sent' (not accepted) lead with no invoice at all -- it does not touch the voidInvoice/provider path at all. Deliberately NOT rushed this run given AUDIT.md's own history (3 consecutive audit-written specs broke on first CI run 2026-08-2x) and the remaining time box -- next run should seed an accepted-but-unpaid quote with a real deposit_invoice_provider set (or drive the accept flow live in the spec itself, per the admin agent's proven recipe above) and assert the 'N invoice(s) voided in <provider>' toast + the activities row, validated live against staging BEFORE it ships.",
+      "watch": [
+        "lib/ledger/**",
+        "app/(dashboard)/leads/actions.ts",
+        "app/actions/booking-change.ts",
+        "app/actions/refunds.ts",
+        "e2e/office/mark-lost.spec.ts"
       ]
     }
   }
