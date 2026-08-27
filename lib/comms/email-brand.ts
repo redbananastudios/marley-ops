@@ -154,12 +154,36 @@ const MARLEY_THEME: EmailTheme = {
 };
 
 export interface EmailThemeOptions {
-  /** Whether the brand's phone-card channel is live (global AND per-brand
-   *  switches, PRD §11.10) — drives the word "card" in non-default pay copy.
-   *  Ignored for the default brand (its literals stand as today). Defaults
-   *  false: bank transfer + cash only, the Pitmans launch posture. */
+  /**
+   * Override for the brand's phone-card channel.
+   *
+   * Normally this is DERIVED from `brand.cardPaymentsEnabled`, so an operator
+   * flipping the Settings toggle changes the copy. Until 2026-08-27 nothing
+   * read that column: the switch was persisted, the Settings card said "Card
+   * payments on", and no email anywhere changed — while `/q` rendered the card
+   * button off the GLOBAL switch alone (QA-20260826-07). The toggle and the
+   * live behaviour could disagree in both directions.
+   *
+   * Pass this only when the caller knows something the row does not — e.g. the
+   * global kill switch is off, so no card channel is live for any brand.
+   */
   cardPhone?: boolean;
 }
+
+/**
+ * The Marley theme with card wording removed — used only when Marley's own
+ * brand row turns the channel off, which is not the live posture (the row seeds
+ * `true`). Everything except the two pay-methods sentences is byte-identical to
+ * {@link MARLEY_THEME}, because those two are the only strings that name card;
+ * `callHtml` and friends name a phone number for a support call, not a payment
+ * rail, and must not change.
+ */
+const MARLEY_THEME_NO_CARD: EmailTheme = {
+  ...MARLEY_THEME,
+  cardPhone: false,
+  payMethodsLine: `Bank transfer or cash. Whichever suits.`,
+  payMethodsText: `You can pay by bank transfer, or in cash if that is easier:`,
+};
 
 /**
  * The email theme for a brand. Marley/absent/null → the literal Marley theme;
@@ -169,7 +193,19 @@ export interface EmailThemeOptions {
  * email fields would degrade to the Marley values rather than render blanks.
  */
 export function emailTheme(brand?: Brand | null, opts?: EmailThemeOptions): EmailTheme {
-  if (!brand || brand.slug === DEFAULT_BRAND) return MARLEY_THEME;
+  // The default theme is LITERAL and never reads the brands row — that is the
+  // single-brand invariant, byte-locked by `email-brand.test.ts` ("marley,
+  // absent and null all yield the identical literal theme"). A Marley row with
+  // a stale or unset card flag must never be able to edit what a live Marley
+  // customer reads.
+  //
+  // So Marley's own Settings toggle stays advisory for copy: only an EXPLICIT
+  // override turns its card wording off, which is the escape hatch for a caller
+  // that knows the global kill switch is down. Flagged to Peter rather than
+  // silently reversing the byte-lock — see QA-20260826-07.
+  if (!brand || brand.slug === DEFAULT_BRAND) {
+    return opts?.cardPhone === false ? MARLEY_THEME_NO_CARD : MARLEY_THEME;
+  }
 
   const name = brand.name.trim() || "Marley Moves";
   const nameEsc = escapeHtml(name);
@@ -194,7 +230,10 @@ export function emailTheme(brand?: Brand | null, opts?: EmailThemeOptions): Emai
 
   const callHtml = `call us on <strong style="color:${accent};">${phoneEsc}</strong>`;
   const callHtmlCap = `Call us on <strong style="color:${accent};">${phoneEsc}</strong>`;
-  const cardPhone = opts?.cardPhone === true;
+  // Derived from the row (QA-20260826-07): a persisted switch that silently
+  // does nothing is worse than an absent one, because an operator will believe
+  // they have changed the customer's payment options.
+  const cardPhone = opts?.cardPhone ?? brand.cardPaymentsEnabled;
   const payMethodsLine = cardPhone
     ? `Bank transfer, card over the phone on ${phoneEsc}, or cash. Whichever suits.`
     : `Bank transfer or cash. Whichever suits.`;
