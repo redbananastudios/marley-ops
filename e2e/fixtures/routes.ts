@@ -71,3 +71,23 @@ export const CREW_FORBIDDEN = [
   "/storage",
   "/performance",
 ] as const;
+
+/**
+ * Admin-only routes an estimator must be bounced OFF. /finance, /finance/statements
+ * and /refunds already self-gate correctly. /board, /jobs, /clients, /storage,
+ * /performance, /automations and /documents do NOT (QA-20260827-01, also live on
+ * master) — those entries are exercised as known-broken (skipped) in
+ * estimator/gating.spec.ts until the fix lands.
+ */
+export const ESTIMATOR_FORBIDDEN = [
+  "/finance",
+  "/finance/statements",
+  "/refunds",
+  "/board",
+  "/jobs",
+  "/clients",
+  "/storage",
+  "/performance",
+  "/automations",
+  "/documents",
+] as const;

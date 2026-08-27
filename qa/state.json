@@ -1,21 +1,21 @@
 {
-  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run.",
+  "comment": "QA audit coverage ledger. Every item: lastTestedAt (ISO or null), lastResult (pass|finding|blocked|null), watch (globs whose change makes this item jump the queue). Never delete items - retire with retired:true + reason. lastAuditSha set each run. 2026-08-27T04:08Z run: 4 role agents (Sonnet) live-verified 8 stalest-queue surfaces (crew push-opt-in/hours-clear, admin retired-routes/survey-book-reschedule-cancel, estimator cockpit/gating, customer day-sheet/join-signup) -- 1 finding: QA-20260827-01 (severity:high, class:risky) -- 7 of 10 admin-only routes (/board /jobs /clients /storage /performance /automations /documents) have NO role gate for estimator at all, confirmed live on staging AND master (production) via source diff. estimator.gating_forbidden_surfaces flipped pass->finding. Permanent spec added (skipped, references the finding). All 4 agents' cleanup + one spot-checked claim each independently re-verified by the main loop -- all matched. Full marker teardown verified by query across clients/leads/staff/vehicles/profiles/staff_submissions/quotes/communications/activities/appointments/surveys/crew_job_sheets/appointment_assignments/auth.users -- 0 remaining everywhere.",
   "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. Still open (risky, all Peter's, none touched this run): QA-20260826-01 (/bookings vs /payments owed-figure divergence) and QA-20260826-04..09 (gate 13/19 pre-merge findings: storage-invoice footer legal identity, WP pull-rail cursor loss, resend-inbound own-domain widening hitting live Marley today, dead card-payments toggle, cross-brand SMS sender fallback, lead-ingest secret hygiene). 2026-08-26T16:38Z run: 4 role agents (Sonnet) live-verified 10 stalest-queue surfaces (crew agreement/job-note-photo/job-sheet-pdf, admin cubic-survey/removal-changedate-cancel/staff-vehicle-crud+join-approve handoff leg, estimator cockpit/pay-statement, customer join-signup/q-accept-bank-transfer) -- 0 new findings, all spot-checked independently by the main loop. HEAD 1bb64ce is docs-only over deployed feeab6f (270-line ledger-adapter design doc), confirmed via diff --stat before treating the health gate as passed.",
-  "lastAuditSha": "1bb64ce",
+  "lastAuditSha": "928d826",
   "crew": {
     "availability_set_remove": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet): 'Offer to work' on 2026-08-29 (Sat, outside working_days=[1-5]) -> staff_availability row (status=available, created_by=own auth id) exact match, held across a reload AND a second fresh browser context (re-login). 'Cancel the offer' -> real DELETE (0 rows after), re-confirmed after reload. Two-hats held (app/my-jobs/availability/actions.ts write path == page.tsx read path). 0 findings.",
+      "note": "Re-verified live this run (crew role agent): set an override on a working day via /my-jobs/availability -> staff_availability row created (status='unavailable', created_by=own profile id) matching the UI's Off state; cleared it -> row deleted, UI reverted to On. UI and DB agreed at both steps, no silent no-op. 0 findings.",
       "watch": [
         "app/my-jobs/availability/**",
         "components/my-jobs/availability-editor.tsx"
       ]
     },
     "hours_log_edit_clear": {
-      "lastTestedAt": "2026-08-26T08:24:00Z",
+      "lastTestedAt": "2026-08-27T04:19:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet): logged Wed 26 Aug 08:00-16:30 -> staff_time_entries exact match; reload + reopen prefilled identically (two-hats held). 0 findings. Existing e2e/crew/hours.spec.ts still covers this (still test.skip'd, no E2E_CREW_PASSWORD in this env).",
+      "note": "Re-verified live this run (Sonnet role agent): logged Tue 25 Aug 08:00-16:30 -> staff_time_entries exact match; two-hats held on reopen; edited finish to 17:00 -> same row updated (not duplicated), SQL confirmed; cleared the day -> clearMyTimeEntryAction hard-deletes the row (not a zero-out, matches its own comment) -> SQL confirmed 0 rows. Main loop independently re-queried staff_time_entries for this staff id post-run: 0 rows, matches. 0 findings.",
       "watch": [
         "app/my-jobs/hours/**",
         "components/my-jobs/hours-editor.tsx",
@@ -34,18 +34,18 @@
       ]
     },
     "job_list_detail": {
-      "lastTestedAt": "2026-08-25T12:11:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent on a fresh marker fixture: seeded 09:00-13:00Z appointment -> /my-jobs list card correctly rendered 10:00-14:00 UK-local (BST +1) with correct postcodes; detail page (incl. hard reload) matched the same DB row exactly (date/time/addresses/crew name/notes). 0 findings.",
+      "note": "Re-verified live this run (crew role agent): seeded lead->quote(accepted)->appointment(removal)->assignment to a marker crew staff row. /my-jobs list card and /my-jobs/[id] detail both matched the seeded row exactly (customer name, time window, both addresses/postcodes, phone tel-link, crew name, notes) -- every displayed field traced to the column actually written. 0 findings. Non-finding noted: the address cards' \"house . ground floor . carry ~5m\" access line is a UI fallback for state_blob-absent property/access data, not a defect (matches how the shared e2e fixture seeds it too).",
       "watch": [
         "app/my-jobs/**",
         "components/my-jobs/**"
       ]
     },
     "push_notification_opt_in": {
-      "lastTestedAt": "2026-08-25T16:26:00Z",
+      "lastTestedAt": "2026-08-27T04:19:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: lib/push/categories.ts still has all 4 categories audience admin/estimator only (pushCategoriesForRole('crew')=[]), confirmed by source inspection. components/my-jobs/notifications-row.tsx returns null when the list is empty -- live /my-jobs (crew session) shows 'YOUR DEVICE' (quick sign-in, user manual) but 0 'Get alerts on this phone' opt-in UI, held after reload. 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent): source confirms pushCategoriesForRole('crew')=[] (lib/push/categories.ts, all 4 categories audience admin/estimator only); live /my-jobs (2 separate loads, fresh + reload) has zero occurrence of 'Get alerts on this phone' or any push/notification/bell text (grepped full page body both times). 0 findings.",
       "watch": [
         "components/my-jobs/notifications-row.tsx",
         "components/push/notifications-setup.tsx",
@@ -127,9 +127,9 @@
       ]
     },
     "lead_status_lost_noreply": {
-      "lastTestedAt": "2026-08-23T20:20:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: Mark lost (reason 'too_expensive' + note) -> leads.status='declined', lost_reason/lost_note/lost_at/chase_paused all correct, survived reload; Activity-tab snapshot text matches exactly (write-once at the same instant lost_reason is set, no live re-read elsewhere -- no drift surface since a declined lead has no re-fire path). No reply (separate marker lead) -> follow_ups row (reason='no_answer', status='open', due_at=tomorrow 08:00 UTC/09:00 UK, assigned_to/created_by=own profile id, attempt_count=1). 0 findings.",
+      "note": "Re-verified live this run (admin role agent), same result as prior runs: mark-lost -> leads.status='declined', lost_reason/lost_note/lost_at/chase_paused all correct + matching activity row; no-reply action -> follow_ups row (reason='no_answer', status='open', attempt_count=1, due_at=tomorrow 08:00 UTC) + 2 activity rows. 0 findings.",
       "watch": [
         "components/leads/leads-board.tsx",
         "components/leads/lead-action-bar.tsx",
@@ -174,9 +174,9 @@
       ]
     },
     "survey_book_reschedule_cancel": {
-      "lastTestedAt": "2026-08-24T12:20:00Z",
+      "lastTestedAt": "2026-08-27T04:26:00Z",
       "lastResult": "pass",
-      "note": "FRESH CODE this run: re-verified live in a REAL browser (not just unit tests) that the QA-20260823-06 fix (lib/schedule/slot-range.ts, PR #71/68439b5) actually renders correctly on the deployed FullCalendar UI -- never confirmed live post-fix until now. Seeded a survey at 21:00-22:00 UK-local (BST), previously invisible in Week/Day view under the old hard-coded 07:00-20:00 slotMinTime/slotMaxTime. Live DOM check on /schedule/surveys: marker event IS visible in default view, Week (explicit re-click), AND Day (navigated to the correct date, toolbar title confirmed) -- grid visibly stretches past the old 20:00 cutoff. Month view regression-checked, still shows it too. 0 findings -- QA-20260823-06 fix confirmed live, not just by unit test.",
+      "note": "Re-verified live this run (Sonnet role agent) against the marker QA-SENTINEL lead: booked a survey (appointments+surveys rows exact match) -> rescheduled (single row updated in place, no duplicate -- confirmed by count) -> cancelled (both native confirms accepted, status->cancelled on both rows, comms dry-run sent, UI hides cancelled events from the month grid entirely). Main loop independently re-queried the appointment+survey rows post-run: exact match to reported evidence. 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/**",
         "components/schedule/appointment-dialog.tsx",
@@ -215,9 +215,9 @@
       ]
     },
     "invoice_resend_deposit_commitment": {
-      "lastTestedAt": "2026-08-24T08:36:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (real Chromium): legacyLocked = source='imve' && !standard_comms_at (lib/legacy.ts). A1: legacy-locked lead, raised unpaid BALANCE invoice -> real 'Send again' button rendered (not blocked), clicked -> toast 'sent again', activities note + communications row written (status=sent, provider_id=dryrun-..., is_override=true). A2: legacy-locked lead, raised unpaid DEPOSIT invoice -> real UI showed the standard-comms-lock alert box, no 'Send again' button, 0 activities/communications rows for that lead. Both branches match the documented 2026-08-21 fix exactly -- no regression. 0 findings. SPEC GAP still open: no permanent e2e spec covers this comms-lock logic (office/invoice-resend-race.spec.ts covers a different scenario -- payment landing mid-dialog); not written this run, see spec_gaps.admin_invoice_resend_lock_spec.",
+      "note": "Re-verified live this run (admin role agent) with a fresh seed pair: legacy-locked (source='imve', standard_comms_at=null) deposit-rail lead+quote (lead.deposit_requested_at set, unpaid) -> resend dialog shows ONLY the comms-lock alert, no Send button, 0 comms/activities written. Same legacy shape on the balance rail (raised, unpaid final invoice) -> Send button live, click succeeds (communications row status=sent, is_override=true, dry-run provider id) -- confirms lib/quote/accept-flow.ts's resendBalanceInvoiceFlow deliberately hard-codes commsLocked:false for this rail (comment: \"the office raises and emails a final invoice to a legacy customer on purpose\"). Matches this item's own 2026-08-24 note exactly -- no regression. 0 findings. Recipe promoted to a permanent spec this run: e2e/office/invoice-resend-lock.spec.ts (see spec_gaps.admin_invoice_resend_lock_spec).",
       "watch": [
         "app/(dashboard)/invoicing/**",
         "lib/payments/invoice-resend.ts",
@@ -240,9 +240,9 @@
       ]
     },
     "refunds_queue": {
-      "lastTestedAt": "2026-08-23T19:03:43Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Ledger corrected this run: this entry was left at 'blocked' after QA-20260823-03's reopen (fd260dd), but the finding was properly re-closed the same day by commit e146ad5 (PR #65) -- staging's app.env was read directly over SSH (COMMS_DRYRUN=true), confirming sendEmail short-circuits before contacting Resend even on the sendOpsAlert(...,'money') path, so the null-email Complete branch is safe to drive live. Both Verify-section halves were re-run against deployed staging and passed: Case A (no customer_email) shows 'The customer has NOT been told - accounts have been alerted', Case B (has email) still shows 'customer emailed'. Not re-driven by this run -- ledger brought in line with the finding file's own status:closed, not a fresh test.",
+      "note": "Re-verified this run (admin role agent): refund_queue is currently empty on staging (0 rows) -- UI's three sections (Needs decision/To pay out/Held) all correctly show their empty states, reconciling exactly against SQL (0 vs 0). Did not seed a new actionable row this run (would need driving the cancel/date-change trigger path in lib/refunds.ts, out of this run's time budget) -- recomputed against existing rows only, as the brief's documented fallback allows. 0 findings.",
       "watch": [
         "app/(dashboard)/refunds/**",
         "app/actions/refunds.ts",
@@ -346,9 +346,9 @@
       ]
     },
     "routing_retired_routes_pr70": {
-      "lastTestedAt": "2026-08-24T04:32:00Z",
+      "lastTestedAt": "2026-08-27T04:26:00Z",
       "lastResult": "pass",
-      "note": "NEW surface (PR #70, freshest code this run, jumped the queue). Live-verified by the MAIN LOOP directly (real Chromium via Playwright, real /login as a throwaway admin, real hydration-race retry per auth.setup.ts's documented pattern) -- not by a role-agent subagent, see 2026-08-24T04:32Z LOG entry for why. /schedule/board -> lands on /schedule (next.config.ts temporary redirect, confirmed by final page.url() after navigation, 200 after redirect followed). /growth and /growth/ads both render the new app/not-found.tsx branded page verbatim ('That page isn't here any more' / 'Job allocation now lives on Schedule & Allocation' / 'Take me back' / 'User manual'), not Next's bare 404 and not a silent redirect. 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent): /growth and /growth/ads both 404 to the branded not-found page (app/not-found.tsx); /schedule/board 307-redirects (temporary, matches next.config.ts permanent:false) to /schedule; zero nav hrefs on /schedule reference any of the 3 retired paths. 0 findings.",
       "watch": [
         "app/not-found.tsx",
         "next.config.ts"
@@ -357,17 +357,17 @@
   },
   "estimator": {
     "cockpit": {
-      "lastTestedAt": "2026-08-26T16:38:00Z",
+      "lastTestedAt": "2026-08-27T04:24:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (Sonnet role-agent): 2 seeded QA-SENTINEL leads recomputed straight from SQL (estimator_id scoping, status bucketing, submitted_at ordering) matched the rendered 'Needs attention' tile exactly, incl. order. Gating re-confirmed: /finance, /finance/statements, /refunds all bounce to estimator-appropriate pages (200 + redirect chain, not raw 403). 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent): fixture estimator owns no data, cockpit correctly rendered all-empty state (0 surveys/follow-ups/quotes/leads), matched independently by SQL for every section. Low-signal (zero counts don't stress the .slice() truncation limits) but consistent, 0 findings on this surface.",
       "watch": [
         "app/(dashboard)/estimator/**"
       ]
     },
     "book_survey_quote_from_visit": {
-      "lastTestedAt": "2026-08-26T08:24:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent (Sonnet): lead created -> survey booked (past slot) -> Create Quote from the lead's Quotes tab landed on /quotes/<id> with a real draft (quote_ref MMR114, \u00a31,020) -- matches e2e/estimator/work-quote.spec.ts's recipe exactly, a second independent live confirmation of that skipped spec. SQL: leads.status='survey_booked', appointments row (estimator_id=profiles.id, matches the documented gotcha), quotes row matched UI exactly. 0 findings.",
+      "note": "Re-verified live this run (estimator role agent), third independent confirmation: lead -> book survey -> \"New quote\" from the Quotes tab lands directly on the new quote (surveys/appointments/quotes rows all correctly linked via lead_id/survey_id/estimator_id -- estimator_id is the PROFILE id, not staff.id, the documented gotcha). 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -388,9 +388,9 @@
       ]
     },
     "gating_forbidden_surfaces": {
-      "lastTestedAt": "2026-08-26T08:24:00Z",
-      "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: /finance -> /estimator, /finance/statements -> /estimator/pay, /refunds -> /estimator/pay -- all role-appropriate redirects (not the generic fallback), matching app/(dashboard)/finance/page.tsx, finance/statements/page.tsx, refunds/page.tsx exactly. Also confirmed /estimator/work is not a real route (it's /estimator) and /estimator (cockpit) + /quotes/[id] (quote-builder) are the actual work/quote surfaces. 0 findings. (Prior observation about /board /clients /storage /performance /automations having no estimator boundary still stands, unchanged, not re-flagged as new.)",
+      "lastTestedAt": "2026-08-27T04:24:00Z",
+      "lastResult": "finding",
+      "note": "BROKEN, this run (Sonnet role agent + main-loop independent source verification): /finance, /finance/statements, /refunds still correctly bounce estimator server-side. But /board, /jobs, /clients, /storage, /performance, /automations, /documents have NO role gate at all -- app/(dashboard)/layout.tsx only blocks role==='crew', and none of these 7 page.tsx files call requireOfficeProfile(). Estimator reads full unredacted content: all customer PII, cross-staff pay/margin figures, company financials, signed documents. CONFIRMED same missing gate exists on origin/master (production) via direct source diff -- this is live today, not staging-only. Filed QA-20260827-01 (class:risky/severity:high -- RLS/permissions, Peter's fix). Permanent spec added: e2e/estimator/gating.spec.ts now has a skipped block asserting all 7 should bounce, referencing the finding id; un-skips once the gate is added.",
       "watch": [
         "app/(dashboard)/finance/**",
         "app/(dashboard)/refunds/**",
@@ -412,9 +412,9 @@
       ]
     },
     "cv_self_fill_survey": {
-      "lastTestedAt": "2026-08-26T08:24:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: Sofa 2-seater + Coffee table + customer notes -> 'Sent -- thank you... 2 items', total_ft3=47 matched (35+12), customer_notes exact match, status=customer_submitted. Two-hats: office's cubic review page (leads/[id]/cubic) selects the identical columns. Re-confirmed via source (components/cubic/cubic-builder.tsx:741) that SurveyPhotos only renders in office mode -- the public /cv flow genuinely has no photo upload surface (not a gap, 0 file inputs on the live page). 0 findings.",
+      "note": "Re-verified live this run (customer role agent): self-fill item-picker flow on /cv/<token> works end to end (item added, total_ft3 computed, customer_notes saved, status -> customer_submitted) -- 0 findings on the flow itself. NOTE (not filed as a finding): the agent found /cv has NO file/photo upload input at all -- confirmed via code read (components/cubic/cubic-builder.tsx's <SurveyPhotos> block is gated `office && leadId`, never true in customer mode) and live (`input[type=file]` count = 0 on the loaded page). This matches the architecture -- photo capture is office/estimator-only (RLS-gated cubic_survey_media/survey-media bucket), the customer link is deliberately item-selection-only -- so treated as by-design, not a product gap. Flagging here in case product intent was actually to offer customer-side photo capture and it was simply never built.",
       "watch": [
         "app/cv/**",
         "app/actions/cubic-survey.ts",
@@ -422,26 +422,26 @@
       ]
     },
     "s_storage_signing": {
-      "lastTestedAt": "2026-08-25T20:45:00Z",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: /s/<token> -> 3 acks + name -> submit -> 'All signed' confirmation text. SQL exact match (signatures row, acknowledgments all true, terms_version stamped). IO proof: signature_data decoded to 65,920 raw bytes starting with the PNG magic number 89 50 4E 47 0D 0A 1A 0A -- a real, non-empty image. Re-opened in a FRESH browser context -> idempotent 'All signed' state, 0 form fields re-rendered (DB-backed, not client state). 0 findings.",
+      "note": "Re-verified live this run (customer role agent): seeded an unsigned storage_let with its own remote-signing token, drove /s/<token> end to end (typed signature, 3 acknowledgments), confirmed via SQL that signing state lives entirely in a new `signatures` row (kind='storage', signer_name/method/channel/signed_at/acknowledgments all correct) joined by the page -- storage_lets itself carries no signed flag, by design. Two-hats: greeting reads clients.display_name, matches the seeded value. 0 findings.",
       "watch": [
         "app/s/**"
       ]
     },
     "sheet_day_sheet": {
-      "lastTestedAt": "2026-08-26T08:24:00Z",
+      "lastTestedAt": "2026-08-27T04:20:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live by a role-agent subagent: seeded 09:00-13:00Z removal appointment + crew_job_sheets token -> /sheet/<token> every rendered field traced to its source column/table by SQL (name, date, customer, addresses, notes fallback chain in lib/job-sheet-data.ts:120, BST +1h time conversion). 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent): seeded a full marker fixture chain (staff/vehicle/client/lead/quote/appointment/appointment_assignments/crew_job_sheets, all QA-SENTINEL marked) -> /sheet/<token> rendered every field (names, phone, addresses/postcodes, quote ref, vehicle, crew, time window incl. correct UTC->BST conversion) matching SQL exactly, field by field. 0 findings.",
       "watch": [
         "app/sheet/**",
         "e2e/public/day-sheet.spec.ts"
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-08-26T16:38:00Z",
+      "lastTestedAt": "2026-08-27T04:20:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live (Sonnet role-agent): submitted /join/e2e-join-token-0001 with a deliberately messy postcode ('sp78ab') to re-probe the formatUkPostcode two-hats fix \u2014 normalised to 'SP7 8AB' identically in both staff_submissions.address_postcode and the legacy one-line address field. Also served as the customer leg of handoff h5 (approved by the concurrent admin-role agent same run). 0 findings.",
+      "note": "Re-verified live this run (Sonnet role agent) using the live shared business_settings.staff_onboard_token (deliberately did not overwrite the shared singleton mid-run): submitted a full QA-SENTINEL marker application, staff_submissions row exact match field-by-field including the derived address one-liner, status=pending/staff_id=null as expected for unreviewed. Main loop independently re-queried the row post-run: exact match. 0 findings.",
       "watch": [
         "app/join/**",
         "lib/staff/onboarding.ts"
@@ -723,14 +723,15 @@
       ]
     },
     "admin_invoice_resend_lock_spec": {
-      "lastTestedAt": null,
-      "lastResult": null,
-      "note": "NOT written yet. No permanent spec covers the legacy comms-lock logic on invoice resend (lib/legacy.ts's legacyLocked, deposit/commitment locked vs balance deliberately not) -- office/invoice-resend-race.spec.ts covers a different scenario (payment landing mid-dialog). Proven live 2026-08-24 by the QA audit (admin.invoice_resend_deposit_commitment, both branches, 0 findings). Deferred per the run's time box -- needs seeding a source='imve'/standard_comms_at=null quote with a raised unpaid deposit AND a separate one with a raised unpaid balance, same shapes the role-agent used.",
+      "lastTestedAt": "2026-08-26T20:30:00Z",
+      "lastResult": "pass",
+      "note": "WRITTEN this run: e2e/office/invoice-resend-lock.spec.ts. Two tests -- deposit rail refuses on the legacy comms lock (role=alert, no Send button, 0 comms rows), balance rail sends successfully despite the identical legacy shape (deliberate commsLocked:false per lib/quote/accept-flow.ts). Seed shapes/locators cross-verified against lib/legacy.ts, resendDepositInvoiceFlow/resendBalanceInvoiceFlow, and the resend-invoice-button/balance-invoice-button components; tsc + eslint clean; `playwright test --list --project=office` confirms both tests load. Underlying flow independently proven live this run by the admin role-agent (see admin.invoice_resend_deposit_commitment). test.skip'd: this env has no E2E_OFFICE_PASSWORD so auth.setup.ts can't sign in the office fixture -- the file itself has never executed here, same standing gap as every other DB-seeded spec in this suite -- not blocked by any bug.",
       "watch": [
         "lib/legacy.ts",
         "lib/payments/invoice-resend.ts",
         "app/(dashboard)/invoicing/**",
-        "e2e/office/invoice-resend-race.spec.ts"
+        "e2e/office/invoice-resend-race.spec.ts",
+        "e2e/office/invoice-resend-lock.spec.ts"
       ]
     },
     "admin_board_kanban_spec": {
