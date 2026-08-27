@@ -1,18 +1,21 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * `syncZohoPayments` polls the ledger for payments recorded outside the app. Its
- * three catches are deliberately non-fatal — a transient outage genuinely is
- * caught by the next pass, and throwing would abandon the rest of the sweep.
+ * Companion to `zoho-payment-sync-blindness.test.ts`, which pins the PERMANENT
+ * lock-out class. This file pins the counting the other escalation needs.
  *
- * But they used to be SILENT, and that made a total provider outage
- * indistinguishable from a day nobody paid: the cron returned
- * `{checked: 25, settled: 0}` either way, `runCron` saw no throw, and it then
- * RESOLVED the job's operational issue — clearing the only surface that would
- * have shown the problem.
+ * The two exist because `staging` and `master` fixed the same silent-poller bug
+ * independently and caught different failures, and the merge keeps both:
  *
- * These tests pin the counting, not the swallowing. The swallow is correct; the
- * silence was not.
+ *  - `accessDenied` — one permanent failure is enough. It will not clear.
+ *  - `attempted` / `unreadable` — feeds `blindSweepFailure`, which fails a run
+ *    where EVERY read failed even when no single error was classifiable. A
+ *    total outage returning nothing recognisable escalates through this path
+ *    and through no other.
+ *
+ * The counts are also what keep a PARTIAL failure a green run with a visible
+ * number rather than an alarm: one timeout in twenty-five genuinely does clear
+ * next pass, and crying wolf on it is how the alert gets ignored.
  */
 
 const { getInvoiceStatus } = vi.hoisted(() => ({ getInvoiceStatus: vi.fn() }));
@@ -22,7 +25,13 @@ vi.mock("@/lib/ledger", async (importOriginal) => ({
   getInvoiceStatus,
 }));
 
-import { syncZohoPayments, type LedgerReadStats } from "@/lib/quote/accept-flow";
+vi.mock("@/lib/ops/zoho-access", () => ({
+  ZOHO_ACCESS_ISSUE_KEY: "zoho:access-denied",
+  reportZohoAccessDenied: async () => {},
+  resolveZohoAccessDenied: async () => {},
+}));
+
+import { syncZohoPayments } from "@/lib/quote/accept-flow";
 
 /* Structural stand-ins for the two real parameter types. `Sb` is not exported
    and `AcceptQuoteRow` has ~40 fields none of these branches read, so widen
@@ -50,20 +59,31 @@ const quote = asQuote({
   zoho_deposit_invoice_id: "111111",
   zoho_commitment_invoice_id: "222222",
   zoho_balance_invoice_id: "333333",
+  deposit_invoice_provider: "zoho",
+  commitment_invoice_provider: "zoho",
+  balance_invoice_provider: "zoho",
   deposit_paid_at: null,
   commitment_paid_at: null,
 });
 
-const stats = (): LedgerReadStats => ({ attempted: 0, failed: 0 });
+const unpaid = {
+  invoiceId: "i",
+  invoiceNumber: "INV-1",
+  invoiceUrl: null,
+  status: "sent",
+  total: 100,
+  balance: 100,
+};
 
 beforeEach(() => vi.clearAllMocks());
 
 describe("counting reads that could not be completed", () => {
   it("counts every failed read and still returns the quote rather than throwing", async () => {
     getInvoiceStatus.mockRejectedValue(new Error("ledger unreachable"));
-    const s = stats();
-    await expect(syncZohoPayments(sb, quote, s)).resolves.toBe(quote);
-    expect(s).toEqual({ attempted: 3, failed: 3 });
+    const r = await syncZohoPayments(sb, quote);
+    expect(r.quote).toBe(quote);
+    expect(r.attempted).toBe(3);
+    expect(r.unreadable).toBe(3);
   });
 
   /**
@@ -71,39 +91,32 @@ describe("counting reads that could not be completed", () => {
    * nothing, versus three reads that never happened. Both settle nothing.
    */
   it("counts attempts without failures when the ledger answers 'not paid'", async () => {
-    getInvoiceStatus.mockResolvedValue({
-      invoiceId: "i",
-      invoiceNumber: "INV-1",
-      invoiceUrl: null,
-      status: "sent",
-      total: 100,
-      balance: 100,
-    });
-    const s = stats();
-    await syncZohoPayments(sb, quote, s);
-    expect(s).toEqual({ attempted: 3, failed: 0 });
+    getInvoiceStatus.mockResolvedValue(unpaid);
+    const r = await syncZohoPayments(sb, quote);
+    expect(r.attempted).toBe(3);
+    expect(r.unreadable).toBe(0);
   });
 
   it("counts a partial outage as partial, not as total blindness", async () => {
-    getInvoiceStatus
-      .mockRejectedValueOnce(new Error("timeout"))
-      .mockResolvedValue({
-        invoiceId: "i",
-        invoiceNumber: "INV-1",
-        invoiceUrl: null,
-        status: "sent",
-        total: 100,
-        balance: 100,
-      });
-    const s = stats();
-    await syncZohoPayments(sb, quote, s);
-    expect(s).toEqual({ attempted: 3, failed: 1 });
+    getInvoiceStatus.mockRejectedValueOnce(new Error("timeout")).mockResolvedValue(unpaid);
+    const r = await syncZohoPayments(sb, quote);
+    expect(r.attempted).toBe(3);
+    expect(r.unreadable).toBe(1);
+  });
+
+  /**
+   * An ordinary network error is NOT a lock-out. Escalating it would put a
+   * permanent-looking ops alert on a blip that clears itself.
+   */
+  it("does not mistake a transient failure for a lock-out", async () => {
+    getInvoiceStatus.mockRejectedValue(new Error("socket hang up"));
+    expect((await syncZohoPayments(sb, quote)).accessDenied).toBe(false);
   });
 
   it("attempts nothing for a quote with no open invoice slots", async () => {
-    const s = stats();
-    await syncZohoPayments(sb, asQuote({ id: "q2", lead_id: null, zoho_deposit_invoice_id: null }), s);
-    expect(s).toEqual({ attempted: 0, failed: 0 });
+    const r = await syncZohoPayments(sb, asQuote({ id: "q2", lead_id: null, zoho_deposit_invoice_id: null }));
+    expect(r.attempted).toBe(0);
+    expect(r.unreadable).toBe(0);
     expect(getInvoiceStatus).not.toHaveBeenCalled();
   });
 
@@ -113,8 +126,7 @@ describe("counting reads that could not be completed", () => {
    * look like an outage.
    */
   it("does not read a slot still holding the pending creation claim", async () => {
-    const s = stats();
-    await syncZohoPayments(
+    const r = await syncZohoPayments(
       sb,
       asQuote({
         id: "q3",
@@ -124,18 +136,8 @@ describe("counting reads that could not be completed", () => {
         deposit_paid_at: null,
         commitment_paid_at: null,
       }),
-      s,
     );
-    expect(s).toEqual({ attempted: 0, failed: 0 });
+    expect(r.attempted).toBe(0);
     expect(getInvoiceStatus).not.toHaveBeenCalled();
-  });
-
-  /**
-   * The /q page omits the collector — that read self-heals on the next page load
-   * and has a human looking at the result. It must not become a required arg.
-   */
-  it("works without a collector, so the customer page is unaffected", async () => {
-    getInvoiceStatus.mockRejectedValue(new Error("ledger unreachable"));
-    await expect(syncZohoPayments(sb, quote)).resolves.toBe(quote);
   });
 });
