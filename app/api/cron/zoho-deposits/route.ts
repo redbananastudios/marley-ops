@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
+import { blindSweepFailure } from "@/lib/cron/blind-sweep";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { fetchQuoteById, syncZohoPayments } from "@/lib/quote/accept-flow";
+import { fetchQuoteById, syncZohoPayments, type LedgerReadStats } from "@/lib/quote/accept-flow";
 
 /**
  * Payment watcher (Vercel cron): polls Zoho for card payments (or payments
@@ -88,11 +89,16 @@ export async function GET(req: Request) {
 
   let checked = 0;
   let settled = 0;
+  // `checked` counts rows EXAMINED, which is not the same as statuses READ.
+  // Without this tally a total ledger outage returned {checked: 25, settled: 0}
+  // — byte-identical to a day nobody paid — and runCron then RESOLVED this job's
+  // operational issue, clearing the only surface that would have shown it.
+  const reads: LedgerReadStats = { attempted: 0, failed: 0 };
   for (const id of ids) {
     const quote = await fetchQuoteById(sb, id);
     if (!quote) continue;
     checked++;
-    const after = await syncZohoPayments(sb, quote);
+    const after = await syncZohoPayments(sb, quote, reads);
     if (
       (!quote.deposit_paid_at && after.deposit_paid_at) ||
       (!quote.commitment_paid_at && after.commitment_paid_at) ||
@@ -102,7 +108,13 @@ export async function GET(req: Request) {
     }
   }
 
-  return { checked, settled };
+  return {
+    checked,
+    settled,
+    statusReads: reads.attempted,
+    statusReadFailures: reads.failed,
+    ...(blindSweepFailure("ledger status", reads.attempted, reads.failed) ?? {}),
+  };
   });
   return NextResponse.json(
     { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },

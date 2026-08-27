@@ -2727,6 +2727,101 @@ export type Database = {
           },
         ]
       }
+      ledger_invoice_archive: {
+        Row: {
+          app_url: string | null
+          balance: number
+          brand: string | null
+          captured_at: string
+          customer_name: string
+          external_id: string
+          id: string
+          invoice_date: string | null
+          invoice_number: string
+          provider: string
+          provider_tax_total: number | null
+          reference: string
+          status: string
+          total: number
+        }
+        Insert: {
+          app_url?: string | null
+          balance?: number
+          brand?: string | null
+          captured_at?: string
+          customer_name?: string
+          external_id: string
+          id?: string
+          invoice_date?: string | null
+          invoice_number?: string
+          provider: string
+          provider_tax_total?: number | null
+          reference?: string
+          status?: string
+          total?: number
+        }
+        Update: {
+          app_url?: string | null
+          balance?: number
+          brand?: string | null
+          captured_at?: string
+          customer_name?: string
+          external_id?: string
+          id?: string
+          invoice_date?: string | null
+          invoice_number?: string
+          provider?: string
+          provider_tax_total?: number | null
+          reference?: string
+          status?: string
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ledger_invoice_archive_brand_fkey"
+            columns: ["brand"]
+            isOneToOne: false
+            referencedRelation: "brands"
+            referencedColumns: ["slug"]
+          },
+        ]
+      }
+      ledger_tokens: {
+        Row: {
+          access_expires_at: string | null
+          access_token: string | null
+          provider: string
+          refresh_lease_owner: string | null
+          refresh_lease_until: string | null
+          refresh_token: string
+          rotated_at: string | null
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          access_expires_at?: string | null
+          access_token?: string | null
+          provider: string
+          refresh_lease_owner?: string | null
+          refresh_lease_until?: string | null
+          refresh_token: string
+          rotated_at?: string | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          access_expires_at?: string | null
+          access_token?: string | null
+          provider?: string
+          refresh_lease_owner?: string | null
+          refresh_lease_until?: string | null
+          refresh_token?: string
+          rotated_at?: string | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       operational_issue_daily_digests: {
         Row: {
           attempt_count: number

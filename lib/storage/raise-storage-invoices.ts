@@ -8,7 +8,7 @@ import {
   findInvoiceByReference,
   findOrCreateContact,
   getInvoicePdfBase64,
-} from "@/lib/zoho";
+} from "@/lib/ledger";
 import {
   invoicesDue,
   storageInvoiceReference,

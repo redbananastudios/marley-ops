@@ -2,9 +2,10 @@ import { NextResponse } from "next/server";
 import { requireUserOrCronSecret } from "@/lib/api-auth";
 import { runCron } from "@/lib/cron/run-logger";
 import { log, errorContext } from "@/lib/log";
+import { blindSweepFailure } from "@/lib/cron/blind-sweep";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { getInvoiceStatus } from "@/lib/zoho";
+import { getInvoiceStatus } from "@/lib/ledger";
 import {
   raiseDueStorageInvoices,
   repairPendingStorageClaims,
@@ -110,7 +111,12 @@ export async function GET(req: Request) {
     }
 
     /* ---------------- refresh unpaid statuses ---------------- */
+    // statusUpdated counts rows CHANGED. On its own it cannot distinguish "every
+    // invoice is still unpaid" from "the ledger was unreachable for all 25", and
+    // the latter used to leave nothing behind but a log line. Count the reads.
     let statusUpdated = 0;
+    let statusReads = 0;
+    let statusReadFailures = 0;
     const { data: unpaid } = await admin
       .from("storage_invoices")
       .select("id, zoho_invoice_id")
@@ -120,6 +126,7 @@ export async function GET(req: Request) {
       .limit(25);
     for (const row of unpaid ?? []) {
       try {
+        statusReads++;
         const status = await getInvoiceStatus(row.zoho_invoice_id!);
         if (status.status === "paid") {
           await admin.from("storage_invoices").update({ status: "paid" } as never).eq("id", row.id);
@@ -129,7 +136,10 @@ export async function GET(req: Request) {
           statusUpdated++;
         }
       } catch (e) {
-        // transient Zoho error — next run retries; log so a persistent one is visible
+        // Transient ledger error — next run retries. Logged AND counted: the log
+        // line alone was invisible to the run summary, so a persistent outage
+        // reported a healthy run (and cleared this job's operational issue).
+        statusReadFailures++;
         log.warn("cron.storage-billing.status_refresh_failed", { invoiceId: row.zoho_invoice_id, ...errorContext(e) });
       }
     }
@@ -175,6 +185,11 @@ export async function GET(req: Request) {
       raised: summary.raised,
       emailed: summary.emailed,
       statusUpdated,
+      statusReads,
+      statusReadFailures,
+      // Every read failing means this sweep learned nothing about which storage
+      // invoices are paid — a failed run, not a quiet one.
+      ...(blindSweepFailure("storage invoice status", statusReads, statusReadFailures) ?? {}),
       stranded: strandedCount,
       resentInvoiceEmails: resend.resent,
       errors: summary.errors,

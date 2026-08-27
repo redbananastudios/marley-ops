@@ -11,7 +11,7 @@ import { sendReviewRequest } from "@/lib/comms/review-request";
 import { buildHeldSnapshot, createRefundQueueEntry } from "@/lib/refunds";
 import { queueAmountsFor } from "@/lib/comms/cancellation-emails";
 import { ukDayOf } from "@/lib/sales-report";
-import { voidInvoice } from "@/lib/zoho";
+import { voidInvoice } from "@/lib/ledger";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { isBackwardMove } from "@/lib/leads/funnel";
 import { canDeleteLead, storageLetsBlockingDelete } from "@/lib/leads/deletable";

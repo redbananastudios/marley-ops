@@ -29,8 +29,8 @@ import {
   refundCreditNote,
   findCreditNoteByReference,
   invoiceCarriesVat,
-  type ZohoCreditNoteRef,
-} from "@/lib/zoho";
+  type LedgerCreditNoteRef,
+} from "@/lib/ledger";
 
 type Sb = SupabaseClient<Database>;
 
@@ -219,7 +219,7 @@ export async function reverseDepositVatInZoho(
   // committed in Zoho then died on the wire) rather than telling a human to raise
   // a SECOND one for the same refund.
   const reference = `${displayRef}-CN-${input.idemKey}`.slice(0, 100);
-  let createdCn: ZohoCreditNoteRef | null = null;
+  let createdCn: LedgerCreditNoteRef | null = null;
   try {
     if (!Number.isInteger(input.amountPence) || input.amountPence <= 0) {
       throw new Error(`bad refund amount ${input.amountPence}`);

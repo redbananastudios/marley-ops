@@ -38,6 +38,8 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   nobody had seen. **Before merging any guard-queued PR, merge staging into it locally and
   run all four gates on the MERGED tree** (`npm run lint && npm run typecheck && npm test
   && npm run build`) — not on the branch alone, since staging moves underneath it.
+  **Claude is that human.** The guard refuses ROBOT auto-merge; it is not a request for
+  Peter, and a guard-queued PR whose merged tree is green must be merged, not parked.
 
 ## Current State (2026-08-25 — prod live on `6ae3ba3`; master == staging; zero open QA findings)
 

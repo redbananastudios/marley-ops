@@ -92,7 +92,7 @@ vi.mock("@/lib/ai/auth", () => ({
 }));
 vi.mock("@/lib/comms/dispatch", () => ({ sendOpsAlert: vi.fn() }));
 vi.mock("@/lib/comms/review-request", () => ({ sendReviewRequest: vi.fn() }));
-vi.mock("@/lib/zoho", () => ({ voidInvoice: vi.fn() }));
+vi.mock("@/lib/ledger", () => ({ voidInvoice: vi.fn() }));
 vi.mock("@/lib/refunds", () => ({ buildHeldSnapshot: vi.fn(), createRefundQueueEntry: vi.fn() }));
 vi.mock("@/lib/comms/cancellation-emails", () => ({ queueAmountsFor: vi.fn() }));
 
