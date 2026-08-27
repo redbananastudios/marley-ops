@@ -147,10 +147,16 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
 
   return (
     <main className="flex-1 p-6 md:p-8">
-      <Link href="/clients" className="focus-ring -ml-1 mb-3 inline-flex items-center gap-0.5 rounded-sm text-sm text-mist-400 transition-colors hover:text-foreground">
-        <ChevronLeft className="size-4" strokeWidth={1.75} />
-        Clients
-      </Link>
+      {/* The client LIST is admin-only (QA-20260827-01) while this record page
+          stays estimator-readable — they reach it from their own lead. Showing
+          the crumb to an estimator would offer a link that bounces them out of
+          the page they are working in. */}
+      {isAdmin && (
+        <Link href="/clients" className="focus-ring -ml-1 mb-3 inline-flex items-center gap-0.5 rounded-sm text-sm text-mist-400 transition-colors hover:text-foreground">
+          <ChevronLeft className="size-4" strokeWidth={1.75} />
+          Clients
+        </Link>
+      )}
 
       <Card className="mb-6 p-0">
         <div className="flex flex-wrap items-start justify-between gap-4 p-5">
@@ -296,9 +302,13 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
       <Card className="mt-5 p-0">
         <div className="flex items-center justify-between border-b px-5 py-3.5">
           <h2 className="font-display text-lg font-semibold text-foreground">Documents</h2>
-          <Link href="/documents" className="focus-ring text-xs font-medium text-mist-400 hover:text-foreground">
-            All documents →
-          </Link>
+          {/* /documents is admin-only (QA-20260827-01) — same reason as the
+              crumb above: no link an estimator can only bounce off. */}
+          {isAdmin && (
+            <Link href="/documents" className="focus-ring text-xs font-medium text-mist-400 hover:text-foreground">
+              All documents →
+            </Link>
+          )}
         </div>
         {docCount === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-mist-400">

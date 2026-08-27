@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { ClientsView, type ClientRow } from "@/components/clients/clients-view";
@@ -17,6 +18,8 @@ export default async function ClientsPage({
   searchParams: Promise<{ brand?: string }>;
 }) {
   const supabase = await createClient();
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   const { baseLocation } = await getBusinessSettings(supabase);
 
   // Brand layer (multi-brand PRD §4 Clients): with a single active brand no

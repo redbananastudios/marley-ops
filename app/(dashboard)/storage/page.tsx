@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
@@ -24,6 +25,8 @@ export default async function StoragePage({
   searchParams: Promise<{ brand?: string }>;
 }) {
   const supabase = await createClient();
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
 
   // Brand layer (multi-brand PRD §4 /storage): with a single active brand no
   // brand UI renders and the page is unchanged (the single-brand invariant,

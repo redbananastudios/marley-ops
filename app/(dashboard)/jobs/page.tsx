@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import type { Metadata } from "next";
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
@@ -33,6 +34,8 @@ export default async function CompletedJobsPage({
   searchParams: Promise<{ q?: string; brand?: string }>;
 }) {
   const sp = await searchParams;
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   const query = (sp.q ?? "").trim();
   // Same sanitize as /quotes — the search is applied in-memory here, but keeping
   // the grammar-safe term means the two pages behave identically for a user.

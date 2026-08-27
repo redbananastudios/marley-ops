@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { AutomationsLog } from "@/components/automations/automations-log";
@@ -25,6 +26,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AutomationsPage() {
   const sb = await createClient();
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   const [{ data }, { data: issues }, sheetFailures] = await Promise.all([
     sb
       .from("cron_runs")

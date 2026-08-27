@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { StatusBoard, type BoardLead } from "@/components/board/status-board";
@@ -13,6 +14,8 @@ type SearchParams = { brand?: string };
 
 export default async function BoardPage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   const supabase = await createClient();
   const {
     data: { user },

@@ -1,3 +1,4 @@
+import { requireAdminPage } from "@/lib/auth";
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -336,6 +337,8 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
 
 export default async function PerformancePage({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const sp = await searchParams;
+  // Admin-only: absent from ESTIMATOR_NAV, and hidden nav is not a gate.
+  await requireAdminPage();
   if (sp.tab === "sales") return <SalesTabPage sp={sp} />;
   if (sp.tab === "storage") return <StorageTabPage sp={sp} />;
   const nowUk = ukParts();

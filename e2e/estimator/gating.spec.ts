@@ -28,15 +28,18 @@ test.describe("Estimator gating — admin-only routes redirect", () => {
 });
 
 /**
- * QA-20260827-01: these 7 routes have NO role gate at all (layout.tsx only
- * blocks role==='crew'; the pages themselves never call requireOfficeProfile())
- * — an estimator can load every one of them with full unredacted content,
- * confirmed live on staging AND on master. class:risky, Peter's fix. These
- * ship skipped and un-skip in the repair PR that adds the gate.
+ * QA-20260827-01, fixed: these 7 routes had NO role gate at all — the layout
+ * blocks only role==='crew', and none of the pages gated themselves, so an
+ * estimator loading the URL directly got the full unredacted page (customer
+ * PII, other estimators' pay and win rate, company-wide margin, signed
+ * documents, the ops dashboard). Live on staging AND master until this fix.
+ *
+ * Each now calls `requireAdminPage()` as its first statement. These assertions
+ * are the standing proof that the gate is real rather than a hidden nav link.
  */
-test.describe("Estimator gating — routes with NO gate yet (QA-20260827-01)", () => {
+test.describe("Estimator gating — admin-only routes with no nav entry (QA-20260827-01)", () => {
   for (const path of ["/board", "/jobs", "/clients", "/storage", "/performance", "/automations", "/documents"] as const) {
-    test.skip(`${path} should be admin-only but currently renders for estimator (QA-20260827-01)`, async ({ page }) => {
+    test(`${path} is admin-only → bounced to the estimator cockpit`, async ({ page }) => {
       await expectBounced(page, path, /\/estimator/);
     });
   }
