@@ -3,12 +3,7 @@ import { log, errorContext } from "@/lib/log";
 import { sendEmail } from "@/lib/comms/send";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
 import { getBrandOrDefault } from "@/lib/brand";
-import {
-  createInvoice,
-  findInvoiceByReference,
-  findOrCreateContact,
-  getInvoicePdfBase64,
-} from "@/lib/ledger";
+import { asProvider, configuredProvider, createInvoice, findInvoiceByReference, findOrCreateContact, getInvoicePdfBase64 } from "@/lib/ledger";
 import {
   invoicesDue,
   storageInvoiceReference,
@@ -194,6 +189,9 @@ async function emailStorageInvoice(
     amount: number;
     kind: DueInvoice["kind"];
     invoiceId: string;
+    /* Which ledger minted invoiceId (0109). Omitted on a freshly created
+       invoice — that one is by definition from the configured provider. */
+    invoiceProvider?: string | null;
     invoiceNumber: string;
     invoiceUrl: string | null;
     /** The let's brand slug (multi-brand PRD §3.5) — absent/marley sends
@@ -215,7 +213,7 @@ async function emailStorageInvoice(
   };
   let pdf: string | undefined;
   try {
-    pdf = await getInvoicePdfBase64(args.invoiceId);
+    pdf = await getInvoicePdfBase64(args.invoiceId, asProvider(args.invoiceProvider));
   } catch (e) {
     pdf = undefined; // email still sends, just without the VAT PDF
     log.warn("storage-billing.pdf_failed", { invoiceId: args.invoiceId, ...errorContext(e) });
@@ -434,6 +432,7 @@ export async function raiseDueStorageInvoices(
           .from("storage_invoices")
           .update({
             zoho_invoice_id: ref.invoiceId,
+            invoice_provider: configuredProvider(),
             zoho_invoice_number: ref.invoiceNumber,
             zoho_invoice_url: ref.invoiceUrl,
             status: "sent",
@@ -616,6 +615,7 @@ export async function repairPendingStorageClaims(
       .from("storage_invoices")
       .update({
         zoho_invoice_id: ref.invoiceId,
+        invoice_provider: configuredProvider(),
         zoho_invoice_number: ref.invoiceNumber,
         zoho_invoice_url: ref.invoiceUrl,
         status: "sent",
@@ -696,7 +696,7 @@ export async function resendUnemailedStorageInvoices(
   let query = admin
     .from("storage_invoices")
     .select(
-      "id, let_id, client_id, period_start, period_end, amount, kind, handling_amount, zoho_invoice_id, zoho_invoice_number, zoho_invoice_url, created_at",
+      "id, let_id, client_id, period_start, period_end, amount, kind, handling_amount, zoho_invoice_id, zoho_invoice_number, zoho_invoice_url, invoice_provider, created_at",
     )
     .eq("status", "sent")
     .is("emailed_at", null)
@@ -748,6 +748,7 @@ export async function resendUnemailedStorageInvoices(
       amount: Number(row.amount),
       kind,
       invoiceId: row.zoho_invoice_id as string,
+      invoiceProvider: row.invoice_provider as string | null,
       invoiceNumber: row.zoho_invoice_number as string,
       invoiceUrl: row.zoho_invoice_url as string | null,
       letBrand: (let_ as { brand?: string | null } | undefined)?.brand ?? null,

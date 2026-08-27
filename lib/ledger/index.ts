@@ -45,6 +45,60 @@ export function configuredProvider(): LedgerProvider {
 }
 
 /**
+ * Narrow a provider stamp read from the database to a {@link LedgerProvider}.
+ *
+ * The stamp columns are plain text (migration 0109), so this is the one place
+ * that decides what a stored value means.
+ *
+ * An **unrecognised** stamp throws. Falling back to the configured provider is
+ * exactly the bug the stamp exists to prevent — reading a document against a
+ * system that never minted it — and after the flip that fallback is silent:
+ * a not-found reads as transient, the customer who HAS paid is never marked
+ * paid, and the poller keeps reporting a healthy run.
+ *
+ * **Null** passes through as "no override", which resolves to the configured
+ * provider. That is safe only because the database guarantees it: every
+ * `*_provider` column carries a CHECK that a stored id (other than the literal
+ * `pending` creation claim) cannot exist without its stamp, and 0109 backfilled
+ * every pre-existing row. Callers pass null only for a slot that holds no id.
+ */
+export function asProvider(stamp: string | null | undefined): LedgerProvider | null {
+  if (stamp == null) return null;
+  if (stamp === "zoho" || stamp === "xero") return stamp;
+  throw new LedgerError(
+    `Stored ledger provider "${stamp}" is not recognised — expected "zoho" or "xero". ` +
+      `Refusing to guess which system this document was raised in.`,
+  );
+}
+
+/**
+ * The contact id to reuse for a raise in `ledger`, or null when a fresh one
+ * must be created.
+ *
+ * A contact id is meaningful only inside the ledger that minted it, and nothing
+ * about the id itself says which one that was. The repo's `isRealZohoId` tests
+ * non-null and `<> 'pending'` and knows nothing about providers, so on its own
+ * it hands Xero a Zoho contact id on every quote raised before the cutover —
+ * and `createInvoice` then fails for a reason that reads like an outage.
+ *
+ * The commitment path is the one that makes this expensive rather than merely
+ * wrong: it self-heals from the customer's own `/q` page load, so a customer
+ * refreshing their booking would generate a fresh failed create and a fresh ops
+ * alert every single time they looked at it.
+ *
+ * Defined here, beside `asProvider`, because four raise paths need the identical
+ * rule and four copies of a condition is how one of them ends up different.
+ */
+export function reusableContactId(
+  contactId: string | null | undefined,
+  stamp: string | null | undefined,
+  ledger: LedgerProvider,
+): string | null {
+  if (!contactId || contactId === "pending") return null;
+  return asProvider(stamp) === ledger ? contactId : null;
+}
+
+/**
  * Resolve one adapter.
  *
  * `provider` is the **per-document override** and exists for design §8: an

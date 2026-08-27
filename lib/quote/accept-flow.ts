@@ -90,12 +90,16 @@ import {
   replyAddressFor,
 } from "@/lib/quote/chase";
 import {
+  type LedgerProvider,
+  asProvider,
+  configuredProvider,
   createInvoice,
   findInvoiceByReference,
   findOrCreateContact,
   getInvoicePdfBase64,
   getInvoiceStatus,
   recordInvoicePayment,
+  reusableContactId,
   voidInvoice,
 } from "@/lib/ledger";
 
@@ -104,7 +108,7 @@ type Sb = SupabaseClient<Database>;
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, brand, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, brand, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -138,6 +142,14 @@ export type AcceptQuoteRow = {
   deposit_selfreport_at: string | null;
   declined_at: string | null;
   zoho_contact_id: string | null;
+  /* Which ledger minted each stored id (migration 0109). Never infer these
+     from a date or from each other: a booking accepted before the cutover
+     takes its deposit in one system and its balance in the other, and the
+     supersede path copies a deposit id onto a newer quote. */
+  contact_provider: string | null;
+  deposit_invoice_provider: string | null;
+  balance_invoice_provider: string | null;
+  commitment_invoice_provider: string | null;
   zoho_deposit_invoice_id: string | null;
   zoho_deposit_invoice_number: string | null;
   zoho_deposit_invoice_url: string | null;
@@ -350,6 +362,11 @@ async function supersedeSiblingQuotes(
           deposit_paid_at: old.deposit_paid_at,
           deposit_paid_method: old.deposit_paid_method,
           zoho_contact_id: old.zoho_contact_id,
+          // The stamps travel with the ids (0109). This path is exactly why a
+          // per-QUOTE provider marker is insufficient: it puts a document the
+          // old system minted onto a quote created after the cutover.
+          contact_provider: old.contact_provider,
+          deposit_invoice_provider: old.deposit_invoice_provider,
           zoho_deposit_invoice_id: old.zoho_deposit_invoice_id,
           zoho_deposit_invoice_number: old.zoho_deposit_invoice_number,
           zoho_deposit_invoice_url: old.zoho_deposit_invoice_url,
@@ -359,7 +376,7 @@ async function supersedeSiblingQuotes(
     } else if (isRealZohoId(old.zoho_deposit_invoice_id)) {
       // Unpaid deposit invoice on the old number: void it (audit stays in Zoho).
       try {
-        await voidInvoice(old.zoho_deposit_invoice_id);
+        await voidInvoice(old.zoho_deposit_invoice_id, asProvider(old.deposit_invoice_provider));
         await sb.from("activities").insert({
           lead_id: quote.lead_id,
           client_id: lead?.client_id ?? quote.client_id,
@@ -392,7 +409,7 @@ async function supersedeSiblingQuotes(
         ], "money");
       } else {
         try {
-          await voidInvoice(old.zoho_commitment_invoice_id);
+          await voidInvoice(old.zoho_commitment_invoice_id, asProvider(old.commitment_invoice_provider));
           await sb.from("activities").insert({
             lead_id: quote.lead_id,
             client_id: lead?.client_id ?? quote.client_id,
@@ -419,7 +436,7 @@ async function supersedeSiblingQuotes(
         ], "money");
       } else {
         try {
-          await voidInvoice(old.zoho_balance_invoice_id);
+          await voidInvoice(old.zoho_balance_invoice_id, asProvider(old.balance_invoice_provider));
           await sb
             .from("leads")
             .update({ balance_amount: null, balance_due_date: null } as never)
@@ -1052,10 +1069,15 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
   if (!quote || quote.status !== "accepted") return quote;
   if (isRealZohoId(quote.zoho_deposit_invoice_id)) return quote;
 
+  // Which ledger this raise talks to. Read ONCE per raise and written to the
+  // row alongside every id it produces, so a later status poll routes to the
+  // system that actually minted the document rather than to whatever the env
+  // says today (0109).
+  const ledger: LedgerProvider = configuredProvider();
   // Claim the creation slot: NULL → 'pending'. Only one caller wins.
   const { data: claimed } = await sb
     .from("quotes")
-    .update({ zoho_deposit_invoice_id: "pending" } as never)
+    .update({ zoho_deposit_invoice_id: "pending", deposit_invoice_provider: ledger } as never)
     .eq("id", quoteId)
     .is("zoho_deposit_invoice_id", null)
     .select("id");
@@ -1084,13 +1106,16 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       return quote;
     }
     let contactId = quote.zoho_contact_id;
+    let contactProvider = quote.contact_provider;
     if (!inv) {
-      if (!isRealZohoId(contactId)) {
+      // A contact id is reusable only inside the ledger that minted it (0109).
+      if (!reusableContactId(contactId, contactProvider, ledger)) {
         contactId = await findOrCreateContact({
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
         });
+        contactProvider = ledger;
       }
       inv = await createInvoice({
         customerId: contactId!,
@@ -1104,7 +1129,9 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       .from("quotes")
       .update({
         zoho_contact_id: contactId,
+        contact_provider: contactProvider,
         zoho_deposit_invoice_id: inv.invoiceId,
+        deposit_invoice_provider: ledger,
         zoho_deposit_invoice_number: inv.invoiceNumber,
         zoho_deposit_invoice_url: inv.invoiceUrl,
         zoho_deposit_error: null,
@@ -1326,7 +1353,7 @@ export async function markDepositPaid(
     isRealZohoId(quote.zoho_contact_id)
   ) {
     try {
-      const status = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
+      const status = await getInvoiceStatus(quote.zoho_deposit_invoice_id, asProvider(quote.deposit_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
         await recordInvoicePayment({
           customerId: quote.zoho_contact_id,
@@ -1542,10 +1569,15 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
 
   const dueDate = commitmentDueDate(quote.moving_date);
 
+  // Which ledger this raise talks to. Read ONCE per raise and written to the
+  // row alongside every id it produces, so a later status poll routes to the
+  // system that actually minted the document rather than to whatever the env
+  // says today (0109).
+  const ledger: LedgerProvider = configuredProvider();
   // Claim the creation slot: NULL → 'pending'. Only one caller wins.
   const { data: claimed } = await sb
     .from("quotes")
-    .update({ zoho_commitment_invoice_id: "pending" } as never)
+    .update({ zoho_commitment_invoice_id: "pending", commitment_invoice_provider: ledger } as never)
     .eq("id", quoteId)
     .is("zoho_commitment_invoice_id", null)
     .select("id");
@@ -1572,13 +1604,16 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       return quote;
     }
     let contactId = quote.zoho_contact_id;
+    let contactProvider = quote.contact_provider;
     if (!inv) {
-      if (!isRealZohoId(contactId)) {
+      // A contact id is reusable only inside the ledger that minted it (0109).
+      if (!reusableContactId(contactId, contactProvider, ledger)) {
         contactId = await findOrCreateContact({
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
         });
+        contactProvider = ledger;
       }
       // Invoice notes are customer-visible: a non-default brand's clause drops
       // the phone-card mention (its card channel is off at launch, §11.10) and
@@ -1601,7 +1636,9 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .from("quotes")
       .update({
         zoho_contact_id: contactId,
+        contact_provider: contactProvider,
         zoho_commitment_invoice_id: inv.invoiceId,
+        commitment_invoice_provider: ledger,
         zoho_commitment_invoice_number: inv.invoiceNumber,
         zoho_commitment_invoice_url: inv.invoiceUrl,
         zoho_commitment_error: null,
@@ -1677,7 +1714,7 @@ export async function markCommitmentPaid(
     isRealZohoId(quote.zoho_contact_id)
   ) {
     try {
-      const status = await getInvoiceStatus(quote.zoho_commitment_invoice_id);
+      const status = await getInvoiceStatus(quote.zoho_commitment_invoice_id, asProvider(quote.commitment_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
         await recordInvoicePayment({
           customerId: quote.zoho_contact_id,
@@ -2477,10 +2514,15 @@ export async function createBalanceInvoiceFlow(
     return { ok: false, error: "Nothing left to invoice — payments received cover the agreed price." };
   }
 
+  // Which ledger this raise talks to. Read ONCE per raise and written to the
+  // row alongside every id it produces, so a later status poll routes to the
+  // system that actually minted the document rather than to whatever the env
+  // says today (0109).
+  const ledger: LedgerProvider = configuredProvider();
   // Claim the creation slot (NULL → 'pending'); only one caller wins.
   const { data: claimed } = await sb
     .from("quotes")
-    .update({ zoho_balance_invoice_id: "pending" } as never)
+    .update({ zoho_balance_invoice_id: "pending", balance_invoice_provider: ledger } as never)
     .eq("id", quoteId)
     .is("zoho_balance_invoice_id", null)
     .select("id");
@@ -2508,13 +2550,16 @@ export async function createBalanceInvoiceFlow(
       return { ok: false, error: `An invoice for ${ref} already exists in Zoho at a different figure — reconcile it there first.` };
     }
     let contactId = quote.zoho_contact_id;
+    let contactProvider = quote.contact_provider;
     if (!inv) {
-      if (!isRealZohoId(contactId)) {
+      // A contact id is reusable only inside the ledger that minted it (0109).
+      if (!reusableContactId(contactId, contactProvider, ledger)) {
         contactId = await findOrCreateContact({
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
         });
+        contactProvider = ledger;
       }
       const credits = [
         ...(depositCredit > 0 ? [`the £${depositCredit.toFixed(2)} booking deposit`] : []),
@@ -2547,7 +2592,9 @@ export async function createBalanceInvoiceFlow(
       .from("quotes")
       .update({
         zoho_contact_id: contactId,
+        contact_provider: contactProvider,
         zoho_balance_invoice_id: inv.invoiceId,
+        balance_invoice_provider: ledger,
         zoho_balance_invoice_number: inv.invoiceNumber,
         zoho_balance_invoice_url: inv.invoiceUrl,
         balance_invoice_amount: amount,
@@ -2654,7 +2701,7 @@ export async function markBalancePaid(
     isRealZohoId(quote.zoho_contact_id)
   ) {
     try {
-      const status = await getInvoiceStatus(quote.zoho_balance_invoice_id);
+      const status = await getInvoiceStatus(quote.zoho_balance_invoice_id, asProvider(quote.balance_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
         await recordInvoicePayment({
           customerId: quote.zoho_contact_id,
@@ -2802,7 +2849,7 @@ export async function syncZohoPayments(
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
     try {
       if (stats) stats.attempted++;
-      const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id);
+      const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id, asProvider(quote.deposit_invoice_provider));
       if (s.status === "paid") {
         // BACS, not card — same reasoning as the commitment branch below. No
         // Zoho card gateway is active, so an invoice reaching 'paid' in Zoho was
@@ -2822,7 +2869,7 @@ export async function syncZohoPayments(
   if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
     try {
       if (stats) stats.attempted++;
-      const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id);
+      const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id, asProvider(quote.commitment_invoice_provider));
       if (s.status === "paid") {
         // Commitment is BACS/cash only; a payment Connor records in Zoho lands
         // here. Method defaults to bank transfer (cash one-taps record in ops).
@@ -2846,7 +2893,7 @@ export async function syncZohoPayments(
         .single();
       if (lead && !lead.balance_paid_at) {
         if (stats) stats.attempted++;
-        const s = await getInvoiceStatus(quote.zoho_balance_invoice_id);
+        const s = await getInvoiceStatus(quote.zoho_balance_invoice_id, asProvider(quote.balance_invoice_provider));
         if (s.status === "paid") {
           await markBalancePaid(sb, quote.id, null);
           changed = true;

@@ -877,6 +877,7 @@ export type Database = {
           response_message: string | null
           settled_at: string | null
           status: string
+          credit_note_provider: string | null
           zoho_credit_note_id: string | null
           zoho_credit_note_number: string | null
         }
@@ -903,6 +904,7 @@ export type Database = {
           response_message?: string | null
           settled_at?: string | null
           status?: string
+          credit_note_provider?: string | null
           zoho_credit_note_id?: string | null
           zoho_credit_note_number?: string | null
         }
@@ -929,6 +931,7 @@ export type Database = {
           response_message?: string | null
           settled_at?: string | null
           status?: string
+          credit_note_provider?: string | null
           zoho_credit_note_id?: string | null
           zoho_credit_note_number?: string | null
         }
@@ -3136,6 +3139,10 @@ export type Database = {
           vat_amount: number
           vat_enabled: boolean
           vehicle: string | null
+          balance_invoice_provider: string | null
+          commitment_invoice_provider: string | null
+          contact_provider: string | null
+          deposit_invoice_provider: string | null
           zoho_balance_invoice_id: string | null
           zoho_balance_invoice_number: string | null
           zoho_balance_invoice_url: string | null
@@ -3211,6 +3218,10 @@ export type Database = {
           vat_amount?: number
           vat_enabled?: boolean
           vehicle?: string | null
+          balance_invoice_provider?: string | null
+          commitment_invoice_provider?: string | null
+          contact_provider?: string | null
+          deposit_invoice_provider?: string | null
           zoho_balance_invoice_id?: string | null
           zoho_balance_invoice_number?: string | null
           zoho_balance_invoice_url?: string | null
@@ -3286,6 +3297,10 @@ export type Database = {
           vat_amount?: number
           vat_enabled?: boolean
           vehicle?: string | null
+          balance_invoice_provider?: string | null
+          commitment_invoice_provider?: string | null
+          contact_provider?: string | null
+          deposit_invoice_provider?: string | null
           zoho_balance_invoice_id?: string | null
           zoho_balance_invoice_number?: string | null
           zoho_balance_invoice_url?: string | null
@@ -4066,6 +4081,7 @@ export type Database = {
           period_start: string
           status: string
           updated_at: string
+          invoice_provider: string | null
           zoho_invoice_id: string | null
           zoho_invoice_number: string | null
           zoho_invoice_url: string | null
@@ -4085,6 +4101,7 @@ export type Database = {
           period_start: string
           status?: string
           updated_at?: string
+          invoice_provider?: string | null
           zoho_invoice_id?: string | null
           zoho_invoice_number?: string | null
           zoho_invoice_url?: string | null
@@ -4104,6 +4121,7 @@ export type Database = {
           period_start?: string
           status?: string
           updated_at?: string
+          invoice_provider?: string | null
           zoho_invoice_id?: string | null
           zoho_invoice_number?: string | null
           zoho_invoice_url?: string | null

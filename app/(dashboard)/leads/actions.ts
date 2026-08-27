@@ -11,7 +11,7 @@ import { sendReviewRequest } from "@/lib/comms/review-request";
 import { buildHeldSnapshot, createRefundQueueEntry } from "@/lib/refunds";
 import { queueAmountsFor } from "@/lib/comms/cancellation-emails";
 import { ukDayOf } from "@/lib/sales-report";
-import { voidInvoice } from "@/lib/ledger";
+import { asProvider, voidInvoice } from "@/lib/ledger";
 import { attachOrCreateClient, findExistingClient } from "@/lib/leads/resolver";
 import { isBackwardMove } from "@/lib/leads/funnel";
 import { canDeleteLead, storageLetsBlockingDelete } from "@/lib/leads/deletable";
@@ -866,7 +866,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   const { data: moneyQuotes } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, commitment_paid_at, commitment_invoice_amount, zoho_commitment_invoice_id, zoho_commitment_invoice_number, estimator_id, client_id",
+      "id, quote_ref, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, deposit_invoice_provider, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_provider, balance_invoice_amount, commitment_paid_at, commitment_invoice_amount, zoho_commitment_invoice_id, zoho_commitment_invoice_number, commitment_invoice_provider, estimator_id, client_id",
     )
     .eq("lead_id", leadId)
     .eq("status", "accepted");
@@ -876,7 +876,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     // Unpaid deposit invoice → void.
     if (!q.deposit_paid_at && isReal(q.zoho_deposit_invoice_id)) {
       try {
-        await voidInvoice(q.zoho_deposit_invoice_id!);
+        await voidInvoice(q.zoho_deposit_invoice_id!, asProvider(q.deposit_invoice_provider));
         voidedInvoices++;
         await sb.from("activities").insert({
           lead_id: leadId,
@@ -896,7 +896,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     // sits between deposit and balance and must not survive a cancellation).
     if (!q.commitment_paid_at && isReal(q.zoho_commitment_invoice_id)) {
       try {
-        await voidInvoice(q.zoho_commitment_invoice_id!);
+        await voidInvoice(q.zoho_commitment_invoice_id!, asProvider(q.commitment_invoice_provider));
         voidedInvoices++;
         await sb.from("activities").insert({
           lead_id: leadId,
@@ -915,7 +915,7 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
     // Unpaid balance invoice → void.
     if (!current?.balance_paid_at && isReal(q.zoho_balance_invoice_id)) {
       try {
-        await voidInvoice(q.zoho_balance_invoice_id!);
+        await voidInvoice(q.zoho_balance_invoice_id!, asProvider(q.balance_invoice_provider));
         voidedInvoices++;
         await sb.from("activities").insert({
           lead_id: leadId,

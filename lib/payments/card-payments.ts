@@ -16,6 +16,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { configuredProvider } from "@/lib/ledger";
 import type { Database } from "@/lib/supabase/database.types";
 import { getBusinessSettings } from "@/lib/settings";
 import { log } from "@/lib/log";
@@ -642,6 +643,8 @@ export async function refundCardPayment(
       quoteRef: quote?.quote_ref ?? null,
       zohoContactId: quote?.zoho_contact_id ?? null,
       zohoDepositInvoiceId: quote?.zoho_deposit_invoice_id ?? null,
+      depositInvoiceProvider: quote?.deposit_invoice_provider ?? null,
+      contactProvider: quote?.contact_provider ?? null,
       zohoDepositInvoiceNumber: quote?.zoho_deposit_invoice_number ?? null,
       customerName: quote?.customer_name ?? null,
       customerEmail: quote?.customer_email ?? null,
@@ -654,7 +657,14 @@ export async function refundCardPayment(
       onCreditNote: async (creditNoteId, creditNoteNumber) => {
         await sb
           .from("card_payments")
-          .update({ zoho_credit_note_id: creditNoteId, zoho_credit_note_number: creditNoteNumber } as never)
+          // Stamp WHICH ledger raised the note (0109) — refundCreditNote is
+          // called against this id later, and after the cutover a note raised
+          // in the old system would otherwise be looked up in the new one.
+          .update({
+            zoho_credit_note_id: creditNoteId,
+            credit_note_provider: configuredProvider(),
+            zoho_credit_note_number: creditNoteNumber,
+          } as never)
           .eq("id", row.id);
       },
     });
