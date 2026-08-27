@@ -88,11 +88,16 @@ export async function GET(req: Request) {
 
   let checked = 0;
   let settled = 0;
+  let unreadable = 0;
+  let accessDenied = false;
   for (const id of ids) {
     const quote = await fetchQuoteById(sb, id);
     if (!quote) continue;
     checked++;
-    const after = await syncZohoPayments(sb, quote);
+    const sync = await syncZohoPayments(sb, quote);
+    const after = sync.quote;
+    unreadable += sync.unreadable;
+    accessDenied ||= sync.accessDenied;
     if (
       (!quote.deposit_paid_at && after.deposit_paid_at) ||
       (!quote.commitment_paid_at && after.commitment_paid_at) ||
@@ -102,10 +107,20 @@ export async function GET(req: Request) {
     }
   }
 
-  return { checked, settled };
+  // `settled: 0` is only good news if the invoices were actually READ. A
+  // lock-out is permanent until a human clears it, so report the run as failed
+  // rather than letting a green row imply nothing had been paid: runCron turns
+  // `ok: false` into an error row + an operational issue, and the watchdog then
+  // pages on the missing fresh success. Transient unreadables stay a green run
+  // with a visible count — they genuinely do clear on the next pass.
+  return accessDenied
+    ? { ok: false, error: "Zoho denied access — invoice states could not be read", checked, settled, unreadable }
+    : { ok: true, checked, settled, unreadable };
   });
   return NextResponse.json(
-    { ok: run.ok, ...(run.summary ?? {}), ...(run.error ? { error: run.error } : {}) },
+    // Summary first: it carries its own `ok`, and runCron's verdict is the
+    // authoritative one, so it must win the spread rather than be overwritten.
+    { ...(run.summary ?? {}), ok: run.ok, ...(run.error ? { error: run.error } : {}) },
     { status: run.status },
   );
 }

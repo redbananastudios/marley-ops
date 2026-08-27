@@ -282,7 +282,7 @@ export default async function AcceptPage({
   // since the last visit (instant confirmation when they return from Zoho).
   if (!quote.deposit_paid_at) {
     quote = (await ensureDepositInvoice(sb, quote.id)) ?? quote;
-    quote = await syncZohoPayments(sb, quote);
+    quote = (await syncZohoPayments(sb, quote)).quote;
   }
 
   if (quote.deposit_paid_at) {
@@ -306,7 +306,7 @@ export default async function AcceptPage({
       // pick up a commitment payment recorded in Zoho since the last visit.
       quote = (await ensureCommitmentInvoice(sb, quote.id)) ?? quote;
       if (quote.zoho_commitment_invoice_id && !quote.commitment_paid_at) {
-        quote = await syncZohoPayments(sb, quote);
+        quote = (await syncZohoPayments(sb, quote)).quote;
       }
     }
 
