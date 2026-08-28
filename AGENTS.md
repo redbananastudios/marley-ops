@@ -41,6 +41,40 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   **Claude is that human.** The guard refuses ROBOT auto-merge; it is not a request for
   Peter, and a guard-queued PR whose merged tree is green must be merged, not parked.
 
+- **The four gates DO NOT include e2e, and e2e is where changes actually break
+  (2026-08-28).** Ten PRs went out in one session with lint + typecheck + vitest
+  + build green on every one. Every failure that followed came from e2e: a
+  renamed money-tile label that `office/bookings.spec.ts` asserted, and an
+  audit-written spec that had never passed. "All four gates green" is not
+  "tested" for anything touching a page, a label or a flow.
+
+  Three habits, cheapest first:
+
+  1. **Grep `e2e/` for any user-visible string you change, before you commit.**
+     `grep -rn "Balance outstanding" e2e/` takes a second and would have caught
+     the whole chain: the break, its fix PR, the second break, and the fix to
+     the fix.
+  2. **Run the suite LOCALLY.** `e2e/README.md` documents it and it works:
+     local Supabase on `i9:54321`, dev server on 3016, `.env.e2e` layered over
+     `.env.local` (it pins the STAGING Zoho org, so money specs are real).
+     Needs Docker Desktop running for local Supabase — if `docker info` fails,
+     start Docker Desktop first, that is the whole blocker. The note elsewhere
+     about auth setup timing out is about running against DEPLOYED staging over
+     the internet; it does not apply to a local target.
+  3. **One merge at a time.** There is ONE set of e2e fixtures and both a
+     hand-run and CI share it. Merging two PRs a minute apart races two e2e runs
+     over the same rows and produces failures that look like code bugs —
+     2026-08-28 lost an hour to exactly that. Wait for the staging run of one
+     merge to come back before merging the next. `e2e/README.md` warned about
+     the hand-run case only; CI-versus-CI does the same damage.
+
+- **An audit-written spec has never been proven to pass (2026-08-28).** Four in
+  a row now: an ambiguous locator (#75), a missing teardown (#76), an image read
+  before it loaded (#81), and a FullCalendar click that no force could make
+  deterministic. That last one closed QA-20260827-03 on the strength of a spec
+  that passes intermittently at best. Treat a finding closed by a brand-new spec
+  as unverified until that spec has gone green in CI at least twice.
+
 ## Current State (2026-08-25 — prod live on `6ae3ba3`; master == staging; zero open QA findings)
 
 Last touched: 2026-08-25 on i9 — **prod, `master` and `staging` are all `6ae3ba3`.** The QA loop now runs end to end on its own: audits on **Sonnet**, first-pass repair firing and fixing findings unaided.
