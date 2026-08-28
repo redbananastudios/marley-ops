@@ -37,8 +37,29 @@ import { E2E_USERS } from "./seed-data";
 const AUTH_DIR = "e2e/fixtures/.auth";
 mkdirSync(AUTH_DIR, { recursive: true });
 
-/** Per-attempt budget for the redirect off /login. */
+/** Per-attempt budget for the redirect off /login, once the app is warm. */
 const REDIRECT_BUDGET_MS = 10_000;
+/**
+ * The FIRST attempt gets longer, because it is genuinely the slowest request the
+ * app will serve all run.
+ *
+ * This job starts seconds after `docker run` replaces the container, and the
+ * deploy's health check polls `/login` — which is statically prerendered, so it
+ * proves the process is listening and initialises none of the module graph an
+ * authenticated render needs. The first sign-in therefore pays for loading the
+ * whole dashboard tree, and it blew the 10s budget three attempts running on
+ * three consecutive deploys, failing the entire suite before a single test ran.
+ *
+ * Measured, so this is a tolerance and not a guess: a warm container serves the
+ * dashboard's RSC payload in ~360ms and the whole sign-in in ~3s (every re-run of
+ * those same three deploys passed). The cost is real, one-off, and belongs to the
+ * deploy rather than to the app.
+ *
+ * Tolerating it does NOT hide it: the warning below still fires on anything over
+ * the warm budget, so a genuine regression is still visible in the run output
+ * rather than being absorbed into a bigger number.
+ */
+const FIRST_ATTEMPT_BUDGET_MS = 40_000;
 /** Attempts, whether we are re-driving the form or just waiting longer. */
 const ATTEMPTS = 3;
 
@@ -69,7 +90,7 @@ for (const [role, cfg] of Object.entries(E2E_USERS)) {
         // The real success signal is leaving /login — wait for that FIRST (a
         // loose landing pattern can match a transient redirect hop mid-chain).
         await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
-          timeout: REDIRECT_BUDGET_MS,
+          timeout: attempt === 1 ? FIRST_ATTEMPT_BUDGET_MS : REDIRECT_BUDGET_MS,
         });
         signedIn = true;
       } catch {
