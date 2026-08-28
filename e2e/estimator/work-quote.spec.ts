@@ -262,13 +262,22 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
       // something a real estimator hits, and forcing still runs the real
       // handler.
       //
-      // Forcing a click can silently hit the WRONG element, so the next line
-      // makes that impossible to pass: the dialog must carry OUR marker. A
-      // mis-click opens someone else's survey and fails here.
+      // Forcing a click can silently hit the WRONG element. Identity is proved
+      // in the LAST step rather than here: it reads back quotes for THIS leadId
+      // and asserts the URL is that row, so a mis-click creates a draft against
+      // another lead, finds zero rows for ours, and fails.
+      //
+      // An earlier attempt asserted the dialog carried the marker text. It does
+      // not: DialogTitle renders the APPOINTMENT title, while the lead name
+      // arrives later inside LeadContextPanels. The assertion was guessing at
+      // the DOM, and a guard that fails on a correct product is worse than no
+      // guard - it trains the next reader to force-merge past it.
       await event.first().click({ force: true });
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByText(marker).first()).toBeVisible();
+      // It is a SURVEY dialog (the one that offers Create Quote), not some
+      // other appointment's - the cheap half of the identity check.
+      await expect(dialog.getByRole("button", { name: "Create Quote", exact: true })).toBeVisible();
     });
 
     await step("click Create Quote (client-side router.push, not a page.goto)", page, async () => {
