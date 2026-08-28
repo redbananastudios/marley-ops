@@ -27,6 +27,15 @@ export interface BookingRow {
    *  only where there is somewhere to send it. */
   customerEmail: string | null;
   customerPhone: string | null;
+  /** Snapshotted at acceptance (gate 8). Drives which LADDER this booking
+   *  runs; never re-derived from the client. */
+  paymentPolicy: "residential" | "commercial";
+  /** Commercial only: when the completion invoice falls due, from the
+   *  client's terms. Null until it is raised. */
+  commercialDueDate: string | null;
+  /** Commercial only: the removal appointment is completed, so the invoice
+   *  can be raised. */
+  jobCompleted: boolean;
   agreed: number;
   deposit: number;
   depositPaidAt: string | null;
@@ -79,7 +88,7 @@ export async function loadBookingRows(
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, source, standard_comms_at, status, brand, lead_id, customer_name, customer_email, customer_phone, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, booking_cancelled_at",
+        "id, quote_ref, source, standard_comms_at, status, brand, payment_policy, commercial_due_date, lead_id, customer_name, customer_email, customer_phone, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, booking_cancelled_at",
       )
       .eq("status", "accepted")
       // A cancelled booking owes nothing and expects nothing — its unwind
@@ -142,7 +151,14 @@ export async function loadBookingRows(
   const leadById = new Map((leads ?? []).map((l) => [l.id, l]));
   // Earliest removal appointment per lead — id + slot so the booked rows can
   // open the change-date dialog against the actual diary entry.
-  const apptByLead = new Map<string, { id: string; startsAt: string; endsAt: string | null }>();
+  // `status` rides along because a COMMERCIAL job is invoiced on completion,
+  // so 'is this done?' is a money question there, not just a diary one. The
+  // query already selects it (it filters on scheduled|completed); it simply was
+  // not carried through.
+  const apptByLead = new Map<
+    string,
+    { id: string; startsAt: string; endsAt: string | null; status: string | null }
+  >();
   for (const a of appts ?? []) {
     const cur = apptByLead.get(a.lead_id as string);
     if (!cur || (a.starts_at as string) < cur.startsAt) {
@@ -150,6 +166,7 @@ export async function loadBookingRows(
         id: a.id as string,
         startsAt: a.starts_at as string,
         endsAt: (a.ends_at as string | null) ?? null,
+        status: (a.status as string | null) ?? null,
       });
     }
   }
@@ -190,6 +207,14 @@ export async function loadBookingRows(
       customer: (q.customer_name || lead.name || "Customer") as string,
       customerEmail: (q.customer_email as string | null) ?? null,
       customerPhone: (q.customer_phone as string | null) ?? null,
+      // Anything that is not explicitly 'commercial' runs the residential
+      // ladder - the same direction of default as resolvePaymentPolicy, and
+      // for the same reason: guessing commercial would silently switch a
+      // booking's chase OFF, and the surface that would have shown the
+      // mistake is the chase queue the guess just emptied.
+      paymentPolicy: q.payment_policy === "commercial" ? "commercial" : "residential",
+      commercialDueDate: (q.commercial_due_date as string | null) ?? null,
+      jobCompleted: appt?.status === "completed",
       agreed,
       deposit,
       depositPaidAt: q.deposit_paid_at,
@@ -244,6 +269,9 @@ export async function loadBookingRows(
           dateReleasableAt: row.dateReleasableAt,
           balancePaidAt: row.balancePaidAt,
           balanceInvoiceNumber: row.balanceInvoiceNumber,
+          paymentPolicy: row.paymentPolicy,
+          jobCompleted: row.jobCompleted,
+          commercialDueDate: row.commercialDueDate,
         },
         todayUk,
       ),
@@ -261,6 +289,8 @@ export async function loadBookingRows(
           balanceInvoiceNumber: row.balanceInvoiceNumber,
           hasRemovalAppt,
           apptDayUk,
+          paymentPolicy: row.paymentPolicy,
+          commercialDueDate: row.commercialDueDate,
         },
         todayUk,
       ),
