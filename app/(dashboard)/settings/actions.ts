@@ -91,6 +91,7 @@ const settingsSchema = z.object({
   vatFlatRatePct: z.coerce.number().min(1, "FRS % must be 1–16.5").max(16.5, "FRS % must be 1–16.5"),
   baseLocation: z.string().trim().min(1, "Base location is required").max(200),
   defaultDeposit: num,
+  smallJobThreshold: num,
   googleReviewUrl: z
     .string()
     .trim()
@@ -285,6 +286,7 @@ export async function updateSettingsAction(input: SettingsInput) {
       vat_flat_rate_pct: v.vatFlatRatePct as never,
       base_location: v.baseLocation,
       default_deposit: v.defaultDeposit,
+      small_job_threshold: v.smallJobThreshold,
       google_review_url: v.googleReviewUrl,
       cubic_fill_pct: v.cubicFillPct,
       cubic_transit_ft3: v.cubicTransitFt3,

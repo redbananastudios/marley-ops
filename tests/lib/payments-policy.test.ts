@@ -107,41 +107,50 @@ describe("commitmentDueDate", () => {
   });
 });
 
+/**
+ * Gate 9a made requestedDeposit's small-job threshold a REQUIRED parameter, so
+ * every call below names it. These cases predate the rule and lock the ladder
+ * that still runs underneath it, so they pass 0 — the rule explicitly off —
+ * rather than a value that happens not to trigger. The rule's own behaviour,
+ * including where it overrides these, is asserted separately further down.
+ */
+const NO_SMALL_JOB = 0;
+
 /* --------------------------------------- late-booking collapse (25% up-front) */
 
 describe("requestedDeposit — the late-booking collapse", () => {
   const today = new Date("2026-08-05T10:00:00Z");
 
   it("Brydee's case: £600 job 7 days out asks £150 up-front, not £100 + £50 later", () => {
-    expect(requestedDeposit(600, 100, "2026-08-12", today)).toBe(150);
+    expect(requestedDeposit(600, 100, "2026-08-12", NO_SMALL_JOB, today)).toBe(150);
     // ...and the commitment machinery never engages for that deposit.
     expect(commitmentAmount(600, 150)).toBe(0);
   });
 
   it("8 days out is the normal ladder — the base deposit stands", () => {
-    expect(requestedDeposit(600, 100, "2026-08-13", today)).toBe(100);
+    expect(requestedDeposit(600, 100, "2026-08-13", NO_SMALL_JOB, today)).toBe(100);
   });
 
   it("a small job's 25% under the base deposit never LOWERS the ask", () => {
     // £300 job → 25% = £75 < £100 base.
-    expect(requestedDeposit(300, 100, "2026-08-10", today)).toBe(100);
+    expect(requestedDeposit(300, 100, "2026-08-10", NO_SMALL_JOB, today)).toBe(100);
   });
 
   it("a big late job asks the full 25%", () => {
-    expect(requestedDeposit(2400, 100, "2026-08-09", today)).toBe(600);
+    expect(requestedDeposit(2400, 100, "2026-08-09", NO_SMALL_JOB, today)).toBe(600);
   });
 
   it("an office-set base above 25% is respected (max, never a reduction)", () => {
-    expect(requestedDeposit(600, 200, "2026-08-10", today)).toBe(200);
+    expect(requestedDeposit(600, 200, "2026-08-10", NO_SMALL_JOB, today)).toBe(200);
   });
 
   it("no move date → no collapse (there is nothing to secure yet)", () => {
-    expect(requestedDeposit(600, 100, null, today)).toBe(100);
-    expect(requestedDeposit(600, 100, "not-a-date", today)).toBe(100);
+    expect(requestedDeposit(600, 100, null, NO_SMALL_JOB, today)).toBe(100);
+    expect(requestedDeposit(600, 100, "not-a-date", NO_SMALL_JOB, today)).toBe(100);
   });
 
   it("rounds to 2dp", () => {
-    expect(requestedDeposit(999.99, 100, "2026-08-10", today)).toBe(250);
+    expect(requestedDeposit(999.99, 100, "2026-08-10", NO_SMALL_JOB, today)).toBe(250);
   });
 });
 
@@ -449,15 +458,78 @@ describe("gate 8 leaves the residential ladder alone", () => {
   // these move, gate 8 has stopped being a foundation gate.
   it("still asks the plain deposit outside the commitment window", () => {
     const today = new Date("2026-09-01T09:00:00Z");
-    expect(requestedDeposit(2000, 100, "2026-10-01", today)).toBe(100);
+    expect(requestedDeposit(2000, 100, "2026-10-01", NO_SMALL_JOB, today)).toBe(100);
   });
 
   it("still collapses to 25% inside the commitment window", () => {
     const today = new Date("2026-09-01T09:00:00Z");
-    expect(requestedDeposit(2000, 100, "2026-09-04", today)).toBe(500);
+    expect(requestedDeposit(2000, 100, "2026-09-04", NO_SMALL_JOB, today)).toBe(500);
   });
 
   it("still computes the commitment as 25% of gross minus the deposit", () => {
     expect(commitmentAmount(2000, 100)).toBe(400);
+  });
+});
+
+/* ------------------------------------ gate 9a: the small job takes one payment */
+
+describe("requestedDeposit — the small-job full ask", () => {
+  const today = new Date("2026-08-05T10:00:00Z");
+  const THRESHOLD = 300; // the Settings default (Peter, 2026-08-25)
+
+  it("kills the 2026-08-24 case: a £120 job asks £120 once, not £100 then £20", () => {
+    const ask = requestedDeposit(120, 100, "2026-09-30", THRESHOLD, today);
+    expect(ask).toBe(120);
+    // The whole point: nothing is left to invoice afterwards.
+    expect(commitmentAmount(120, ask)).toBe(0);
+  });
+
+  it("is inclusive at the threshold — £300 asks £300", () => {
+    // This overrides a pre-gate-9a expectation on purpose. The old suite locked
+    // `requestedDeposit(300, 100, …) === 100` as "25% never lowers the ask",
+    // which was right when £100-then-£200-later was the only option. A £300 job
+    // is now a small job, and asking for it once is the entire feature.
+    expect(requestedDeposit(300, 100, "2026-08-10", THRESHOLD, today)).toBe(300);
+  });
+
+  it("leaves the job one penny above the threshold on the normal ladder", () => {
+    expect(requestedDeposit(300.01, 100, "2026-09-30", THRESHOLD, today)).toBe(100);
+  });
+
+  it("never asks for more than the job costs", () => {
+    // An £80 job with the £100 default: the ask is the job. True via the
+    // small-job rule here...
+    expect(requestedDeposit(80, 100, "2026-09-30", THRESHOLD, today)).toBe(80);
+    // ...and true via the cap alone, with the rule switched off entirely.
+    expect(requestedDeposit(80, 100, "2026-09-30", NO_SMALL_JOB, today)).toBe(80);
+    // ...and true against an office-typed override well above the job.
+    expect(requestedDeposit(250, 400, "2026-09-30", THRESHOLD, today)).toBe(250);
+  });
+
+  it("beats the late-booking collapse when a job is both small and imminent", () => {
+    // £200 moving in two days. The late rule alone would ask max(100, £50) =
+    // £100 and leave a £100 balance chasing a customer who moves on Friday.
+    // The small-job rule asks the whole £200 and closes the ladder.
+    const ask = requestedDeposit(200, 100, "2026-08-07", THRESHOLD, today);
+    expect(ask).toBe(200);
+    expect(commitmentAmount(200, ask)).toBe(0);
+  });
+
+  it("is switched off by a zero threshold, restoring the plain ladder", () => {
+    expect(requestedDeposit(120, 100, "2026-09-30", 0, today)).toBe(100);
+    expect(requestedDeposit(300, 100, "2026-08-10", 0, today)).toBe(100);
+  });
+
+  it("does not collapse a quote that has no price yet", () => {
+    // gross 0 is "not priced", not "free". Reporting "pay the whole thing" for
+    // a £0 quote would ask for nothing and silently end the ladder.
+    expect(requestedDeposit(0, 100, "2026-09-30", THRESHOLD, today)).toBe(100);
+  });
+
+  it("leaves a normal job completely untouched", () => {
+    // The assertion that matters most: the ordinary four-figure move that is
+    // almost every booking sees none of this.
+    expect(requestedDeposit(2000, 100, "2026-10-01", THRESHOLD, today)).toBe(100);
+    expect(requestedDeposit(2000, 100, "2026-08-09", THRESHOLD, today)).toBe(500);
   });
 });

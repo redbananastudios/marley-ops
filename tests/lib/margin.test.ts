@@ -23,6 +23,7 @@ const RATES: BusinessSettings = {
   baseLocation: "",
   googleReviewUrl: "",
   defaultDeposit: 0,
+  smallJobThreshold: 300,
   cubicFillPct: 90,
   cubicTransitFt3: 280,
   cubicLutonFt3: 550,

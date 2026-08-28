@@ -644,7 +644,12 @@ export async function acceptQuoteOnline(
   // Late-booking collapse: a move inside 7 days is invoiced the full 25% as
   // ONE up-front payment (requestedDeposit), so the commitment machinery never
   // engages — no second invoice minutes later, no chase, no at-risk alarm.
-  const deposit = requestedDeposit(agreed, quote.deposit_amount ?? settings.defaultDeposit, quote.moving_date);
+  const deposit = requestedDeposit(
+    agreed,
+    quote.deposit_amount ?? settings.defaultDeposit,
+    quote.moving_date,
+    settings.smallJobThreshold,
+  );
 
   const acceptedAt = new Date().toISOString();
   const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
@@ -856,7 +861,7 @@ export async function acceptQuoteByStaff(
   // Late-booking collapse (applies over an office-typed override too — the
   // returned/toasted deposit shows the real ask): a move inside 7 days takes
   // the full 25% up-front, so no commitment invoice ever raises for it.
-  const deposit = requestedDeposit(agreed, baseDeposit, quote.moving_date);
+  const deposit = requestedDeposit(agreed, baseDeposit, quote.moving_date, settings.smallJobThreshold);
 
   // The payment link (accept page in its post-accept state) + reply routing
   // both hang off the token — make sure it exists before anything sends.

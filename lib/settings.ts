@@ -42,6 +42,8 @@ export interface BusinessSettings {
   baseLocation: string;
   /** Standard deposit £ — prefills "Request deposit" on a job (editable per job). */
   defaultDeposit: number;
+  /** Gross at or under which acceptance asks for the FULL amount (0 = off). */
+  smallJobThreshold: number;
   /** Google "write a review" link — the post-move review email sends only when set. */
   googleReviewUrl: string;
   /** Cubic-survey van planning: crews pack to ~this % of a van's usable volume. */
@@ -81,6 +83,7 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
   vatFlatRatePct: 10,
   baseLocation: DEFAULT_BASE_LOCATION,
   defaultDeposit: 100, // £100 booking deposit (Peter, 2026-07-08)
+  smallJobThreshold: 300, // one payment at or under £300 (Peter, 2026-08-25)
   // The GBP "write a review" short link for the CURRENT listing (Peter,
   // 2026-08-19). The old writereview?placeid=… form pointed at the wrong
   // listing — do not reintroduce it.
@@ -124,6 +127,9 @@ export function mapBusinessSettings(data: Record<string, unknown> | null | undef
       ? data.base_location.trim()
       : DEFAULT_BASE_LOCATION,
     defaultDeposit: Number(data.default_deposit ?? DEFAULT_SETTINGS.defaultDeposit) || DEFAULT_SETTINGS.defaultDeposit,
+    // NOT `|| DEFAULT` like the line above: a deliberate 0 means the office
+    // switched the small-job rule OFF, and `||` would silently turn it back on.
+    smallJobThreshold: Number(data.small_job_threshold ?? DEFAULT_SETTINGS.smallJobThreshold) || 0,
     googleReviewUrl: typeof data.google_review_url === "string"
       ? data.google_review_url.trim()
       : DEFAULT_SETTINGS.googleReviewUrl,
@@ -158,7 +164,7 @@ export const getBusinessSettings = cache(async function getBusinessSettings(
 ): Promise<BusinessSettings> {
   const { data } = await sb
     .from("business_settings")
-    .select("estimator_fee, estimator_phone_quote_fee, estimator_commission_pct, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, vat_scheme, vat_flat_rate_pct, base_location, default_deposit, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
+    .select("estimator_fee, estimator_phone_quote_fee, estimator_commission_pct, cost_fuel_per_mile, cost_fuel_75_per_mile, cost_labour_per_day, cost_box, cost_van_day, cost_transit_day, cost_75t, cost_misc, vat_default, vat_number, vat_stagger_group, vat_scheme, vat_flat_rate_pct, base_location, default_deposit, small_job_threshold, google_review_url, cubic_fill_pct, cubic_transit_ft3, cubic_luton_ft3, cubic_75t_ft3, ai_survey_enabled, ai_grounded_replay_enabled, ai_model_default, ai_model_escalation, ai_survey_cap_gbp, ai_monthly_cap_gbp, ai_monthly_alert_gbp")
     .eq("id", true)
     .maybeSingle();
   return mapBusinessSettings(data as Record<string, unknown> | null);
