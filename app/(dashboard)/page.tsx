@@ -34,12 +34,15 @@ import {
 import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import type { DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
+import { log } from "@/lib/log";
 import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
 import { getSessionProfile } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
+/** Above this, a dashboard render is worth a log line. See the note at the return. */
+const SLOW_RENDER_MS = 3_000;
 const PERIOD_KEYS: PeriodKey[] = ["today", "week", "month"];
 const sourceLabel = (key: string): string => SOURCES.find((s) => s.key === key)?.label ?? key;
 
@@ -119,13 +122,25 @@ async function DashboardContent({
   searchParams: Promise<{ brand?: string }>;
 }) {
   const sp = await searchParams;
+  // Server component: a per-request timestamp is correct here (this is not a
+  // client render that must stay idempotent across re-renders) — same reasoning
+  // as the `now` below.
+  // eslint-disable-next-line react-hooks/purity
+  const renderStartedAt = Date.now();
 
   const supabase = await createClient();
 
   // Keep the panel current: pull any new website leads from Sanity before reading.
   // Incremental (only docs newer than the latest synced lead) so it's fast, and
   // fail-soft so a slow/unreachable Sanity never blocks the dashboard render.
-  await syncSanityLeads({ incremental: true }).catch(() => null);
+  //
+  // STARTED here, AWAITED below. It used to be awaited on this line, which put
+  // its 8s worst case in front of the external panels' 11s instead of alongside
+  // them — the two stacked rather than overlapping, on the page every office
+  // login lands on. Freshness is unchanged: it is still awaited before the leads
+  // read, which is the only thing that actually depends on it (the return value
+  // is discarded; the DB write is the point).
+  const sanityPromise = syncSanityLeads({ incremental: true }).catch(() => null);
 
   // Start independent external/attention reads before the all-time KPI scan.
   // They used to sit behind all lead/appointment/quote processing, adding their
@@ -203,6 +218,9 @@ async function DashboardContent({
   // plain select at 1000 rows and would silently corrupt every all-time KPI).
   // leads keeps submitted_at-desc for the "Latest enquiries" slice(0,6) below,
   // with id as a unique tiebreaker so the range() windows never skip/duplicate.
+  // Join the sync HERE, not at the top: the leads read below is the only
+  // thing that depends on it having landed.
+  await sanityPromise;
   const [leadsData, apptData, quoteData, { data: profilesData }, settings, activeBrands] =
     await Promise.all([
       fetchAllRows((f, t) =>
@@ -464,6 +482,25 @@ async function DashboardContent({
     brands: brandOptions,
     filteredSections,
   };
+
+  /**
+   * Say how long that took, when it took too long.
+   *
+   * On 2026-08-27 a ~30s render broke every e2e login and left NO trace anywhere:
+   * `docker logs` held four lines for a ten-hour-old container, so the audit had
+   * to guess between a code path and a network stall. This page makes roughly 28
+   * Supabase round trips to a hosted instance across the public internet, and not
+   * one of them has a timeout — so slowness here is expected to recur, and the
+   * next occurrence should leave evidence rather than another investigation.
+   *
+   * Threshold, not every render: a line on every dashboard load is noise nobody
+   * reads, and the quiet majority is not what anyone needs to see.
+   */
+  // eslint-disable-next-line react-hooks/purity
+  const renderMs = Date.now() - renderStartedAt;
+  if (renderMs > SLOW_RENDER_MS) {
+    log.warn("dashboard.slow_render", { renderMs, leads: leads.length, quotes: quotes.length });
+  }
 
   return <DashboardView data={data} />;
 }
