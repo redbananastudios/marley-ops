@@ -69,6 +69,12 @@ leaves no trace here. Verify it after the deploy rather than looking for a file:
   instead. That also applies to the ordinary T-7 raise in the rare case it meets an
   unpaid deposit, where the old line was simply wrong.
 
+Gate 9c (settle in full at the commitment step) is the same shape — code only, live on the
+restart. After the deploy, the commitment state at `/q` gains a second amount card and the
+date-confirmation email a second figure, for any booking with a raised, unpaid 25% invoice.
+Choosing it raises that booking's `-BAL` early; ignoring it changes nothing at all, which is
+the property to spot-check rather than the new card.
+
 First live check: the first Marley acceptance after promotion whose move is inside a
 week. Confirm exactly two invoices exist against it and that they sum to the agreed
 price — not three, and not 125% of the job.

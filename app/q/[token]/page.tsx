@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { CalendarCheck2, CheckCircle2, PhoneCall, ShieldCheck } from "lucide-react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  computeBalanceCredits,
   ensureCommitmentInvoice,
   ensureDepositInvoice,
   fetchQuoteByToken,
@@ -11,10 +12,12 @@ import {
 } from "@/lib/quote/accept-flow";
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
 import { requestedDeposit } from "@/lib/payments-policy";
+import { payInFullAvailable } from "@/lib/payments/pay-in-full";
 import { getBusinessSettings } from "@/lib/settings";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { DateConfirmCard } from "@/components/quote/date-confirm-card";
+import { CommitmentChoice } from "@/components/quote/commitment-choice";
 import { AcceptForm } from "./accept-form";
 import { DeclineOption, DepositSentButton } from "./customer-actions";
 import { PayCardButton } from "./pay-card-button";
@@ -337,6 +340,21 @@ export default async function AcceptPage({
     const balanceAmt = Number(quote.balance_invoice_amount ?? 0);
     const showBalanceCard = balanceInvoiced && balanceAmt > 0;
 
+    // Settle-in-full at the commitment step (PRD §3.10 Addition 3). The SAME
+    // rule the server action enforces decides whether the choice renders: an
+    // option the page offers and the server refuses is worse than no option.
+    // When it is unavailable the commitment step renders exactly as it does
+    // today, so every booking that is not at this step is untouched.
+    const canPayInFull = payInFullAvailable(quote, {
+      date_confirmed_at: dateConfirmedAt,
+      balance_paid_at: balancePaidAt,
+    });
+    // What would remain after the commitment — the T-7 balance, computed by the
+    // one function that also computes what the invoice will actually say, so
+    // the figure the customer picks is the figure they are billed. Read only
+    // when the choice is on offer; it costs two queries.
+    const balanceRemaining = canPayInFull ? (await computeBalanceCredits(sb, quote)).amount : 0;
+
     return (
       <Shell>
         <Card>
@@ -415,8 +433,27 @@ export default async function AcceptPage({
                         "due now"
                       )}
                       . It counts towards your final bill.
+                      {canPayInFull ? (
+                        <> Or settle the whole thing now and have nothing left to pay.</>
+                      ) : null}
                     </p>
-                    <BankPanel reference={quote.quote_ref} />
+                    {canPayInFull ? (
+                      <CommitmentChoice
+                        token={token}
+                        quoteRef={quote.quote_ref}
+                        commitmentAmount={commitAmt}
+                        commitmentDueLabel={commitDueLbl}
+                        balanceRemaining={balanceRemaining}
+                        moveDateLabel={moveLbl}
+                        bank={{
+                          name: BANK_DETAILS.name,
+                          sortCode: BANK_DETAILS.sortCode,
+                          account: BANK_DETAILS.account,
+                        }}
+                      />
+                    ) : (
+                      <BankPanel reference={quote.quote_ref} />
+                    )}
                     {quote.zoho_commitment_invoice_number && quote.zoho_commitment_invoice_url ? (
                       <p className="text-center text-xs text-mist-400">
                         Your commitment invoice{" "}
