@@ -19,6 +19,7 @@ import {
   COMMS_RETRY_MAX_ATTEMPTS,
   COMMS_RECLAIM_WINDOW_HOURS,
 } from "@/lib/comms/retry-worker";
+import { isPermanentProviderError } from "@/lib/comms/permanent-failure";
 
 const nowMs = 1_700_000_000_000;
 const NOW = new Date(nowMs);
@@ -275,5 +276,199 @@ describe("escalateUnretryableComms", () => {
     const lines = (sendOpsAlert.mock.calls[0][1] as string[]).join(" ");
     expect(lines).toContain("was NOT delivered");
     expect(lines).not.toMatch(/may already have been delivered/i);
+  });
+});
+
+/* ------------------------------------- brand-scoped SMS: the frozen snapshot */
+
+/**
+ * `dispatchComm` freezes `{ slug, smsSender }` into `provider_request`, and this
+ * worker re-drives that stored payload. A row minted for a brand whose
+ * `sms_sender` was still null therefore replayed `smsSender: null` on every
+ * pass — `smsSenderFor` refused it identically each time, so it never dialled
+ * WebEx yet still spent an attempt, burning the ladder to a critical issue. The
+ * refusal's own remedy ("set brands.sms_sender") could not release it either,
+ * because the retry read the snapshot rather than the column.
+ */
+const smsRow = (o: Record<string, unknown> = {}) => ({
+  ...row(),
+  id: "s1",
+  channel: "sms",
+  to_address: "07000000000",
+  subject: null,
+  provider_error:
+    "No SMS sender id configured for brand pitmans. Set brands.sms_sender for pitmans — this message is held and goes out on the next retry once it is set.",
+  provider_request: {
+    channel: "sms",
+    sms: { to: "07000000000", body: "Your balance is due", brand: { slug: "pitmans", smsSender: null } },
+  },
+  ...o,
+});
+
+/** Supabase double that also answers the `brands` read the re-resolve makes. */
+function fakeSmsSb(
+  rows: unknown[],
+  liveSmsSender: string | null,
+  opts: { brandRowMissing?: boolean; afterAttempt?: number } = {},
+) {
+  const reclaimCalls: unknown[] = [];
+  const updates: unknown[] = [];
+  let brandReads = 0;
+  const sb = {
+    from(table: string) {
+      if (table === "brands") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                brandReads++;
+                return { data: opts.brandRowMissing ? null : { slug: "pitmans", sms_sender: liveSmsSender } };
+              },
+            }),
+          }),
+        };
+      }
+      return {
+        select(cols: string) {
+          if (cols === "attempt_count") {
+            return { eq: () => ({ maybeSingle: async () => ({ data: { attempt_count: opts.afterAttempt ?? 2 } }) }) };
+          }
+          const b: Record<string, unknown> = {};
+          for (const m of ["eq", "not", "lt", "order", "limit"]) b[m] = () => b;
+          b.then = (resolve: (v: unknown) => unknown) => resolve({ data: rows, error: null });
+          return b;
+        },
+        update(patch: unknown) {
+          return {
+            eq: () => ({
+              eq: () => {
+                updates.push(patch);
+                return Promise.resolve({ data: null, error: null });
+              },
+            }),
+          };
+        },
+      };
+    },
+    async rpc(name: string, args: unknown) {
+      if (name === "reclaim_communication_send") {
+        reclaimCalls.push(args);
+        return { data: true };
+      }
+      return { data: null };
+    },
+  };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return { sb: sb as any, reclaimCalls, updates, brandReads: () => brandReads };
+}
+
+describe("runCommsRetry — a brand whose SMS sender id is missing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("holds the row instead of re-driving it, and raises ONE brand-level alarm naming the remedy", async () => {
+    const { sb, reclaimCalls, updates } = fakeSmsSb([smsRow()], null);
+    const s = await runCommsRetry(sb, NOW);
+
+    expect(s).toMatchObject({ candidates: 1, redriven: 0, recovered: 0, escalated: 0, blocked: 1 });
+    // reclaim_communication_send is what increments attempt_count, so not
+    // calling it is what proves no rung of the ladder was spent.
+    expect(reclaimCalls).toHaveLength(0);
+    expect(runProviderSend).not.toHaveBeenCalled();
+    // Nor was the row capped out of the sweep, so setting the column still releases it.
+    expect(updates).toEqual([]);
+
+    expect(reportOperationalIssue).toHaveBeenCalledTimes(1);
+    const issue = reportOperationalIssue.mock.calls[0][1];
+    // Keyed on the BRAND, never the row: one configuration gap, one alarm.
+    expect(issue.key).toBe("brand-sms-sender:pitmans");
+    expect(issue.event).toBe("comm.retry.brand_sms_sender_missing");
+    expect(issue.message).toContain("pitmans");
+    expect(issue.message).toContain("SMS sender");
+  });
+
+  it("does not burn the retry ladder: eight sweeps spend no attempt and never escalate to critical", async () => {
+    runProviderSend.mockResolvedValue({ ok: false, error: "should never be reached" });
+    const { sb, reclaimCalls, updates } = fakeSmsSb([smsRow()], null, {
+      afterAttempt: COMMS_RETRY_MAX_ATTEMPTS,
+    });
+    for (let i = 0; i < COMMS_RETRY_MAX_ATTEMPTS; i++) await runCommsRetry(sb, NOW);
+
+    expect(reclaimCalls).toHaveLength(0);
+    expect(runProviderSend).not.toHaveBeenCalled();
+    expect(updates).toEqual([]);
+    const events = reportOperationalIssue.mock.calls.map((c) => c[1].event);
+    expect(events).not.toContain("comm.retry.exhausted");
+    expect(events).not.toContain("comm.retry.permanent_rejection");
+    // Every alarm across all eight passes is the same deduped brand key, so the
+    // report_operational_issue upsert collapses them into one row with a count.
+    expect(new Set(reportOperationalIssue.mock.calls.map((c) => c[1].key))).toEqual(
+      new Set(["brand-sms-sender:pitmans"]),
+    );
+  });
+
+  it("ten held messages for one brand raise one alarm key, not ten", async () => {
+    const rows = Array.from({ length: 10 }, (_, i) => smsRow({ id: `s${i}` }));
+    const { sb } = fakeSmsSb(rows, null);
+    const s = await runCommsRetry(sb, NOW);
+
+    expect(s).toMatchObject({ candidates: 10, blocked: 10, redriven: 0 });
+    expect(new Set(reportOperationalIssue.mock.calls.map((c) => c[1].key))).toEqual(
+      new Set(["brand-sms-sender:pitmans"]),
+    );
+  });
+
+  it("re-drives with the LIVE sender id once the column is set — the remedy the refusal names actually works", async () => {
+    runProviderSend.mockResolvedValue({ ok: true });
+    const { sb, reclaimCalls } = fakeSmsSb([smsRow()], "Pitmans");
+    const s = await runCommsRetry(sb, NOW);
+
+    expect(s).toMatchObject({ redriven: 1, recovered: 1, blocked: 0 });
+    expect(reclaimCalls).toHaveLength(1);
+    // The stored snapshot said null; the brands row says "Pitmans". What reaches
+    // the provider must be the live value, or setting the column changes nothing.
+    expect(runProviderSend.mock.calls[0][2].providerRequest).toEqual({
+      channel: "sms",
+      sms: {
+        to: "07000000000",
+        body: "Your balance is due",
+        brand: { slug: "pitmans", smsSender: "Pitmans" },
+      },
+    });
+    expect(resolveOperationalIssue).toHaveBeenCalledWith(expect.anything(), "brand-sms-sender:pitmans");
+  });
+
+  it("a brand row that has vanished is held, not sent under another brand's sender id", async () => {
+    const { sb, reclaimCalls } = fakeSmsSb([smsRow()], null, { brandRowMissing: true });
+    const s = await runCommsRetry(sb, NOW);
+
+    expect(s).toMatchObject({ blocked: 1, redriven: 0 });
+    expect(reclaimCalls).toHaveLength(0);
+    expect(runProviderSend).not.toHaveBeenCalled();
+  });
+
+  it("an unbranded (Marley) SMS never reads the brands table and re-drives its stored payload unchanged", async () => {
+    runProviderSend.mockResolvedValue({ ok: true });
+    const marley = smsRow({
+      provider_error: "WebEx error 500",
+      provider_request: { channel: "sms", sms: { to: "07000000000", body: "Your balance is due" } },
+    });
+    const { sb, brandReads } = fakeSmsSb([marley], null);
+    const s = await runCommsRetry(sb, NOW);
+
+    expect(s).toMatchObject({ redriven: 1, recovered: 1, blocked: 0 });
+    expect(brandReads()).toBe(0);
+    expect(runProviderSend.mock.calls[0][2].providerRequest).toEqual({
+      channel: "sms",
+      sms: { to: "07000000000", body: "Your balance is due" },
+    });
+  });
+
+  it("the refusal is not classified as a permanent rejection — that would cap the row beyond rescue", () => {
+    // A permanent verdict caps attempt_count at the ceiling, which drops the row
+    // out of the sweep for good: setting brands.sms_sender could then never
+    // release it. Held-and-recoverable is the correct state, not dead.
+    expect(isPermanentProviderError(smsRow().provider_error)).toBe(false);
   });
 });

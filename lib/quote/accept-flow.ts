@@ -116,6 +116,7 @@ import {
 // rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
 import { isLedgerAccessDenied } from "@/lib/ledger/access";
 import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
+import { reportInvoiceRaiseFailed, resolveInvoiceRaiseFailed } from "@/lib/ops/invoice-raise";
 
 type Sb = SupabaseClient<Database>;
 
@@ -1299,6 +1300,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       } as never)
       .eq("id", quoteId);
     await resolveZohoAccessDenied(sb);
+    await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho deposit invoice failed";
@@ -1311,11 +1313,15 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     // A lock-out is not this quote's problem — it is every quote's. Collapse it
     // into the one integration-level alert that names the actual remedy.
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "deposit invoice" });
-    else
+    else {
+      // The email alone left no trace anywhere a human looks: the ops board and
+      // the daily digest read clean while the customer went unbilled.
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "deposit", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
         `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
       ], "system");
+    }
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -1821,6 +1827,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
         commitment_due_date: dueDate,
       } as never)
       .eq("id", quoteId);
+    await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho commitment invoice failed";
@@ -1831,11 +1838,13 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "commitment invoice" });
-    else
+    else {
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "commitment", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
         `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
       ], "system");
+    }
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -2900,10 +2909,12 @@ export async function createBalanceInvoiceFlow(
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "balance invoice" });
-    else
+    else {
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "balance", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
       ], "system");
+    }
     return { ok: false, error: msg };
   }
 }

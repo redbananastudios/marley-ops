@@ -24,8 +24,41 @@ import { runProviderSend, sendOpsAlert, type ProviderRequest } from "@/lib/comms
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { log } from "@/lib/log";
 import { isPermanentProviderError } from "@/lib/comms/permanent-failure";
+import { getBrand, type Brand } from "@/lib/brand";
+import { smsSenderFor } from "@/lib/comms/send";
 
 type Sb = SupabaseClient<Database>;
+
+/** One alarm per BRAND whose SMS sender id is missing, never one per stuck
+ *  message: five held chases are one configuration gap, not five incidents. */
+export const brandSmsSenderIssueKey = (slug: string): string => `brand-sms-sender:${slug}`;
+
+/**
+ * Re-resolve the brand a stored SMS payload was frozen against.
+ *
+ * `dispatchComm` snapshots `{ slug, smsSender }` into `provider_request` at
+ * send time and this worker re-drives that payload verbatim, so a row minted
+ * while `brands.sms_sender` was still null carries `smsSender: null` for ever.
+ * `smsSenderFor` then refuses it identically on every pass: the row never
+ * dials WebEx, yet each pass still spends an attempt, so it burns the whole
+ * ladder to a critical issue — the MMR034 churn shape `permanent-failure.ts`
+ * exists to stop. Worse, the refusal's own remedy ("set brands.sms_sender")
+ * could not release the row, because the retry replayed the stale snapshot.
+ *
+ * Reading the column here is what makes that remedy true. Returns null when
+ * the brand STILL has no usable sender id, so the caller can hold the row
+ * rather than spend an attempt on a call that cannot leave the process.
+ */
+async function liveSmsBrand(
+  sb: Sb,
+  snapshot: Pick<Brand, "slug" | "smsSender">,
+): Promise<Pick<Brand, "slug" | "smsSender"> | null> {
+  const live = await getBrand(sb, snapshot.slug);
+  // A brand row that has vanished is not evidence the snapshot is usable, so
+  // fall back to it and let smsSenderFor deliver the same verdict as the send.
+  const brand = live ? { slug: live.slug, smsSender: live.smsSender } : snapshot;
+  return smsSenderFor(brand) ? brand : null;
+}
 
 /** Give up (and escalate) once a send has been attempted this many times. */
 export const COMMS_RETRY_MAX_ATTEMPTS = 8;
@@ -78,12 +111,16 @@ export interface CommsRetrySummary extends Record<string, unknown> {
   recovered: number;
   escalated: number;
   waiting: number;
+  /** Held back by a configuration gap, NOT by backoff — counted apart from
+   *  `waiting` so a run that could not even attempt a send never reads as a
+   *  quiet, healthy wait. */
+  blocked: number;
 }
 
 export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetrySummary> {
   const nowMs = now.getTime();
   const empty: CommsRetrySummary = {
-    ok: true, candidates: 0, redriven: 0, recovered: 0, escalated: 0, waiting: 0,
+    ok: true, candidates: 0, redriven: 0, recovered: 0, escalated: 0, waiting: 0, blocked: 0,
   };
 
   // Only outbound sends ever carry a provider_request, so that filter alone
@@ -121,7 +158,7 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
   if (!data) return empty;
 
   const rows = data as unknown as RetryRow[];
-  let redriven = 0, recovered = 0, escalated = 0, waiting = 0;
+  let redriven = 0, recovered = 0, escalated = 0, waiting = 0, blocked = 0;
 
   for (const row of rows) {
     if (!row.provider_request || !row.provider_payload_hash) continue;
@@ -163,6 +200,39 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
 
     if (!commsRetryDue(row, nowMs)) { waiting++; continue; }
 
+    // The stored SMS payload carries a FROZEN brand snapshot, so re-drive it
+    // against the LIVE brands row rather than that snapshot (see liveSmsBrand).
+    // While the sender id is still missing the row is HELD, not re-driven: no
+    // reclaim, no attempt spent, so it keeps its place in the ladder instead of
+    // grinding to critical against a call that never reaches WebEx. One deduped
+    // brand-level alarm carries the remedy, because ten held chases for one
+    // brand are one configuration gap and ten separate alerts would bury it.
+    let providerRequest = row.provider_request;
+    const snapshot = providerRequest.channel === "sms" ? providerRequest.sms?.brand : null;
+    if (snapshot) {
+      const brand = await liveSmsBrand(sb, snapshot);
+      if (!brand) {
+        blocked++;
+        await reportOperationalIssue(sb, {
+          key: brandSmsSenderIssueKey(snapshot.slug),
+          severity: "error",
+          source: "comms-retry",
+          event: "comm.retry.brand_sms_sender_missing",
+          message: `Brand ${snapshot.slug} has no SMS sender id, so its text messages are held and cannot send — set the brand's SMS sender in Settings and the held messages go out on the next retry.`,
+          context: {
+            brand: snapshot.slug,
+            communicationId: row.id,
+            to: row.to_address,
+            providerError: row.provider_error,
+          },
+        });
+        log.warn("comms.retry.brand_sms_sender_missing", { commId: row.id, brand: snapshot.slug });
+        continue;
+      }
+      await resolveOperationalIssue(sb, brandSmsSenderIssueKey(snapshot.slug));
+      providerRequest = { ...providerRequest, sms: { ...providerRequest.sms!, brand } };
+    }
+
     const newToken = randomUUID();
     const { data: reclaimed } = await sb.rpc("reclaim_communication_send", {
       p_id: row.id,
@@ -180,7 +250,7 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
       communicationId: row.id,
       claimToken: newToken,
       channel: row.channel,
-      providerRequest: row.provider_request,
+      providerRequest,
       leadId: row.lead_id,
       clientId: row.client_id,
       actorId: null,
@@ -217,7 +287,7 @@ export async function runCommsRetry(sb: Sb, now = new Date()): Promise<CommsRetr
     }
   }
 
-  return { ok: true, candidates: rows.length, redriven, recovered, escalated, waiting };
+  return { ok: true, candidates: rows.length, redriven, recovered, escalated, waiting, blocked };
 }
 
 interface UnretryableRow {

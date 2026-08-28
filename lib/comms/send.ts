@@ -256,13 +256,17 @@ export async function sendSms(input: {
   if (!sender) {
     // Name the actual remedy: for a non-default brand the env vars are fine and
     // the missing value is a database column, so the generic message would send
-    // whoever reads the ops board to the wrong place.
+    // whoever reads the ops board to the wrong place. The promised recovery is
+    // real because the comms-retry worker re-reads brands.sms_sender before it
+    // re-drives an SMS (liveSmsBrand) — the stored payload's brand snapshot is
+    // frozen at send time, so without that re-read setting the column would fix
+    // nothing for the row that prompted the message.
     const slug = input.brand?.slug;
     const brandScoped = !!slug && slug !== DEFAULT_BRAND && slug !== GROUP_BRAND;
     return {
       ok: false,
       error: brandScoped
-        ? `No SMS sender id configured for brand ${slug}. Set brands.sms_sender before sending.`
+        ? `No SMS sender id configured for brand ${slug}. Set brands.sms_sender for ${slug} — this message is held and goes out on the next retry once it is set.`
         : "WebEx sender ID not configured",
     };
   }
