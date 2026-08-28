@@ -36,10 +36,15 @@ type Sb = SupabaseClient<Database>;
  * starts empty at install and only ever contains post-install submissions.
  */
 
-/** The plugin returns at most this many of its newest rows per poll. Sized so
- *  weeks of Pitmans enquiry volume fit inside one response — a missed lead
- *  only escapes recovery if MORE than this arrive between two successful
- *  polls, which at a removals firm's volume is not a real number. */
+/** Rows per page. With a cursor this is a PAGE SIZE, not a loss bound: the
+ *  window starts at the first row we do not hold, so a backlog larger than
+ *  this drains over successive polls and is counted as `unaccounted` in
+ *  between — never silently skipped.
+ *
+ *  It used to say a lead only escapes recovery if more than this arrive
+ *  between two polls. That was never the invariant the code provided: with
+ *  the window anchored to the NEWEST row, the bound was a backlog, not a
+ *  rate, and anything that fell behind it was gone for good. */
 export const WP_PULL_LIMIT = 200;
 
 /** How long one poll may take before it counts as a fetch failure. */
@@ -71,16 +76,71 @@ export function wpExternalLeadId(rowId: number): string {
  * half is plb_rest_permission in the plugin; change both together or not at
  * all. `ts` bounds replay to ±300s on the plugin side.
  */
-export function signPullQuery(limit: number, tsSeconds: number, secret: string): string {
-  const canonical = `limit=${Math.trunc(limit)}&ts=${Math.trunc(tsSeconds)}`;
+export function signPullQuery(
+  limit: number,
+  sinceId: number,
+  tsSeconds: number,
+  secret: string,
+): string {
+  const canonical = `limit=${Math.trunc(limit)}&since_id=${Math.trunc(sinceId)}&ts=${Math.trunc(tsSeconds)}`;
   return createHmac("sha256", secret).update(canonical).digest("hex");
 }
 
 /** The full signed URL for one poll against the plugin's REST route. */
-export function buildPullUrl(baseUrl: string, limit: number, tsSeconds: number, secret: string): string {
-  const sig = signPullQuery(limit, tsSeconds, secret);
+export function buildPullUrl(
+  baseUrl: string,
+  limit: number,
+  sinceId: number,
+  tsSeconds: number,
+  secret: string,
+): string {
+  const sig = signPullQuery(limit, sinceId, tsSeconds, secret);
   const sep = baseUrl.includes("?") ? "&" : "?";
-  return `${baseUrl}${sep}limit=${Math.trunc(limit)}&ts=${Math.trunc(tsSeconds)}&sig=${sig}`;
+  return `${baseUrl}${sep}limit=${Math.trunc(limit)}&since_id=${Math.trunc(sinceId)}&ts=${Math.trunc(tsSeconds)}&sig=${sig}`;
+}
+
+/**
+ * The highest plugin row id below which EVERY row has landed here.
+ *
+ * Derived from our own leads table, never persisted: a stored cursor is state
+ * that can be lost or reset, and a lost cursor skips rows in silence, which is
+ * the exact failure this rail exists to make impossible. The leads table
+ * already records what landed, so it IS the record of what has been
+ * reconciled.
+ *
+ * Stopping at the first gap is deliberate. A submission we cannot land keeps
+ * the cursor beneath it, so it is re-offered on every poll rather than
+ * scrolling away. The cost is that a permanently unlandable row pins the
+ * window: rows beyond it are only reachable while they fit inside one page.
+ * That is a LOUD failure, not a silent one — `unaccounted` below counts them
+ * and holds the operational issue open until a human clears the blockage.
+ */
+export function contiguousReconciledUpTo(ids: ReadonlySet<number>): number {
+  let n = 0;
+  while (ids.has(n + 1)) n += 1;
+  return n;
+}
+
+/**
+ * Every plugin row id this rail already holds, read from OUR side.
+ *
+ * Returns the error rather than an empty set on failure: an unreadable leads
+ * table must not look like a rail that has landed nothing, which would reset
+ * the cursor to zero and re-offer every row as if new.
+ */
+async function reconciledRowIds(sb: Sb): Promise<Set<number> | { error: string }> {
+  const { data, error } = await sb
+    .from("leads")
+    .select("external_lead_id")
+    .eq("brand", WP_PULL_BRAND)
+    .like("external_lead_id", "wp-%");
+  if (error) return { error: error.message };
+  const ids = new Set<number>();
+  for (const row of (data ?? []) as { external_lead_id: string | null }[]) {
+    const m = /^wp-(\d+)$/.exec(row.external_lead_id ?? "");
+    if (m) ids.add(Number(m[1]));
+  }
+  return ids;
 }
 
 export type WpPullConfig =
@@ -130,6 +190,10 @@ const wpSubmissionSchema = z.object({
 
 const wpPullResponseSchema = z.object({
   ok: z.boolean().optional(),
+  /** Rows in the plugin's whole table. Optional in SHAPE only — an endpoint
+   *  that omits it proves nothing, and is handled below as UNKNOWN, never as
+   *  zero. */
+  total: z.number().int().nonnegative().optional(),
   submissions: z.array(z.unknown()),
 });
 
@@ -159,10 +223,24 @@ export interface WpLeadsSummary {
   /** Rows that could not be landed (schema-invalid payload, insert error).
    *  Reported as a standing operational issue, retried next poll. */
   failures: number;
+  /** Where this poll's window started — the highest id below which every
+   *  plugin row has landed here. */
+  sinceId: number;
+  /** Submissions on the WordPress side this rail has neither landed nor seen.
+   *  `null` means the endpoint reported no total, i.e. UNKNOWN — which is a
+   *  different answer from 0 and must never resolve the issue. */
+  unaccounted: number | null;
   firstError?: string;
 }
 
-const emptyCounts = { seen: 0, alreadyPresent: 0, inserted: 0, failures: 0 };
+const emptyCounts = {
+  seen: 0,
+  alreadyPresent: 0,
+  inserted: 0,
+  failures: 0,
+  sinceId: 0,
+  unaccounted: null,
+};
 
 /**
  * One poll-and-reconcile pass. Called by /api/cron/wp-leads every 15 minutes;
@@ -197,8 +275,29 @@ export async function syncWpLeads(
     return { ok: false, configured: false, error: config.reason, ...emptyCounts };
   }
 
+  // ---- Anchor the window to what has actually been reconciled --------------
+  // A failed read here is a FAILED run, not a poll from zero: guessing the
+  // cursor is exactly how a rail skips rows while reporting success.
+  const held = await reconciledRowIds(sb);
+  if (!(held instanceof Set)) {
+    log.error("wp-leads.cursor_read_failed", { error: held.error });
+    return {
+      ok: false,
+      configured: true,
+      error: `WP pull cursor read failed: ${held.error}`,
+      ...emptyCounts,
+    };
+  }
+  const sinceId = contiguousReconciledUpTo(held);
+
   // ---- Fetch over the disjoint channel -------------------------------------
-  const url = buildPullUrl(config.url, WP_PULL_LIMIT, Math.floor(now.getTime() / 1000), config.secret);
+  const url = buildPullUrl(
+    config.url,
+    WP_PULL_LIMIT,
+    sinceId,
+    Math.floor(now.getTime() / 1000),
+    config.secret,
+  );
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   let res: Response;
@@ -235,9 +334,11 @@ export async function syncWpLeads(
   }
 
   // ---- Reconcile -----------------------------------------------------------
-  // Oldest first so recovered leads land in submission order. One bad row must
-  // not abort the batch — each is isolated, counted, and retried next poll.
-  const rows = [...parsed.submissions].reverse();
+  // The endpoint answers oldest-first FROM the cursor, so this is already
+  // submission order — nothing to reverse, and nothing behind it to miss. One
+  // bad row must not abort the batch: each is isolated, counted, and retried
+  // next poll.
+  const rows = parsed.submissions;
 
   let alreadyPresent = 0;
   let inserted = 0;
@@ -327,15 +428,50 @@ export async function syncWpLeads(
   // unlandable submission cannot page every 15 minutes as a dead rail — but a
   // submission we have seen and cannot land is a customer waiting, so it must
   // sit visibly open until it lands or a human deals with it.
-  if (failures > 0) {
-    log.error("wp-leads.reconcile_failures", { failures, failedIds, firstError });
+  // Prove nothing is missing, rather than inferring it from a window that by
+  // construction cannot show what it excluded. `total` is the plugin's whole
+  // table; what we can account for is what we already hold, plus what this
+  // poll landed, plus what this poll saw and could not land. Anything left
+  // over is a submission this rail has never been offered.
+  const unlandedSeen = failedIds.filter(
+    (id) => typeof id !== "number" || !held.has(id),
+  ).length;
+  const accountedFor = held.size + inserted + unlandedSeen;
+  const unaccounted =
+    parsed.total === undefined ? null : Math.max(0, parsed.total - accountedFor);
+
+  // The resolve is deliberately NOT gated on `failures === 0` alone. Under the
+  // old newest-N window a lost row simply left the window, `failures` read 0,
+  // and this call marked the loss RESOLVED — the monitor erasing the only
+  // evidence of the thing it exists to catch. An endpoint reporting no total
+  // proves nothing either way, so it does not resolve either: "I could not
+  // check" is not "nothing to report".
+  if (failures > 0 || unaccounted === null || unaccounted > 0) {
+    const parts: string[] = [];
+    if (failures > 0) parts.push(`${failures} submission(s) could not be landed as leads`);
+    if (unaccounted === null) {
+      parts.push(
+        "the endpoint reported no table total, so this rail cannot prove nothing else is missing",
+      );
+    } else if (unaccounted > 0) {
+      parts.push(
+        `${unaccounted} submission(s) exist on the WordPress side that this rail has not reached`,
+      );
+    }
+    log.error("wp-leads.reconcile_failures", {
+      failures,
+      unaccounted,
+      sinceId,
+      failedIds,
+      firstError,
+    });
     await reportOperationalIssue(sb, {
       key: WP_RECONCILE_ISSUE_KEY,
       severity: "warning",
       source: "wp-leads",
       event: "wp_leads.reconcile_failed",
-      message: `${failures} Pitmans WordPress submission(s) could not be landed as leads. They retry each poll, but a persistent entry here is an enquiry no one is answering.`,
-      context: { failures, failedIds: failedIds.slice(0, 20), firstError },
+      message: `Pitmans WordPress submissions are unaccounted for: ${parts.join("; ")}. They retry each poll, but a persistent entry here is an enquiry no one is answering.`,
+      context: { failures, unaccounted, sinceId, failedIds: failedIds.slice(0, 20), firstError },
     });
   } else {
     await resolveOperationalIssue(sb, WP_RECONCILE_ISSUE_KEY);
@@ -345,6 +481,8 @@ export async function syncWpLeads(
     ok: true,
     configured: true,
     seen: rows.length,
+    sinceId,
+    unaccounted,
     alreadyPresent,
     inserted,
     failures,

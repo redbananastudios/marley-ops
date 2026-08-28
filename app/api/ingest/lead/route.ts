@@ -7,12 +7,14 @@ import {
   MAX_INGEST_BODY_BYTES,
   payloadBrandMismatch,
   resolveIngestBrand,
+  sharedIngestSecretBrands,
   resolveSubmittedAt,
   websiteLeadIngestSchema,
 } from "@/lib/leads/ingest";
 import { decideEnquiryPushes } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import { errorContext, log } from "@/lib/log";
+import { GROUP_BRAND } from "@/lib/brand";
 
 /**
  * Direct lead ingest — the website posts an enquiry straight into the panel.
@@ -69,6 +71,40 @@ export async function POST(req: Request) {
     // ordinary rejected traffic. An unconfigured per-brand secret is not the
     // same emergency — that brand's site isn't wired up yet by definition.
     if (!process.env.LEAD_INGEST_SECRET?.trim()) log.warn("lead-ingest.secret_unconfigured", {});
+    // A refused-for-being-shared secret looks identical to a wrong one from the
+    // caller's side, so say which it was on OUR side — otherwise an operator who
+    // pasted one value into two variables debugs the wrong thing.
+    const shared = sharedIngestSecretBrands();
+    if (shared.length) log.error("lead-ingest.shared_secret_refused", { brands: shared });
+    return reject(401, "unauthorized");
+  }
+
+  // The SUFFIX OF AN ENVIRONMENT VARIABLE NAME IS NOT AN ALLOWLIST.
+  // LEAD_INGEST_SECRET_<X> mints a working credential for a brand called <X>
+  // whether or not <X> exists — the shape a rotation invites, when the outgoing
+  // value is parked as ..._OLD and quietly becomes brand `<slug>_old`. Unchecked
+  // that reaches the insert and dies on the foreign key as a 5xx: loud, and
+  // nothing is misfiled, but it is an outage the naming convention created and a
+  // diagnostic pointing at the database instead of at the variable. Checked here
+  // it is a 401 like any other unknown caller.
+  //
+  // An unreadable brands table is NOT an unknown brand: 'I could not check' must
+  // not render as 'no such brand', so a read error is the 5xx the caller retries
+  // rather than a permanent-looking refusal of a real enquiry. Not filtered on
+  // `active` either — an inactive brand row is a config state, not a reason to
+  // turn away a live customer.
+  const sb = createAdminClient();
+  const { data: brandRow, error: brandError } = await sb
+    .from("brands")
+    .select("slug")
+    .eq("slug", brand)
+    .maybeSingle();
+  if (brandError) {
+    log.error("lead-ingest.brand_lookup_failed", { brand, error: brandError.message });
+    return reject(500, "ingest_failed");
+  }
+  if (!brandRow || brand === GROUP_BRAND) {
+    log.error("lead-ingest.unknown_brand_secret", { brand });
     return reject(401, "unauthorized");
   }
 
@@ -120,7 +156,7 @@ export async function POST(req: Request) {
   let landed: Awaited<ReturnType<typeof landWebsiteLead>>;
   try {
     landed = await landWebsiteLead(
-      createAdminClient(),
+      sb,
       {
         // From the matched secret, never the payload — see resolveIngestBrand.
         brand,

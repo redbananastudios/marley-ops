@@ -83,6 +83,11 @@ export interface BrandIngestSecret {
 export function brandIngestSecrets(
   env: Record<string, string | undefined> = process.env,
 ): BrandIngestSecret[] {
+  return withoutSharedSecrets(configuredIngestSecrets(env));
+}
+
+/** The raw configured set, before ambiguity is removed. */
+function configuredIngestSecrets(env: Record<string, string | undefined>): BrandIngestSecret[] {
   const secrets: BrandIngestSecret[] = [{ brand: "marley", secret: env.LEAD_INGEST_SECRET }];
   const prefix = "LEAD_INGEST_SECRET_";
   for (const key of Object.keys(env)) {
@@ -91,6 +96,56 @@ export function brandIngestSecrets(
     if (slug) secrets.push({ brand: slug, secret: env[key] });
   }
   return secrets;
+}
+
+/**
+ * Drop EVERY entry whose secret value is shared with another brand's.
+ *
+ * A duplicate is not a tie to break, it is a question with no answer. Two
+ * brands presenting the same token are indistinguishable, so first-match-wins
+ * does not resolve the ambiguity, it hides it — and the first candidate is
+ * always the default brand, so the quiet outcome is the OTHER brand's customer
+ * filed under the default one, carrying its quote-ref prefix, its legal line
+ * and its sending address on a document that reaches a real person. Nothing
+ * errors, so nothing says so.
+ *
+ * Refusing costs the shared token every brand that presents it, the default one
+ * included. That is the intended trade: a 401 fires the caller's own documented
+ * fallback (email the office) and the enquiry still reaches a human, whereas a
+ * misfiled lead reaches the wrong customer under the wrong company's name.
+ * Ambiguity yields nothing, never a best guess.
+ *
+ * Values below MIN_INGEST_SECRET_LENGTH are ignored: they authenticate nothing
+ * already, and counting them would let two blank placeholders collide and
+ * disable a brand that was never configured in the first place.
+ */
+function withoutSharedSecrets(secrets: readonly BrandIngestSecret[]): BrandIngestSecret[] {
+  const seen = new Map<string, number>();
+  for (const { secret } of secrets) {
+    const value = (secret ?? "").trim();
+    if (value.length < MIN_INGEST_SECRET_LENGTH) continue;
+    seen.set(value, (seen.get(value) ?? 0) + 1);
+  }
+  return secrets.map((entry) =>
+    (seen.get((entry.secret ?? "").trim()) ?? 0) > 1 ? { brand: entry.brand, secret: null } : entry,
+  );
+}
+
+/**
+ * Configured ingest secrets that have been REFUSED for being shared, and which
+ * brands they belong to. Pure, so the route can log it and a health surface can
+ * raise it as a standing issue.
+ *
+ * Failing closed without saying so would only move the silence: an operator who
+ * pasted one secret into two variables would see 401s and conclude the secret
+ * was wrong, not that it was duplicated.
+ */
+export function sharedIngestSecretBrands(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  const raw = configuredIngestSecrets(env);
+  const usable = withoutSharedSecrets(raw);
+  return raw.filter((entry, i) => entry.secret && !usable[i].secret).map((e) => e.brand);
 }
 
 /**

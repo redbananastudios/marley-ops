@@ -7,6 +7,7 @@ import {
   MAX_SUBMISSION_AGE_MS,
   payloadBrandMismatch,
   resolveIngestBrand,
+  sharedIngestSecretBrands,
   resolveSubmittedAt,
   websiteLeadIngestSchema,
 } from "@/lib/leads/ingest";
@@ -263,5 +264,67 @@ describe("resolveSubmittedAt", () => {
 
     const justPast = new Date(now.getTime() - MAX_SUBMISSION_AGE_MS - 1000).toISOString();
     expect(resolveSubmittedAt(justPast, now).ok).toBe(false);
+  });
+});
+
+/**
+ * A duplicate secret is a question with no answer (QA-20260826-09). Resolving
+ * it to the first match hides the ambiguity rather than settling it, and the
+ * first candidate is always the default brand - so the quiet outcome is the
+ * OTHER brand's customer filed under the default one, with its quote-ref
+ * prefix, its legal line and its sending address on a document a real person
+ * receives.
+ */
+describe("brandIngestSecrets — an ambiguous credential authenticates nobody", () => {
+  const MARLEY = "marley-secret-long-enough";
+  const OTHER = "other-secret-long-enough";
+
+  it("two brands sharing one secret authenticate NEITHER - not the first match", () => {
+    const shared = brandIngestSecrets({
+      LEAD_INGEST_SECRET: MARLEY,
+      LEAD_INGEST_SECRET_PITMANS: MARLEY,
+    });
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, shared)).toBe(null);
+  });
+
+  it("a duplicate does not disarm a third brand whose secret is its own", () => {
+    const mixed = brandIngestSecrets({
+      LEAD_INGEST_SECRET: MARLEY,
+      LEAD_INGEST_SECRET_PITMANS: MARLEY,
+      LEAD_INGEST_SECRET_THIRD: OTHER,
+    });
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, mixed)).toBe(null);
+    expect(resolveIngestBrand(`Bearer ${OTHER}`, mixed)).toBe("third");
+  });
+
+  it("a unique secret is completely unaffected", () => {
+    const clean = brandIngestSecrets({
+      LEAD_INGEST_SECRET: MARLEY,
+      LEAD_INGEST_SECRET_PITMANS: OTHER,
+    });
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, clean)).toBe("marley");
+    expect(resolveIngestBrand(`Bearer ${OTHER}`, clean)).toBe("pitmans");
+  });
+
+  it("two blank or placeholder-short values are not a collision", () => {
+    // They authenticate nothing already; counting them would disable a brand
+    // that was never configured in the first place.
+    const blanks = brandIngestSecrets({
+      LEAD_INGEST_SECRET: "",
+      LEAD_INGEST_SECRET_PITMANS: "",
+    });
+    expect(resolveIngestBrand("Bearer ", blanks)).toBe(null);
+    expect(blanks.length).toBe(2);
+  });
+
+  it("sharedIngestSecretBrands names every brand whose secret was refused", () => {
+    expect(
+      sharedIngestSecretBrands({
+        LEAD_INGEST_SECRET: MARLEY,
+        LEAD_INGEST_SECRET_PITMANS: MARLEY,
+        LEAD_INGEST_SECRET_THIRD: OTHER,
+      }).sort(),
+    ).toEqual(["marley", "pitmans"]);
+    expect(sharedIngestSecretBrands({ LEAD_INGEST_SECRET: MARLEY })).toEqual([]);
   });
 });

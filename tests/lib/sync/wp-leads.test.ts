@@ -48,6 +48,7 @@ vi.mock("@/lib/push/send", () => ({
 
 import {
   buildPullUrl,
+  contiguousReconciledUpTo,
   resolveWpPullConfig,
   signPullQuery,
   syncWpLeads,
@@ -58,7 +59,28 @@ import {
 } from "@/lib/sync/wp-leads";
 import { websiteLeadIngestSchema } from "@/lib/leads/ingest";
 
-const SB = {} as never;
+/**
+ * The cursor is read from OUR leads table, so the stub answers from the same
+ * `existingExternalIds` fixture that decides what landWebsiteLead adopts —
+ * one source of truth for what the fake DB holds, so a test cannot
+ * accidentally describe a world where the two disagree.
+ */
+let cursorReadError: string | null = null;
+const SB = {
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        like: async () =>
+          cursorReadError
+            ? { data: null, error: { message: cursorReadError } }
+            : {
+                data: [...existingExternalIds].map((id) => ({ external_lead_id: id })),
+                error: null,
+              },
+      }),
+    }),
+  }),
+} as never;
 const NOW = new Date("2026-08-26T12:00:00Z");
 const URL_ENV = "https://pitmansremovals.co.uk/wp-json/pitmans-lead-bridge/v1/submissions";
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -119,16 +141,38 @@ describe("wpExternalLeadId — the id contract shared with the plugin", () => {
 });
 
 describe("signPullQuery — the HMAC contract shared with the plugin", () => {
-  it("signs exactly 'limit=<n>&ts=<unix>' with SHA-256 hex", () => {
-    const expected = createHmac("sha256", SECRET).update("limit=200&ts=1756209600").digest("hex");
-    expect(signPullQuery(200, 1756209600, SECRET)).toBe(expected);
+  it("signs exactly 'limit=<n>&since_id=<n>&ts=<unix>' with SHA-256 hex", () => {
+    const expected = createHmac("sha256", SECRET)
+      .update("limit=200&since_id=7&ts=1756209600")
+      .digest("hex");
+    expect(signPullQuery(200, 7, 1756209600, SECRET)).toBe(expected);
   });
 
-  it("buildPullUrl carries limit, ts and sig as query params", () => {
-    const url = new URL(buildPullUrl(URL_ENV, 200, 1756209600, SECRET));
+  it("since_id is INSIDE the signature, so a replay cannot advance the window", () => {
+    // An on-path observer bumping since_id past a row would hide that row from
+    // the only backstop the enquiry has.
+    expect(signPullQuery(200, 7, 1756209600, SECRET)).not.toBe(
+      signPullQuery(200, 8, 1756209600, SECRET),
+    );
+  });
+
+  it("buildPullUrl carries limit, since_id, ts and sig as query params", () => {
+    const url = new URL(buildPullUrl(URL_ENV, 200, 7, 1756209600, SECRET));
     expect(url.searchParams.get("limit")).toBe("200");
+    expect(url.searchParams.get("since_id")).toBe("7");
     expect(url.searchParams.get("ts")).toBe("1756209600");
-    expect(url.searchParams.get("sig")).toBe(signPullQuery(200, 1756209600, SECRET));
+    expect(url.searchParams.get("sig")).toBe(signPullQuery(200, 7, 1756209600, SECRET));
+  });
+});
+
+describe("contiguousReconciledUpTo", () => {
+  it("stops at the first gap, so an unlanded row keeps coming back", () => {
+    expect(contiguousReconciledUpTo(new Set())).toBe(0);
+    expect(contiguousReconciledUpTo(new Set([1, 2, 3]))).toBe(3);
+    // 4 is missing, so the window must reopen at 4 however many rows follow.
+    expect(contiguousReconciledUpTo(new Set([1, 2, 3, 5, 6]))).toBe(3);
+    // A set that never starts at 1 has reconciled nothing contiguously.
+    expect(contiguousReconciledUpTo(new Set([2, 3]))).toBe(0);
   });
 });
 
@@ -209,10 +253,13 @@ describe("syncWpLeads", () => {
     existingExternalIds = new Set(["wp-000001"]);
     const body = {
       ok: true,
-      // Endpoint order is newest-first; the rail must land oldest-first.
+      total: 2,
+      // The endpoint now answers oldest-first FROM the cursor, so the rail lands
+      // them in the order given. It used to answer newest-first and the rail
+      // reversed; the ORDER LANDED is what matters and is unchanged.
       submissions: [
-        submission(2, { name: "Missed Customer", phone: "07572000001" }),
         submission(1, { name: "Pushed Customer", phone: "07572000002" }, { pushed_at: "2026-08-26T11:00:01Z" }),
+        submission(2, { name: "Missed Customer", phone: "07572000001" }),
       ],
     };
     const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: fetchReturning(body) });
@@ -272,8 +319,104 @@ describe("syncWpLeads", () => {
     const url = new URL(seenUrl);
     const limit = Number(url.searchParams.get("limit"));
     const ts = Number(url.searchParams.get("ts"));
+    const sinceId = Number(url.searchParams.get("since_id"));
     expect(limit).toBe(WP_PULL_LIMIT);
     expect(ts).toBe(Math.floor(NOW.getTime() / 1000));
-    expect(url.searchParams.get("sig")).toBe(signPullQuery(limit, ts, SECRET));
+    expect(url.searchParams.get("sig")).toBe(signPullQuery(limit, sinceId, ts, SECRET));
+  });
+});
+
+/**
+ * The loss must not be able to scroll out of the window, and the monitor must
+ * not be able to clear its own evidence (QA-20260826-05). Before this, the
+ * window was the plugin's NEWEST 200 rows: anything that fell behind it was
+ * offered by no poll ever again, `failures` then read 0, and the standing
+ * reconcile issue RESOLVED ITSELF — the surface that would have shown the gap
+ * cleared by the gap.
+ */
+describe("syncWpLeads — the loss cannot scroll out of the window", () => {
+  beforeEach(() => {
+    cursorReadError = null;
+    process.env.WP_PULL_URL = URL_ENV;
+    process.env.WP_PULL_SECRET = SECRET;
+  });
+
+  it("a backlog the window never reached keeps the issue OPEN — failures:0 is not proof", async () => {
+    // 200 rows landed, the plugin holds 250. The 50 it has never offered us are
+    // invisible to this poll by construction, which is exactly why the poll must
+    // not be allowed to conclude anything from its own emptiness.
+    existingExternalIds = new Set(
+      Array.from({ length: 200 }, (_, i) => wpExternalLeadId(i + 1)),
+    );
+    const summary = await syncWpLeads(SB, {
+      now: NOW,
+      fetchImpl: fetchReturning({ ok: true, total: 250, submissions: [] }),
+    });
+    expect(summary.failures).toBe(0);
+    expect(summary.unaccounted).toBe(50);
+    expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
+    expect(issueCalls.map((i) => i.key)).toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("asks for rows AFTER the last one that landed, so nothing can fall behind", async () => {
+    // A gap at 8 pins the window there: 9 onwards are held, but the rail must
+    // keep re-offering 8 rather than moving past it.
+    existingExternalIds = new Set(
+      [1, 2, 3, 4, 5, 6, 7, 9, 10].map((n) => wpExternalLeadId(n)),
+    );
+    let seenUrl = "";
+    const fetchImpl = (async (u: string) => {
+      seenUrl = u;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ ok: true, total: 10, submissions: [] }),
+        text: async () => "",
+      };
+    }) as unknown as typeof fetch;
+    await syncWpLeads(SB, { now: NOW, fetchImpl });
+    const url = new URL(seenUrl);
+    expect(Number(url.searchParams.get("since_id"))).toBe(7);
+  });
+
+  it("an endpoint reporting no total never resolves the issue", async () => {
+    // "I could not check" is a different answer from "nothing to report", and
+    // the two must not share a rendering.
+    existingExternalIds = new Set();
+    const summary = await syncWpLeads(SB, {
+      now: NOW,
+      fetchImpl: fetchReturning({ ok: true, submissions: [] }),
+    });
+    expect(summary.unaccounted).toBeNull();
+    expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("a fully reconciled rail DOES resolve — the issue is not permanently stuck open", async () => {
+    existingExternalIds = new Set([1, 2, 3].map((n) => wpExternalLeadId(n)));
+    const summary = await syncWpLeads(SB, {
+      now: NOW,
+      fetchImpl: fetchReturning({ ok: true, total: 3, submissions: [] }),
+    });
+    expect(summary.unaccounted).toBe(0);
+    expect(summary.failures).toBe(0);
+    expect(resolveCalls).toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("an unreadable leads table is a FAILED run, never a poll from zero", async () => {
+    // Guessing the cursor is how a rail skips rows while reporting success: a
+    // read failure treated as an empty set would reset the window to 0 and
+    // re-offer every row as if new.
+    existingExternalIds = new Set();
+    cursorReadError = "connection terminated";
+    let fetched = false;
+    const fetchImpl = (async () => {
+      fetched = true;
+      return { ok: true, status: 200, json: async () => ({}), text: async () => "" };
+    }) as unknown as typeof fetch;
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl });
+    expect(summary.ok).toBe(false);
+    expect(summary.configured).toBe(true);
+    expect(summary.error).toContain("cursor read failed");
+    expect(fetched).toBe(false);
   });
 });
