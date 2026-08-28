@@ -48,6 +48,31 @@ applies BEFORE 0110 despite the higher number. They are independent (unrelated t
 and columns), so the out-of-order run is safe — but it is deliberate, not a typo. Apply
 in the order the table gives, not in filename order.
 
+### Changes the DEPLOY carries with no migration of their own
+
+Not everything in this promotion has a row above it, and the table is the thing a
+reader trusts. Gate 9b (late bookings raise the balance in the same breath, PRD
+§3.10 Addition 2) is pure code: it goes live the instant the container restarts and
+leaves no trace here. Verify it after the deploy rather than looking for a file:
+
+- A quote accepted **at `/q`** whose move is inside 7 days now raises its `-BAL`
+  invoice immediately, beside the collapsed 25% ask, instead of waiting for the
+  09:00 chase cron (which in turn waits for the deposit to be paid and the date
+  confirmed — for a move on Thursday, often too late to be useful). Two invoices are
+  open at once and they still sum to exactly the agreed price: the balance always
+  carves the deposit out whether or not it has been paid.
+- The same booking accepted by the **office** ("Mark won") is unchanged, and that is
+  deliberate rather than an oversight — `lib/payments/late-balance.ts` records why the
+  customer's own contract signature is a condition of raising early.
+- The balance email drops its "your deposit is already accounted for" line whenever
+  the deposit is genuinely unpaid, and names the deposit, the balance and the total
+  instead. That also applies to the ordinary T-7 raise in the rare case it meets an
+  unpaid deposit, where the old line was simply wrong.
+
+First live check: the first Marley acceptance after promotion whose move is inside a
+week. Confirm exactly two invoices exist against it and that they sum to the agreed
+price — not three, and not 125% of the job.
+
 ### 0110 is the one migration that must run AFTER the deploy
 
 Every other file here goes on before the deploy, so a new container never queries a
