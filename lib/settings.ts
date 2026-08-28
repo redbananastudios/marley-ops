@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { DEFAULT_AI_MODEL, isApprovedAiModelId, type AiModelId } from "@/lib/ai/budget";
 
@@ -141,7 +142,18 @@ export function mapBusinessSettings(data: Record<string, unknown> | null | undef
 }
 
 /** Read the singleton settings row, falling back to defaults if absent. */
-export async function getBusinessSettings(
+/**
+ * Deduped per request with React `cache()`.
+ *
+ * The dashboard render reads this twice — once directly and once inside
+ * `loadBookingRows` — against the same client instance, which was a free extra
+ * Supabase round trip on a page that already makes roughly 28 of them across the
+ * public network. `cache()` keys on the argument by identity, so callers sharing
+ * one client share one read; a caller that builds its own client still gets its
+ * own, which is correct rather than merely convenient (a service-role client and
+ * a session client must never share a cached row).
+ */
+export const getBusinessSettings = cache(async function getBusinessSettings(
   sb: SupabaseClient,
 ): Promise<BusinessSettings> {
   const { data } = await sb
@@ -150,4 +162,4 @@ export async function getBusinessSettings(
     .eq("id", true)
     .maybeSingle();
   return mapBusinessSettings(data as Record<string, unknown> | null);
-}
+});
