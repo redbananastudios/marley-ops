@@ -25,10 +25,11 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 *(rows appended per gate)*
 | 6 | `supabase/migrations/0109_ledger_provider_stamp.sql` | six nullable `*_provider` columns (four on `quotes`, one on `storage_invoices`, one on `card_payments`) recording WHICH ledger minted each stored document id, backfilled to `zoho` — prod has never run anything else. Without them the Zoho→Xero flip reads every stored Zoho id against Xero: the not-found looks transient, a customer who HAS paid is never marked paid, and the poller keeps reporting healthy runs while the chase emails go out | No — additive nullable columns plus a one-off backfill UPDATE; nothing reads them until the deploy |
 | 7 | `supabase/migrations/0111_payment_policy.sql` | `clients.payment_terms_days integer not null default 30` (check 30/60) and `quotes.payment_policy text` (check residential/commercial), plus a backfill stamping every ALREADY-ACCEPTED quote `residential` — which is the ladder they already ran. Lays the rails for the commercial path (gate 10); changes no behaviour on its own | **Ordering matters — see below.** Otherwise no: additive columns, and the backfill only writes rows that are already accepted |
-| 8 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 (which the new code writes to on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
-| 9 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
+| 8 | `supabase/migrations/0112_small_job_threshold.sql` | `business_settings.small_job_threshold numeric(10,2) not null default 300` (check >= 0) — the gross at or under which acceptance asks for the WHOLE job in one payment, killing the £100-then-£20-tomorrow shape. 0 disables the rule | **Same ordering rule as 0111 — before the deploy.** `requestedDeposit()` takes the threshold as a REQUIRED argument read from settings, so once the code is live every ask on every surface reads this column |
+| 9 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 (which the new code writes to on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
+| 10 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
 
-### 0111 must run BEFORE the deploy — and therefore before 0110
+### 0111 and 0112 must run BEFORE the deploy — and therefore before 0110
 
 This is the mirror image of 0110's rule, so read both before running either.
 
@@ -38,7 +39,11 @@ rejects that UPDATE — so the customer's own acceptance at `/q` and the office 
 on their behalf BOTH fail, and the customer is told to phone in. Acceptance is the
 single most expensive thing in this system to break.
 
-That is why 0111 sits above the deploy row and 0110 sits below it, which means 0111
+0112 carries the same rule for the same reason: `requestedDeposit()` reads the small-job
+threshold as a required argument on every acceptance, quote page and chase email, so the
+column has to exist before the code that reads it.
+
+That is why 0111 and 0112 sit above the deploy row and 0110 sits below it, which means they
 applies BEFORE 0110 despite the higher number. They are independent (unrelated tables
 and columns), so the out-of-order run is safe — but it is deliberate, not a typo. Apply
 in the order the table gives, not in filename order.
@@ -283,6 +288,30 @@ App-side, after the deploy: accept one real quote and confirm the row comes back
 count was 0 at gate 8), so anything else means the resolver is reading the wrong thing —
 and a policy that only exists on backfilled rows is the failure this verification exists
 to catch.
+
+---
+
+### 0112
+
+```sql
+select small_job_threshold, default_deposit from business_settings;
+```
+
+Expected: `300.00` and `100.00`. Then prove the constraint rejects (it rolls back either way):
+
+```sql
+begin;
+  update business_settings set small_job_threshold = -1;
+rollback;
+```
+
+Expected: fails on `business_settings_small_job_threshold_valid`. Mutation-tested on
+staging this way before the gate merged.
+
+App-side, after the deploy: open a quote under £300 and confirm `/quotes/[id]` and the
+customer's `/q` page quote the SAME figure — the whole job, not the £100 deposit. Those
+two surfaces computing different numbers is the failure mode this gate is most exposed
+to, because `/q` is what the customer reads and `/quotes` is what the office reads.
 
 ---
 

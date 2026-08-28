@@ -114,11 +114,11 @@ interface QuoteRow {
  *  emails used to hardcode "£100", silently contradicting any bumped or
  *  office-set deposit (found by /qa 2026-08-05: a £300 late-booking ask whose
  *  payment email said £100). */
-function chaseDepositLabel(quote: QuoteRow, defaultDeposit: number): string {
+function chaseDepositLabel(quote: QuoteRow, defaultDeposit: number, smallJobThreshold: number): string {
   const base = Number(quote.deposit_amount ?? defaultDeposit);
   if (quote.status === "accepted") return depositLabel(base);
   const agreed = Number(quote.agreed_price ?? quote.grand_total ?? 0);
-  return depositLabel(requestedDeposit(agreed, base, quote.moving_date));
+  return depositLabel(requestedDeposit(agreed, base, quote.moving_date, smallJobThreshold));
 }
 
 /** Today as a UK wall-clock yyyy-mm-dd (en-CA = ISO date format). */
@@ -554,7 +554,7 @@ export async function GET(req: Request) {
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
           ownerName: owner.name,
           ownerEmail: owner.email,
-          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
+          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit, settings.smallJobThreshold),
           brand,
         });
         const sent = await sendChase(sb, lead, quote, email, QUOTE_TEMPLATE_ENVS[step - 1], token, brand);
@@ -635,7 +635,7 @@ export async function GET(req: Request) {
           expiryLabel: expiryLabelFrom(quote.email_sent_at, quote.created_at),
           ownerName: owner.name,
           ownerEmail: owner.email,
-          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit),
+          depositAmount: chaseDepositLabel(quote, settings.defaultDeposit, settings.smallJobThreshold),
           brand,
         });
         const sent = await sendChase(sb, lead, quote, email, DEPOSIT_TEMPLATE_ENVS[step - 1], token, brand);

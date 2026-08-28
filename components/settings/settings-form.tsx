@@ -61,6 +61,7 @@ const FIELDS: FieldDef[] = [
   { key: "cost75t", label: "7.5t lorry (per lorry)", hint: "Flat per 7.5t lorry — vehicle only. Its crew is billed via labour.", unit: "£" },
   { key: "costMisc", label: "Misc / consumables", hint: "Tape, wrap, sundries per job. Internal cost.", unit: "£" },
   { key: "defaultDeposit", label: "Standard deposit", hint: "Prefills 'Request deposit' on a job. Editable per job.", unit: "£" },
+  { key: "smallJobThreshold", label: "Small-job threshold", hint: "At or under this, acceptance asks for the WHOLE job in one payment — no commitment, no balance. 0 turns it off.", unit: "£" },
 ];
 
 function MoneyInput({
@@ -124,6 +125,7 @@ export function SettingsForm({
     cost75t: String(initial.cost75t),
     costMisc: String(initial.costMisc),
     defaultDeposit: String(initial.defaultDeposit),
+    smallJobThreshold: String(initial.smallJobThreshold),
     cubicFillPct: String(initial.cubicFillPct),
     cubicTransitFt3: String(initial.cubicTransitFt3),
     cubicLutonFt3: String(initial.cubicLutonFt3),
@@ -145,6 +147,7 @@ export function SettingsForm({
       cost75t: Number(v.cost75t),
       costMisc: Number(v.costMisc),
       defaultDeposit: Number(v.defaultDeposit),
+      smallJobThreshold: Number(v.smallJobThreshold),
       vatDefault,
       vatNumber: vatNumber.trim(),
       vatStaggerGroup: Number(vatStaggerGroup),

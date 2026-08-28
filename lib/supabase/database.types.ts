@@ -747,6 +747,7 @@ export type Database = {
           self_billing_enabled: boolean
           staff_onboard_enabled: boolean
           staff_onboard_token: string | null
+          small_job_threshold: number
           storage_rates: Json | null
           updated_at: string
           vat_default: boolean
@@ -795,6 +796,7 @@ export type Database = {
           self_billing_enabled?: boolean
           staff_onboard_enabled?: boolean
           staff_onboard_token?: string | null
+          small_job_threshold?: number
           storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean
@@ -843,6 +845,7 @@ export type Database = {
           self_billing_enabled?: boolean
           staff_onboard_enabled?: boolean
           staff_onboard_token?: string | null
+          small_job_threshold?: number
           storage_rates?: Json | null
           updated_at?: string
           vat_default?: boolean

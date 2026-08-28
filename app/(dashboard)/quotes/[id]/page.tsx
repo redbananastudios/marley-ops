@@ -305,6 +305,7 @@ export default async function QuoteDetailPage({
             Number(quote.agreed_price ?? quote.grand_total ?? 0),
             quote.deposit_amount ?? settings.defaultDeposit,
             quote.moving_date,
+            settings.smallJobThreshold,
           )}
           readOnly={!editing}
           editHref={`/quotes/${quote.id}?edit=1`}

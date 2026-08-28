@@ -120,24 +120,62 @@ export function commitmentDueImmediately(
 }
 
 /**
- * The deposit actually REQUESTED to secure a booking. Normally the quote's
- * stored deposit (office-set) or the Settings default — but when the move is
- * already inside the commitment window (≤7 UK days out), securing the date
- * costs the full 25%, so the ask becomes max(base, 25% × agreed) in ONE
- * payment (Peter, 2026-08-05: "if the move is under 7 days just ask for the
- * 25%"). commitmentAmount(agreed, thisResult) is then ≤ 0, so the separate
- * commitment invoice never raises — no second invoice minutes after the
- * deposit, no chase, no date-at-risk alarm (the Brydee Thomas MMR034 dance).
+ * The deposit actually REQUESTED to secure a booking. Three rules, in the order
+ * they apply — and the ask never exceeds the job.
+ *
+ * 1. **Small job takes one payment** (gate 9a; Peter, 2026-08-25). At or under
+ *    `smallJobThreshold` the ask IS the gross, so `commitmentAmount` clamps to
+ *    zero, no balance remains and no second invoice ever raises. This is the
+ *    2026-08-24 case: a ~£120 job asked £100 at acceptance and then chased £20
+ *    the next day — two invoices and a bank transfer for twenty pounds.
+ * 2. **Late booking collapses to 25%** (Peter, 2026-08-05: "if the move is under
+ *    7 days just ask for the 25%"). Inside the commitment window, securing the
+ *    date costs max(base, 25% × agreed) in ONE payment, so again the separate
+ *    commitment invoice never raises — no second invoice minutes after the
+ *    deposit, no chase, no date-at-risk alarm (the Brydee Thomas MMR034 dance).
+ * 3. Otherwise the quote's stored deposit (office-set) or the Settings default.
+ *
+ * The small-job rule is checked FIRST because it subsumes the late one: a £200
+ * job moving tomorrow asks £200, not 25% of £200. Rule 2 would collect less than
+ * the whole job and leave a balance behind, which is the exact shape rule 1
+ * exists to remove.
+ *
+ * Every branch is capped at `agreed`. Without the cap the £100 default against
+ * an £80 job asks £80 — but only because rule 1 catches it; the cap is what
+ * makes that true for a £100 job with an office-typed £150 deposit too. Asking
+ * for more than the job costs is never right, and it is the customer who finds
+ * out.
+ *
+ * `smallJobThreshold` is REQUIRED rather than defaulted on purpose. It comes from
+ * `business_settings`, and a defaulted parameter would let a call site silently
+ * opt out of the rule while still compiling — which is precisely how the gate 18
+ * provider stamp went missing at three of its call sites. Making it required
+ * means tsc names every caller that has not been told about it. Pass 0 to
+ * disable the rule deliberately.
  */
 export function requestedDeposit(
   agreed: number,
   baseDeposit: number,
   movingDate: string | null | undefined,
+  smallJobThreshold: number,
   today: Date = new Date(),
 ): number {
+  const gross = round2(agreed || 0);
   const base = round2(baseDeposit || 0);
-  if (!commitmentDueImmediately(movingDate, today)) return base;
-  return Math.max(base, round2(COMMITMENT_PCT * (agreed || 0)));
+  const threshold = round2(smallJobThreshold || 0);
+
+  // Rule 1. `gross > 0` guards a quote with no price yet: a £0 job must not
+  // report "pay the whole thing" and collapse the ladder to nothing.
+  if (gross > 0 && gross <= threshold) return gross;
+
+  const ask = commitmentDueImmediately(movingDate, today)
+    ? Math.max(base, round2(COMMITMENT_PCT * gross)) // rule 2
+    : base; // rule 3
+
+  // The cap, applied last so it holds however the ask was reached. A priceless
+  // quote (gross 0) has nothing to cap against, so it keeps its base deposit
+  // rather than collapsing to zero.
+  return gross > 0 ? Math.min(ask, gross) : ask;
 }
 
 /**

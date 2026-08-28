@@ -11,6 +11,7 @@ import {
 } from "@/lib/quote/accept-flow";
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
 import { requestedDeposit } from "@/lib/payments-policy";
+import { getBusinessSettings } from "@/lib/settings";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { DateConfirmCard } from "@/components/quote/date-confirm-card";
@@ -222,13 +223,21 @@ export default async function AcceptPage({
   }
 
   const total = quote.agreed_price ?? Number(quote.grand_total ?? 0);
-  // Pre-accept, the ask is computed live (a move inside 7 days takes the full
-  // 25% up-front — late-booking collapse); once accepted, deposit_amount is
-  // the frozen truth every money surface reads.
+  // Settings, not constants. This page shows the customer the figure they are
+  // about to pay, and accept-flow computes the figure they are actually
+  // invoiced — so the two must read the SAME inputs or the page quotes one
+  // number and the invoice asks another. The deposit default was hardcoded 100
+  // here while every other money surface read it from settings: identical
+  // today, and silently wrong the first time anyone edits it.
+  const settings = await getBusinessSettings(sb);
+  const baseDeposit = quote.deposit_amount ?? settings.defaultDeposit;
+  // Pre-accept, the ask is computed live (a small job asks for the whole thing;
+  // a move inside 7 days takes the full 25% up-front — late-booking collapse);
+  // once accepted, deposit_amount is the frozen truth every money surface reads.
   const deposit =
     quote.status === "sent"
-      ? requestedDeposit(total, quote.deposit_amount ?? 100, quote.moving_date)
-      : (quote.deposit_amount ?? 100);
+      ? requestedDeposit(total, baseDeposit, quote.moving_date, settings.smallJobThreshold)
+      : baseDeposit;
 
   /* ---------------------------------------------------------- sent → accept */
   if (quote.status === "sent") {
