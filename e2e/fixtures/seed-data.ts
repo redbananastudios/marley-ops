@@ -74,6 +74,24 @@ export const SEED = {
   /** A second SENT quote used to test the DECLINE flow (so it never consumes the
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
+  /** A booking sitting AT the commitment step and reachable from /q — the
+   *  gate 9c "settle in full" choice (PRD §3.10 Addition 3). Deposit paid,
+   *  date confirmed, a 25% commitment invoice raised and unpaid, no balance
+   *  yet. Its move is 30 days out on purpose: OUTSIDE T-7, so gate 9b cannot
+   *  have raised the balance and the only thing that can is the customer. */
+  commitmentDue: {
+    name: "E2E Commitment Due",
+    quoteRef: "E2E-COMFULL-001",
+    acceptToken: "e2e-commitment-full-token-01",
+    total: 2000,
+    deposit: 100,
+    /** 25% x 2000, less the deposit already paid. */
+    commitment: 400,
+    /** agreed - deposit - commitment: what the T-7 balance would be. */
+    balanceRemaining: 1500,
+    /** commitment + balance = the whole rest of the job. */
+    full: 1900,
+  },
   /** A DRAFT quote — the office quote-builder wizard. A draft opens straight into
    *  the 7-step builder (status==="draft" → editing), so the wizard spec drives it
    *  via a stable seeded row instead of the create→navigate flow (that soft-nav is

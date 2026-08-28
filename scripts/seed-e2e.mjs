@@ -76,6 +76,16 @@ const SEED = {
     balance: 1500,
   },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
+  commitmentDue: {
+    name: "E2E Commitment Due",
+    quoteRef: "E2E-COMFULL-001",
+    acceptToken: "e2e-commitment-full-token-01",
+    total: 2000,
+    deposit: 100,
+    commitment: 400,
+    balanceRemaining: 1500,
+    full: 1900,
+  },
   draftQuote: { name: "E2E Draft Quote", quoteRef: "E2E-DRAFT-001", total: 1200 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
   markLost: { name: "E2E Mark Lost" },
@@ -619,6 +629,59 @@ await resetCrewContractorState();
   });
   if (error) die(`${SEED.lateQuote.name} late sent quote`, error);
   console.log(`seeded late sent quote: ${SEED.lateQuote.name} (/q/${SEED.lateQuote.acceptToken}, moving in 3 days)`);
+}
+
+// 5c. A booking AT the commitment step, reachable from /q — gate 9c's
+// "settle in full" choice. Deposit paid, date confirmed on the LEAD (that is
+// where the ladder flag lives), a 25% commitment invoice raised and unpaid,
+// and no balance invoice. The move is 30 days out deliberately: outside T-7,
+// so gate 9b's early raise cannot fire and the ONLY thing that can raise a
+// balance on this booking is the customer choosing to.
+{
+  const c = SEED.commitmentDue;
+  const ids = await makeLead({ name: c.name, status: "confirmed" });
+  const { error } = await sb.from("quotes").insert({
+    quote_ref: c.quoteRef,
+    client_id: ids.clientId,
+    lead_id: ids.leadId,
+    customer_name: c.name,
+    customer_email: SINK_EMAIL,
+    customer_phone: SINK_PHONE,
+    subtotal: c.total,
+    grand_total: c.total,
+    agreed_price: c.total,
+    status: "accepted",
+    accepted_at: at(-10),
+    moving_date: at(30).slice(0, 10),
+    deposit_amount: c.deposit,
+    deposit_paid_at: at(-9),
+    deposit_paid_method: "bank_transfer",
+    // A stand-in id: the commitment invoice is not raised through Zoho here,
+    // and nothing in this journey reads it back (syncZohoPayments logs an
+    // unreadable slot and carries on). The PROVIDER stamp is not optional
+    // though — migration 0110's CHECK constraints reject an id without one.
+    zoho_commitment_invoice_id: "e2e-commitment-invoice",
+    zoho_commitment_invoice_number: "E2E-COMFULL-INV",
+    commitment_invoice_provider: "zoho",
+    commitment_invoice_amount: c.commitment,
+    commitment_invoice_created_at: at(-8),
+    commitment_due_date: at(23).slice(0, 10),
+    accept_token: c.acceptToken,
+    email_sent_at: at(-11),
+    collect_addr: "5 Commitment Close, Shaftesbury, SP7 8AA",
+    dest_addr: "6 Settle Street, Gillingham, SP8 4AB",
+    vat_enabled: true,
+    breakdown: { vehicle: "1luton", totalMiles: 20 },
+    state_blob: { seeded: MARKER },
+  });
+  if (error) die(`${c.name} commitment-step quote`, error);
+  // The ladder flag lives on the LEAD, not the quote.
+  const { error: lErr } = await sb
+    .from("leads")
+    .update({ date_confirmed_at: at(-8) })
+    .eq("id", ids.leadId);
+  if (lErr) die(`${c.name} date_confirmed_at`, lErr);
+  console.log(`seeded commitment-step quote: ${c.name} (/q/${c.acceptToken}, £${c.commitment} due, £${c.full} in full)`);
 }
 
 // 6. A second SENT quote with a token — the public DECLINE flow (kept separate
