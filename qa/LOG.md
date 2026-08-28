@@ -4,6 +4,15 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-28T00:33Z — escalation repair sweep (scheduled): nothing escalated — first-pass tier has not fired in ~46h and its queue has grown to 4
+
+- Tier: escalation (Opus). Checked out `origin/staging` @ `b653e0d`. `grep -rn "escalate:" qa/findings/` → **empty**: no finding carries `escalate: opus-5`, so per `qa/REPAIR.md` §2 there is nothing for this tier to take. Nothing claimed, no branch cut, no PR opened, no escalations written, nothing left in `status: fixing`, `master` untouched, no DB or browser access used.
+- Queue at checkout: **10 open findings — 6 `class: risky`, 4 `class: safe-fix`.** Risky (never in scope for either automated tier, all still awaiting Peter): QA-20260826-01 (bookings-vs-payments owed divergence), -04 (storage invoice footer states the wrong legal identity for a non-default brand), -05 (WP pull rail has no cursor; loss auto-resolves its own alert), -06 (inactive Pitmans row widens own-domain set and silently stops forwarding LIVE Marley inbound mail), -08 (non-default brand chases money from Marley's SMS sender), -09 (lead-ingest secret duplicate → silent misattribution; unallowlisted `LEAD_INGEST_SECRET_` prefix scan).
+- Safe-fix, **all four untried**: QA-20260827-02 (schedule view-dialog header missing `Europe/London`), -03 (Create Quote from a survey visit renders the error boundary on first client-side nav), -04 (`/cv/<token>` self-fill survey has no photo-upload control), -05 (raw un-normalised postcode stored in `from_address`/`to_address`). Every one is `status: open`, `branch:` blank, **no `escalate:` key and no `## First-pass notes` section** — i.e. never attempted, first-pass (Fable) work, not escalation-tier work.
+- **Process defect, flagged not acted on — recurrence of the 2026-08-24T06:33Z observation.** The last first-pass repair entry of any kind in this log is **2026-08-26T05:35Z** (`be83abd`, "nothing eligible"). Since then the escalation tier has fired four times (08-26T06:38Z, 08-27T00:34Z, 08-27T06:35Z, this run) and four audits have filed four safe-fix findings — and first-pass has logged nothing for ~46 hours. A first-pass sweep that finds nothing eligible still logs, so the silence is not "it ran and passed": the tier is not firing (webhook or cron). That makes the escalation tier a structural no-op, because it can only take what first-pass hands it, and the safe-fix queue can only grow.
+- Deliberately **not** self-authorized: fixing an untried `safe-fix` here would violate `qa/REPAIR.md` §2 and dissolve the tier boundary the two-model pipeline depends on; re-tagging the findings `escalate: opus-5` would be manufacturing my own work order. All ten left exactly as filed. Peter notified.
+- Time spent: ~6 min.
+
 ## 2026-08-27T16:09Z — scheduled QA audit: 4 role agents, 1 new finding, 1 new spec
 
 - sha at checkout: `1784a3c` (`git fetch origin staging && git checkout staging && git reset --hard origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
