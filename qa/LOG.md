@@ -4,6 +4,19 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-28T08:13Z — scheduled QA audit: aborted at the health gate again — CI still red on the same base, unchanged since 04:08Z
+
+- sha at checkout: `6ef64c1` (`git fetch origin staging && git checkout staging && git reset --hard origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
+- Deployed staging `/api/version` = `b653e0d`, two commits behind HEAD; `git diff --stat b653e0d..HEAD` = `qa/LOG.md` + `qa/findings/open/QA-20260828-01.md` only — docs-only (the escalation-sweep entry and this morning's health-gate finding), health gate proceeds without a deploy wait.
+- Verify-first: 0 findings at `status: fixed-pending-verify` — 11 open findings, all `status: open` (7 `risky`, 4 `safe-fix`), nothing to re-verify or close this run.
+- **Health gate: still red, nothing has changed.** Queried the GitHub Actions history directly rather than trusting the last log entry's age: the last push-triggered run that actually executed the suite is still `33121391706` (run #254, sha `b653e0d`, 2026-08-27T22:10Z) — `changes`/`test` (lint+tsc+vitest)/`deploy-staging` all `success`, `e2e` still `failure` (same job id `98689707886`, same step "Playwright e2e against the live staging deployment" failing at the `[setup]` auth stage). No push-triggered run has landed since; every later run on `staging` is the qa-only docs-skip path (hollow green). This is the exact same break the 04:08Z audit filed as **QA-20260828-01** and the 06:33Z escalation sweep re-confirmed unresolved — did not re-diagnose (code hasn't moved since then, root cause already documented in that finding), just independently re-verified the CI state itself rather than assuming staleness.
+- Per `qa/AUDIT.md` run lifecycle §2 and the matching abort condition ("CI red on a base predating this run"), **did not run seed/rota/role-agent steps** — no marker rows created, no specs written, `qa/state.json` untouched (`lastAuditSha` stays `a2c1503`).
+- Marker sweep (read-only, no seeding this run): full query across `clients`(`notes`/`display_name`)/`leads`/`quotes`(`customer_name`)/`staff`/`vehicles`/`claims`/`storage_units`/`storage_sites`/`communications`/`appointments`/`operational_issues` for `QA-SENTINEL`, plus `auth.users` for `@qa.test` addresses — **0 everywhere**, `auth.users` at exactly the 3 persistent `e2e-*` fixtures. Nothing to clean up.
+- Findings filed: **0 new** — QA-20260828-01 already covers this exact break, filing a duplicate would just fragment the record. Specs added: **0**.
+- Both loop halves the 06:33Z sweep flagged are still down as of this run: producing half blocked by this same health gate a second consecutive audit cycle; repair half (first-pass) still hasn't logged an attempt since 2026-08-26T05:35Z, and the four safe-fix GitHub issues (#124/#125/#130/#131) are still open/untouched. Neither is fixable from inside this run's mandate (staging-only, no CI/infra config changes, no self-authorizing untried safe-fix work per `qa/REPAIR.md` §2) — flagged for Peter again, not acted on.
+- Pushes: one commit to `staging` (this log entry only — no app code, no findings changes). No PRs opened, `master` never touched. Rebased onto `origin/staging` immediately before pushing.
+- Time spent: ~18 min.
+
 ## 2026-08-28T06:33Z — escalation repair sweep (scheduled): nothing escalated — the loop is now stalled at BOTH ends, and the handoff surface is proven innocent
 
 - Tier: escalation (Opus). Checked out `origin/staging` @ `a2539a6`. `grep -rn "^escalate:" qa/findings/` → **empty**: no finding carries `escalate: opus-5`, so per `qa/REPAIR.md` §2 there is nothing for this tier to take. Nothing claimed, no branch cut, no PR opened, no escalations written, nothing left in `status: fixing`, `master` untouched, no DB or browser access used.
