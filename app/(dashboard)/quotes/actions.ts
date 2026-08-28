@@ -308,6 +308,13 @@ export async function saveQuoteDraft(id: string, values: QuoteFormValues) {
       // internal view and reporting can read it without unpacking the JSON.
       additional_charges: b.additionalCharges,
       additional_charges_reason: values.review.additionalChargesReason?.trim() || null,
+      // The commercial client's own PO reference (PRD §3.10). Trimmed and
+      // TRUNCATED to the `quotes_po_number_len` bound from migration 0113: the
+      // input caps at 64 too, but a value can also arrive by paste or from an
+      // older state_blob, and the constraint rejects the whole UPDATE — so an
+      // over-long PO would fail the entire quote save with a database error
+      // the office cannot act on.
+      po_number: values.review.poNumber?.trim().slice(0, 64) || null,
       vat_enabled: b.vatEnabled,
       vat_amount: b.vatAmount,
       grand_total: b.grandTotal,

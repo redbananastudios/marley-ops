@@ -185,6 +185,12 @@ export function QuoteView({ values, money }: { values: QuoteFormValues; money: Q
                       ? `${gbp(money.deposit_amount)} paid`
                       : `${gbp(money.deposit_amount)} awaiting`,
                   )}
+              {/* Shown only when the client actually issued one — an "PO: —"
+                  row would read as a gap to chase on the jobs that never had
+                  one, which is most of them. */}
+              {money.payment_policy === "commercial" && values.review.poNumber?.trim()
+                ? row("PO number", values.review.poNumber.trim())
+                : null}
             </>
           ) : null}
         </Card>

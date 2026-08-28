@@ -257,3 +257,94 @@ describe("/q renders a commercial quote for review, with no accept action", () =
     expect(residential).toMatch(/deposit<\/strong> secures the booking/);
   });
 });
+
+/* ------------------------------------------------------------------ gate 10b
+ * The completion invoice: the PO the client matches it against, and the date it
+ * actually falls due.
+ *
+ * `quotes.po_number` and `quotes.commercial_due_date` both arrived in migration
+ * 0113. The due date was READ by three sites and written by none until gate
+ * 10b; the PO was written by nobody and read by nobody at all — a column with a
+ * length constraint, a comment explaining its purpose, and no code anywhere. A
+ * column nothing reads is indistinguishable from a feature nobody built.
+ */
+describe("the completion invoice carries the client's reference and its real due date", () => {
+  const flowBody = () => {
+    const at = SRC.indexOf("export async function createBalanceInvoiceFlow(");
+    expect(at, "createBalanceInvoiceFlow not found — rename it here too").toBeGreaterThan(-1);
+    const end = SRC.indexOf("\n/**", at);
+    expect(end, "the invoice flow has no end").toBeGreaterThan(at);
+    return SRC.slice(at, end);
+  };
+
+  it("prints the PO on the invoice when the client issued one", () => {
+    const body = flowBody();
+    // On the document itself, not merely fetched: accounts payable matches on
+    // this reference, and an invoice they cannot match sits unpaid without
+    // anyone treating it as late.
+    expect(body).toContain("Your purchase order:");
+    expect(body).toContain("(PO ${po})");
+  });
+
+  it("never prints a PO on a residential invoice", () => {
+    // Reading it unconditionally would put an empty clause on every
+    // residential invoice, or a stale value on a re-typed client's quote.
+    expect(flowBody()).toContain('const po = commercialInvoice ? (quote.po_number ?? "").trim() : "";');
+  });
+
+  it("SELECTS the column, or every read of it is undefined", () => {
+    // The guard that matters most and looks least like one: the flow reads
+    // quote.po_number off a row fetched by QUOTE_COLS. Omit it there and every
+    // assertion above still passes while the PO silently never prints.
+    const cols = SRC.indexOf("const QUOTE_COLS");
+    const rowType = SRC.indexOf("export type AcceptQuoteRow");
+    expect(cols, "QUOTE_COLS not found").toBeGreaterThan(-1);
+    expect(rowType).toBeGreaterThan(cols);
+    expect(SRC.slice(cols, rowType)).toContain("po_number");
+  });
+
+  it("tells a commercial client their terms, not that it was due before the move", () => {
+    const body = flowBody();
+    expect(body).toContain('commercialInvoice ? "Payable on your agreed terms, by"');
+    // The residential sentence must survive as the other branch — the control
+    // that fails if the change was applied too broadly.
+    expect(body).toContain('"Payment in full is due before move day, by"');
+  });
+
+  it("dates the lead and the follow-up by the terms date", () => {
+    const body = flowBody();
+    // balanceDueDate() works back from the MOVE, which on a commercial job has
+    // already happened by the time this raise runs — so it dated the invoice in
+    // the past and filed the balance follow-up straight into the overdue
+    // section, on the day it was raised and well inside the client's terms.
+    const due = body.indexOf("const dueDate = commercialDueDate ?? balanceDueDate(quote.moving_date);");
+    expect(due, "dueDate no longer prefers the commercial terms date").toBeGreaterThan(-1);
+    // commercialDueDate must be computed BEFORE dueDate reads it, or this is a
+    // temporal-dead-zone crash rather than a wrong date.
+    const computed = body.indexOf("const commercialDueDate =");
+    expect(computed, "commercialDueDate is no longer computed in this flow").toBeGreaterThan(-1);
+    expect(computed).toBeLessThan(due);
+  });
+});
+
+describe("the PO reaches the database at all", () => {
+  const ACTIONS = readFileSync(join(process.cwd(), "app/(dashboard)/quotes/actions.ts"), "utf8");
+  const FORM = readFileSync(join(process.cwd(), "lib/quote/form-types.ts"), "utf8");
+
+  it("is persisted by the quote save, not just held in the wizard", () => {
+    expect(ACTIONS).toContain("po_number: values.review.poNumber?.trim().slice(0, 64) || null,");
+  });
+
+  it("is truncated to the length the database will accept", () => {
+    // `quotes_po_number_len` (migration 0113) rejects over 64, and it rejects
+    // the whole UPDATE — so an over-long PO arriving by paste or from an older
+    // state_blob would fail the entire quote save with a database error the
+    // office cannot act on.
+    expect(ACTIONS).toContain(".slice(0, 64)");
+  });
+
+  it("has a default, so an older quote hydrates without an undefined field", () => {
+    expect(FORM).toContain("poNumber: string;");
+    expect(FORM).toContain('poNumber: "",');
+  });
+});

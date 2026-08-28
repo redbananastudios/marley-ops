@@ -875,11 +875,15 @@ export function Step7Review({
   breakdown,
   actions,
   settings,
+  paymentPolicy,
 }: StepProps & {
   breakdown: QuoteBreakdown;
   actions: React.ReactNode;
   /** Cost rates for the internal margin figure. Absent → no margin shown. */
   settings?: BusinessSettings | null;
+  /** Which ladder this quote runs (PRD §3.10), resolved on the server. Gates
+   *  the PO field; absent means residential, so the step is unchanged. */
+  paymentPolicy?: "residential" | "commercial";
 }) {
   const r = values.review;
   const b = breakdown;
@@ -990,6 +994,32 @@ export function Step7Review({
         />
         <p className="mt-1.5 text-xs text-mist-400">Saved with the quote and shown to office and estimator only.</p>
       </div>
+
+      {/* PO number — COMMERCIAL only (PRD §3.10). Hidden on the residential
+          ladder rather than shown-and-ignored: a residential customer has no
+          purchase order, and an empty field the office learns to skip is how a
+          real one stops being noticed on the jobs that do have it. Never
+          required — confirmation must not wait on a client's paperwork. */}
+      {paymentPolicy === "commercial" ? (
+        <div className="mb-5 rounded-md border border-border bg-muted/40 p-4">
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <FieldLabel>PO number</FieldLabel>
+            <span className="text-xs font-medium text-mist-400">Optional</span>
+          </div>
+          <input
+            type="text"
+            value={r.poNumber}
+            maxLength={64}
+            onChange={(e) => set("review", { ...r, poNumber: e.target.value })}
+            placeholder="Their purchase-order reference, if they have issued one"
+            className="h-12 w-full rounded-md border border-input bg-card px-4 text-base text-foreground placeholder:text-mist-300 focus:border-mm-red focus:outline-none focus:ring-2 focus:ring-mm-red/30"
+          />
+          <p className="mt-1.5 text-xs text-mist-400">
+            Printed on the completion invoice when present. Leave blank if they have not issued
+            one — it never blocks confirming the booking.
+          </p>
+        </div>
+      ) : null}
 
       {/* Total card */}
       <div className="mb-6 overflow-hidden rounded-md border border-border">

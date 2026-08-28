@@ -206,7 +206,7 @@ async function clientPaymentTermsDays(
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at, po_number";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -276,6 +276,9 @@ export type AcceptQuoteRow = {
    *  cancel / mark-lost). Money surfaces must go quiet: no payment panels on
    *  /q, no date confirmation, no commitment invoice, no chases. */
   booking_cancelled_at: string | null;
+  /** Commercial only: the client's own purchase-order reference, printed on
+   *  the completion invoice when present (PRD §3.10). Never required. */
+  po_number?: string | null;
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
@@ -2912,21 +2915,36 @@ export async function createBalanceInvoiceFlow(
       // Same rule as the commitment invoice: card follows the brand's switch,
       // the disclosure follows the brand's identity.
       const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      // COMMERCIAL falls due on the client's agreed terms, not before move day
+      // — this raise happens AFTER the move. The residential lead sentence told
+      // a business client their invoice was already overdue on the day they
+      // received it, which is both wrong and the kind of wrong that gets
+      // forwarded to an accounts department.
+      const commercialInvoice = policyOfQuote(quote) === "commercial";
       const payClause = invoicePayClause(
         notesBrand,
         quote.quote_ref,
-        "Payment in full is due before move day, by",
+        commercialInvoice ? "Payable on your agreed terms, by" : "Payment in full is due before move day, by",
       );
+      // The client's own PO, when they issued one. Printed on the invoice
+      // because that is the reference their accounts payable matches against —
+      // an invoice without it can sit unpaid without anyone treating it as
+      // overdue, which is exactly the failure the terms date is meant to catch.
+      const po = commercialInvoice ? (quote.po_number ?? "").trim() : "";
+      const poClause = po ? ` Your purchase order: ${po}.` : "";
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
-        description: `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
+        description: commercialInvoice
+          ? `Removal services — quote ${quote.quote_ref}${po ? ` (PO ${po})` : ""}`
+          : `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
+        notes: commercialInvoice
+          ? `Removal completed, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}.${poClause} ${payClause}`
+          : `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
-    const dueDate = balanceDueDate(quote.moving_date);
     // COMMERCIAL: this raise IS the completion invoice (Peter, 2026-08-28 —
     // commercial invoices are raised BY HAND on completion, so this office
     // action is the moment, and there is no automation to add). It falls due on
@@ -2944,6 +2962,13 @@ export async function createBalanceInvoiceFlow(
       policyOfQuote(quote) === "commercial"
         ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
         : null;
+    // The date everything DOWNSTREAM of this raise is dated by — the lead's
+    // balance_due_date and the balance follow-up's due_at. `balanceDueDate`
+    // works back from the MOVE, which on a commercial job has already
+    // happened: it dated the completion invoice in the past and dropped the
+    // follow-up straight into the overdue section of the queue, on the day
+    // the invoice was raised and inside the client's terms.
+    const dueDate = commercialDueDate ?? balanceDueDate(quote.moving_date);
     await sb
       .from("quotes")
       .update({

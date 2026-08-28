@@ -63,6 +63,17 @@ export interface QuoteFormValues {
     additionalCharges: number;
     /** Short internal reason for the uplift (commercial access, stairs, …). Internal view only. */
     additionalChargesReason: string;
+    /**
+     * The COMMERCIAL client's own purchase-order reference (PRD §3.10), printed
+     * on the completion invoice when present. Optional by design and never
+     * blocking: refusing to confirm a booking because a PO has not been issued
+     * yet would hold a real job for paperwork.
+     *
+     * Capped at 64 to match the `quotes_po_number_len` constraint from
+     * migration 0113 — a longer value is rejected by the database, which would
+     * surface to the office as a failed save with no explanation.
+     */
+    poNumber: string;
     quoteNotes: string;
   };
   vatEnabled: boolean;
@@ -139,7 +150,13 @@ export function defaultQuoteValues(): QuoteFormValues {
     extras: { congestion: false, tolls: 0, parking: 0 },
     items: { ...ZERO_ITEMS },
     survey: { accessNotes: "", largeItemsNotes: "" },
-    review: { discount: 0, additionalCharges: 0, additionalChargesReason: "", quoteNotes: "" },
+    review: {
+      discount: 0,
+      additionalCharges: 0,
+      additionalChargesReason: "",
+      poNumber: "",
+      quoteNotes: "",
+    },
     vatEnabled: false,
   };
 }

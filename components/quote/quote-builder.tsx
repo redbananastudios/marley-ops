@@ -350,6 +350,7 @@ export function QuoteBuilder({
             breakdown={breakdown}
             actions={reviewActions}
             settings={settings}
+            paymentPolicy={paymentPolicy}
           />
         )}
       </div>
