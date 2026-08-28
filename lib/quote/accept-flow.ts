@@ -62,7 +62,13 @@ import {
   type CommitmentReceivedMeta,
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
-import { commitmentAmount, commitmentDueDate, requestedDeposit } from "@/lib/payments-policy";
+import {
+  commitmentAmount,
+  commitmentDueDate,
+  requestedDeposit,
+  resolvePaymentPolicy,
+  type PaymentPolicy,
+} from "@/lib/payments-policy";
 import { canResendBalanceInvoice } from "@/lib/payments/balance-resend";
 import {
   canResendCommitmentInvoice,
@@ -110,6 +116,53 @@ import { isLedgerAccessDenied } from "@/lib/ledger/access";
 import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
 
 type Sb = SupabaseClient<Database>;
+
+/**
+ * The payment policy to freeze onto a quote at acceptance (multi-brand PRD
+ * §3.10, gate 8). Read once, here, and written into the same UPDATE that marks
+ * the quote accepted — never re-derived afterwards, so a later edit to the
+ * client's type cannot rewrite the schedule of a booking already in flight.
+ *
+ * BOTH accept paths call this: the customer's own acceptance at /q, and the
+ * office accepting on their behalf. A snapshot written on only one of them is
+ * worse than no snapshot at all, because the missing rows are indistinguishable
+ * from genuinely-residential ones.
+ *
+ * A failed read resolves residential — the safe direction, since residential
+ * collects up front — but it is LOGGED rather than swallowed. "The client is
+ * residential" and "I could not find out what the client is" must not share a
+ * silent rendering, and this is a money decision.
+ */
+async function snapshotPaymentPolicy(
+  sb: Sb,
+  quote: { id: string; client_id: string | null; lead_id: string | null },
+): Promise<PaymentPolicy> {
+  // The quote's OWN client is the right source — the policy belongs to the
+  // client this quote is for. The lead is only a fallback for a quote that
+  // carries no client of its own; elsewhere in this file the order is reversed
+  // (`lead?.client_id ?? quote.client_id`) because those call sites are
+  // resolving who to invoice, which is a different question. Neither shape
+  // exists in production today (both counts were 0 on 2026-08-28), but a client
+  // merge is exactly the operation that would create one.
+  let clientId = quote.client_id;
+  if (!clientId && quote.lead_id) {
+    const { data: lead } = await sb.from("leads").select("client_id").eq("id", quote.lead_id).maybeSingle();
+    clientId = lead?.client_id ?? null;
+  }
+  if (!clientId) return "residential";
+
+  const { data, error } = await sb.from("clients").select("is_company").eq("id", clientId).maybeSingle();
+  if (error || !data) {
+    log.warn("quote.payment_policy.client_unreadable", {
+      quoteId: quote.id,
+      clientId,
+      reason: error ? error.message : "no client row",
+      fellBackTo: "residential",
+    });
+    return "residential";
+  }
+  return resolvePaymentPolicy(data);
+}
 
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
@@ -594,6 +647,7 @@ export async function acceptQuoteOnline(
   const deposit = requestedDeposit(agreed, quote.deposit_amount ?? settings.defaultDeposit, quote.moving_date);
 
   const acceptedAt = new Date().toISOString();
+  const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
   const { data: won, error } = await sb
     .from("quotes")
     .update({
@@ -603,6 +657,7 @@ export async function acceptQuoteOnline(
       accepted_ip: ip,
       agreed_price: agreed,
       deposit_amount: deposit,
+      payment_policy: paymentPolicy,
     } as never)
     .eq("id", quote.id)
     .eq("status", "sent") // double-submit / accept-vs-decline race: only one wins
@@ -807,6 +862,7 @@ export async function acceptQuoteByStaff(
   // both hang off the token — make sure it exists before anything sends.
   const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
 
+  const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
   const { data: won } = await sb
     .from("quotes")
     .update({
@@ -814,6 +870,7 @@ export async function acceptQuoteByStaff(
       accepted_at: new Date().toISOString(),
       agreed_price: agreed,
       deposit_amount: deposit,
+      payment_policy: paymentPolicy,
     } as never)
     .eq("id", quote.id)
     .in("status", ["draft", "sent"]) // double-tap / online-accept race: one winner

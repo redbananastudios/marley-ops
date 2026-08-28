@@ -157,6 +157,104 @@ export function isInsideChangeWindow(
   return days < COMMITMENT_DUE_DAYS_BEFORE;
 }
 
+/* --------------------------------------------- residential vs commercial */
+
+/**
+ * Which payment schedule a booking runs (multi-brand PRD §3.10, gate 8).
+ *
+ * `residential` is the entire ladder above — deposit, confirmation, commitment,
+ * balance — and is what every Marley booking to date has run. `commercial`
+ * skips all of it: no deposit, no commitment, no customer chase, one invoice
+ * raised when the job completes and due on the client's own terms.
+ *
+ * Brand does NOT differentiate this. A Pitmans residential move and a Marley
+ * residential move run the identical schedule; only the branding and the card
+ * rail differ.
+ */
+export type PaymentPolicy = "residential" | "commercial";
+
+/** The commercial terms the office can pick, in days (PRD §3.10). */
+export const PAYMENT_TERMS_DAY_OPTIONS = [30, 60] as const;
+
+/** Terms a client carries when nobody chooses otherwise. */
+export const DEFAULT_PAYMENT_TERMS_DAYS = 30;
+
+/**
+ * The policy for a client. `clients.is_company` is the marker: before gate 8 it
+ * only chose which display name to render, so from here it drives real money
+ * behaviour.
+ *
+ * Anything unknown — no client, a null flag, a client row we could not read —
+ * resolves to `residential`, and the direction of that default is deliberate
+ * rather than incidental. Residential asks for money UP FRONT; commercial
+ * extends credit and switches the chase off. Guessing "commercial" for a client
+ * nobody classified would silently hand out payment terms and stop chasing a
+ * booking that needed both — and the surface that would have shown the mistake
+ * is the chase queue the guess just emptied. Guessing "residential" asks a
+ * company for a deposit, which is a conversation rather than a loss.
+ */
+export function resolvePaymentPolicy(
+  client: { is_company?: boolean | null } | null | undefined,
+): PaymentPolicy {
+  return client?.is_company === true ? "commercial" : "residential";
+}
+
+/**
+ * Read the policy snapshotted onto a quote. The single place the null rule
+ * lives, so no caller invents its own.
+ *
+ * Null is not a defect to shout about — three legitimate paths produce it. A
+ * quote that has not been accepted yet has no snapshot by design. Migration
+ * 0111 backfills only rows accepted before it ran, so a quote accepted in the
+ * window between that migration and the code deploy that writes the column has
+ * none either. And an unreadable client row falls back rather than blocking an
+ * acceptance.
+ *
+ * All three mean the same thing operationally — this booking runs the ladder
+ * every Marley booking has always run — so they resolve to `residential`, the
+ * direction that collects money up front rather than extending credit.
+ */
+export function policyOfQuote(
+  quote: { payment_policy?: string | null } | null | undefined,
+): PaymentPolicy {
+  return quote?.payment_policy === "commercial" ? "commercial" : "residential";
+}
+
+/**
+ * Coerce a stored terms value onto the allowed set. The DB constraint already
+ * rejects anything else, so this guards the read side only: a legacy null, or a
+ * value that arrived before the constraint existed, must not reach a due-date
+ * calculation as NaN and silently produce an invoice due on 1970-01-01.
+ */
+export function paymentTermsDays(value: number | null | undefined): number {
+  const n = Number(value);
+  return (PAYMENT_TERMS_DAY_OPTIONS as readonly number[]).includes(n)
+    ? n
+    : DEFAULT_PAYMENT_TERMS_DAYS;
+}
+
+/**
+ * When a commercial invoice falls due: the day it was raised plus the client's
+ * terms, in UK calendar days (same day maths as the rest of this module — the
+ * date on an invoice is what the customer was told, not a UTC instant).
+ *
+ * Gate 8 ships this unused by design; gate 10's completion invoice is its only
+ * caller. It lives here so the arithmetic is test-locked in the same suite as
+ * the rest of the ladder rather than invented inside a server action.
+ */
+export function paymentTermsDueDate(
+  raisedOn: Date | string | null | undefined,
+  termsDays: number | null | undefined,
+): string {
+  const raisedDay =
+    typeof raisedOn === "string"
+      ? (ukDayOf(raisedOn) ?? ukToday(new Date()))
+      : ukToday(raisedOn instanceof Date ? raisedOn : new Date());
+  const base = dayToMs(raisedDay);
+  if (base === null) return raisedDay;
+  return msToDay(base + paymentTermsDays(termsDays) * DAY_MS);
+}
+
 /* ------------------------------------------------------------- held money */
 
 export type PaymentRail = "card" | "bank_transfer" | "cash";

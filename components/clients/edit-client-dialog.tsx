@@ -25,12 +25,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PAYMENT_TERMS_DAY_OPTIONS, DEFAULT_PAYMENT_TERMS_DAYS } from "@/lib/payments-policy";
 import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
 import { updateClientAction, setClientActiveAction } from "@/app/(dashboard)/clients/actions";
 
 export interface EditableClient {
   id: string;
   is_company: boolean | null;
+  payment_terms_days: number | null;
   company_name: string | null;
   business_number: string | null;
   first_name: string | null;
@@ -51,6 +53,7 @@ export interface EditableClient {
 
 interface Values {
   isCompany: boolean;
+  paymentTermsDays: number;
   companyName: string;
   businessNumber: string;
   firstName: string;
@@ -66,6 +69,7 @@ const isEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 function valuesFrom(c: EditableClient): Values {
   return {
     isCompany: !!c.is_company,
+    paymentTermsDays: c.payment_terms_days ?? DEFAULT_PAYMENT_TERMS_DAYS,
     companyName: c.company_name ?? "",
     businessNumber: c.business_number ?? "",
     firstName: c.first_name ?? "",
@@ -145,6 +149,7 @@ export function ClientEditControls({ client, isAdmin }: { client: EditableClient
     try {
       const res = await updateClientAction(client.id, {
         isCompany: v.isCompany,
+        paymentTermsDays: v.paymentTermsDays,
         companyName: v.companyName || undefined,
         businessNumber: v.businessNumber || undefined,
         firstName: v.firstName || undefined,
@@ -211,9 +216,17 @@ export function ClientEditControls({ client, isAdmin }: { client: EditableClient
                 onChange={(e) => setV((s) => ({ ...s, isCompany: e.target.checked }))}
                 className="size-4 accent-mm-red"
               />
-              <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-                <Building2 className="size-4 text-mist-400" strokeWidth={1.75} />
-                Is this client a company?
+              <span className="text-sm font-medium text-foreground">
+                <span className="flex items-center gap-1.5">
+                  <Building2 className="size-4 text-mist-400" strokeWidth={1.75} />
+                  Commercial client — invoiced on account
+                </span>
+                <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                  Commercial bookings skip the deposit and the 25% commitment. One invoice is
+                  raised when the job completes, due on the terms below, and the customer is
+                  never chased automatically. Bookings already accepted keep the schedule they
+                  were accepted on.
+                </span>
               </span>
             </label>
 
@@ -226,6 +239,19 @@ export function ClientEditControls({ client, isAdmin }: { client: EditableClient
                 <div className="grid gap-2">
                   <Label htmlFor="ec-bizno">Business number</Label>
                   <Input id="ec-bizno" value={v.businessNumber} onChange={set("businessNumber")} placeholder="Company no." />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="ec-terms">Payment terms</Label>
+                  <select
+                    id="ec-terms"
+                    value={v.paymentTermsDays}
+                    onChange={(e) => setV((s) => ({ ...s, paymentTermsDays: Number(e.target.value) }))}
+                    className="focus-ring h-11 rounded-lg border border-input bg-background px-3 text-sm"
+                  >
+                    {PAYMENT_TERMS_DAY_OPTIONS.map((d) => (
+                      <option key={d} value={d}>{d} days</option>
+                    ))}
+                  </select>
                 </div>
               </div>
             ) : null}
