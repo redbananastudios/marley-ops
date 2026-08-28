@@ -573,9 +573,25 @@ stale id. §8's hazard is real but confined to the **read** direction.
 2. **Which three accounts** the picker's rails map to, once credentials exist (§12.2).
    Not a lookup for Peter: three choices from a list we render.
 3. **Null `quotes.client_id`** at the contact call sites (§12.3).
-4. **`clients.merged_into_id`** — a client row can be tombstoned after its
-   ContactNumber is already stamped into Xero, leaving a contact keyed on a dead id.
-   Needs a rule (follow the merge, or re-stamp).
+4. ~~**`clients.merged_into_id`**~~ — **SETTLED at gate 18a (2026-08-28): no adapter
+   code, and the obligation moves to the merge.** The premise does not hold today.
+   Nothing in the repo writes `merged_into_id` (all 21 references are reads or DDL —
+   it exists to support the two partial unique indexes of the dedupe spine), and 0
+   of 139 production client rows have it set, so there is no merge path to follow.
+   Neither option was right: a merge sets the column, it does not delete the row
+   (the `quotes.client_id` FK would block that), so `MMOPS-{dead-id}` keeps
+   resolving to a real, correct contact for every document already raised — nothing
+   breaks retroactively. Following the chain would mean a `clients` read on every
+   contact resolution, on the money path, for a condition that has occurred zero
+   times, with a cycle risk (`merged_into_id` is self-referential with no depth
+   guard). Re-stamping is worse still: it writes to contacts a human may have
+   edited, against §12.3's own rule never to blind-stamp a ContactNumber.
+   **The rule to carry instead:** whenever a client-merge is built, it must reassign
+   `quotes.client_id`, `storage_lets.client_id` and `card_payments.client_id` (plus
+   the other `client_id` FKs) to the survivor inside the merge transaction. The next
+   raise then resolves the survivor's `MMOPS-{id}` naturally and the loser's Xero
+   contact simply goes unused. Residual, accepted: a person merged *between* two
+   raises gets a second contact — duplication, human-fixable, never a mis-bill.
 5. **Invoice PDFs** — Zoho's own VAT documents die with the account. Archive to a
    private bucket? UK VAT retention is commonly cited as six years; confirm with the
    accountant.
