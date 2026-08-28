@@ -3,7 +3,7 @@ import { AlertTriangle, CalendarPlus, CheckCircle2, PauseCircle, Users } from "l
 import { createClient } from "@/lib/supabase/server";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
 import { moveDateLabel } from "@/lib/quote/payments";
-import { daysBetweenUk, type BookingBucket } from "@/lib/bookings/queue";
+import { daysBetweenUk, queueMoney, type BookingBucket } from "@/lib/bookings/queue";
 import { loadBookingRows, ukDayOfInstant as ukDayOf, type BookingRow as Row } from "@/lib/bookings/load-signals";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
 import { listActiveBrands } from "@/lib/brand";
@@ -209,12 +209,13 @@ export default async function BookingsPage({
   const balanceDueRows = by("balance_due").sort(byMoveDay);
   const allSet = by("all_set").sort(byMoveDay);
 
-  const commitmentToCollect = commitmentOverdue.concat(commitmentDue).reduce((s, r) => s + r.commitmentInvoiceAmount, 0);
-  // Reads the same computed figure as /payments. It previously required
-  // depositPaidAt, so a job moving this week with the deposit unpaid reported
-  // £0 outstanding while /payments Upcoming counted its full balance
-  // (QA-20260820-04).
-  const balanceOutstanding = rows.reduce((s, r) => s + r.owed.balance, 0);
+  // Both money tiles read the SAME per-obligation ledger as /payments. The 25%
+  // tile used to sum the commitment_* BUCKETS, which the ladder only reaches
+  // once the deposit is paid and a removal appointment exists — so an invoiced,
+  // unpaid 25% on a booking whose slot is not in the diary yet read as £0 while
+  // /payments counted it (QA-20260826-01). The balance tile had already been
+  // fixed for the identical shape (QA-20260820-04); this puts both on one seam.
+  const money = queueMoney(rows);
   const needsCrew = (r: Row) =>
     !!r.apptStartsAt && r.crewAssigned === 0 && daysBetweenUk(todayUk, ukDayOf(r.apptStartsAt)) >= 0;
   const toAllocate = rows.filter(needsCrew);
@@ -385,20 +386,20 @@ export default async function BookingsPage({
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Stat
-          label="£100 outstanding"
-          value={gbp(awaiting.reduce((s, r) => s + r.deposit, 0))}
-          sub={`${awaiting.length} job${awaiting.length === 1 ? "" : "s"} · auto-chased day 1 and 3`}
+          label="Deposits outstanding"
+          value={gbp(money.depositsOutstanding)}
+          sub={`${money.depositJobs} job${money.depositJobs === 1 ? "" : "s"} · auto-chased day 1 and 3`}
         />
         <Stat
           label="25% to collect"
-          value={gbp(commitmentToCollect)}
+          value={gbp(money.commitment)}
           sub={
             commitmentOverdue.length
-              ? `${commitmentOverdue.length} overdue · chased at T-10`
-              : `${commitmentDue.length} invoiced · chased at T-10`
+              ? `${commitmentOverdue.length} overdue · ${money.commitmentJobs} invoiced · chased at T-10`
+              : `${money.commitmentJobs} invoiced · chased at T-10`
           }
         />
-        <Stat label="Balance outstanding" value={gbp(balanceOutstanding)} sub="due in full before move day" />
+        <Stat label="Balance to collect" value={gbp(money.balance)} sub="final balances only, not the 25%" />
         <Stat
           label="To allocate"
           value={String(toAllocate.length)}

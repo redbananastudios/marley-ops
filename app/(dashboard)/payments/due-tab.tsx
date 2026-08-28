@@ -2,16 +2,25 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadBookingRows, ukDayOfInstant, type BookingRow } from "@/lib/bookings/load-signals";
-import { daysBetweenUk, type BookingBucket } from "@/lib/bookings/queue";
+import { daysBetweenUk, queueMoney, type BookingBucket } from "@/lib/bookings/queue";
 import { applyBrandFilter } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { poundsMoney, shortDate } from "./format";
 
 /**
  * Due — what customers owe RIGHT NOW, with real £ totals per lifecycle stage.
- * Same rows and classifier as /bookings (lib/bookings/load-signals), so the
- * two surfaces can never disagree; this one is the admin money read, Bookings
- * stays the office action queue.
+ * Same rows, same classifier and the same per-obligation money seam as
+ * /bookings (queueMoney) — this one is the admin money read, Bookings stays
+ * the office action queue.
+ *
+ * What that shared seam does and does not promise: both pages compute every
+ * figure from the SAME rows and the SAME obligations, so no figure here can
+ * contradict one there. It does NOT mean any single headline equals any
+ * single tile — this page's "Owed right now" is 25% + balance together,
+ * while /bookings decomposes the same money into one tile per rung. A QA
+ * ledger entry once recorded "/bookings Balance outstanding matches
+ * /payments Due exactly" as an invariant; it only ever held on a day with no
+ * unpaid 25% (QA-20260826-01). Tile2 + tile3 is the identity that holds.
  */
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: "danger" }) {
@@ -144,8 +153,9 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
   // £100 deposits are excluded entirely, because a deposit secures a booking
   // rather than falling due today (Peter, 2026-08-20). The deposits queue
   // below is unchanged; it just no longer inflates the headline.
-  const overdueTotal = rows.reduce((s, r) => s + r.owed.overdue, 0);
-  const dueTotal = rows.reduce((s, r) => s + r.owed.total, 0) - overdueTotal;
+  const money = queueMoney(rows);
+  const overdueTotal = money.overdue;
+  const dueTotal = money.owedNow - overdueTotal;
 
   const moveIn = (r: BookingRow): string => {
     if (!r.apptStartsAt) return "";
