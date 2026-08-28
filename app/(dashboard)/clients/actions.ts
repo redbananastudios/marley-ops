@@ -8,6 +8,7 @@ import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
 import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
+import { paymentTermsDays } from "@/lib/payments-policy";
 
 async function actor() {
   const sb = await createClient();
@@ -55,6 +56,8 @@ interface AddressInput {
 
 export interface CreateClientInput {
   isCompany?: boolean;
+  /** Commercial payment terms in days (30 | 60). Ignored unless isCompany. */
+  paymentTermsDays?: number;
   companyName?: string;
   businessNumber?: string;
   firstName?: string;
@@ -108,6 +111,10 @@ export async function createClientAction(input: CreateClientInput) {
       .insert({
         display_name: displayName,
         is_company: isCompany,
+        // Normalised, never trusted raw: the DB check constraint rejects
+        // anything but 30/60, and a rejected write would fail the whole
+        // client save rather than the one field the office got wrong.
+        payment_terms_days: paymentTermsDays(input.paymentTermsDays),
         company_name: companyName,
         business_number: clean(input.businessNumber),
         first_name: firstName,
@@ -188,6 +195,10 @@ export async function updateClientAction(id: string, input: CreateClientInput) {
       .update({
         display_name: displayName,
         is_company: isCompany,
+        // Normalised, never trusted raw: the DB check constraint rejects
+        // anything but 30/60, and a rejected write would fail the whole
+        // client save rather than the one field the office got wrong.
+        payment_terms_days: paymentTermsDays(input.paymentTermsDays),
         company_name: companyName,
         business_number: clean(input.businessNumber),
         first_name: firstName,

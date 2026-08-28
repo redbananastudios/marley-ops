@@ -1078,6 +1078,7 @@ export type Database = {
           last_name: string | null
           merged_into_id: string | null
           notes: string | null
+          payment_terms_days: number
           phone_e164: string | null
           phone_raw: string | null
           postcode_home: string | null
@@ -1104,6 +1105,7 @@ export type Database = {
           last_name?: string | null
           merged_into_id?: string | null
           notes?: string | null
+          payment_terms_days?: number
           phone_e164?: string | null
           phone_raw?: string | null
           postcode_home?: string | null
@@ -1130,6 +1132,7 @@ export type Database = {
           last_name?: string | null
           merged_into_id?: string | null
           notes?: string | null
+          payment_terms_days?: number
           phone_e164?: string | null
           phone_raw?: string | null
           postcode_home?: string | null
@@ -3127,6 +3130,7 @@ export type Database = {
           moving_date: string | null
           moving_date_estimated: boolean
           packing: string | null
+          payment_policy: string | null
           pdf_path: string | null
           quote_ref: string
           sms_send_count: number
@@ -3206,6 +3210,7 @@ export type Database = {
           moving_date?: string | null
           moving_date_estimated?: boolean
           packing?: string | null
+          payment_policy?: string | null
           pdf_path?: string | null
           quote_ref: string
           sms_send_count?: number
@@ -3285,6 +3290,7 @@ export type Database = {
           moving_date?: string | null
           moving_date_estimated?: boolean
           packing?: string | null
+          payment_policy?: string | null
           pdf_path?: string | null
           quote_ref?: string
           sms_send_count?: number

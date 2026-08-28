@@ -5,6 +5,11 @@ import {
   commitmentAmount,
   commitmentDueDate,
   commitmentDueImmediately,
+  DEFAULT_PAYMENT_TERMS_DAYS,
+  paymentTermsDays,
+  paymentTermsDueDate,
+  policyOfQuote,
+  resolvePaymentPolicy,
   isInsideChangeWindow,
   refundOutcome,
   requestedDeposit,
@@ -342,5 +347,117 @@ describe("DATE_CONFIRM_ACKS (PRD §5A)", () => {
     expect(label).toContain("within 7 days");
     expect(label).toContain("25%");
     expect(label).toContain("refunded in full if the day is re-booked");
+  });
+});
+
+/* ------------------------------------------- gate 8: residential vs commercial */
+
+describe("resolvePaymentPolicy", () => {
+  it("reads a flagged client as commercial", () => {
+    expect(resolvePaymentPolicy({ is_company: true })).toBe("commercial");
+  });
+
+  it("reads an unflagged client as residential", () => {
+    expect(resolvePaymentPolicy({ is_company: false })).toBe("residential");
+  });
+
+  it("falls to residential — the collect-up-front direction — on anything unknown", () => {
+    // Never guess "commercial": that hands out payment terms and switches off
+    // the chase, and the queue that would have shown the mistake is the one the
+    // guess just emptied. Guessing residential only asks a company for a
+    // deposit, which is a conversation rather than a loss.
+    expect(resolvePaymentPolicy({ is_company: null })).toBe("residential");
+    expect(resolvePaymentPolicy({})).toBe("residential");
+    expect(resolvePaymentPolicy(null)).toBe("residential");
+    expect(resolvePaymentPolicy(undefined)).toBe("residential");
+  });
+
+  it("does not accept a truthy non-true value as commercial", () => {
+    // Guards a stringly-typed read (PostgREST returning "true"/"f") from
+    // silently promoting a residential client onto account terms.
+    expect(resolvePaymentPolicy({ is_company: "true" } as never)).toBe("residential");
+    expect(resolvePaymentPolicy({ is_company: 1 } as never)).toBe("residential");
+  });
+});
+
+describe("policyOfQuote", () => {
+  it("reads the snapshot when one was taken", () => {
+    expect(policyOfQuote({ payment_policy: "commercial" })).toBe("commercial");
+    expect(policyOfQuote({ payment_policy: "residential" })).toBe("residential");
+  });
+
+  it("reads every not-snapshotted shape as residential", () => {
+    // Three legitimate sources of null: an unaccepted quote, a quote accepted
+    // in the window between migration 0111 and the deploy that writes the
+    // column, and an unreadable client row at acceptance. All three mean the
+    // booking runs the ladder every Marley booking has always run.
+    expect(policyOfQuote({ payment_policy: null })).toBe("residential");
+    expect(policyOfQuote({})).toBe("residential");
+    expect(policyOfQuote(null)).toBe("residential");
+    expect(policyOfQuote(undefined)).toBe("residential");
+  });
+
+  it("never reads an unrecognised value as commercial", () => {
+    expect(policyOfQuote({ payment_policy: "COMMERCIAL" })).toBe("residential");
+    expect(policyOfQuote({ payment_policy: "business" })).toBe("residential");
+  });
+});
+
+describe("paymentTermsDays", () => {
+  it("passes through the two values the office can pick", () => {
+    expect(paymentTermsDays(30)).toBe(30);
+    expect(paymentTermsDays(60)).toBe(60);
+  });
+
+  it("coerces anything else to the 30-day default", () => {
+    // The DB check constraint rejects these on write; this guards the READ
+    // side, so a legacy null can never reach a due-date calculation as NaN and
+    // silently produce an invoice due in 1970.
+    expect(paymentTermsDays(null)).toBe(DEFAULT_PAYMENT_TERMS_DAYS);
+    expect(paymentTermsDays(undefined)).toBe(DEFAULT_PAYMENT_TERMS_DAYS);
+    expect(paymentTermsDays(45)).toBe(DEFAULT_PAYMENT_TERMS_DAYS);
+    expect(paymentTermsDays(0)).toBe(DEFAULT_PAYMENT_TERMS_DAYS);
+    expect(paymentTermsDays(Number.NaN)).toBe(DEFAULT_PAYMENT_TERMS_DAYS);
+  });
+});
+
+describe("paymentTermsDueDate", () => {
+  it("adds the client's terms to the day the invoice was raised", () => {
+    expect(paymentTermsDueDate("2026-09-01T10:00:00Z", 30)).toBe("2026-10-01");
+    expect(paymentTermsDueDate("2026-09-01T10:00:00Z", 60)).toBe("2026-10-31");
+  });
+
+  it("counts UK calendar days, so a late-evening BST instant is already tomorrow", () => {
+    // 23:30 UTC on 1 Sept is 00:30 on the 2nd in London — the invoice is dated
+    // the 2nd, so its terms run from the 2nd.
+    expect(paymentTermsDueDate("2026-09-01T23:30:00Z", 30)).toBe("2026-10-02");
+  });
+
+  it("crosses the BST→GMT boundary without dropping or gaining a day", () => {
+    // 2026 clocks go back on 25 October; 30 days from 10 Oct is 9 Nov either side.
+    expect(paymentTermsDueDate("2026-10-10T12:00:00Z", 30)).toBe("2026-11-09");
+  });
+
+  it("falls back to the default terms rather than producing a nonsense date", () => {
+    expect(paymentTermsDueDate("2026-09-01T10:00:00Z", null)).toBe("2026-10-01");
+    expect(paymentTermsDueDate("2026-09-01T10:00:00Z", 45)).toBe("2026-10-01");
+  });
+});
+
+describe("gate 8 leaves the residential ladder alone", () => {
+  // The PRD's headline property, asserted here rather than assumed. If any of
+  // these move, gate 8 has stopped being a foundation gate.
+  it("still asks the plain deposit outside the commitment window", () => {
+    const today = new Date("2026-09-01T09:00:00Z");
+    expect(requestedDeposit(2000, 100, "2026-10-01", today)).toBe(100);
+  });
+
+  it("still collapses to 25% inside the commitment window", () => {
+    const today = new Date("2026-09-01T09:00:00Z");
+    expect(requestedDeposit(2000, 100, "2026-09-04", today)).toBe(500);
+  });
+
+  it("still computes the commitment as 25% of gross minus the deposit", () => {
+    expect(commitmentAmount(2000, 100)).toBe(400);
   });
 });

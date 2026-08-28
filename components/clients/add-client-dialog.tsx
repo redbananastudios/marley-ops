@@ -23,6 +23,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PAYMENT_TERMS_DAY_OPTIONS, DEFAULT_PAYMENT_TERMS_DAYS } from "@/lib/payments-policy";
 import {
   Select,
   SelectContent,
@@ -41,6 +42,7 @@ import {
 
 interface Values {
   isCompany: boolean;
+  paymentTermsDays: number;
   companyName: string;
   businessNumber: string;
   firstName: string;
@@ -53,6 +55,7 @@ interface Values {
 
 const EMPTY: Values = {
   isCompany: false,
+  paymentTermsDays: DEFAULT_PAYMENT_TERMS_DAYS,
   companyName: "",
   businessNumber: "",
   firstName: "",
@@ -167,6 +170,7 @@ export function AddClientDialog({
     try {
       const res = await createClientAction({
         isCompany: v.isCompany,
+        paymentTermsDays: v.paymentTermsDays,
         companyName: v.companyName || undefined,
         businessNumber: v.businessNumber || undefined,
         firstName: v.firstName || undefined,
@@ -319,9 +323,16 @@ export function AddClientDialog({
               onChange={(e) => setV((s) => ({ ...s, isCompany: e.target.checked }))}
               className="size-4 accent-mm-red"
             />
-            <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
-              <Building2 className="size-4 text-mist-400" strokeWidth={1.75} />
-              Is this client a company?
+            <span className="text-sm font-medium text-foreground">
+              <span className="flex items-center gap-1.5">
+                <Building2 className="size-4 text-mist-400" strokeWidth={1.75} />
+                Commercial client — invoiced on account
+              </span>
+              <span className="mt-0.5 block text-xs font-normal text-muted-foreground">
+                Commercial bookings skip the deposit and the 25% commitment. One invoice is
+                raised when the job completes, due on the terms below, and the customer is
+                never chased automatically.
+              </span>
             </span>
           </label>
 
@@ -334,6 +345,19 @@ export function AddClientDialog({
               <div className="grid gap-2">
                 <Label htmlFor="ac-bizno">Business number</Label>
                 <Input id="ac-bizno" value={v.businessNumber} onChange={set("businessNumber")} placeholder="Company no." />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="ac-terms">Payment terms</Label>
+                <select
+                  id="ac-terms"
+                  value={v.paymentTermsDays}
+                  onChange={(e) => setV((s) => ({ ...s, paymentTermsDays: Number(e.target.value) }))}
+                  className="focus-ring h-11 rounded-lg border border-input bg-background px-3 text-sm"
+                >
+                  {PAYMENT_TERMS_DAY_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d} days</option>
+                  ))}
+                </select>
               </div>
             </div>
           ) : null}

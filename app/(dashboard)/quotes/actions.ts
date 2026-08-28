@@ -20,6 +20,7 @@ import { recommendVans } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { quoteRefKind } from "@/lib/quote/ref";
+import { resolvePaymentPolicy } from "@/lib/payments-policy";
 import { DEFAULT_BRAND } from "@/lib/brand";
 import { planSupersede, refList, type SiblingQuote } from "@/lib/quote/supersede";
 
@@ -148,8 +149,14 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
   const pricing = await getPricingConfig(sb);
   const breakdown = computeQuote(deriveInputs(seed), pricing);
 
-  // Residential vs commercial reference kind (R/C), from the lead's move type.
-  const kind = quoteRefKind(lead?.property_size);
+  // Residential vs commercial reference kind (R/C). Since gate 8 the client's
+  // own type leads (PRD §3.10) and the lead's property size is only the
+  // fallback hint — see quoteRefKind. A lead-less draft has neither and lands
+  // residential, which is what it renders as today.
+  const { data: refClient } = lead?.client_id
+    ? await sb.from("clients").select("is_company").eq("id", lead.client_id).maybeSingle()
+    : { data: null };
+  const kind = quoteRefKind(resolvePaymentPolicy(refClient), lead?.property_size);
   // The ref's brand prefix (MM/PM) follows the lead's brand, with the same
   // DEFAULT_BRAND fallback as the denormalised `brand` column in the insert
   // below — one variable feeds both so the ref and the row can never disagree.
