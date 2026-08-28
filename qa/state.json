@@ -788,6 +788,22 @@
         "app/actions/refunds.ts",
         "e2e/office/mark-lost.spec.ts"
       ]
+    },
+    "gate8_gate9a_payment_policy_live_verify": {
+      "lastTestedAt": null,
+      "lastResult": null,
+      "note": "STILL NOT LIVE-TESTED, second run in a row to try and fail on time. Gate 8 (f062756, residential/commercial payment policy via clients.is_company) and gate 9a (6c34753, business_settings.small_job_threshold -- migration 0112, live value on staging confirmed via SQL = 300) merged onto staging this run's checkout and have ONLY unit coverage (tests/lib/payments-policy.test.ts) -- never driven through the real UI+DB on deployed staging. A dispatched Sonnet role-agent spent its full 20-minute budget on environment setup (the pinned @playwright/test version wants a chromium-headless-shell build not present at /opt/pw-browsers -- worked around by pointing executablePath at the installed full build directly, e.g. /opt/pw-browsers/chromium-1194/chrome-linux/chrome; a first login attempt raced the click against page hydration and silently failed, needed response-logging to debug) and never reached scenario 1 (small residential: one full-gross payment, no commitment/balance), scenario 2 (small commercial: is_company=true set via the real add/edit-client dialog, payment_policy='commercial' snapshotted, no deposit chase at all), or scenario 3 (ordinary >threshold residential: confirm the existing deposit+commitment ladder math is unchanged). Zero marker rows were created or left behind -- cleanup verified 0 before it even started seeding. Next run: reuse the executablePath workaround above to skip the environment-debugging tax, and budget the UI+DB round trip itself, not the harness setup.",
+      "watch": [
+        "lib/payments-policy.ts",
+        "lib/quote/accept-flow.ts",
+        "lib/quote/ref.ts",
+        "app/(dashboard)/clients/actions.ts",
+        "app/(dashboard)/quotes/actions.ts",
+        "components/clients/add-client-dialog.tsx",
+        "components/clients/edit-client-dialog.tsx",
+        "supabase/migrations/0111_payment_policy.sql",
+        "supabase/migrations/0112_small_job_threshold.sql"
+      ]
     }
   }
 }
