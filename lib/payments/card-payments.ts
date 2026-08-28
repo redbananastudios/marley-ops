@@ -675,7 +675,12 @@ export async function refundCardPayment(
       customerName: quote?.customer_name ?? null,
       customerEmail: quote?.customer_email ?? null,
       leadId: row.lead_id,
-      clientId: row.client_id,
+      // `card_payments.client_id` is nullable AND `on delete set null`, while the
+      // quote fetched above carries the live one. Preferring the row's own value
+      // and falling back to the quote's means the contact key is present in every
+      // case where it exists at all — this is the one caller that could hand a
+      // null into a path where a real client id was two lines away.
+      clientId: row.client_id ?? quote?.client_id ?? null,
       amountPence: amount,
       mode: "creditcard",
       voided,

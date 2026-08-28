@@ -414,6 +414,12 @@ export async function raiseDueStorageInvoices(
             name: client?.display_name ?? "Storage customer",
             email: client?.email ?? null,
             phone: client?.phone_e164 ?? client?.phone_raw ?? null,
+            // `storage_lets.client_id` is NOT NULL (0021_storage.sql:39), so no
+            // fallback is reachable here. Note the asymmetry this buys: the
+            // joined `client` row may be missing (the chunked read can miss it),
+            // which is why the NAME falls back to "Storage customer" — but the
+            // KEY is always sound, which is exactly the point of keying on an id.
+            party: { kind: "client", id: let_.client_id },
           });
           ref = await createInvoice({
             customerId: contactId,

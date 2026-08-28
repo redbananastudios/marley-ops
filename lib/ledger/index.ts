@@ -21,9 +21,11 @@ import type {
   RefundCreditNoteInput,
 } from "./types";
 import { LedgerError } from "./types";
+import type { LedgerParty } from "./party";
 import { zohoAdapter } from "./zoho-adapter";
 
 export * from "./types";
+export { partyForQuote, type LedgerParty } from "./party";
 
 /**
  * Which system NEW documents are raised in. Unset means Zoho — today's
@@ -127,6 +129,7 @@ export function findOrCreateContact(input: {
   name: string;
   email?: string | null;
   phone?: string | null;
+  party: LedgerParty;
 }): Promise<string> {
   return adapterFor().findOrCreateContact(input);
 }
