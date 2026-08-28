@@ -89,6 +89,17 @@ export interface DateConfirmationMeta {
   commitmentDueLabel?: string | null;
   invoiceNumber?: string | null;
   invoiceUrl?: string | null;
+  /**
+   * What would remain after the commitment — the T-7 balance. Present only when
+   * settling in full is genuinely on offer (PRD §3.10 Addition 3): the same
+   * `payInFullAvailable` gate the /q page and the server action use, so the
+   * email never advertises a choice the page would not honour.
+   *
+   * Absent/0 renders today's exact bytes.
+   */
+  balanceRemaining?: number | null;
+  /** Where the customer takes the choice — their own /q page. */
+  payUrl?: string | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
   brand?: Brand | null;
 }
@@ -110,6 +121,11 @@ function dueClausePlain(dueLabel: string | null | undefined): string {
 
 function commitmentBlockHtml(m: DateConfirmationMeta, t: EmailTheme): string {
   if (m.commitmentAmount > 0) {
+    // Settling in full is an OFFER, never a nudge: the 25% the customer agreed
+    // is the card that comes first and the one the copy leads with. The second
+    // card appears only when the /q page would actually honour the choice.
+    const remaining = Number(m.balanceRemaining ?? 0) > 0 ? Number(m.balanceRemaining) : 0;
+    const full = m.commitmentAmount + remaining;
     return [
       amountCard(
         `Commitment payment${m.invoiceNumber ? ` · Invoice ${escapeHtml(m.invoiceNumber)}` : ""}`,
@@ -117,10 +133,24 @@ function commitmentBlockHtml(m: DateConfirmationMeta, t: EmailTheme): string {
         t,
         `${dueClausePlain(m.commitmentDueLabel)} · counts towards your final bill`,
       ),
+      remaining > 0
+        ? amountCard(
+            "Or settle in full",
+            full,
+            t,
+            "Nothing more to pay before your move",
+          )
+        : "",
       m.invoiceUrl ? themedButtonRow(m.invoiceUrl, "View your invoice &rarr;", t) : "",
       themedBankCard(m.quoteRef, t),
       subline(
-        `Your commitment payment of <strong style="color:#1A1A1A;">${gbp(m.commitmentAmount)}</strong> is ${dueClause(m.commitmentDueLabel)}. It counts towards your final bill, and the remaining balance is due in full before move day.`,
+        remaining > 0
+          ? `Your commitment payment of <strong style="color:#1A1A1A;">${gbp(m.commitmentAmount)}</strong> is ${dueClause(m.commitmentDueLabel)}, and it counts towards your final bill. If you would rather clear it in one go, ${
+              m.payUrl
+                ? `<a href="${escapeHtml(m.payUrl)}" style="color:#1A1A1A;font-weight:600;">choose "settle in full" on your booking page</a>`
+                : `choose "settle in full" on your booking page`
+            } and we will send the final invoice straight away. Either way the bank reference stays the same.`
+          : `Your commitment payment of <strong style="color:#1A1A1A;">${gbp(m.commitmentAmount)}</strong> is ${dueClause(m.commitmentDueLabel)}. It counts towards your final bill, and the remaining balance is due in full before move day.`,
       ),
     ]
       .filter(Boolean)

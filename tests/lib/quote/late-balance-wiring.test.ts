@@ -4,22 +4,26 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Source guard over the gate 9b wiring.
+ * Source guard over the gate 9b / 9c wiring.
  *
- * `lateBalanceDueAtAcceptance` is pure and unit-tested, and it can be perfectly
- * correct while nothing calls it — or while something calls straight past it.
- * Those two failures are not equal:
+ * `lateBalanceDueAtAcceptance` and `payInFullAvailable` are pure and
+ * unit-tested, and each can be perfectly correct while nothing calls it — or
+ * while something calls straight past it. Those two failures are not equal:
  *
  *  - **A missed call site degrades to today.** The balance simply waits for the
  *    T-7 cron, as it always has. Annoying, not dangerous. `raisesOnEveryPath`
- *    below catches it so a new accept path is not silently left behind.
- *  - **A call that bypasses the rule is the dangerous one.** Reaching
- *    `createBalanceInvoiceFlow` directly from an accept path would raise a
- *    customer-facing invoice with none of the gates the rule exists to hold:
- *    the T-7 window, the cancelled/legacy locks, and above all the contract
- *    signature that stands in for `date_confirmed_at` (Marks Davis MMR019 —
- *    never bill a date nobody agreed). `onlyThroughTheRule` is the assertion
- *    that matters most in this file.
+ *    catches it so a new accept path is not silently left behind.
+ *  - **A call that bypasses a rule is the dangerous one.** Reaching
+ *    `createBalanceInvoiceFlow` directly would raise a customer-facing invoice
+ *    with none of the gates the rules exist to hold: the T-7 window, the
+ *    cancelled/legacy locks, the ladder position, and above all the contract
+ *    signature that stands in for `date_confirmed_at` at acceptance (Marks
+ *    Davis MMR019 — never bill a date nobody agreed). `everyRaiseIsRuled` is
+ *    the assertion that matters most in this file.
+ *
+ * It has already earned its keep once: gate 9c's `settleQuoteInFull` added the
+ * second call site and this test failed on the spot, which is the point — a new
+ * money path gets a deliberate decision rather than a silent addition.
  */
 const SRC = readFileSync(join(process.cwd(), "lib/quote/accept-flow.ts"), "utf8");
 
@@ -35,6 +39,19 @@ const count = (haystack: string, needle: string): number => haystack.split(needl
 
 const ONLINE = spanBetween("export async function acceptQuoteOnline(", "/* ---------------");
 const STAFF = spanBetween("export async function acceptQuoteByStaff(", "/* ---------------");
+
+/** The two functions allowed to raise a balance from inside this module, each
+ *  with the pure rule it must consult first. */
+const RAISERS = [
+  {
+    fn: "export async function ensureLateBookingBalanceInvoice(",
+    rule: "lateBalanceDueAtAcceptance(quote, !!signature)",
+  },
+  {
+    fn: "export async function settleQuoteInFull(",
+    rule: "payInFullAvailable(quote, lead)",
+  },
+] as const;
 
 describe("gate 9b — the late-booking balance is raised on every accept path", () => {
   it("the span extraction found both accept functions, not an empty string", () => {
@@ -62,35 +79,38 @@ describe("gate 9b — the late-booking balance is raised on every accept path", 
     }
   });
 
-  it("onlyThroughTheRule: nothing in this module calls createBalanceInvoiceFlow except the guarded helper", () => {
-    // One definition, one call. The call lives inside
-    // ensureLateBookingBalanceInvoice, which is the only thing that consults
-    // lateBalanceDueAtAcceptance. The office button and the T-7 cron call it
-    // from their own modules, where their own guards apply.
-    expect(count(SRC, "export async function createBalanceInvoiceFlow(")).toBe(1);
-    expect(count(SRC, "await createBalanceInvoiceFlow(")).toBe(1);
-    const helper = spanBetween(
-      "export async function ensureLateBookingBalanceInvoice(",
-      "/* ---------------",
-    );
-    expect(helper).toContain("await createBalanceInvoiceFlow(");
-    expect(helper).toContain("lateBalanceDueAtAcceptance(");
-  });
-
   it("checks the rule against the real signature, not against `true`", () => {
     // The helper deliberately calls the rule twice: once with `true` to skip
     // the signature READ for a booking that cannot qualify anyway, then once
     // with the actual answer. Only the second decides.
-    const helper = spanBetween(
-      "export async function ensureLateBookingBalanceInvoice(",
-      "/* ---------------",
-    );
+    const helper = spanBetween(RAISERS[0].fn, "/* ---------------");
     expect(helper).toContain('.eq("kind", "contract")');
-    expect(helper).toContain("lateBalanceDueAtAcceptance(quote, !!signature)");
-    // The signature check must sit BEFORE the raise, not after it.
-    expect(helper.indexOf("lateBalanceDueAtAcceptance(quote, !!signature)")).toBeLessThan(
+    expect(helper).toContain(RAISERS[0].rule);
+    expect(helper.indexOf(RAISERS[0].rule)).toBeLessThan(
       helper.indexOf("await createBalanceInvoiceFlow("),
     );
+  });
+});
+
+describe("every balance raise in this module is gated by a pure rule", () => {
+  it("everyRaiseIsRuled: each call site sits behind its own rule, checked first", () => {
+    for (const { fn, rule } of RAISERS) {
+      const span = spanBetween(fn, "/* ---------------");
+      expect(count(span, "await createBalanceInvoiceFlow("), `${fn} raises exactly once`).toBe(1);
+      expect(span, `${fn} must consult ${rule}`).toContain(rule);
+      expect(span.indexOf(rule), `${fn} must check its rule BEFORE raising`).toBeLessThan(
+        span.indexOf("await createBalanceInvoiceFlow("),
+      );
+    }
+  });
+
+  it("and there are no OTHER call sites hiding in the module", () => {
+    // One definition; one call per ruled raiser and not a single one more. A
+    // third would mean a money path nobody gated. Bump this ONLY alongside a
+    // new entry in RAISERS above — that is the deliberate decision this guard
+    // exists to force.
+    expect(count(SRC, "export async function createBalanceInvoiceFlow(")).toBe(1);
+    expect(count(SRC, "await createBalanceInvoiceFlow(")).toBe(RAISERS.length);
   });
 });
 
@@ -105,7 +125,8 @@ describe("gate 9b — the balance email never lies about an unpaid deposit", () 
   });
 
   it("derives the outstanding deposit from the quote, so every send path agrees", () => {
-    // Raise, early raise and office re-send all go through sendBalanceInvoiceEmail.
+    // Raise, early raise, settle-in-full and office re-send all go through
+    // sendBalanceInvoiceEmail.
     expect(SRC).toContain(
       "const depositOutstanding = quote.deposit_paid_at ? 0 : round2(Number(quote.deposit_amount ?? 0));",
     );

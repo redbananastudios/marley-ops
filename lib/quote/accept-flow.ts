@@ -76,6 +76,7 @@ import {
   type InvoiceResend,
 } from "@/lib/payments/invoice-resend";
 import { lateBalanceDueAtAcceptance } from "@/lib/payments/late-balance";
+import { payInFullAvailable } from "@/lib/payments/pay-in-full";
 import { legacyLocked } from "@/lib/legacy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -2297,6 +2298,24 @@ async function sendDateConfirmationEmail(
     }
   }
   const brand = await getBrandOrDefault(sb, quote.brand);
+  // Settle-in-full (PRD §3.10 Addition 3) is advertised only where the /q page
+  // would actually honour it, so this reads the SAME gate rather than inferring
+  // an offer from the commitment amount: an email offering a choice the page
+  // refuses is worse than no offer at all. Read FRESH — the commitment invoice
+  // was raised moments ago and `quote` predates it, so the passed-in row would
+  // fail the gate for the wrong reason.
+  let balanceRemaining = 0;
+  const fresh = await fetchQuoteById(sb, quote.id);
+  if (fresh?.lead_id) {
+    const { data: payLead } = await sb
+      .from("leads")
+      .select("date_confirmed_at, balance_paid_at")
+      .eq("id", fresh.lead_id)
+      .maybeSingle();
+    if (payInFullAvailable(fresh, payLead)) {
+      balanceRemaining = (await computeBalanceCredits(sb, fresh)).amount;
+    }
+  }
   const meta: DateConfirmationMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2306,6 +2325,8 @@ async function sendDateConfirmationEmail(
     commitmentDueLabel: c.commitmentDueLabel,
     invoiceNumber: c.invoiceNumber,
     invoiceUrl: c.invoiceUrl,
+    balanceRemaining,
+    payUrl: quote.accept_token ? acceptUrlFor(quote.accept_token) : null,
     brand,
   };
   const templateId = templateIdFor(brand, "RESEND_TEMPLATE_DATE_CONFIRMATION");
@@ -2916,6 +2937,96 @@ export async function ensureLateBookingBalanceInvoice(
   } catch (err) {
     log.error("quote.late_balance.failed", { quoteId, ...errorContext(err) });
   }
+}
+
+/* ------------------------------------------------------- settle in full */
+
+/** What the customer is offered, and what taking it produced. */
+export type SettleInFullOutcome =
+  | { ok: true; already: boolean; invoiceNumber: string | null; amount: number }
+  | { ok: false; error: string };
+
+/**
+ * The customer chose to settle in full at the commitment step (PRD §3.10
+ * Addition 3) — raise the T-7 balance invoice NOW, beside the commitment.
+ *
+ * Two open invoices, individually matchable, and deliberately **no new**
+ * `match_kind` and no new invoice suffix: a single bank transfer covering both
+ * is the case `lib/bank-feed/whole-quote.ts` already handles — exact pennies
+ * against the summed set, offered to the office, never auto-matched.
+ *
+ * Ignoring the option changes nothing. That is the safety property of the whole
+ * feature, so eligibility is a set of gates (`payInFullAvailable`, pure and
+ * tested) rather than a preference, and the SAME function decides whether the
+ * page offers it. An option the page shows but the server refuses is worse than
+ * no option; an action the server accepts without the page offering it is an
+ * unguarded money path.
+ */
+export async function settleQuoteInFull(
+  sb: Sb,
+  token: string,
+  actorId: string | null,
+): Promise<SettleInFullOutcome> {
+  const quote = await fetchQuoteByToken(sb, token);
+  if (!quote) return { ok: false, error: "This link is no longer valid." };
+
+  // Replay / double-tap: the invoice this action exists to create already
+  // exists. Report the success it produced rather than an error — the customer
+  // tapping twice must not be told something went wrong.
+  if (isRealZohoId(quote.zoho_balance_invoice_id)) {
+    return {
+      ok: true,
+      already: true,
+      invoiceNumber: quote.zoho_balance_invoice_number,
+      amount: Number(quote.balance_invoice_amount ?? 0),
+    };
+  }
+
+  const { data: lead } = quote.lead_id
+    ? await sb
+        .from("leads")
+        .select("date_confirmed_at, balance_paid_at")
+        .eq("id", quote.lead_id)
+        .maybeSingle()
+    : { data: null };
+  if (!payInFullAvailable(quote, lead)) {
+    return {
+      ok: false,
+      error: "This booking can't be settled in full from here — please call 01747 637070.",
+    };
+  }
+
+  const res = await createBalanceInvoiceFlow(sb, quote.id, actorId);
+  if (!res.ok) {
+    log.warn("quote.settle_in_full.failed", { quoteId: quote.id, reason: res.error });
+    // The ledger failure already alerted ops inside the flow. Say plainly that
+    // nothing was raised, rather than leaving the customer to guess whether an
+    // invoice is on its way: the commitment they were already asked for still
+    // stands, and the balance still raises at T-7 as it always would have.
+    return {
+      ok: false,
+      error: "We couldn't raise the final invoice just now — your commitment payment is unchanged. Please try again shortly or call 01747 637070.",
+    };
+  }
+
+  if (quote.lead_id) {
+    await sb.from("activities").insert({
+      lead_id: quote.lead_id,
+      client_id: quote.client_id,
+      actor_id: actorId,
+      type: "note",
+      summary: `Customer chose to settle in full at the commitment step — final invoice ${res.invoiceNumber} raised early for £${res.amount.toFixed(2)}`,
+      meta: { quote_id: quote.id, invoice_number: res.invoiceNumber, amount: res.amount, via: "pay_in_full" },
+    } as never);
+  }
+
+  log.info("quote.settle_in_full.raised", {
+    quoteId: quote.id,
+    quoteRef: quote.quote_ref,
+    invoiceNumber: res.invoiceNumber,
+    amount: res.amount,
+  });
+  return { ok: true, already: false, invoiceNumber: res.invoiceNumber, amount: res.amount };
 }
 
 /* ------------------------------------------------------------- balance paid */

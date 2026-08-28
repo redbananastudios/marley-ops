@@ -231,6 +231,27 @@ An internal uplift on the quote — amount plus a short reason (`commercial acce
 
 **Addition 3 — pay in full at the commitment step** (Peter, earlier this session). The commitment email and its `/q` payment state offer both figures: the 25% now, or settle in full. Opting full raises the T-7 balance invoice early alongside the commitment — two open invoices, individually matchable, **no new `match_kind`, no new suffix**. A single bank transfer covering both is exactly the case `#73`'s **whole-quote link** (match kind `full`, migration `0103`) now handles: offered to the office only when the transfer equals the recorded payments to the penny, picked by a human, never auto-matched. Ignoring the option changes nothing.
 
+> **As built (gate 9c, 2026-08-28), with two corrections to the surrounding notes.**
+> **(a) It needs no Resend push, and §11.7 trap 4's lane split assumed it would.** The hosted
+> date-confirmation template renders the whole commitment step through a single
+> `{{{COMMITMENT_BLOCK}}}` variable, so an offer added inside `commitmentBlockHtml` reaches the
+> templated send and the in-repo fallback alike — nothing to PATCH, nothing to republish, and
+> none of trap 4's overwrite risk. Locked by a test rather than left as an observation, because a
+> future template rewrite that inlines the block would silently stop offering the choice to every
+> templated customer while the fallback ones kept getting it.
+> **(b) There is no card on this surface, and "as today" is why.** §4 says card renders for
+> card-enabled brands "as it does on today's payment states"; today's commitment state has no
+> card button at all — card is deposit-only, because the balance rail is deliberately BACS-only
+> (fees are too high at these values, Peter 2026-07-09) and settling in full is mostly balance.
+> So "as today" resolves to none, and adding one here would have quietly reversed a pricing
+> decision nobody asked to revisit.
+> **The gate is one function, `payInFullAvailable`** (`lib/payments/pay-in-full.ts`, pure and
+> tested), consulted by the /q render, the server action AND the commitment email. An option the
+> page offers and the server refuses is worse than no option; an email advertising a choice the
+> page will not honour is the same defect one surface further out. A small job, a late booking and
+> a deposit that already covers the 25% all fall out of it without being special-cased — none of
+> them has a commitment invoice to attach the choice to.
+
 **Office "Send payment link"** (Peter, 2026-08-25 — the one piece kept from the abandoned channel redesign). A new office action on the quote detail and `/bookings`: generates a tokenised card page for exactly one invoice (deposit, commitment, full or balance) and emails/texts it — for the customer who phones in unable to do a bank transfer. Behind the global card kill switch AND `brands.card_payments_enabled`; absent for Pitmans at launch. All other payment copy and channels stay exactly as today.
 
 **Classification.** `clients.is_company` is repurposed as the residential/commercial marker. It currently only selects which display name to use, so it starts driving real behaviour — hence the pre-flight check below. The flag carries to the quote form when a client is selected, and **replaces `quoteRefKind()`'s property-size regex** as the source of the `R`/`C` ref prefix. That also fixes a latent bug: today an unusual property-size string picks the wrong prefix, and the prefix is what the bank feed reconciles against.

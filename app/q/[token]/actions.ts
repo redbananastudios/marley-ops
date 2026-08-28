@@ -8,8 +8,10 @@ import {
   confirmMoveDateOnline,
   declineQuoteOnline,
   reportDepositSent,
+  settleQuoteInFull,
   type AcceptOutcome,
   type DateConfirmOutcome,
+  type SettleInFullOutcome,
 } from "@/lib/quote/accept-flow";
 import { startCardPayment } from "@/lib/payments/card-payments";
 
@@ -55,6 +57,20 @@ export async function confirmMoveDateAction(
     userAgent,
     signatureImage,
   });
+  if (result.ok) revalidatePath(`/q/${token}`);
+  return result;
+}
+
+/**
+ * Customer chose "settle in full" at the commitment step (PRD §3.10 Addition 3).
+ * Raises the T-7 balance invoice early so both are payable now — separately or
+ * in one transfer. Token-authed like the rest of this file, and idempotent: a
+ * double-tap finds the invoice already raised and reports that success rather
+ * than an error.
+ */
+export async function settleInFullAction(token: string): Promise<SettleInFullOutcome> {
+  const sb = createAdminClient();
+  const result = await settleQuoteInFull(sb, token, null);
   if (result.ok) revalidatePath(`/q/${token}`);
   return result;
 }
