@@ -12,7 +12,7 @@ import {
   type QuoteFormValues,
 } from "@/lib/quote/form-types";
 import { addressFromLead } from "@/lib/places/parse";
-import { acceptQuoteByStaff } from "@/lib/quote/accept-flow";
+import { acceptQuoteByStaff, snapshotPaymentPolicy } from "@/lib/quote/accept-flow";
 import { markLeadLostAction, createLeadAction } from "@/app/(dashboard)/leads/actions";
 import type { NewLeadInput } from "@/lib/leads/schema";
 import { getBusinessSettings } from "@/lib/settings";
@@ -20,7 +20,7 @@ import { recommendVans } from "@/lib/cubic-survey";
 import { getSurveyPlanningState } from "@/lib/ai/planning";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { quoteRefKind } from "@/lib/quote/ref";
-import { resolvePaymentPolicy } from "@/lib/payments-policy";
+import { policyOfQuote, resolvePaymentPolicy } from "@/lib/payments-policy";
 import { DEFAULT_BRAND } from "@/lib/brand";
 import { planSupersede, refList, type SiblingQuote } from "@/lib/quote/supersede";
 
@@ -616,6 +616,39 @@ export async function rejectQuote(id: string, reason: string, note?: string) {
  * lands in Bookings → Awaiting deposit and confirms itself when the money
  * arrives. The full pipeline lives in lib/quote/accept-flow.ts.
  */
+/**
+ * Which ladder a quote will run if it is accepted right now — so the office
+ * dialog can describe what its own button is about to do.
+ *
+ * Resolved LIVE from the client rather than read off `quotes.payment_policy`,
+ * because that column is the acceptance SNAPSHOT: it is null on every draft and
+ * sent quote, which is precisely the set this dialog operates on. A dialog that
+ * read the column would call every unaccepted quote residential and promise a
+ * commercial client a deposit email — the same mistake QA-20260828-03 recorded
+ * on /q, made by the same wrong source.
+ *
+ * The column still wins once it exists, for the re-open case: an accepted quote
+ * must report the ladder it actually took, not the one its client would pick
+ * today.
+ *
+ * Fails CLOSED to residential, matching snapshotPaymentPolicy: an unreadable
+ * client leaves the office looking at today's dialog rather than a wrong one.
+ */
+export async function quotePaymentPolicy(id: string) {
+  const { sb, userId } = await ctx();
+  if (!userId) return { ok: false as const, error: "Not signed in" };
+  const { data: quote } = await sb
+    .from("quotes")
+    .select("id, client_id, lead_id, payment_policy")
+    .eq("id", id)
+    .maybeSingle();
+  if (!quote) return { ok: false as const, error: "Quote not found" };
+  const policy = quote.payment_policy
+    ? policyOfQuote(quote)
+    : await snapshotPaymentPolicy(sb, quote);
+  return { ok: true as const, policy };
+}
+
 export async function acceptQuote(id: string, agreedPrice?: number, depositAmount?: number) {
   const { sb, userId } = await ctx();
   if (!userId) return { ok: false as const, error: "Not signed in" };

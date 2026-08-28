@@ -291,8 +291,14 @@ export default async function QuoteDetailPage({
       {statusStr === "accepted" && quote.agreed_price != null ? (
         <QuoteMetaChip>Agreed {gbp(quote.agreed_price)}</QuoteMetaChip>
       ) : null}
+      {/* Commercial has no deposit rung, so neither chip is true of it: it is
+          not "awaiting" money nobody asked for, and it has not "paid" either.
+          Before this it rendered "Awaiting £0 deposit" — a warning tone against
+          a figure that only looks like a problem. */}
       {statusStr === "accepted" ? (
-        quote.deposit_paid_at ? (
+        paymentPolicy === "commercial" ? (
+          <QuoteMetaChip>Business terms — invoiced on completion</QuoteMetaChip>
+        ) : quote.deposit_paid_at ? (
           <QuoteMetaChip icon={CheckCircle2} tone="success">
             Deposit paid
           </QuoteMetaChip>
@@ -320,12 +326,21 @@ export default async function QuoteDetailPage({
           brand={quoteBrand}
           status={statusStr}
           grandTotal={Number(quote.grand_total ?? 0)}
-          depositAmount={requestedDeposit(
-            Number(quote.agreed_price ?? quote.grand_total ?? 0),
-            quote.deposit_amount ?? settings.defaultDeposit,
-            quote.moving_date,
-            settings.smallJobThreshold,
-          )}
+          // `requestedDeposit` is the RESIDENTIAL rule — the small-job and
+          // late-booking collapses included — so running it on a commercial
+          // quote produced a figure with no meaning (25% of gross inside T-7,
+          // or the whole job under the small-job threshold) and offered it to
+          // the office as the deposit to request. Commercial has no rung: 0.
+          depositAmount={
+            paymentPolicy === "commercial"
+              ? 0
+              : requestedDeposit(
+                  Number(quote.agreed_price ?? quote.grand_total ?? 0),
+                  quote.deposit_amount ?? settings.defaultDeposit,
+                  quote.moving_date,
+                  settings.smallJobThreshold,
+                )
+          }
           readOnly={!editing}
           editHref={`/quotes/${quote.id}?edit=1`}
           leadId={quote.lead_id}
@@ -391,6 +406,7 @@ export default async function QuoteDetailPage({
               deposit_amount: quote.deposit_amount ?? settings.defaultDeposit,
               deposit_paid_at: quote.deposit_paid_at,
               moving_date: quote.moving_date,
+              payment_policy: paymentPolicy,
             }}
           />
           <div className="mt-4 space-y-4">

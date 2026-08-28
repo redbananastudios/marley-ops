@@ -124,6 +124,7 @@ export function QuoteHeaderActions({
           grandTotal={grandTotal}
           status={status}
           depositAmount={depositAmount}
+          paymentPolicy={paymentPolicy}
           className="h-11 w-full sm:w-auto"
         />
       ) : status === "accepted" ? (
