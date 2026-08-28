@@ -254,8 +254,21 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
       await page.goto("/schedule/surveys", { waitUntil: "networkidle" });
       const event = page.locator(".fc-event").filter({ hasText: marker });
       await expect(event.first()).toBeVisible({ timeout: 15000 });
-      await event.first().click();
-      await expect(page.getByRole("dialog")).toBeVisible();
+      // force: because FullCalendar insets OVERLAPPING events into a shared
+      // harness, so on a crowded test diary a sibling event's harness sits over
+      // ours and Playwright's actionability check never clears - the element is
+      // visible, enabled and stable, and still refuses for 15s (run
+      // 33190859320). The overlap is an artefact of the seeded diary, not
+      // something a real estimator hits, and forcing still runs the real
+      // handler.
+      //
+      // Forcing a click can silently hit the WRONG element, so the next line
+      // makes that impossible to pass: the dialog must carry OUR marker. A
+      // mis-click opens someone else's survey and fails here.
+      await event.first().click({ force: true });
+      const dialog = page.getByRole("dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText(marker).first()).toBeVisible();
     });
 
     await step("click Create Quote (client-side router.push, not a page.goto)", page, async () => {
