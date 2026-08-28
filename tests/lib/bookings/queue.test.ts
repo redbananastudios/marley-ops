@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { classifyBooking, daysBetweenUk, owedNow, type QueueSignals } from "@/lib/bookings/queue";
+import {
+  classifyBooking,
+  daysBetweenUk,
+  owedNow,
+  queueMoney,
+  type QueueSignals,
+} from "@/lib/bookings/queue";
 
 const TODAY = "2026-07-30";
 
@@ -131,7 +137,50 @@ describe("owedNow", () => {
   });
 
   it("owes nothing when there is no move behind the balance", () => {
+    // The INFERRED case: nothing invoiced, so a balance would be implied by a
+    // date window alone. A booking with no date owes nothing today, however
+    // large the job. This guard stays exactly as it was.
     expect(owedNow({ ...owedBase, hasRemovalAppt: false, apptDayUk: null }, TODAY).total).toBe(0);
+  });
+
+  it("counts an INVOICED balance with no diary entry yet (gates 9b/9c)", () => {
+    // Gate 9b raises the balance at acceptance for a move already inside T-7;
+    // gate 9c raises it when the customer chooses to settle in full. Both fire
+    // days before the office allocates a slot, so requiring a removal
+    // appointment reported GBP 0 owed on the jobs moving soonest, on BOTH
+    // money headlines at once. An issued invoice is owed on its own
+    // authority: a document has been sent asking for it.
+    const issued = owedNow(
+      { ...owedBase, hasRemovalAppt: false, apptDayUk: null, balanceInvoiceNumber: "INV-000318" },
+      TODAY,
+    );
+    expect(issued.balance).toBe(1700);
+    expect(issued.total).toBe(1700);
+    // Not past due: there is no move day to have passed.
+    expect(issued.overdue).toBe(0);
+  });
+
+  it("mutating either half of the issued-balance clause changes the answer", () => {
+    // Guard on the clause above: if these still returned 1700 the new
+    // condition would be doing no work.
+    expect(
+      owedNow(
+        {
+          ...owedBase,
+          hasRemovalAppt: false,
+          apptDayUk: null,
+          balanceInvoiceNumber: "INV-000318",
+          balancePaidAt: "2026-07-29T10:00:00Z",
+        },
+        TODAY,
+      ).total,
+    ).toBe(0);
+    expect(
+      owedNow(
+        { ...owedBase, hasRemovalAppt: false, apptDayUk: null, balanceInvoiceNumber: "INV-000318", balanceAmount: 0 },
+        TODAY,
+      ).total,
+    ).toBe(0);
   });
 
   it("owes nothing once the money is paid", () => {
@@ -160,5 +209,100 @@ describe("owedNow", () => {
       TODAY,
     );
     expect(flagged.overdue).toBe(450);
+  });
+});
+
+/**
+ * queueMoney - the one seam behind every money headline on /bookings and
+ * /payments Due. These assertions exist because the two pages once computed
+ * the same money two different ways: the 25% tile summed the commitment_*
+ * BUCKETS while everything else summed OBLIGATIONS, so an invoiced-and-unpaid
+ * 25% on a booking the office had not yet put in the diary was counted by
+ * /payments and not by /bookings (QA-20260826-01).
+ */
+const money = (
+  bucket: string,
+  deposit: number,
+  owed: { commitment: number; balance: number; overdue: number },
+) => ({
+  bucket: bucket as never,
+  deposit,
+  owed: { ...owed, total: owed.commitment + owed.balance },
+});
+
+describe("queueMoney", () => {
+  it("counts an invoiced 25% the bucket ladder cannot reach", () => {
+    // Date confirmed and the 25% raised, but the office has not booked the
+    // slot - so classifyBooking says no_date and no commitment_* bucket holds
+    // it. The tile must still show the money.
+    const m = queueMoney([money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 })]);
+    expect(m.commitment).toBe(450);
+    expect(m.commitmentJobs).toBe(1);
+    expect(m.owedNow).toBe(450);
+  });
+
+  it("counts an invoiced 25% behind an unpaid deposit too", () => {
+    // ensureCommitmentInvoice requires a confirmed date and the customer's
+    // signature - NOT a paid deposit - so this combination is reachable.
+    const m = queueMoney([money("deposit_outstanding", 100, { commitment: 450, balance: 0, overdue: 450 })]);
+    expect(m.commitment).toBe(450);
+    expect(m.overdue).toBe(450);
+    // The deposit is reported separately and never joins owedNow.
+    expect(m.depositsOutstanding).toBe(100);
+    expect(m.depositJobs).toBe(1);
+    expect(m.owedNow).toBe(450);
+  });
+
+  it("the two /bookings money tiles sum to the /payments headline, on any mix", () => {
+    // The invariant that replaces the QA ledger's false one (Balance
+    // outstanding matches Due exactly), which only ever held on a day with no
+    // unpaid 25%. Neither tile alone equals the headline.
+    const rows = [
+      money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 }),
+      money("deposit_outstanding", 100, { commitment: 300, balance: 0, overdue: 300 }),
+      money("commitment_due", 0, { commitment: 500, balance: 0, overdue: 0 }),
+      money("balance_due", 0, { commitment: 0, balance: 1700, overdue: 0 }),
+      money("balance_overdue", 0, { commitment: 0, balance: 900, overdue: 900 }),
+      money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 }),
+    ];
+    const m = queueMoney(rows);
+    expect(m.commitment).toBe(1250);
+    expect(m.balance).toBe(2600);
+    expect(m.commitment + m.balance).toBe(m.owedNow);
+    expect(m.owedNow).toBe(3850);
+    expect(m.overdue).toBe(1200);
+    // Deposits are disjoint from every owed figure.
+    expect(m.depositsOutstanding).toBe(100);
+  });
+
+  it("a row owing the 25% AND an early balance counts in both tiles at once", () => {
+    // Gate 9c: settling in full raises the balance alongside the unpaid 25%.
+    // The bucket carries only half the story, which is why money is never
+    // read off the bucket.
+    const m = queueMoney([money("commitment_due", 0, { commitment: 400, balance: 1500, overdue: 0 })]);
+    expect(m.commitment).toBe(400);
+    expect(m.balance).toBe(1500);
+    expect(m.owedNow).toBe(1900);
+    expect(m.commitmentJobs).toBe(1);
+  });
+
+  it("a small job (gate 9a) contributes nothing to owed money", () => {
+    // The full price was asked once at acceptance, so there is no 25% and no
+    // balance for the rest of its life.
+    const m = queueMoney([money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 })]);
+    expect(m.owedNow).toBe(0);
+    expect(m.commitmentJobs).toBe(0);
+  });
+
+  it("is empty for no rows", () => {
+    expect(queueMoney([])).toEqual({
+      depositsOutstanding: 0,
+      depositJobs: 0,
+      commitment: 0,
+      commitmentJobs: 0,
+      balance: 0,
+      owedNow: 0,
+      overdue: 0,
+    });
   });
 });
