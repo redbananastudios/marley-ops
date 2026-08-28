@@ -4,7 +4,18 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getTakepaymentsConfig } from "@/lib/payments/takepayments";
-import { refundCardPayment, startCardPayment } from "@/lib/payments/card-payments";
+import {
+  cardPaymentsAvailable,
+  refundCardPayment,
+  startCardPayment,
+} from "@/lib/payments/card-payments";
+import { paymentLinkFor } from "@/lib/payments/payment-link";
+import { fetchQuoteById } from "@/lib/quote/accept-flow";
+import { getBusinessSettings } from "@/lib/settings";
+import { getBrandOrDefault } from "@/lib/brand";
+import { dispatchComm } from "@/lib/comms/dispatch";
+import { brandedEmailHtml } from "@/lib/comms/branded-shell";
+import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
 
 /** Any active office user (admin/estimator) — reads. */
 async function requireOffice() {
@@ -99,4 +110,99 @@ export async function startTestCardPaymentAction(
   // isTest tags the row so settle records the simulator charge but never touches
   // the real customer/Zoho/confirm pipeline — even against a real quote token.
   return startCardPayment(admin, token, { testAmountPence: 100, isTest: true });
+}
+
+/* ------------------------------------------------- office payment link */
+
+export type SendPaymentLinkOutcome = { ok: true; sentTo: string } | { ok: false; error: string };
+
+/**
+ * Gate 9d (PRD §3.10) — email or text the customer a card page for the
+ * acceptance ask.
+ *
+ * For the customer who phones in unable to do a bank transfer. The link points
+ * at the EXISTING /q/<token> page rather than a new surface, which is the
+ * whole reason this is small: that page already resolves
+ * `cardPaymentsAvailable(sb, quote.brand)` for itself and already refuses a
+ * paid or cancelled quote. A link cannot therefore outlive the conditions that
+ * justified sending it — if the customer pays by bank transfer in the meantime,
+ * the page they open no longer offers card.
+ *
+ * Eligibility is `paymentLinkFor`, the same pure rule the button consults, so
+ * the office can never send a link the page will refuse.
+ */
+export async function sendPaymentLinkAction(input: {
+  quoteId: string;
+  channel: "email" | "sms";
+}): Promise<SendPaymentLinkOutcome> {
+  const prof = await requireOffice();
+  if (!prof) return { ok: false, error: "Not signed in." };
+
+  const admin = createAdminClient();
+  const quote = await fetchQuoteById(admin, input.quoteId);
+  if (!quote) return { ok: false, error: "Quote not found." };
+
+  // Both switches, resolved by the one helper that ANDs them (PRD §11.10).
+  // Re-derived here rather than trusted from the client: the button being
+  // rendered is not evidence the brand still has card on.
+  const cardOk = await cardPaymentsAvailable(admin, quote.brand).catch(() => false);
+  const settings = await getBusinessSettings(admin);
+  const verdict = paymentLinkFor(quote, cardOk, settings.defaultDeposit);
+  if (!verdict.ok) return { ok: false, error: verdict.reason };
+
+  if (!quote.accept_token) {
+    return { ok: false, error: "This quote has no customer link." };
+  }
+  const to = input.channel === "email" ? quote.customer_email : quote.customer_phone;
+  if (!to) {
+    return {
+      ok: false,
+      error: input.channel === "email" ? "No email address on file." : "No mobile number on file.",
+    };
+  }
+
+  const brand = await getBrandOrDefault(admin, quote.brand);
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://ops.marleymoves.co.uk").replace(/\/$/, "");
+  const url = `${appUrl}/q/${quote.accept_token}`;
+  const amount = (verdict.amountPence / 100).toFixed(2);
+  const firstName = (quote.customer_name ?? "").trim().split(/\s+/)[0] || undefined;
+  const line = `You can pay the £${amount} for ${quote.quote_ref} by card here: ${url}`;
+
+  const res = await dispatchComm(admin, prof.id, {
+    channel: input.channel,
+    to,
+    // Money desk identity — a payment ask goes out from accounts, like every
+    // other money email.
+    ...(input.channel === "email"
+      ? { from: accountsFromFor(brand), replyTo: accountsAddress() }
+      : {}),
+    subject: `Pay by card for ${quote.quote_ref}`,
+    bodyText: line,
+    ...(input.channel === "email"
+      ? {
+          bodyHtml: brandedEmailHtml({
+            preheader: `Pay £${amount} by card`,
+            greeting: firstName,
+            headline: "Pay by card",
+            paragraphs: [
+              `Here is a secure link to pay £${amount} for ${quote.quote_ref} by card.`,
+              `The link opens your booking page, where the card form sits under the payment section.`,
+            ],
+            cta: { label: `Pay £${amount} by card`, url },
+            brand,
+          }),
+        }
+      : {}),
+    brand,
+    leadId: quote.lead_id ?? undefined,
+    quoteId: quote.id,
+    clientId: quote.client_id ?? undefined,
+  });
+
+  if ("duplicate" in res) {
+    return { ok: false, error: "That link was just sent — check the Comms tab before sending again." };
+  }
+  if (!res.ok) return { ok: false, error: res.error };
+  revalidatePath("/leads", "layout");
+  return { ok: true, sentTo: to };
 }

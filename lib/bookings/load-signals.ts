@@ -23,6 +23,10 @@ export interface BookingRow {
   quoteRef: string;
   leadId: string;
   customer: string;
+  /** Contact details, so the office payment link (gate 9d) can be offered
+   *  only where there is somewhere to send it. */
+  customerEmail: string | null;
+  customerPhone: string | null;
   agreed: number;
   deposit: number;
   depositPaidAt: string | null;
@@ -75,7 +79,7 @@ export async function loadBookingRows(
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, source, lead_id, customer_name, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, booking_cancelled_at",
+        "id, quote_ref, source, standard_comms_at, status, brand, lead_id, customer_name, customer_email, customer_phone, agreed_price, grand_total, accepted_at, accept_token, moving_date, deposit_amount, deposit_paid_at, deposit_selfreport_at, commitment_paid_at, commitment_invoice_amount, commitment_due_date, date_releasable_at, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_amount, booking_cancelled_at",
       )
       .eq("status", "accepted")
       // A cancelled booking owes nothing and expects nothing — its unwind
@@ -184,6 +188,8 @@ export async function loadBookingRows(
       quoteRef: q.quote_ref,
       leadId: lead.id,
       customer: (q.customer_name || lead.name || "Customer") as string,
+      customerEmail: (q.customer_email as string | null) ?? null,
+      customerPhone: (q.customer_phone as string | null) ?? null,
       agreed,
       deposit,
       depositPaidAt: q.deposit_paid_at,

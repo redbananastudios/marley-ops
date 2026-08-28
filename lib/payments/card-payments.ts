@@ -126,6 +126,38 @@ export async function cardPaymentsAvailable(sb: Sb, brandSlug?: string | null): 
   return brand?.cardPaymentsEnabled === true;
 }
 
+/**
+ * Which brand slugs currently have a LIVE card channel — the same three
+ * conditions as `cardPaymentsAvailable`, resolved once for a whole page.
+ *
+ * A list surface spans brands, so asking per row would be one round trip per
+ * booking; asking once and testing membership keeps the precedence rule in one
+ * place while staying a single read. An empty set is the correct answer for
+ * every failure mode here (no credentials, kill switch off, unreadable table):
+ * failing open would put a card affordance on a surface whose copy says bank
+ * transfer is the only route.
+ */
+export async function cardEnabledBrands(sb: Sb): Promise<Set<string>> {
+  if (!getTakepaymentsConfig()) return new Set();
+  const { data: settings } = await sb
+    .from("business_settings")
+    .select("card_payments_enabled")
+    .eq("id", true)
+    .maybeSingle();
+  if (settings?.card_payments_enabled !== true) return new Set();
+
+  // The default brand is live on the global switch alone — it has no row-level
+  // opt-in to satisfy, exactly as cardPaymentsAvailable treats it.
+  const live = new Set<string>([DEFAULT_BRAND]);
+  const { data, error } = await sb
+    .from("brands")
+    .select("slug, card_payments_enabled")
+    .eq("card_payments_enabled", true);
+  if (error) return live;
+  for (const row of (data ?? []) as { slug: string }[]) live.add(row.slug);
+  return live;
+}
+
 /* ------------------------------------------------------------- start */
 
 export type StartCardPaymentOutcome =
@@ -336,6 +368,31 @@ async function runPaidPipeline(
   xref: string | null,
   cardMask?: string | null,
 ): Promise<void> {
+  // This pipeline settles the DEPOSIT rung, and only that rung. The kind
+  // column's check constraint has always also allowed 'balance', but nothing
+  // has ever minted one - so a settle has never had to ask what it was
+  // settling, and did not. That is inert only while the capacity stays unused:
+  // the moment anything mints a non-deposit row, a successful capture would
+  // flip deposit_paid_at instead, marking a rung paid that nobody paid and
+  // leaving the real one outstanding.
+  //
+  // Gate 9d deliberately mints deposit rows only - commitment and balance are
+  // BACS/cash by a pricing decision this code defends elsewhere by throwing
+  // (lib/ledger/xero-config.ts, Peter 2026-07-09) - so this guard should never
+  // fire. It exists because 'should never happen' is exactly the condition that
+  // must not settle silently: the money IS taken by then, so the only safe
+  // answer is to record it and shout, never to guess which rung it belongs to.
+  if (row.kind !== "deposit") {
+    await sendOpsAlert(
+      `Card paid for an unroutable kind — attempt ${row.id.slice(0, 8)}`,
+      [
+        `takepayments captured ${(row.amount_pence / 100).toFixed(2)} for quote ${row.quote_id} on a card_payments row of kind "${row.kind}", which has no settlement path.`,
+        `The money IS taken (xref ${xref ?? "?"}). Nothing has been marked paid — decide which rung it settles and record it by hand.`,
+      ],
+      "system",
+    );
+    return;
+  }
   try {
     // Money truth uses the amount actually captured (row.amount_pence), not a
     // possibly-since-edited quote.deposit_amount.
