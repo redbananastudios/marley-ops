@@ -23,7 +23,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
-import { asProvider, configuredProvider, createCreditNote, findCreditNoteByReference, findOrCreateContact, invoiceCarriesVat, refundCreditNote, reusableContactId, type LedgerCreditNoteRef } from "@/lib/ledger";
+import { asProvider, configuredProvider, createCreditNote, findCreditNoteByReference, findOrCreateContact, invoiceCarriesVat, refundCreditNote, reusableContactId, type LedgerCreditNoteRef, type LedgerParty } from "@/lib/ledger";
 
 type Sb = SupabaseClient<Database>;
 
@@ -249,11 +249,17 @@ export async function reverseDepositVatInZoho(
       input.contactProvider,
       configuredProvider(),
     );
+    // Keyed on the client where we have one, else on the quote — never on the
+    // name. `quoteId` is non-nullable on this input, so a key always exists.
+    const party: LedgerParty = input.clientId
+      ? { kind: "client", id: input.clientId }
+      : { kind: "quote", id: input.quoteId };
     const contactId =
       realContact ??
       (await findOrCreateContact({
         name: input.customerName || input.customerEmail || "Customer",
         email: input.customerEmail,
+        party,
       }));
 
     // 3. Create the credit note (idempotent by reference; VAT mirrors the invoice).

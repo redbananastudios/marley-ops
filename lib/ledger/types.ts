@@ -190,6 +190,11 @@ export interface RefundCreditNoteInput {
 /** Returned by `refundCreditNote` when the note has nothing left to refund. */
 export const ALREADY_REFUNDED = "already_refunded";
 
+/* The contact key. Defined in its own module because the fallback rule needs to
+   log, and this file is otherwise pure type declarations. */
+import type { LedgerParty } from "./party";
+export type { LedgerParty };
+
 /**
  * The 13 app-facing operations. Measured, not assumed: the other six exports on
  * `lib/zoho.ts` are either test/script cleanup (voidAndDelete*, deletePayment,
@@ -205,6 +210,13 @@ export interface LedgerAdapter {
     name: string;
     email?: string | null;
     phone?: string | null;
+    /**
+     * WHO this contact is, as a stable id — see {@link LedgerParty}. Required,
+     * not optional: an optional field would let a call site added later fall
+     * through to name-only resolution under Xero, which is the exact collision
+     * it exists to prevent, arriving silently on the money path.
+     */
+    party: LedgerParty;
   }): Promise<string>;
 
   /* invoices */

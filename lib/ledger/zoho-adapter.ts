@@ -70,7 +70,18 @@ async function wrap<T>(run: () => Promise<T>): Promise<T> {
 export const zohoAdapter: LedgerAdapter = {
   provider: "zoho",
 
-  findOrCreateContact: (input) => wrap(() => zFindOrCreateContact(input)),
+  /**
+   * `party` is deliberately DROPPED. Zoho has no `ContactNumber` equivalent and
+   * `lib/zoho.ts` must not change — zero behaviour change is this file's whole
+   * contract.
+   *
+   * Destructured rather than passed straight through: forwarding `input` would
+   * compile and behave identically today (excess-property checks do not fire on
+   * a variable, and `lib/zoho.ts` builds its POST body field by field), so the
+   * omission would rest on a coincidence. This way a test can prove it.
+   */
+  findOrCreateContact: ({ name, email, phone }) =>
+    wrap(() => zFindOrCreateContact({ name, email, phone })),
 
   findInvoiceByReference: (reference): Promise<(LedgerInvoiceRef & { total?: number }) | null> =>
     wrap(() => zFindInvoiceByReference(reference)),

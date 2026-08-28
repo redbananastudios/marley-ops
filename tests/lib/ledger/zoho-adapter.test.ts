@@ -147,4 +147,37 @@ describe("pass-throughs", () => {
   it("reports its own provider", () => {
     expect(zohoAdapter.provider).toBe("zoho");
   });
+
+  /**
+   * Gate 18a added a required `party` to the seam so Xero can key contacts on a
+   * stable id instead of the customer's name. Zoho has no `ContactNumber`
+   * equivalent, and zero behaviour change on the live books is this adapter's
+   * whole contract — so the field must be DROPPED, not forwarded.
+   *
+   * Forwarding it would in fact behave identically today, because `lib/zoho.ts`
+   * builds its POST body field by field and ignores unknown keys. That is a
+   * coincidence, not a guarantee, and this is the test that turns "Zoho didn't
+   * change" from an assumption into an assertion. The method had no assertions
+   * at all before this.
+   */
+  it("drops the contact party — Zoho must not see it", async () => {
+    z.findOrCreateContact.mockResolvedValue("zc1");
+    await zohoAdapter.findOrCreateContact({
+      name: "John Smith",
+      email: "j@example.com",
+      phone: "+447700900000",
+      party: { kind: "client", id: "c1" },
+    });
+    const arg = z.findOrCreateContact.mock.calls[0][0];
+    expect(arg).toEqual({ name: "John Smith", email: "j@example.com", phone: "+447700900000" });
+    expect("party" in arg).toBe(false);
+  });
+
+  it("drops it unconditionally — both party kinds reach Zoho identically", async () => {
+    z.findOrCreateContact.mockResolvedValue("zc1");
+    await zohoAdapter.findOrCreateContact({ name: "A", party: { kind: "client", id: "c1" } });
+    await zohoAdapter.findOrCreateContact({ name: "A", party: { kind: "quote", id: "q1" } });
+    const [first, second] = z.findOrCreateContact.mock.calls.map((c) => c[0]);
+    expect(first).toEqual(second);
+  });
 });

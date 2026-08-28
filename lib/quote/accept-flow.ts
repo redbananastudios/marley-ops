@@ -96,6 +96,7 @@ import {
   createInvoice,
   findInvoiceByReference,
   findOrCreateContact,
+  partyForQuote,
   getInvoicePdfBase64,
   getInvoiceStatus,
   recordInvoicePayment,
@@ -1155,6 +1156,10 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
+          // Keyed on the client, not the name: Xero rejects (or worse, silently
+          // adopts) a duplicate contact name. `partyForQuote` logs if it has to
+          // fall back to the quote id.
+          party: partyForQuote({ id: quote.id, clientId: quote.client_id }),
         });
         contactProvider = ledger;
       }
@@ -1658,6 +1663,10 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
+          // Keyed on the client, not the name: Xero rejects (or worse, silently
+          // adopts) a duplicate contact name. `partyForQuote` logs if it has to
+          // fall back to the quote id.
+          party: partyForQuote({ id: quote.id, clientId: quote.client_id }),
         });
         contactProvider = ledger;
       }
@@ -2603,6 +2612,10 @@ export async function createBalanceInvoiceFlow(
           name: quote.customer_name ?? "Customer",
           email: quote.customer_email,
           phone: quote.customer_phone,
+          // Keyed on the client, not the name: Xero rejects (or worse, silently
+          // adopts) a duplicate contact name. `partyForQuote` logs if it has to
+          // fall back to the quote id.
+          party: partyForQuote({ id: quote.id, clientId: quote.client_id }),
         });
         contactProvider = ledger;
       }
