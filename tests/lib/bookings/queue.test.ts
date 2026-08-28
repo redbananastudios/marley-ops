@@ -271,10 +271,19 @@ describe("queueMoney", () => {
     expect(m.owedNow).toBe(450);
   });
 
-  it("the two /bookings money tiles sum to the /payments headline, on any mix", () => {
+  it("totals a mix the bucket ladder gets wrong", () => {
     // The invariant that replaces the QA ledger's false one (Balance
     // outstanding matches Due exactly), which only ever held on a day with no
-    // unpaid 25%. Neither tile alone equals the headline.
+    // unpaid 25%. /bookings shows m.commitment and m.balance as two tiles and
+    // /payments shows m.owedNow, and neither tile alone equals the headline.
+    //
+    // That the two tiles SUM to the headline is not asserted here: owedNow is
+    // defined as commitment + balance a few lines up in queue.ts, so the
+    // assertion would hold for every input, including one produced by the
+    // bucket-based tile this whole block exists to forbid. The half of that
+    // identity worth pinning is the arithmetic below; the half about which
+    // figure each PAGE renders is pinned against the pages themselves in
+    // tests/lib/bookings/bucket-coverage.test.ts.
     const rows = [
       money("no_date", 0, { commitment: 450, balance: 0 }),
       money("deposit_outstanding", 100, { commitment: 300, balance: 0, commitmentOverdue: 300 }),
@@ -286,7 +295,6 @@ describe("queueMoney", () => {
     const m = queueMoney(rows);
     expect(m.commitment).toBe(1250);
     expect(m.balance).toBe(2600);
-    expect(m.commitment + m.balance).toBe(m.owedNow);
     expect(m.owedNow).toBe(3850);
     expect(m.overdue).toBe(1200);
     // And the overdue half splits the same way the danger sections do.
@@ -295,6 +303,34 @@ describe("queueMoney", () => {
     expect(m.commitmentOverdue + m.balanceOverdue).toBe(m.overdue);
     // Deposits are disjoint from every owed figure.
     expect(m.depositsOutstanding).toBe(100);
+
+    // ...and the mix has to STAY one a bucket-based tile gets wrong, or £1,250
+    // above could be satisfied by the very implementation this block forbids.
+    // Two of the three unpaid 25%s sit in buckets no commitment_* filter
+    // reaches, which is QA-20260826-01 exactly.
+    const bucketBased = rows
+      .filter((r) => (r.bucket as string).startsWith("commitment_"))
+      .reduce((s, r) => s + r.owed.commitment, 0);
+    expect(
+      bucketBased,
+      "the fixture stopped discriminating: every unpaid 25% now sits in a commitment_* bucket, " +
+        "so a tile that summed those buckets would pass this test",
+    ).toBeLessThan(m.commitment);
+  });
+
+  it("reads money per obligation, so re-bucketing a row cannot move it", () => {
+    // The regression the fixture above is chosen to catch, stated directly:
+    // any bucket-conditional money read. Same obligations, different rung —
+    // every owed figure must be identical. Only the deposit figures are
+    // bucket-keyed, deliberately (the deposits queue IS a bucket), and neither
+    // row here is in it.
+    const owed = { commitment: 450, balance: 1700, overdue: 450 };
+    const parked = queueMoney([money("no_date", 0, owed)]);
+    const booked = queueMoney([money("commitment_due", 0, owed)]);
+    expect(parked).toEqual(booked);
+    expect(parked.commitment).toBe(450);
+    expect(parked.balance).toBe(1700);
+    expect(parked.commitmentJobs).toBe(1);
   });
 
   it("a row owing the 25% AND an early balance counts in both tiles at once", () => {

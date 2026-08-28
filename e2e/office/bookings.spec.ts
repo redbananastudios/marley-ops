@@ -17,13 +17,21 @@ test.describe("Office — Bookings", () => {
     // equals it — so both must be on screen or the office is reading a
     // partial figure as a total.
     //
-    // Matched on the tiles' OWN labels. They used to repeat the section
-    // titles below them, so /Balance to collect/ resolved to the section
-    // heading and the assertion passed with no tile on the page at all.
-    await expect(page.getByText("Deposits outstanding").first()).toBeVisible();
-    await expect(page.getByText("25% outstanding")).toBeVisible();
-    await expect(page.getByText("Balances outstanding")).toBeVisible();
-    // And the sections they decompose into, each carrying its own total.
+    // Scoped to the tile, NOT to the label text: these labels are ALSO
+    // section headings further down the page, so getByText(...).first() is
+    // satisfied by the section on a page with no tile at all — it could not
+    // fail for the deletion it was written to catch. The tile is the element
+    // carrying the £ figure, so the figure is asserted too: a tile showing
+    // its label and nothing else is the same money-not-on-screen failure.
+    const tile = (label: string) => page.getByTestId("stat-tile").filter({ hasText: label });
+    for (const label of ["Deposits outstanding", "25% outstanding", "Balances outstanding"]) {
+      await expect(tile(label), `${label} money tile`).toHaveCount(1);
+      await expect(tile(label)).toBeVisible();
+      await expect(tile(label)).toContainText(/£[\d,]/);
+    }
+    // And the sections those tiles decompose into. The two 25%/balance tiles
+    // were RENAMED away from these headings precisely so a tile and a section
+    // can never share a title while showing different money.
     await expect(page.getByRole("heading", { name: "25% to collect" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Balance to collect" })).toBeVisible();
 

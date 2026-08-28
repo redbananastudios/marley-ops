@@ -190,9 +190,14 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-3">
+        {/* money.owedNow, not overdueTotal + dueTotal: identical arithmetic,
+            but this headline IS the seam's owedNow, and saying so is what lets
+            a guard pin it to /bookings' two tiles (bucket-coverage.test.ts).
+            Recomposing it from a split of itself also lost the last bit to
+            floating point on some mixes. */}
         <Stat
           label="Owed right now"
-          value={poundsMoney(overdueTotal + dueTotal)}
+          value={poundsMoney(money.owedNow)}
           sub="invoiced 25% + balances due (deposits excluded)"
         />
         <Stat

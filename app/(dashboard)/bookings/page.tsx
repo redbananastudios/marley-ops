@@ -143,12 +143,20 @@ function Stat({ label, value, sub, href }: { label: string; value: string; sub?:
       {sub ? <p className="mt-0.5 text-xs text-mist-400">{sub}</p> : null}
     </>
   );
+  // data-testid, not the label text: every money tile shares its label with the
+  // section further down the page ("25% to collect" is a tile AND an h2), so a
+  // browser assertion that matches on text alone is satisfied by the section
+  // heading after the tile has been deleted — the tile is what carries the £.
   return href ? (
     <Link href={href} className="focus-ring block">
-      <Card className="px-5 py-4 transition-colors hover:bg-muted/40">{inner}</Card>
+      <Card data-testid="stat-tile" className="px-5 py-4 transition-colors hover:bg-muted/40">
+        {inner}
+      </Card>
     </Link>
   ) : (
-    <Card className="px-5 py-4">{inner}</Card>
+    <Card data-testid="stat-tile" className="px-5 py-4">
+      {inner}
+    </Card>
   );
 }
 
