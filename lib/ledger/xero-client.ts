@@ -48,6 +48,19 @@ type EnvLike = Record<string, string | undefined>;
  * this project (it omits `AUTHORISED` from `Invoice.Status`, and it shows a
  * `/Contacts/ContactNumber/{ContactNumber}` path the yaml does not define).
  */
+/**
+ * Per-request budget, matching `ZOHO_TIMEOUT_MS`.
+ *
+ * Every Zoho call carries one; the Xero calls carried none, which is worse than
+ * it sounds. The deposit-poll cron walks up to ~100 sequential status reads
+ * inside a 60-second function budget: one stalled connection consumed the whole
+ * budget and the function was killed mid-loop, so `runCron` never wrote a result
+ * row — the run was neither a recorded success nor a recorded failure, and
+ * neither the access-denied escalation nor the blind-sweep check ever ran. A
+ * timeout turns that into a counted, reported failure.
+ */
+export const XERO_TIMEOUT_MS = 10_000;
+
 export const XERO = {
   authorize: "https://login.xero.com/identity/connect/authorize",
   token: "https://identity.xero.com/connect/token",
@@ -174,6 +187,7 @@ interface XeroTokenResponse {
 async function postToken(body: URLSearchParams): Promise<XeroTokenResponse> {
   const config = requireConfig();
   const res = await fetch(XERO.token, {
+    signal: AbortSignal.timeout(XERO_TIMEOUT_MS),
     method: "POST",
     headers: {
       Authorization: basicAuth(config),
@@ -228,7 +242,7 @@ export async function refreshXeroTokens(currentRefreshToken: string): Promise<Re
     // discovering it in 30 minutes on a cron pass.
     throw new LedgerError(
       "Xero returned no new refresh token — the rotation contract was not honoured, so " +
-        "the connection will expire. Re-authorise with scripts/xero-authorise.mjs.",
+        "the connection will expire. Re-authorise with /api/xero/connect (admin only).",
     );
   }
   return {
@@ -248,7 +262,7 @@ export async function xeroAuth(): Promise<{ accessToken: string; tenantId: strin
   if (!tenantId) {
     throw new LedgerError(
       "No Xero tenant is recorded for this connection. If the Demo Company was reset, " +
-        "re-authorise with scripts/xero-authorise.mjs.",
+        "re-authorise with /api/xero/connect (admin only).",
     );
   }
   return { accessToken, tenantId };
@@ -263,6 +277,7 @@ interface XeroConnection {
 /** The organisations this token may address. */
 export async function listConnections(accessToken: string): Promise<XeroConnection[]> {
   const res = await fetch(XERO.connections, {
+    signal: AbortSignal.timeout(XERO_TIMEOUT_MS),
     headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
   });
   if (!res.ok) {
@@ -305,6 +320,8 @@ export async function xeroFetch(
 ): Promise<Response> {
   const { accessToken, tenantId } = await xeroAuth();
   const res = await fetch(`${XERO.api}${path}`, {
+    // A PDF read moves ~135KB, comfortably inside the same budget.
+    signal: AbortSignal.timeout(XERO_TIMEOUT_MS),
     ...init,
     headers: {
       ...(init.headers ?? {}),

@@ -58,7 +58,23 @@ export function isLedgerAccessDenied(err: unknown): boolean {
   if (!(err instanceof LedgerError)) return false;
   if (err.providerCode !== undefined && PERMANENT_PROVIDER_CODES.has(err.providerCode)) return true;
   if (err.httpStatus === 401 || err.httpStatus === 403) return true;
-  // The seam preserves provider messages verbatim, so the two auth failures
-  // that carry no code and no status are still recognisable by text.
-  return /credentials not configured|token refresh failed|not configured —/i.test(err.message);
+  /**
+   * Recognise the provider's own permanent-auth wording.
+   *
+   * Zoho's two cases carry no code and no status. Xero's carry a 400, which is
+   * indistinguishable from an ordinary bad request by status alone — so a
+   * revoked consent, a refresh token past its 60-day life, or a rotation lost
+   * mid-write all arrived here as `LedgerError("Xero token request failed:
+   * invalid_grant", undefined, 400)` and classified as TRANSIENT. That is the
+   * failure this module was written to prevent, one provider over: the deduped
+   * integration alert would never fire, and each quote would instead emit its
+   * own "invoice FAILED" — five unrelated-looking incidents for one broken
+   * integration, none of them naming the remedy.
+   *
+   * This file's doc comment promised Xero was covered because it raises the
+   * same error TYPE. Sharing a type is not sharing a signal.
+   */
+  return /credentials not configured|token refresh failed|not configured —|invalid_grant|invalid_client|no new refresh token|No Xero tenant is recorded/i.test(
+    err.message,
+  );
 }

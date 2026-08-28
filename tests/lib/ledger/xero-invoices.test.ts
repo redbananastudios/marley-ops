@@ -421,7 +421,33 @@ describe("createInvoice", () => {
     expect((line.LineItems as Record<string, unknown>[])[0].AccountCode).toBe("260");
   });
 
-  it("falls back to the general income account for storage, and says so", async () => {
+  /**
+   * Storage income does NOT fall back to the general account.
+   *
+   * It used to, with a warning, on the reasoning that a reclassifiable invoice
+   * beats stopping storage billing. That is the same "an unset variable is a
+   * decision" mistake as the branding-theme one, and quieter: the invoice, the
+   * total and the customer email are all correct, so the first person to notice
+   * is the accountant at the quarter end with a month of storage income already
+   * mixed into Removals Income. Under Zoho separation needed no configuration at
+   * all, so a cutover losing it silently is a regression nobody asked for.
+   */
+  it("refuses to book storage income to the general account", async () => {
+    await expect(
+      createInvoice({
+        customerId: "c",
+        reference: "MMS-001",
+        description: "Storage",
+        amount: 60,
+        itemName: "Storage",
+      }),
+    ).rejects.toThrow(/XERO_ACCOUNT_STORAGE_INCOME/);
+    // And it refuses BEFORE writing anything, not after.
+    expect(state.calls).toHaveLength(0);
+  });
+
+  it("uses the storage account when it is configured", async () => {
+    process.env.XERO_ACCOUNT_STORAGE_INCOME = "201";
     state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
     await createInvoice({
       customerId: "c",
@@ -431,8 +457,7 @@ describe("createInvoice", () => {
       itemName: "Storage",
     });
     const line = (sentBody().Invoices as Record<string, unknown>[])[0];
-    expect((line.LineItems as Record<string, unknown>[])[0].AccountCode).toBe("200");
-    expect(state.warnings.map((w) => w.event)).toContain("ledger.xero.storage_income_account_unset");
+    expect((line.LineItems as Record<string, unknown>[])[0].AccountCode).toBe("201");
   });
 
   /**
@@ -781,9 +806,13 @@ describe("voidInvoice", () => {
 
 describe("invoiceAppUrl", () => {
   it("builds the office deep link from the configured org short code", () => {
+    // The legacy `organisationlogin ... /AccountsReceivable/View.aspx` form was
+    // REFUTED: the string "AccountsReceivable" appears nowhere in Xero's own
+    // published source, and the 302 offered as proof it worked reproduces
+    // identically for a garbage path and a bogus short code — so it evidenced
+    // only that an anonymous hit bounces to login. This form is in Xero's source.
     expect(invoiceAppUrl(INVOICE_ID)).toBe(
-      "https://go.xero.com/organisationlogin/default.aspx?shortcode=!N7rJh" +
-        `&redirecturl=/AccountsReceivable/View.aspx?InvoiceID=${INVOICE_ID}`,
+      `https://go.xero.com/app/!N7rJh/invoicing/view/${INVOICE_ID}`,
     );
   });
 

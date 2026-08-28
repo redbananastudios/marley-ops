@@ -212,6 +212,23 @@ export async function createCreditNote(input: CreateCreditNoteInput): Promise<Le
   const created = json.CreditNotes?.[0];
   assertWriteAccepted(created, `credit-note create for ${reference}`, created?.CreditNoteID);
 
+  /**
+   * The mirror of `createInvoice`'s own check. Same cause — an approval
+   * workflow, or a connected user who cannot approve — and a worse consequence
+   * here: a DRAFT credit note reverses no VAT, but its id and number would be
+   * persisted against the card payment as though the reversal had happened, and
+   * every retry would re-adopt the same wedged draft.
+   */
+  if (created!.Status !== "AUTHORISED") {
+    throw new LedgerError(
+      `Xero accepted the credit note for ${reference} but returned it as ` +
+        `${created!.Status ?? "an unknown status"}, not AUTHORISED — it reverses nothing and ` +
+        `carries no journals. This usually means the organisation has an approval workflow ` +
+        `enabled, or the connected user cannot approve. Refusing to report a reversal that ` +
+        `did not happen.`,
+    );
+  }
+
   return {
     creditNoteId: created!.CreditNoteID!,
     creditNoteNumber: created!.CreditNoteNumber ?? "",

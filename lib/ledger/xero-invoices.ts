@@ -198,7 +198,7 @@ export async function assertXeroWritable(operation: string): Promise<void> {
     throw new LedgerError(
       `Cannot ${operation} in Xero: reading the organisation was refused (401/403), so whether ` +
         `these are the live books could not be determined. Suspect a missing ` +
-        `accounting.settings.read scope — re-authorise with scripts/xero-authorise.mjs.`,
+        `accounting.settings.read scope — re-authorise with /api/xero/connect (admin only).`,
     );
   }
   assertWritable(org, operation);
@@ -338,17 +338,24 @@ export function xeroIncomeAccountCode(
     }
     return value;
   }
-  // Storage falls back to the general income account rather than failing: one
-  // configured account raises correct invoices that an accountant can reclassify,
-  // whereas refusing would stop storage billing outright. The general account has
-  // no such fallback — there is nothing left to fall back to.
-  if (storage) {
-    const general = (env.XERO_ACCOUNT_INCOME ?? "").trim();
-    if (general) {
-      log.warn("ledger.xero.storage_income_account_unset", { fallback: "XERO_ACCOUNT_INCOME" });
-      return general;
-    }
-  }
+  /**
+   * Storage does NOT fall back to the general income account.
+   *
+   * It used to, with a `log.warn`, on the reasoning that raising a
+   * reclassifiable invoice beats stopping storage billing. That is the same
+   * "an unset variable is a decision" mistake corrected in `xeroBrandingThemeId`
+   * one file over, and the consequence is quieter: nothing on any screen
+   * differs — the invoice, the total and the customer email are all correct — so
+   * the first person to notice is the accountant at the quarter end, with a
+   * month of storage income already mixed into Removals Income and needing a
+   * journal to get out. Income separation has been standing policy since
+   * 2026-07-22, and under Zoho it needed no configuration at all, so a Xero
+   * cutover silently losing it is a regression nobody asked for.
+   *
+   * If pointing storage at the general account is ever genuinely wanted, set
+   * `XERO_ACCOUNT_STORAGE_INCOME` to the same code — an explicit statement, not
+   * an absence.
+   */
   throw new LedgerError(
     `No Xero income account is configured — set ${name} to the account CODE (e.g. "200") ` +
       `that this income posts to. Xero requires an account code on every line of an ` +
@@ -411,7 +418,22 @@ declare const SINGLE_INVOICE_READ: unique symbol;
 type SingleInvoiceRead = XeroInvoiceRow & { readonly [SINGLE_INVOICE_READ]: true };
 
 /** Terminal statuses: the document no longer represents money owed. */
+/**
+ * Statuses that must never be adopted under one of our references.
+ *
+ * VOIDED and DELETED are the obvious pair — the document no longer represents
+ * money owed. DRAFT and SUBMITTED are the ones that matter more, and they were
+ * missing: `createInvoice` refuses to report a raise that came back unapproved,
+ * but the retry that follows called `findInvoiceByReference`, found the very
+ * draft the assertion had just refused, matched its total and adopted it. The
+ * customer would then be emailed a request to pay a document carrying no
+ * journals, and the failure would surface only when the money arrived and the
+ * payment write was refused — which is exactly the outcome the create-side
+ * assertion exists to prevent, arriving through the back door.
+ */
 const DEAD_STATUSES = new Set(["VOIDED", "DELETED"]);
+/** Raised but not approved — real, but cannot take a payment. */
+const UNAPPROVED_STATUSES = new Set(["DRAFT", "SUBMITTED"]);
 
 /** Map a Xero status, logging anything this build does not recognise. */
 function statusOf(row: XeroInvoiceRow, today: string) {
@@ -505,16 +527,29 @@ export async function findInvoiceByReference(
   // adopting one would mean raising nothing and then failing to take payment
   // against it. Same skip `lib/zoho.ts` makes.
   const live = (json.Invoices ?? []).filter((inv) => !DEAD_STATUSES.has(inv.Status ?? ""));
-  if (live.length === 0) return null;
-  if (live.length > 1) {
+  // An unapproved document under our reference is not "nothing there" — it is a
+  // blocked raise, and returning null would let the caller create a SECOND one.
+  const unapproved = live.filter((inv) => UNAPPROVED_STATUSES.has(inv.Status ?? ""));
+  if (unapproved.length > 0 && unapproved.length === live.length) {
     throw new LedgerError(
-      `Xero holds ${live.length} live invoices with reference ${value} ` +
-        `(${live.map((i) => i.InvoiceNumber ?? i.InvoiceID).join(", ")}). Refusing to guess which ` +
+      `Xero holds invoice ${unapproved[0].InvoiceNumber ?? unapproved[0].InvoiceID} under reference ` +
+        `${value}, but it is ${unapproved[0].Status} rather than AUTHORISED — it carries no journals ` +
+        `and cannot take a payment. This usually means the organisation has an invoice-approval ` +
+        `workflow enabled, or the connected user cannot approve. Approve it in Xero, or void it so a ` +
+        `fresh one can be raised. Refusing to adopt it, and refusing to raise a duplicate alongside it.`,
+    );
+  }
+  const adoptable = live.filter((inv) => !UNAPPROVED_STATUSES.has(inv.Status ?? ""));
+  if (adoptable.length === 0) return null;
+  if (adoptable.length > 1) {
+    throw new LedgerError(
+      `Xero holds ${adoptable.length} live invoices with reference ${value} ` +
+        `(${adoptable.map((i) => i.InvoiceNumber ?? i.InvoiceID).join(", ")}). Refusing to guess which ` +
         `one this quote's money belongs to — a human must void the duplicates in Xero.`,
     );
   }
 
-  const inv = live[0];
+  const inv = adoptable[0];
   if (!inv.InvoiceID) {
     throw new LedgerError(`Xero returned an invoice for ${value} with no InvoiceID.`);
   }
@@ -976,7 +1011,6 @@ export function invoiceAppUrl(invoiceId: string): string {
     return "#xero-org-shortcode-not-configured";
   }
   return (
-    `https://go.xero.com/organisationlogin/default.aspx?shortcode=${shortCode}` +
-    `&redirecturl=/AccountsReceivable/View.aspx?InvoiceID=${invoiceId}`
+    `https://go.xero.com/app/${shortCode}/invoicing/view/${invoiceId}`
   );
 }
