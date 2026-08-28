@@ -90,3 +90,112 @@ describe("the deposit rung refuses a commercial quote", () => {
     expect(SRC).toContain("payment_policy, standard_comms_at");
   });
 });
+
+/**
+ * The staff path is the ONLY way a commercial quote is accepted (the online one
+ * is refused above), and it was residential machinery end to end: it computed a
+ * deposit with `requestedDeposit`, wrote it to the row, armed the chase
+ * counters, opened a day-5 "deposit still unpaid" call task and emailed the
+ * customer the day-1 deposit chase — for a booking with no deposit rung.
+ *
+ * Source guards for the same reason the two above are: this function is deep IO
+ * (Supabase, the ledger, comms dispatch), and what matters is the presence and
+ * ORDER of the policy branch, not arithmetic that is unit-tested in
+ * tests/lib/payments-policy.test.ts and tests/lib/bookings/commercial-money.test.ts.
+ */
+describe("the staff accept path takes no deposit on a commercial booking", () => {
+  const staffBody = () => {
+    const at = SRC.indexOf("export async function acceptQuoteByStaff(");
+    expect(at, "acceptQuoteByStaff not found — rename it here too").toBeGreaterThan(-1);
+    return SRC.slice(at, SRC.indexOf("/* ---------------", at));
+  };
+
+  it("branches the ask on the policy instead of always running requestedDeposit", () => {
+    // Unbranched, the residential rule wrote three different wrong figures: the
+    // flat default, the inside-T-7 collapse to 25%, and — at or under the
+    // small-job threshold — the whole agreed price, which left the only
+    // commercial money figure at exactly £0.
+    expect(staffBody()).toContain("const deposit = commercial");
+  });
+
+  it("resolves the policy BEFORE it computes the ask", () => {
+    // Order is the property. The snapshot used to be taken after the deposit
+    // was already computed, purely to fill its own column — so nothing the
+    // policy knew could reach the figure written beside it.
+    const body = staffBody();
+    const policy = body.indexOf("const paymentPolicy = await snapshotPaymentPolicy(sb, quote);");
+    const ask = body.indexOf("const deposit = commercial");
+    expect(policy).toBeGreaterThan(-1);
+    expect(ask).toBeGreaterThan(-1);
+    expect(policy).toBeLessThan(ask);
+  });
+
+  it("never sends the deposit-chase email to a commercial customer", () => {
+    // This is the day-1 DEPOSIT CHASE, and it names the figure. Before the fix
+    // it asked a business client for money they were never quoted; after it,
+    // the same email would ask them for £0. Both reach a real inbox.
+    expect(staffBody()).toContain("if (!commercial && quote.customer_email && token)");
+  });
+
+  it("never opens a day-5 'deposit still unpaid' call task for one", () => {
+    expect(staffBody()).toContain("if (!carriedDeposit && !commercial)");
+  });
+
+  it("never arms the deposit chase counters on the lead", () => {
+    // deposit_requested_at would date an ask that never happened, and the
+    // counters would leave the booking primed for a queue it is excluded from.
+    expect(staffBody()).toContain("carriedDeposit || commercial");
+  });
+});
+
+/**
+ * `quotes.commercial_due_date` is read in three places — classifyBooking,
+ * owedNow and the /bookings commercial section — and was written by NOTHING.
+ * A repo-wide grep returned the migration, the select, the mapping and the two
+ * reads. So `pastTerms` was false on every row forever: the overdue state was
+ * unreachable, and the internal ops alert the PRD promises could never fire.
+ *
+ * Peter decided (2026-08-28) that commercial invoices are raised BY HAND on
+ * completion, so no automation will ever write it. The office's existing raise
+ * IS that moment, which is why it stamps the date rather than a new action
+ * doing it — a second step is a second step to forget, and a date recorded
+ * apart from the invoice it dates can disagree with it.
+ */
+describe("the completion invoice dates itself on the client's terms", () => {
+  const flowBody = () => {
+    const at = SRC.indexOf("export async function createBalanceInvoiceFlow(");
+    expect(at, "createBalanceInvoiceFlow not found — rename it here too").toBeGreaterThan(-1);
+    return SRC.slice(at, SRC.indexOf("\n/**", at));
+  };
+
+  it("stamps commercial_due_date, so something writes the column three call sites trust", () => {
+    const body = flowBody();
+    expect(body).toContain("commercial_due_date: commercialDueDate");
+    expect(body).toContain("paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))");
+  });
+
+  it("computes the date from the policy snapshot, never from the client's type today", () => {
+    // Same reason the policy itself is snapshotted: re-deriving it would let a
+    // client edited after the fact re-date an invoice already in their hands.
+    expect(flowBody()).toContain('policyOfQuote(quote) === "commercial"');
+  });
+
+  it("writes it in the SAME update as the invoice number that makes it readable", () => {
+    // All three readers key off zoho_balance_invoice_number. A second write
+    // would open a window where the invoice is readable and its terms are not —
+    // which is precisely the undated state the classifier now has to alarm on.
+    const body = flowBody();
+    const number = body.indexOf("zoho_balance_invoice_number: inv.invoiceNumber");
+    const due = body.indexOf("commercial_due_date: commercialDueDate");
+    expect(number).toBeGreaterThan(-1);
+    expect(due).toBeGreaterThan(-1);
+    // Same object literal: no `.update(` may open between the two.
+    expect(body.slice(number, due)).not.toContain(".update(");
+  });
+
+  it("leaves a RESIDENTIAL raise byte-identical", () => {
+    // The conditional spread is what guarantees it: residential resolves the
+    // date to null and writes no extra key at all.
+    expect(flowBody()).toContain("...(commercialDueDate ? { commercial_due_date: commercialDueDate } : {})");
+  });
+});

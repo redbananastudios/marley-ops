@@ -6,6 +6,7 @@ import {
   commitmentDueDate,
   commitmentDueImmediately,
   DEFAULT_PAYMENT_TERMS_DAYS,
+  depositOfQuote,
   paymentTermsDays,
   paymentTermsDueDate,
   policyOfQuote,
@@ -409,6 +410,48 @@ describe("policyOfQuote", () => {
   it("never reads an unrecognised value as commercial", () => {
     expect(policyOfQuote({ payment_policy: "COMMERCIAL" })).toBe("residential");
     expect(policyOfQuote({ payment_policy: "business" })).toBe("residential");
+  });
+});
+
+describe("depositOfQuote", () => {
+  it("a commercial booking carries no deposit, whatever the column says", () => {
+    // The three figures the residential `requestedDeposit` actually wrote onto
+    // commercial quotes before gate 10's accept path was fixed: the flat
+    // default, the inside-T-7 collapse to 25%, and — at or under the small-job
+    // threshold — the WHOLE agreed price. Each was subtracted from the only
+    // commercial money figure there is.
+    expect(depositOfQuote({ payment_policy: "commercial", deposit_amount: 100 }, 100)).toBe(0);
+    expect(depositOfQuote({ payment_policy: "commercial", deposit_amount: 600 }, 100)).toBe(0);
+    expect(depositOfQuote({ payment_policy: "commercial", deposit_amount: 280 }, 100)).toBe(0);
+  });
+
+  it("a null column on a commercial booking does NOT fall back to the default", () => {
+    // The fallback is the whole reason this function exists. A commercial quote
+    // has no deposit row to read, so `?? defaultDeposit` turned "no deposit"
+    // into £100 at every read — silently, and identically on the completion
+    // invoice and the board.
+    expect(depositOfQuote({ payment_policy: "commercial", deposit_amount: null }, 100)).toBe(0);
+    expect(depositOfQuote({ payment_policy: "commercial" }, 100)).toBe(0);
+  });
+
+  it("residential is unchanged — the stored figure, or the default when null", () => {
+    // The control. Every residential caller must read exactly what it read
+    // before this function existed.
+    expect(depositOfQuote({ payment_policy: "residential", deposit_amount: 250 }, 100)).toBe(250);
+    expect(depositOfQuote({ payment_policy: "residential", deposit_amount: null }, 100)).toBe(100);
+    expect(depositOfQuote({ payment_policy: null, deposit_amount: null }, 100)).toBe(100);
+    expect(depositOfQuote({}, 100)).toBe(100);
+    expect(depositOfQuote(null, 100)).toBe(100);
+    // A deliberate £0 residential deposit stays £0 rather than reviving the
+    // default — `??` only fills a null, and that is the existing behaviour.
+    expect(depositOfQuote({ payment_policy: "residential", deposit_amount: 0 }, 100)).toBe(0);
+  });
+
+  it("only the exact snapshot value switches the policy off", () => {
+    // Same guard as policyOfQuote: an unrecognised value must not silently
+    // zero a residential deposit.
+    expect(depositOfQuote({ payment_policy: "COMMERCIAL", deposit_amount: 100 }, 100)).toBe(100);
+    expect(depositOfQuote({ payment_policy: "business", deposit_amount: 100 }, 100)).toBe(100);
   });
 });
 

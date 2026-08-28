@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { getBusinessSettings } from "@/lib/settings";
 import { balanceDue } from "@/lib/quote/payments";
+import { depositOfQuote } from "@/lib/payments-policy";
 import { classifyBooking, owedNow, type BookingBucket, type OwedNow } from "@/lib/bookings/queue";
 
 /**
@@ -17,6 +18,34 @@ import { classifyBooking, owedNow, type BookingBucket, type OwedNow } from "@/li
  *  UTC slice (an all-day Monday move during BST is stored 23:00Z Sunday). */
 export const ukDayOfInstant = (iso: string): string =>
   new Date(iso).toLocaleDateString("en-CA", { timeZone: "Europe/London" });
+
+/**
+ * Is the REMOVAL done? A commercial job is invoiced on completion, so this is a
+ * money question, not just a diary one.
+ *
+ * It reads every removal appointment on the lead, not one of them. The earliest
+ * appointment is the right answer to "when is the move" (it is the slot the
+ * board shows and the change-date dialog opens), and it was being reused to
+ * answer "is it finished" — which it cannot. A two-day job crewed Friday and
+ * Saturday flips its FRIDAY entry to 'completed' at Friday's sign-off, so on
+ * Friday evening the board read "completed — raise the invoice" for a job with
+ * a van still going out in the morning. Multiple live removals on one lead are
+ * ordinary here: the manual createAppointment path has no duplicate guard.
+ *
+ * The test is that NO appointment is still outstanding, which is stricter than
+ * asking whether the latest one is signed off, and stricter in the safe
+ * direction: out-of-order sign-off (Saturday closed, Friday forgotten) reads as
+ * not-done, which parks the row in "awaiting completion" where the office can
+ * see it. The opposite mistake invoices a job that is still running.
+ *
+ * The caller passes only scheduled/completed appointments — cancelled ones are
+ * filtered out of the query, and a cancelled day is not work left to do. An
+ * empty list is NOT complete: `every` is vacuously true, and a lead with no
+ * diary entry at all has not finished anything.
+ */
+export function removalCompleted(appts: ReadonlyArray<{ status: string | null }>): boolean {
+  return appts.length > 0 && appts.every((a) => a.status === "completed");
+}
 
 export interface BookingRow {
   quoteId: string;
@@ -150,25 +179,33 @@ export async function loadBookingRows(
 
   const leadById = new Map((leads ?? []).map((l) => [l.id, l]));
   // Earliest removal appointment per lead — id + slot so the booked rows can
-  // open the change-date dialog against the actual diary entry.
-  // `status` rides along because a COMMERCIAL job is invoiced on completion,
-  // so 'is this done?' is a money question there, not just a diary one. The
-  // query already selects it (it filters on scheduled|completed); it simply was
-  // not carried through.
+  // open the change-date dialog against the actual diary entry. It deliberately
+  // carries NO status: this entry answers "when is the move", and its status
+  // answers "is the FIRST DAY done", which is not a question anything wants.
+  // Reading it as though it were the whole job is the defect above.
   const apptByLead = new Map<
     string,
-    { id: string; startsAt: string; endsAt: string | null; status: string | null }
+    { id: string; startsAt: string; endsAt: string | null }
   >();
+  // ALL of them per lead, kept separately, because "when is the move" and "is
+  // the move finished" are different questions and the earliest entry only
+  // answers the first (see removalCompleted). The query already selects status
+  // — it filters on scheduled|completed — it simply was not carried through.
+  const apptsByLead = new Map<string, { status: string | null }[]>();
   for (const a of appts ?? []) {
-    const cur = apptByLead.get(a.lead_id as string);
+    const leadId = a.lead_id as string;
+    const status = (a.status as string | null) ?? null;
+    const cur = apptByLead.get(leadId);
     if (!cur || (a.starts_at as string) < cur.startsAt) {
-      apptByLead.set(a.lead_id as string, {
+      apptByLead.set(leadId, {
         id: a.id as string,
         startsAt: a.starts_at as string,
         endsAt: (a.ends_at as string | null) ?? null,
-        status: (a.status as string | null) ?? null,
       });
     }
+    const all = apptsByLead.get(leadId);
+    if (all) all.push({ status });
+    else apptsByLead.set(leadId, [{ status }]);
   }
 
   // Crew assigned per appointment → the "confirmed, not allocated" flag.
@@ -191,7 +228,14 @@ export async function loadBookingRows(
     if (lead.status === "completed" || lead.status === "declined") continue;
     seen.add(lead.id);
     const agreed = Number(q.agreed_price ?? q.grand_total ?? 0);
-    const deposit = Number(q.deposit_amount ?? settings.defaultDeposit);
+    // Policy-aware: COMMERCIAL takes no deposit, so nothing is deducted from
+    // its balance and `balanceAmount` below is the whole agreed price. The bare
+    // `?? defaultDeposit` this replaces is what made the only commercial money
+    // figure wrong — see depositOfQuote for the three shapes it produced.
+    const deposit = depositOfQuote(
+      q as { payment_policy?: string | null; deposit_amount?: number | null },
+      settings.defaultDeposit,
+    );
     // Raised 25% commitment carved out of the balance, mirroring the
     // authoritative computeBalanceCredits (accept-flow.ts): the balance invoice
     // will be agreed − deposit − commitment. commitment_invoice_amount is
@@ -214,7 +258,7 @@ export async function loadBookingRows(
       // mistake is the chase queue the guess just emptied.
       paymentPolicy: q.payment_policy === "commercial" ? "commercial" : "residential",
       commercialDueDate: (q.commercial_due_date as string | null) ?? null,
-      jobCompleted: appt?.status === "completed",
+      jobCompleted: removalCompleted(apptsByLead.get(lead.id) ?? []),
       agreed,
       deposit,
       depositPaidAt: q.deposit_paid_at,

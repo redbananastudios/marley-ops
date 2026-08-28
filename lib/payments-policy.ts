@@ -259,6 +259,32 @@ export function policyOfQuote(
 }
 
 /**
+ * The deposit a booking actually carries. COMMERCIAL takes none at all
+ * (PRD §3.10), so it is always 0 — never the quote's stored figure, and never
+ * the Settings default.
+ *
+ * This exists because `deposit_amount ?? defaultDeposit` is the wrong sentence
+ * to say about a commercial booking twice over, and both halves reached money.
+ * A null column silently became £100, so the completion invoice billed the
+ * agreed price minus a deposit nobody had taken and /bookings reported the same
+ * short figure. And when the stored figure was NOT null — the staff accept path
+ * wrote one through the residential `requestedDeposit` — the shortfall became
+ * whatever that rule produced: 25% of gross inside T-7, or the WHOLE job at or
+ * under the small-job threshold, which left the balance at exactly £0 and the
+ * section printing "£0 due" on a live job.
+ *
+ * Reading it through one policy-aware function means the fallback can no longer
+ * be applied to a policy that has no deposit rung to fall back to.
+ */
+export function depositOfQuote(
+  quote: { payment_policy?: string | null; deposit_amount?: number | null } | null | undefined,
+  defaultDeposit: number,
+): number {
+  if (policyOfQuote(quote) === "commercial") return 0;
+  return Number(quote?.deposit_amount ?? defaultDeposit);
+}
+
+/**
  * Coerce a stored terms value onto the allowed set. The DB constraint already
  * rejects anything else, so this guards the read side only: a legacy null, or a
  * value that arrived before the constraint existed, must not reach a due-date

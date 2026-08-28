@@ -216,9 +216,15 @@ export default async function BookingsPage({
   // terms. Overdue rows are listed WITH the invoiced ones rather than in a
   // danger section of their own (PRD §3.10), because the action is the same
   // either way: it is our own credit control, not a customer to chase.
+  // Rows whose terms date is MISSING lead the list: not knowing whether an
+  // invoice is late is a worse position than knowing it is, and it is the only
+  // one nobody can act on until someone looks.
   const commercialAwaiting = by("commercial_awaiting_completion").sort(byMoveDay);
   const commercialOverdue = by("commercial_overdue").sort(byMoveDay);
-  const commercialInvoiced = commercialOverdue.concat(by("commercial_invoiced").sort(byMoveDay));
+  const commercialUndated = by("commercial_terms_unknown").sort(byMoveDay);
+  const commercialInvoiced = commercialUndated
+    .concat(commercialOverdue)
+    .concat(by("commercial_invoiced").sort(byMoveDay));
 
   // Both money tiles read the SAME per-obligation ledger as /payments. The 25%
   // tile used to sum the commitment_* BUCKETS, which the ladder only reaches
@@ -593,16 +599,22 @@ export default async function BookingsPage({
         >
           {commercialInvoiced.map((r) => {
             const overdue = r.bucket === "commercial_overdue";
+            // An invoice with no terms date says so, rather than borrowing the
+            // "due" wording from the rows that are genuinely in terms. Whether
+            // it is late is unknown, and the office needs to read that as the
+            // thing to go and fix.
+            const undated = r.bucket === "commercial_terms_unknown";
             return (
               <div key={r.quoteId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
                 {nameAndRef(r, `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "invoice pending"}`)}
                 <span
                   className={`rounded-pill px-2.5 py-1 text-xs font-semibold ${
-                    overdue ? "bg-danger-bg text-danger" : "bg-warn-bg text-warn"
+                    overdue || undated ? "bg-danger-bg text-danger" : "bg-warn-bg text-warn"
                   }`}
                 >
-                  {gbp(r.balanceAmount)} {overdue ? "overdue" : "due"}
-                  {r.commercialDueDate ? ` ${shortDate(r.commercialDueDate)}` : ""}
+                  {gbp(r.balanceAmount)}{" "}
+                  {undated ? "no terms date — check the invoice" : overdue ? "overdue" : "due"}
+                  {!undated && r.commercialDueDate ? ` ${shortDate(r.commercialDueDate)}` : ""}
                 </span>
               </div>
             );

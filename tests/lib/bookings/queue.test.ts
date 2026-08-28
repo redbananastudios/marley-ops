@@ -365,6 +365,38 @@ describe("classifyBooking — commercial", () => {
     );
   });
 
+  it("an invoiced job with NO terms date is not reported as in terms", () => {
+    // `!!date && date < today` reads a MISSING date as "not past" — the
+    // reassuring answer, produced by having no information at all. Nothing
+    // wrote commercial_due_date until the completion invoice started stamping
+    // it, so every commercial invoice read as comfortably in terms forever and
+    // the overdue state was unreachable code.
+    //
+    // "In terms" and "we cannot tell" are different answers and must not share
+    // a rendering, so the undated invoice gets its own bucket and its own
+    // section rather than being quietly filed with the healthy rows.
+    const invoiced = {
+      ...commercial,
+      hasRemovalAppt: true,
+      apptDayUk: "2026-07-01",
+      jobCompleted: true,
+      balanceInvoiceNumber: "INV-000401",
+    };
+    expect(classifyBooking({ ...invoiced, commercialDueDate: null }, TODAY)).toBe(
+      "commercial_terms_unknown",
+    );
+    expect(classifyBooking(invoiced, TODAY)).toBe("commercial_terms_unknown");
+  });
+
+  it("an undated job that is not invoiced yet still reads as awaiting completion", () => {
+    // The ordinary pre-invoice state. A terms date cannot exist before the
+    // invoice it dates, so its absence there is expected and says nothing —
+    // only an invoice with no date is a gap.
+    expect(
+      classifyBooking({ ...commercial, jobCompleted: true, commercialDueDate: null }, TODAY),
+    ).toBe("commercial_awaiting_completion");
+  });
+
   it("settles to all_set once paid", () => {
     expect(
       classifyBooking(
@@ -444,6 +476,20 @@ describe("owedNow — commercial", () => {
     // point of commercial terms.
     expect(inTerms.overdue).toBe(0);
     expect(inTerms.total).toBe(2400);
+  });
+
+  it("an undated invoice counts in the total but is never ASSERTED overdue", () => {
+    // Deliberately not the same treatment classifyBooking gives it, and the
+    // difference is the point: `overdue` is a claim of fact about a date, and
+    // with no date there is no fact to state. So the money is still counted —
+    // never hidden from the headline — while the lateness claim is withheld,
+    // and the row's own bucket is what puts the gap in front of the office.
+    const v = owedNow(
+      { ...commercialOwed, balanceInvoiceNumber: "INV-000401", commercialDueDate: null },
+      TODAY,
+    );
+    expect(v.total).toBe(2400);
+    expect(v.overdue).toBe(0);
   });
 
   it("a commercial job with no diary entry still owes its raised invoice", () => {

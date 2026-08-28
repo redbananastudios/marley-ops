@@ -682,6 +682,10 @@ export async function updateLeadStatusAction(
         zoho_balance_invoice_url: null,
         balance_invoice_amount: null,
         balance_invoice_created_at: null,
+        // Dropped with the invoice it dated: the terms date outliving its own
+        // invoice is exactly the stale artefact that reads fresh — the re-raise
+        // stamps a new one from the client's terms on the day it happens.
+        commercial_due_date: null,
       } as never)
       .eq("lead_id", leadId)
       .eq("status", "accepted")
