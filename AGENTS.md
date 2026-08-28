@@ -75,16 +75,53 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-08-25 — prod live on `6ae3ba3`; master == staging; zero open QA findings)
+## Current State (2026-08-28 - `gate10b/commercial-safety` green and pushed, NOT merged; staging Zoho token is dead)
 
-Last touched: 2026-08-25 on i9 — **prod, `master` and `staging` are all `6ae3ba3`.** The QA loop now runs end to end on its own: audits on **Sonnet**, first-pass repair firing and fixing findings unaided.
+Last touched: 2026-08-28 on i9. Ten PRs (#148-#157) landed on `staging` during the day, then two
+read-only audits found **17 defects in that same day's work**. Five fix lanes ran in isolated
+worktrees and were merged here one at a time, gates re-run after each. Branch
+`gate10b/commercial-safety` is 12 commits ahead of `staging`, all four gates green on the tree
+WITH `origin/staging` merged in. **Not merged to `staging` - see the Zoho blocker below.**
 
-- **The repair loop's output needs a human read before prod.** Both robot fixes were right in substance and each carried a defect: the tour's dialog wait retried **forever** (polling for the page's life, then slamming a full-viewport overlay up whenever the user finally closed a dialog — now bounded at 12s, giving up is safe because the tour only stamps when it renders), and the postcode fix hand-rolled a second normaliser instead of `formatUkPostcode` in `lib/leads/format.ts`. Reviewed in #82.
-- **THREE consecutive audit-written specs broke on first CI run** — #75 ambiguous locator, #76 no teardown (left an unbilled expense that made `submitMyStatementAction` refuse EVERY invoice submit), #81 read an image's load state before it loaded. The audit's spec step needs a "must go green in CI" gate before it closes a finding.
-- **A qa/-only commit takes the docs-skip path, so a green tip can be hollow** — `test`/`deploy`/`e2e` all show `skipped` while the run reports success. Before promoting, check the last commit that actually RAN the suite, not the tip's badge.
-- **The IMV import gave all 17 jobs a blanket £100 deposit** regardless of price, so a job paid off in one transfer matches no ledger item. Solved by the "Whole job" link (`match_kind='full'`, migration 0103, applied to prod). Full invariant in the brain hub.
-- **Known trap, tracked:** `deploy.yml` still filters at the workflow level, so a docs-only commit pushed to `master` produces no deploy run and prod drifts silently from `master`. [ClickUp 869entgjt](https://app.clickup.com/t/869entgjt), due 2026-08-30.
+- **BLOCKER: the staging Zoho refresh token is dead.** `POST accounts.zoho.eu/oauth/v2/token`
+  returns HTTP 200 with `{"error":"invalid_code"}` for the `.env.e2e` credential set. Every e2e
+  money spec will fail on staging until it is re-minted, whatever the code does, so merging now
+  would produce red specs that look like this work. Re-minting is an interactive OAuth login -
+  Peter's, not the build agent's. **This is separate from the rate limit**: earlier in the day
+  `quotes.zoho_deposit_error` genuinely held "exceeded the maximum call rate limit of 1,000",
+  caused by ten merges triggering ten full e2e runs. Both were real; the token is the live one.
+  The codebase already classifies this correctly - `isLedgerAccessDenied` matches on the message
+  `token refresh failed`, not on HTTP status, so it escalates as a deduped lock-out rather than
+  retrying forever.
+- **A commercial booking was reporting money written by residential machinery.** `requestedDeposit`
+  ran before the policy was known, so a GBP 2,400 job reported GBP 2,300 - or GBP 1,800 four days
+  out (the ask collapses to 25% inside T-7), or exactly GBP 0 at or under the small-job threshold.
+  Nine read sites did `deposit_amount ?? defaultDeposit`, so a null column silently became GBP 100
+  and the completion invoice billed the agreed price minus a deposit nobody took. `depositOfQuote()`
+  now names the rule once, and 0 is WRITTEN rather than left null.
+- **`commercial_due_date` was read by three sites and written by none**, so every commercial
+  invoice read as in-terms forever and the overdue alert could not fire.
+- **A figure in a headline must be findable in a list.** Tiles totalled per OBLIGATION while lists
+  filtered by BUCKET, so a gate 9b late booking put GBP 1,700 in a tile and in no section on the
+  page. Membership now lives in `lib/bookings/sections.ts`, shared by /bookings and /payments Due.
+- **The flagship money test was a tautology** - `commitment + balance === owedNow` IS owedNow's
+  definition, and it passed against a seam deliberately mutated to reproduce QA-20260826-01. Five
+  more guards went through untouched, including a union parser silently checking 7 of 12 buckets.
+  See the testing-conventions block above; the e2e grep habit is the cheap half.
+- **QA-20260828-03 closed:** /q rendered the full residential accept screen - deposit figure,
+  payment copy, enabled Accept button - at commercial clients. The server refused the click, so no
+  money was at risk. The new branch resolves the policy LIVE, because `payment_policy` is null on
+  every `sent` quote and a branch reading the column would be unreachable exactly when needed.
+- **Local e2e works on i9** - the blocker was only ever Docker Desktop being stopped. Local Supabase
+  is up and migrated to 0113. Note `.env.e2e` pins the STAGING Zoho org, so local money specs still
+  spend that org's daily budget and are blocked by the same dead token.
 
-**Open decisions:** whether to restore arrow-key tour navigation (`allowKeyboardControl:false` prevents a data-loss bug but costs keyboard nav — a capture-phase Escape handler would keep both). **Blockers:** none. **Older open items** → [ClickUp 869ehpv2x](https://app.clickup.com/t/869ehpv2x). Import CSV `jobs-imve-2026-08-13.csv` stays untracked (PII).
+**Open decisions:** `clients.payment_terms_days` now has no reader; `commercial_due_date` overdue
+tracking is inert until the terms date is stamped on real rows. **Blockers:** the staging Zoho token
+(above) - nothing merges to `staging` until it is re-minted. **Next:** re-mint, then merge one PR at
+a time waiting for each staging e2e run, then resume the PRD at gate 10b's remaining presentational
+  pieces (office "Confirm booking", PO field, net/VAT/gross), then gates 16 and 20. Gate 15 stays
+BLOCKED on Mark's document; gate 22 is the designated drop. Import CSV `jobs-imve-2026-08-13.csv`
+stays untracked (PII).
 
-_Prior sessions → brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only — `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
+_Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
