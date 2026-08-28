@@ -36,6 +36,7 @@ import { templateIdFor } from "@/lib/comms/template-id";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
 import { isCustomerSendHour, sendWindowReason } from "@/lib/comms/send-window";
+import { sweepCommercialOverdue } from "@/lib/ops/commercial-overdue";
 import { flagLeadEmailInvalid } from "@/lib/comms/invalid-email";
 import {
   fetchResendSuppressions,
@@ -220,6 +221,11 @@ export async function GET(req: Request) {
     closedStaleFollowUps: 0,
     skippedOutsideWindow: 0,
     suppressedLeadsFlagged: 0,
+    /** Commercial credit control (PRD §3.10). Counted, never emailed to the
+     *  customer — see the sweep at the end of this handler. -1 means the sweep
+     *  could not read, which must not render as zero. */
+    commercialOverdue: 0,
+    commercialTermsMissing: 0,
     errors: 0,
   };
 
@@ -1220,6 +1226,24 @@ export async function GET(req: Request) {
         }
       }
     }
+  }
+
+  /* ---------------- commercial credit control ----------------
+   * Deliberately OUTSIDE the `sendsAllowed` window that gates every block
+   * above. Those are gated because they email a CUSTOMER; this one raises an
+   * internal operational issue and emails nobody — a commercial customer is
+   * never chased (PRD §3.10). Gating it on the send window would make the one
+   * alarm for the one ladder with no automated chase the alarm most likely to
+   * be skipped. */
+  {
+    const sweep = await sweepCommercialOverdue(sb);
+    // -1, not 0. A sweep that could not read has NOT found nothing — and this
+    // summary is what the run log and the ops digest report, so a failed read
+    // rendering as "0 overdue" is the precise shape of a monitor reporting good
+    // news about a check that never ran.
+    summary.commercialOverdue = sweep.checked ? sweep.overdue.length : -1;
+    summary.commercialTermsMissing = sweep.checked ? sweep.termsMissing.length : -1;
+    if (!sweep.checked) summary.errors++;
   }
 
   if (summary.errors) {
