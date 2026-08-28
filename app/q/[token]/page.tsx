@@ -7,6 +7,7 @@ import {
   ensureDepositInvoice,
   fetchQuoteByToken,
   isRealZohoId,
+  snapshotPaymentPolicy,
   syncZohoPayments,
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
@@ -241,6 +242,67 @@ export default async function AcceptPage({
     quote.status === "sent"
       ? requestedDeposit(total, baseDeposit, quote.moving_date, settings.smallJobThreshold)
       : baseDeposit;
+
+  /* ------------------------------------------------- commercial → review */
+  // Resolved LIVE from the client, not read off the quote: `payment_policy`
+  // is only snapshotted at acceptance, so on a `sent` quote it is null for
+  // every booking, commercial ones included. Reading the column here would
+  // make this branch unreachable exactly when it is needed. Same lookup the
+  // server refusal uses, so the page and the write can never disagree about
+  // which ladder a quote is on.
+  //
+  // QA-20260828-03: gate 10b closed the WRITE path — a commercial customer
+  // who clicked Accept got a correct refusal and no side effect — but this
+  // page still rendered the whole residential screen at them: a headline
+  // deposit figure they do not owe, copy promising card or bank transfer on
+  // the next screen, and an enabled Accept button. Safe, and still wrong to
+  // put in front of a client who has been told they are on account terms.
+  if (quote.status === "sent" && (await snapshotPaymentPolicy(sb, quote)) === "commercial") {
+    return (
+      <Shell>
+        <Card>
+          <div className="border-b border-mist-150 bg-charcoal px-6 py-5 sm:px-8">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-mist-300">
+              Your removal quote
+            </p>
+            <p className="mt-1 font-display text-3xl font-bold tracking-tight text-white">
+              {gbp(total)}
+              <span className="ml-2 text-sm font-normal text-mist-300">
+                {quote.vat_enabled ? "including VAT" : "total"}
+              </span>
+            </p>
+          </div>
+          <div className="space-y-5 p-6 sm:p-8">
+            <h1 className="font-brand text-2xl font-semibold text-ink">
+              {quote.customer_name
+                ? `Here is your quote, ${quote.customer_name.split(/\s+/)[0]}.`
+                : "Here is your quote."}
+            </h1>
+            <SummaryRows quote={quote} />
+            <div className="flex items-start gap-3 rounded-md border border-mist-200 bg-mist-50 p-4">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
+              <p className="text-sm leading-relaxed text-mist-500">
+                Nothing to pay now. We&apos;ll confirm this booking with you and invoice your
+                account once the job is done, payable on your agreed terms. Read our{" "}
+                <a
+                  href={TERMS_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-ink underline underline-offset-2"
+                >
+                  terms &amp; conditions
+                </a>
+                .
+              </p>
+            </div>
+            {/* Declining stays: it creates no money state, and telling us no is
+                information we want. Only the ACCEPT action is the office's. */}
+            <DeclineOption token={token} />
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
 
   /* ---------------------------------------------------------- sent → accept */
   if (quote.status === "sent") {

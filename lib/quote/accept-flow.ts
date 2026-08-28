@@ -141,7 +141,7 @@ type Sb = SupabaseClient<Database>;
  * residential" and "I could not find out what the client is" must not share a
  * silent rendering, and this is a money decision.
  */
-async function snapshotPaymentPolicy(
+export async function snapshotPaymentPolicy(
   sb: Sb,
   quote: { id: string; client_id: string | null; lead_id: string | null },
 ): Promise<PaymentPolicy> {

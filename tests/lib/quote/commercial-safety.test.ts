@@ -17,6 +17,7 @@ import { join } from "node:path";
  */
 
 const SRC = readFileSync(join(process.cwd(), "lib/quote/accept-flow.ts"), "utf8");
+const QPAGE = readFileSync(join(process.cwd(), "app/q/[token]/page.tsx"), "utf8");
 
 describe("a commercial quote cannot be self-accepted on /q", () => {
   it("acceptQuoteOnline refuses commercial on the SERVER, not just on the page", () => {
@@ -197,5 +198,62 @@ describe("the completion invoice dates itself on the client's terms", () => {
     // The conditional spread is what guarantees it: residential resolves the
     // date to null and writes no extra key at all.
     expect(flowBody()).toContain("...(commercialDueDate ? { commercial_due_date: commercialDueDate } : {})");
+  });
+});
+
+describe("/q renders a commercial quote for review, with no accept action", () => {
+  // QA-20260828-03. Gate 10b closed the WRITE path and its commit message said
+  // "the button was already hidden" — it was not hidden on this page. A
+  // commercial client saw the whole residential screen: a deposit figure they
+  // do not owe, copy promising card or bank transfer, and an enabled Accept
+  // button. The server refused the click correctly, so no money moved; what
+  // reached the customer was still wrong.
+  //
+  // The lines before the residential `sent` branch are the whole subject, so
+  // the guards are anchored to ORDER, not just presence.
+  /** Anchor offsets, but FAILING when an anchor is missing rather than
+   *  returning -1. A bare indexOf makes every later assertion vacuous the
+   *  moment the branch it looks for is deleted: `-1 < sentAt` is true, and
+   *  `slice(-1, sentAt)` is the empty string, which contains no accept form
+   *  and no deposit copy. Verified by mutation — with the branch removed and
+   *  a bare indexOf, only one of the three tests below failed. */
+  const at = (needle: string, what: string): number => {
+    const i = QPAGE.indexOf(needle);
+    expect(i, `/q no longer contains ${what}`).toBeGreaterThan(-1);
+    return i;
+  };
+  const commercialAt = () =>
+    at('snapshotPaymentPolicy(sb, quote)) === "commercial"', "a live payment-policy check");
+  const sentAt = () =>
+    at("/* ---------------------------------------------------------- sent → accept */", "the residential accept branch");
+
+  it("decides on the live client, never on the quote's snapshot column", () => {
+    // `payment_policy` is only written AT acceptance, so on a `sent` quote it
+    // is null for every booking — commercial included. A branch reading the
+    // column here would be unreachable in exactly the case it exists for,
+    // and would look correct in review.
+    commercialAt();
+    expect(
+      QPAGE,
+      "/q decides the commercial branch from the quote's own payment_policy, which is null before acceptance",
+    ).not.toMatch(/quote\.payment_policy === "commercial"/);
+  });
+
+  it("returns the review-only card BEFORE the residential accept screen", () => {
+    expect(
+      commercialAt(),
+      "the commercial check no longer runs before the residential accept screen, so the accept screen wins",
+    ).toBeLessThan(sentAt());
+  });
+
+  it("offers no accept form and no deposit copy on that branch", () => {
+    const review = QPAGE.slice(commercialAt(), sentAt());
+    expect(review, "the commercial review branch still renders the accept form").not.toContain("<AcceptForm");
+    expect(review, "the commercial review branch still promises a deposit").not.toMatch(/deposit/i);
+    // The residential branch must be untouched — this is the control, and it
+    // is the assertion that fails if the fix is applied too broadly.
+    const residential = QPAGE.slice(sentAt());
+    expect(residential).toContain("<AcceptForm token={token}");
+    expect(residential).toMatch(/deposit<\/strong> secures the booking/);
   });
 });
