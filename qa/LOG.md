@@ -4,6 +4,16 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-08-28T06:33Z — escalation repair sweep (scheduled): nothing escalated — the loop is now stalled at BOTH ends, and the handoff surface is proven innocent
+
+- Tier: escalation (Opus). Checked out `origin/staging` @ `a2539a6`. `grep -rn "^escalate:" qa/findings/` → **empty**: no finding carries `escalate: opus-5`, so per `qa/REPAIR.md` §2 there is nothing for this tier to take. Nothing claimed, no branch cut, no PR opened, no escalations written, nothing left in `status: fixing`, `master` untouched, no DB or browser access used.
+- Queue at checkout: **11 open findings — 7 `class: risky`, 4 `class: safe-fix`.** One more risky than the 00:33Z sweep: the 04:08Z audit filed **QA-20260828-01** (high, login/dashboard ~27s stall). The four safe-fix findings (QA-20260827-02/-03/-04/-05) are unchanged and still **all `status: open`, `branch:` blank, no `escalate:` key, no `## First-pass notes`** — never attempted, i.e. first-pass (Fable) work, not escalation-tier work.
+- **New this sweep — the handoff surface is working; the consumer is not.** Previous entries could only say the first-pass tier was "not firing (webhook or cron)". Checked the actual handoff this run: `qa-findings.yml` has raised a correctly-labelled `qa-finding`+`qa-safe-fix` issue for every one of the four — **#124** (QA-20260827-02) and **#125** (-03) raised 2026-08-27T08:52Z, **#130** (-04) 17:05Z, **#131** (-05) 20:36Z. All four are OPEN with **0 comments** and `updated_at` == `created_at`, i.e. nothing has so much as touched them since they were filed. `list_pull_requests(state=open)` → **[]**, no PR of any kind in the repo. So the issue-raising half of the pipeline is healthy and the fault is squarely in whatever schedules/fires the first-pass repair agent — outside this repo. Oldest untaken safe-fix issue is now **~46h** old.
+- **Both halves of the QA loop are now down.** Producing half: the 04:08Z audit aborted at its health gate (CI `e2e` red on `b653e0d` — all three auth-setup steps timing out on `/login`, 175 tests never ran), so no new auditing either. Repair half: as above. Net effect — nothing is being found, nothing is being fixed, and the safe-fix queue can only grow.
+- Deliberately **not** self-authorized, same reasoning as 08-24 and 08-28T00:33Z: fixing an untried `safe-fix` here would violate `qa/REPAIR.md` §2 and dissolve the tier boundary the two-model pipeline depends on; re-tagging findings `escalate: opus-5` would be manufacturing my own work order. All eleven left exactly as filed.
+- Findings taken: **none**. PRs opened: **none**. Escalations written: **none**. Peter notified.
+- Time spent: ~8 min.
+
 ## 2026-08-28T04:08Z — scheduled QA audit: aborted at the health gate — CI red on the base predating this run (login/dashboard critical path, ~27s stall)
 
 - sha at checkout: `32e9e87` (`git fetch origin staging && git checkout staging && git reset --hard origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
