@@ -27,7 +27,7 @@ import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
  * queue"). Sections ARE the money lifecycle, so the page reads top-to-bottom
  * as "who needs acting on today":
  *
- *   £100 OUTSTANDING     accepted online, deposit unpaid (auto-chased d1/d3)
+ *   DEPOSITS OUTSTANDING accepted online, deposit unpaid (auto-chased d1/d3)
  *   ON THE LIST, NO DATE deposit paid, nothing pencilled — capture the window
  *   PROVISIONAL          deposit paid, window/date pencilled — sell the 25%
  *   25% OVERDUE          past due or date-at-risk flagged — call today
@@ -415,9 +415,13 @@ export default async function BookingsPage({
         />
       </div>
 
-      {/* ---------------- £100 outstanding ---------------- */}
+      {/* Deposits outstanding — named for the rung, not a figure. After gate
+          9a a small job's acceptance ask IS the whole price, and after 9b a
+          late booking's collapses to max(deposit, 25%), so "£100" was copy
+          the page could no longer promise. The tile stopped saying it with
+          QA-20260826-01; this section said it for one more deploy. */}
       <Section
-        title="£100 outstanding"
+        title="Deposits outstanding"
         hint="accepted online — locks in when the deposit lands"
         count={awaiting.length}
       >
