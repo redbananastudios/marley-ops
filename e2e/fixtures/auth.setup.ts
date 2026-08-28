@@ -113,6 +113,29 @@ for (const [role, cfg] of Object.entries(E2E_USERS)) {
       }
     }
 
+    // Leaving /login proves the AUTH call landed. Arriving at this role's
+    // landing page is a SECOND server render, and for two of the three roles it
+    // is the slow one: `/` renders, reads the profile, and redirects estimator →
+    // /estimator and crew → /my-jobs. On a cold container that redirect chain is
+    // the first authenticated render the app has ever done.
+    //
+    // The previous fix budgeted only the first half. The assertion below then
+    // ran on Playwright's default 10s and failed the estimator at exactly that
+    // mark — sitting on "/" with the redirect still in flight — while crew
+    // passed the identical chain in 41.8s on the SAME run, which is what proves
+    // the redirect works and the container was simply cold (CI 33168865126).
+    //
+    // So spend one budget across both halves rather than two budgets in a row:
+    // whatever the sign-in did not use is still available to the landing.
+    const landingBudget = Math.max(
+      REDIRECT_BUDGET_MS,
+      FIRST_ATTEMPT_BUDGET_MS - (Date.now() - startedAt),
+    );
+    await page.waitForURL(cfg.landing, { timeout: landingBudget }).catch(() => {
+      // Swallowed on purpose — the assertion below reports the real URL, which
+      // is far more useful than "waitForURL timed out".
+    });
+
     // A login that only just scraped in is a defect worth seeing, not a pass to
     // wave through: the whole 175-test suite hangs off these three steps, so a
     // creeping regression here goes from "green" to "nothing ran" with no
