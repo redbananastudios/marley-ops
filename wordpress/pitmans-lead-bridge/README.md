@@ -93,20 +93,36 @@ external_lead_id = "wp-" + <row id zero-padded to 6 digits>     e.g. wp-000042
 ## The signed read endpoint
 
 ```
-GET /wp-json/pitmans-lead-bridge/v1/submissions?limit=<n>&ts=<unix-seconds>&sig=<hex>
-sig = HMAC-SHA256("limit=<n>&ts=<unix-seconds>", pull_secret)
+GET /wp-json/pitmans-lead-bridge/v1/submissions?limit=<n>&since_id=<n>&ts=<unix-seconds>&sig=<hex>
+sig = HMAC-SHA256("limit=<n>&since_id=<n>&ts=<unix-seconds>", pull_secret)
 ```
 
-- Canonical string is exactly `limit=<n>&ts=<unix>` — plain integers, that
-  parameter order, nothing else. The Ops half of the contract is
+- Canonical string is exactly `limit=<n>&since_id=<n>&ts=<unix>` — plain
+  integers, that parameter order, nothing else. The Ops half of the contract is
   `signPullQuery()` in `lib/sync/wp-leads.ts`; change both together or not at
   all.
+- `since_id` is **signed and required**. Signed, so an on-path observer cannot
+  advance the reader's window and hide a row from the only backstop the enquiry
+  has. Required rather than defaulting to 0, so a caller that forgot it cannot
+  read exactly like a caller that meant it.
 - `ts` must be within ±300 seconds of the server clock (bounded replay window
-  on a read-only endpoint). `limit` is 1–500.
-- Returns the newest `limit` submissions: `id`, `form_id`, `submitted_at`
-  (UTC ISO), `pushed_at` (or null), `push_attempts`, `last_error`, and the
-  stored `payload` (`ingest` = the mapped lead fields sans `leadId`; `raw` =
-  the sanitised form fields, kept for debugging).
+  on a read-only endpoint). `limit` is 1–500; `since_id` is ≥ 0.
+- Returns up to `limit` submissions with `id > since_id`, **oldest first**:
+  `id`, `form_id`, `submitted_at` (UTC ISO), `pushed_at` (or null),
+  `push_attempts`, `last_error`, and the stored `payload` (`ingest` = the mapped
+  lead fields sans `leadId`; `raw` = the sanitised form fields, kept for
+  debugging).
+- Also returns `total` (rows in the whole table), `since_id` (echoed) and
+  `remaining` (rows beyond this page). **`total` is what lets the reader PROVE
+  nothing is missing** rather than infer it from a window that by construction
+  cannot show what it excluded. It used to answer the newest `limit` rows with
+  no cursor and no total, so anything that fell behind that window was offered
+  by no poll ever again — and because the reader's failure count then read zero,
+  its standing reconcile alarm resolved itself. Do not remove `total`: Ops
+  treats its absence as UNKNOWN and holds the alarm open, which is correct but
+  noisy.
+- Row ids are the cursor, so **never reset AUTO_INCREMENT** on the submissions
+  table.
 - Unauthenticated/badly-signed requests get an undifferentiated 403; an
   unconfigured pull secret returns 503 (fail closed, never open).
 

@@ -500,26 +500,34 @@ function plb_rest_permission($request) {
         return new WP_Error('plb_unconfigured', 'Not available.', array('status' => 503));
     }
 
-    $limit = $request->get_param('limit');
-    $ts    = $request->get_param('ts');
-    $sig   = $request->get_param('sig');
+    $limit    = $request->get_param('limit');
+    $since_id = $request->get_param('since_id');
+    $ts       = $request->get_param('ts');
+    $sig      = $request->get_param('sig');
 
     if (!is_string($sig) || !preg_match('/^[0-9a-f]{64}$/', $sig)) {
         return new WP_Error('plb_forbidden', 'Forbidden.', array('status' => 403));
     }
-    if (!is_numeric($limit) || !is_numeric($ts)) {
+    if (!is_numeric($limit) || !is_numeric($ts) || !is_numeric($since_id)) {
         return new WP_Error('plb_forbidden', 'Forbidden.', array('status' => 403));
     }
-    $limit = (int) $limit;
-    $ts    = (int) $ts;
-    if ($limit < 1 || $limit > 500) {
+    $limit    = (int) $limit;
+    $since_id = (int) $since_id;
+    $ts       = (int) $ts;
+    if ($limit < 1 || $limit > 500 || $since_id < 0) {
         return new WP_Error('plb_forbidden', 'Forbidden.', array('status' => 403));
     }
     if (abs(time() - $ts) > 300) {
         return new WP_Error('plb_forbidden', 'Forbidden.', array('status' => 403));
     }
 
-    $canonical = 'limit=' . $limit . '&ts=' . $ts;
+    // since_id is INSIDE the signature, and REQUIRED rather than defaulted.
+    // Signed, because an on-path observer must not be able to advance the
+    // reader's window: a replay with since_id bumped past a row would hide that
+    // row from the only backstop the enquiry has. Required, because an unsigned
+    // optional parameter lets a caller that FORGOT it read exactly like a caller
+    // that meant 0.
+    $canonical = 'limit=' . $limit . '&since_id=' . $since_id . '&ts=' . $ts;
     $expected  = hash_hmac('sha256', $canonical, $cfg['pull_secret']);
     if (!hash_equals($expected, $sig)) {
         return new WP_Error('plb_forbidden', 'Forbidden.', array('status' => 403));
@@ -529,14 +537,22 @@ function plb_rest_permission($request) {
 
 function plb_rest_submissions($request) {
     global $wpdb;
-    $limit = (int) $request->get_param('limit');
-    $table = plb_table();
+    $limit    = (int) $request->get_param('limit');
+    $since_id = (int) $request->get_param('since_id');
+    $table    = plb_table();
 
+    // Forward from the reader's cursor, OLDEST first - not 'the newest N'. A
+    // window anchored to the newest row lets anything that falls behind it leave
+    // the only backstop for good, and the reader cannot even tell it happened.
+    // Anchored to what the reader has actually reconciled, a row stays in view
+    // until it is accounted for.
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT id, form_id, submitted_at, payload, pushed_at, push_attempts, last_error
          FROM {$table}
-         ORDER BY id DESC
+         WHERE id > %d
+         ORDER BY id ASC
          LIMIT %d",
+        $since_id,
         $limit
     ), ARRAY_A);
 
@@ -558,9 +574,21 @@ function plb_rest_submissions($request) {
         );
     }
 
+    // The whole-table count, so the reader can PROVE nothing is missing rather
+    // than infer it from a window that by construction cannot show what it
+    // excluded. `remaining` is what this page did not reach.
+    $total     = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+    $last_id   = count($out) ? (int) $out[count($out) - 1]['id'] : $since_id;
+    $remaining = (int) $wpdb->get_var($wpdb->prepare(
+        "SELECT COUNT(*) FROM {$table} WHERE id > %d", $last_id
+    ));
+
     return rest_ensure_response(array(
         'ok'          => true,
         'count'       => count($out),
+        'total'       => $total,
+        'since_id'    => $since_id,
+        'remaining'   => $remaining,
         'now'         => gmdate('Y-m-d\TH:i:s\Z'),
         'submissions' => $out,
     ));
