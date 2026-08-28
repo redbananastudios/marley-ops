@@ -530,9 +530,10 @@ worst: it self-heals from the customer's own `/q` page load, so a customer refre
 their booking page generates a fresh failed create and a fresh ops alert every time.
 
 **The scheduling fact that actually decides this:** there is exactly one promotion to
-prod (18 September) and prod migrations are human-run over SSH. The question is not
-"when do we flip" — it is **"does the stamp migration make the 18 September train"**.
-If it does, the flip is a low-drama env edit on any day after the 18th. If it misses,
+prod — work-bound, on Peter's word (PRD §5) — and prod migrations are human-run over
+SSH. The question is not "when do we flip" — it is **"does the stamp migration make
+the promotion train"**. If it does, the flip is a low-drama env edit on any day after
+it. If it misses,
 the only fallback is routing by id shape (Zoho ids are numeric, Xero ids are GUIDs),
 which is cheap and fails closed but rests on an **inference about an opaque third-party
 id format** sitting on money code. That inference is provable — once the snapshot runs,
