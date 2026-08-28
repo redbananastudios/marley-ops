@@ -23,6 +23,7 @@ import type {
 import { LedgerError } from "./types";
 import type { LedgerParty } from "./party";
 import { zohoAdapter } from "./zoho-adapter";
+import { xeroAdapter } from "./xero-adapter";
 
 export * from "./types";
 export { partyForQuote, type LedgerParty } from "./party";
@@ -117,9 +118,7 @@ export function adapterFor(provider?: LedgerProvider | null): LedgerAdapter {
     case "zoho":
       return zohoAdapter;
     case "xero":
-      throw new LedgerError(
-        "The Xero adapter has not shipped yet (gate 18). Set LEDGER_PROVIDER=zoho.",
-      );
+      return xeroAdapter;
   }
 }
 
