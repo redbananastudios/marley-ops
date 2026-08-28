@@ -205,7 +205,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
       />
       <Section
         title="Deposits outstanding"
-        hint="accepted online, £100 unpaid — auto-chased day 1 and 3"
+        hint="accepted online, deposit unpaid — auto-chased day 1 and 3"
         rows={deposits}
         total={sum(deposits)}
         detail={(r) => `${r.quoteRef} · agreed ${poundsMoney(r.agreed)} · accepted ${daysAgo(r.acceptedAt)}`}
