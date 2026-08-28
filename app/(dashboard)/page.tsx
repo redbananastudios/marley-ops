@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { unstable_cache } from "next/cache";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -30,6 +31,7 @@ import {
   type DashboardData,
   type FilteredDashboardSections,
 } from "@/components/dashboard/dashboard-view";
+import { DashboardSkeleton } from "@/components/dashboard/dashboard-skeleton";
 import type { DateAtRiskItem } from "@/components/dashboard/dates-at-risk-card";
 import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { startOfUkDay, UK_TZ } from "@/lib/uk-time";
@@ -68,14 +70,55 @@ const fetchExternalPanels = unstable_cache(
   { revalidate: 300 },
 );
 
+/**
+ * The post-login landing page for EVERY role — `app/(auth)/login/page.tsx`
+ * pushes "/" and the two non-office roles bounce onward from here. That makes
+ * this component the login critical path, so it must be able to commit the
+ * navigation on its own, without waiting for any of the dashboard's data.
+ *
+ * Measured, not assumed (Playwright traces from CI run 33121391706): with the
+ * whole page in a single render and no `<Suspense>` boundary anywhere in
+ * `app/`, the client router could not commit the URL until the entire RSC
+ * payload had both arrived AND rendered — 17.8s for office, 16.3s for
+ * estimator, 10.2s for crew, against the e2e setup's 10s budget. All three
+ * auth-setup steps timed out, so none of the 175 downstream tests ran.
+ *
+ * The dashboard makes roughly 28 Supabase round trips and the box talks to
+ * hosted Supabase over the public network, so their combined latency is not
+ * something this page can bound. What it CAN do — and now does — is stop the
+ * navigation from depending on them at all.
+ */
 export default async function DashboardPage({
   searchParams,
 }: {
   searchParams: Promise<{ brand?: string }>;
 }) {
-  const sp = await searchParams;
+  // Role gates stay in the shell, ABOVE the boundary, so a redirect still fires
+  // immediately rather than behind a skeleton.
+  //
+  // Crew is also bounced by `layout.tsx` — but a layout and its page render
+  // CONCURRENTLY, so without the second line here crew paid for the dashboard's
+  // entire read before the layout's redirect threw the result away. On the night
+  // above that was two full renders of "/" (1.5s + 6.6s) for a page crew never
+  // sees. Duplicating the gate is cheap: `getSessionProfile` is `cache()`-wrapped
+  // (lib/auth.ts:10), so this shares the layout's round trip rather than adding one.
   const profile = await getSessionProfile();
   if (profile?.role === "estimator") redirect("/estimator");
+  if (profile?.role === "crew") redirect("/my-jobs");
+
+  return (
+    <Suspense fallback={<DashboardSkeleton />}>
+      <DashboardContent searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+async function DashboardContent({
+  searchParams,
+}: {
+  searchParams: Promise<{ brand?: string }>;
+}) {
+  const sp = await searchParams;
 
   const supabase = await createClient();
 

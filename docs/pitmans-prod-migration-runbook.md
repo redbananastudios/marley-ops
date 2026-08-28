@@ -1,6 +1,6 @@
 # Pitmans multi-brand — production migration runbook
 
-**Who runs this: Peter, over SSH, on the 18 September promotion day** (multi-brand PRD §5, §11.6). The build agent applies these files to STAGING only; production is human-only. Files apply **in order**, in one sitting, followed by the single `notify pgrst` (each file also carries its own where it matters — running it twice is harmless).
+**Who runs this: Peter, over SSH, on promotion day** — which is work-bound rather than dated (multi-brand PRD §5, §11.6): validated gates plus Peter's word, on a clear working day outside the 21–28 September import week. The build agent applies these files to STAGING only; production is human-only. Files apply **in order**, in one sitting, followed by the single `notify pgrst` (each file also carries its own where it matters — running it twice is harmless).
 
 Every gate that adds a migration appends its row here in the same commit. The runbook stays current from gate 1 so promotion day is a scripted operation, not an act of memory.
 
