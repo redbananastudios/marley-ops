@@ -70,6 +70,44 @@ describe("isLedgerAccessDenied — permanent, not transient", () => {
 });
 
 /**
+ * Xero's permanent-auth shapes.
+ *
+ * This module's doc comment promised Xero was covered, because the Xero adapter
+ * raises the same `LedgerError` type. Sharing a TYPE is not sharing a SIGNAL:
+ * Xero's lock-out arrives as HTTP 400 with no provider code, which is
+ * indistinguishable from an ordinary bad request by status alone — so a revoked
+ * consent, a refresh token past its 60-day life, or a rotation lost mid-write
+ * all classified as TRANSIENT, and the deduped integration alert would never
+ * have fired. Each quote would instead have emitted its own "invoice FAILED":
+ * five unrelated-looking incidents for one broken integration, none naming the
+ * remedy. That is the exact failure this module was written to prevent, one
+ * provider over. Nothing pinned it until now.
+ */
+describe("isLedgerAccessDenied — the Xero lock-out shapes", () => {
+  it("recognises a refused grant, which arrives as a plain 400", () => {
+    expect(isLedgerAccessDenied(new LedgerError("Xero token request failed: invalid_grant", undefined, 400))).toBe(true);
+    expect(isLedgerAccessDenied(new LedgerError("Xero token request failed: invalid_client", undefined, 400))).toBe(true);
+  });
+
+  it("recognises a broken rotation and a missing tenant", () => {
+    expect(
+      isLedgerAccessDenied(
+        new LedgerError("Xero returned no new refresh token — the rotation contract was not honoured"),
+      ),
+    ).toBe(true);
+    expect(isLedgerAccessDenied(new LedgerError("No Xero tenant is recorded for this connection."))).toBe(true);
+  });
+
+  it("still leaves an ordinary Xero 400 alone", () => {
+    // A validation error on one invoice is not an integration outage, and
+    // escalating it would train people to ignore the alert that matters.
+    expect(isLedgerAccessDenied(new LedgerError("Xero rejected the invoice: account code invalid", undefined, 400))).toBe(
+      false,
+    );
+  });
+});
+
+/**
  * The class guard, covering the three raise paths no behavioural test reaches.
  * A future edit reintroducing the ZohoError-only check would pass every test
  * above and still stop escalating lock-outs on invoice creation.
@@ -89,5 +127,36 @@ describe("the money call sites classify through the seam", () => {
       "accept-flow errors arrive as LedgerError since gate 17, so isZohoAccessDenied " +
         "returns false for every one of them — use isLedgerAccessDenied",
     ).toBe(false);
+  });
+
+  /**
+   * Every read or write against a STORED invoice id must carry the provider that
+   * minted it. Three `recordInvoicePayment` calls and two `getInvoicePdfBase64`
+   * calls were missing it, each sitting directly beneath a `getInvoiceStatus`
+   * that passed it correctly — so the omission was invisible by eye.
+   *
+   * After the flip, an un-stamped call sends a Zoho id to Xero: the payment
+   * write fails and the deposit is marked paid in ops while appearing in neither
+   * set of books, and the PDF read fails silently so a customer asking "where do
+   * I pay?" gets a second email with no invoice attached.
+   *
+   * Counted rather than eyeballed, because the next raise path added will sit
+   * beside these and look exactly like them.
+   */
+  it("passes the provider stamp on every stored-id ledger call", () => {
+    const src = readFileSync(join(__dirname, "../../../lib/quote/accept-flow.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    for (const fn of ["recordInvoicePayment", "getInvoicePdfBase64", "getInvoiceStatus", "voidInvoice"]) {
+      const calls = src.split(new RegExp(String.raw`\b${fn}\s*\(`)).length - 1;
+      const stamped =
+        src.split(new RegExp(String.raw`\b${fn}\s*\([\s\S]{0,400}?asProvider\(`)).length - 1;
+      expect(
+        stamped,
+        `${fn}: ${calls} call(s) but only ${stamped} pass asProvider(...). A stored invoice id ` +
+          `belongs to the ledger that minted it; routing it by the CONFIGURED provider breaks ` +
+          `every pre-cutover document the moment LEDGER_PROVIDER flips.`,
+      ).toBe(calls);
+    }
   });
 });

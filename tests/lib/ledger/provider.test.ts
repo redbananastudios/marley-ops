@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { adapterFor, configuredProvider, LedgerError } from "@/lib/ledger";
 import { zohoAdapter } from "@/lib/ledger/zoho-adapter";
+import { xeroAdapter } from "@/lib/ledger/xero-adapter";
 
 const original = process.env.LEDGER_PROVIDER;
 afterEach(() => {
@@ -61,7 +62,22 @@ describe("adapterFor", () => {
     expect(adapterFor(null)).toBe(zohoAdapter);
   });
 
-  it("says plainly that the Xero adapter has not shipped yet", () => {
-    expect(() => adapterFor("xero")).toThrow(/has not shipped yet \(gate 18\)/);
+  /**
+   * Shipped at gate 18b. The routing matters as much as the adapter: a stored
+   * invoice id belongs to whichever system minted it, so a per-document stamp
+   * must reach the right adapter even after the global provider flips. Getting
+   * this wrong is not a loud failure — a not-found reads as transient, a
+   * customer who HAS paid is never marked paid, and the cron keeps reporting a
+   * healthy run.
+   */
+  it("routes to the Xero adapter, both by config and by per-document stamp", () => {
+    process.env.LEDGER_PROVIDER = "xero";
+    expect(adapterFor()).toBe(xeroAdapter);
+    expect(adapterFor().provider).toBe("xero");
+
+    process.env.LEDGER_PROVIDER = "zoho";
+    expect(adapterFor("xero")).toBe(xeroAdapter);
+    // ...and the two never collapse into one another.
+    expect(adapterFor("xero")).not.toBe(adapterFor("zoho"));
   });
 });

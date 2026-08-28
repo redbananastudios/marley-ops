@@ -90,7 +90,7 @@ async function readRow(provider: LedgerProvider): Promise<TokenRow> {
   }
   if (!data) {
     throw new LedgerError(
-      `No ${provider} token row exists — run the one-off authorisation script before using the ${provider} adapter.`,
+      `No ${provider} token row exists — re-authorise at /api/xero/connect (admin only) before using the ${provider} adapter.`,
     );
   }
   return data as TokenRow;

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
-import { invoiceAppUrl, listInvoices, type LedgerInvoiceListItem } from "@/lib/ledger";
+import { configuredProvider, invoiceAppUrl, listInvoices, type LedgerInvoiceListItem } from "@/lib/ledger";
 import {
   addDaysIso,
   dayLabel,
@@ -140,6 +140,20 @@ export default async function FinancePage({
   let unpaidTruncated = false;
   let mtdTruncated = false;
   let quarterTruncated = false;
+  /**
+   * After the ledger flips to Xero, this page reads ONLY the configured provider
+   * — so a VAT quarter spanning the cutover silently drops every Zoho-raised
+   * invoice in it while reporting itself complete. Worse than an empty figure:
+   * the migrated open invoices ARE present, so the number looks plausible.
+   *
+   * The real fix is design §9's union over `ledger_invoice_archive` (the table
+   * and `scripts/ledger-snapshot.mjs` both exist; nothing reads them yet). Until
+   * that lands, the page must at least SAY that what it is showing is partial —
+   * the same rule the row cap already follows two lines down, and the reason it
+   * follows it: nobody can recover a wrong number once it has been read off the
+   * screen and filed.
+   */
+  const historySplit = configuredProvider() !== "zoho";
   let zohoError: string | null = null;
   try {
     const [dayL, mtdL, quarterL, unpaidL] = await Promise.all([
@@ -241,7 +255,9 @@ export default async function FinancePage({
           label="VAT quarter to date"
           value={fmtGBP(quarterVat.owed)}
           sub={
-            quarterTruncated
+            historySplit
+              ? `PARTIAL — only invoices raised in the current ledger. Anything raised before the switch is not counted here`
+              : quarterTruncated
               ? `first 2,000 invoices only — VAT owed UNDERSTATES, check Zoho`
               : `${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)}${frs ? ` · FRS ${pct}%` : ""} · cycle in Settings`
           }

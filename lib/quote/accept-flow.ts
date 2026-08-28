@@ -1406,13 +1406,20 @@ export async function markDepositPaid(
     try {
       const status = await getInvoiceStatus(quote.zoho_deposit_invoice_id, asProvider(quote.deposit_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
-        await recordInvoicePayment({
-          customerId: quote.zoho_contact_id,
-          invoiceId: quote.zoho_deposit_invoice_id,
-          amount: Math.min(deposit, status.balance),
-          mode: zohoMode(opts.method),
-          reference: quote.quote_ref,
-        });
+        await recordInvoicePayment(
+          {
+            customerId: quote.zoho_contact_id,
+            invoiceId: quote.zoho_deposit_invoice_id,
+            amount: Math.min(deposit, status.balance),
+            mode: zohoMode(opts.method),
+            reference: quote.quote_ref,
+          },
+          // Route to whichever ledger MINTED this invoice, exactly as the status
+          // read above does. Without it, a payment against a pre-cutover Zoho
+          // invoice is sent to Xero after the flip, fails, and the deposit ends
+          // up marked paid in ops while appearing in neither set of books.
+          asProvider(quote.deposit_invoice_provider),
+        );
       }
     } catch (err) {
       await sendOpsAlert(`Zoho payment record FAILED — ${quote.quote_ref}`, [
@@ -1770,13 +1777,16 @@ export async function markCommitmentPaid(
     try {
       const status = await getInvoiceStatus(quote.zoho_commitment_invoice_id, asProvider(quote.commitment_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
-        await recordInvoicePayment({
-          customerId: quote.zoho_contact_id,
-          invoiceId: quote.zoho_commitment_invoice_id,
-          amount: Math.min(amount || status.balance, status.balance),
-          mode: zohoMode(opts.method),
-          reference: quote.quote_ref,
-        });
+        await recordInvoicePayment(
+          {
+            customerId: quote.zoho_contact_id,
+            invoiceId: quote.zoho_commitment_invoice_id,
+            amount: Math.min(amount || status.balance, status.balance),
+            mode: zohoMode(opts.method),
+            reference: quote.quote_ref,
+          },
+          asProvider(quote.commitment_invoice_provider),
+        );
       }
     } catch (err) {
       await sendOpsAlert(`Zoho commitment payment record FAILED — ${quote.quote_ref}`, [
@@ -2193,9 +2203,22 @@ async function sendDateConfirmationEmail(
   let pdfBase64: string | undefined;
   if (c.commitmentAmount > 0 && isRealZohoId(c.invoiceId)) {
     try {
-      pdfBase64 = await getInvoicePdfBase64(c.invoiceId);
-    } catch {
-      pdfBase64 = undefined; // send without the attachment rather than not at all
+      // Stamped, for the same reason as the payment writes: a re-send of a
+      // pre-cutover invoice must read it from the ledger that minted it. A null
+      // stamp means "no override" and falls through to the configured provider,
+      // which is right for an invoice raised moments ago.
+      pdfBase64 = await getInvoicePdfBase64(c.invoiceId, asProvider(quote.commitment_invoice_provider));
+    } catch (err) {
+      // Send without the attachment rather than not at all — but SAY so. This
+      // email asks a customer for money; losing the VAT invoice off it silently
+      // is how "where do I pay?" becomes a support ticket instead of a defect.
+      pdfBase64 = undefined;
+      log.warn("ledger.invoice_pdf_unavailable", {
+        quoteId: quote.id,
+        slot: "commitment",
+        invoiceId: c.invoiceId,
+        ...errorContext(err),
+      });
     }
   }
   const brand = await getBrandOrDefault(sb, quote.brand);
@@ -2407,9 +2430,15 @@ async function sendBalanceInvoiceEmail(
   if (!quote.customer_email) return false;
   let pdfBase64: string | undefined;
   try {
-    pdfBase64 = await getInvoicePdfBase64(inv.invoiceId);
-  } catch {
+    pdfBase64 = await getInvoicePdfBase64(inv.invoiceId, asProvider(quote.balance_invoice_provider));
+  } catch (err) {
     pdfBase64 = undefined; // send without the attachment rather than not at all
+    log.warn("ledger.invoice_pdf_unavailable", {
+      quoteId: quote.id,
+      slot: "balance",
+      invoiceId: inv.invoiceId,
+      ...errorContext(err),
+    });
   }
   const brand = await getBrandOrDefault(sb, quote.brand);
   const meta: BalanceInvoiceMeta = {
@@ -2764,13 +2793,16 @@ export async function markBalancePaid(
     try {
       const status = await getInvoiceStatus(quote.zoho_balance_invoice_id, asProvider(quote.balance_invoice_provider));
       if (status.status !== "paid" && status.balance > 0) {
-        await recordInvoicePayment({
-          customerId: quote.zoho_contact_id,
-          invoiceId: quote.zoho_balance_invoice_id,
-          amount: status.balance,
-          mode: zohoMode(method),
-          reference: quote.quote_ref,
-        });
+        await recordInvoicePayment(
+          {
+            customerId: quote.zoho_contact_id,
+            invoiceId: quote.zoho_balance_invoice_id,
+            amount: status.balance,
+            mode: zohoMode(method),
+            reference: quote.quote_ref,
+          },
+          asProvider(quote.balance_invoice_provider),
+        );
       }
     } catch (err) {
       await sendOpsAlert(`Zoho balance payment record FAILED — ${quote.quote_ref}`, [
