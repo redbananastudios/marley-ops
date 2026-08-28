@@ -55,6 +55,22 @@ export const SEED = {
   /** A SENT quote with a fixed share token — the customer accept page /q/<token>.
    *  The token is a credential; a fixed local value lets the customer spec load it. */
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
+  /** A SENT quote whose move is 3 days out — INSIDE the commitment window, so
+   *  accepting it collapses the ask to 25% AND raises the balance in the same
+   *  pass (PRD §3.10 Addition 2). Kept separate from sentQuote, which is 21 days
+   *  out precisely so it stays on the ordinary path. £2,000 is comfortably over
+   *  the £300 small-job threshold, so gate 9a's full-ask rule does not fire and
+   *  a real balance remains: £500 deposit + £1,500 balance = the agreed price. */
+  lateQuote: {
+    name: "E2E Late Booking",
+    quoteRef: "E2E-LATE-001",
+    acceptToken: "e2e-late-accept-token-0001",
+    total: 2000,
+    /** requestedDeposit rule 2: max(base 100, 25% x 2000). */
+    collapsedDeposit: 500,
+    /** agreed - deposit. The invoices PARTITION the price. */
+    balance: 1500,
+  },
   /** A second SENT quote used to test the DECLINE flow (so it never consumes the
    *  accept quote above). */
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },

@@ -67,6 +67,14 @@ const SEED = {
   awaitingDeposit: { name: "E2E Awaiting Deposit", quoteRef: "E2E-DEP-001" },
   balanceDue: { name: "E2E Balance Due", quoteRef: "E2E-BAL-001" },
   sentQuote: { name: "E2E Sent Quote", quoteRef: "E2E-SENT-001", acceptToken: "e2e-sent-accept-token-0001", total: 1500 },
+  lateQuote: {
+    name: "E2E Late Booking",
+    quoteRef: "E2E-LATE-001",
+    acceptToken: "e2e-late-accept-token-0001",
+    total: 2000,
+    collapsedDeposit: 500,
+    balance: 1500,
+  },
   declineQuote: { name: "E2E Decline Quote", quoteRef: "E2E-DECLINE-001", acceptToken: "e2e-decline-token-0001", total: 900 },
   draftQuote: { name: "E2E Draft Quote", quoteRef: "E2E-DRAFT-001", total: 1200 },
   vehicle: { name: "E2E Luton", registration: "E2E 001" },
@@ -576,6 +584,41 @@ await resetCrewContractorState();
   });
   if (error) die(`${SEED.sentQuote.name} sent quote`, error);
   console.log(`seeded sent quote: ${SEED.sentQuote.name} (/q/${SEED.sentQuote.acceptToken})`);
+}
+
+// 5b. A SENT quote whose move is INSIDE the 7-day window — the late-booking path.
+// Accepting it must collapse the ask to 25% AND raise the balance in the same
+// pass (PRD §3.10 Addition 2), so the customer meets the whole bill once. Kept
+// apart from block 5, whose 21-day date exists to prove the ordinary path is
+// untouched; one quote cannot assert both.
+{
+  const ids = await makeLead({ name: SEED.lateQuote.name, status: "quoted" });
+  const { error } = await sb.from("quotes").insert({
+    quote_ref: SEED.lateQuote.quoteRef,
+    client_id: ids.clientId,
+    lead_id: ids.leadId,
+    customer_name: SEED.lateQuote.name,
+    customer_email: SINK_EMAIL,
+    customer_phone: SINK_PHONE,
+    subtotal: SEED.lateQuote.total,
+    grand_total: SEED.lateQuote.total,
+    status: "sent",
+    // 3 days out. Comfortably inside the window on any run — not on the
+    // boundary, which is exactly what made block 5's original at(7) ambiguous.
+    moving_date: at(3).slice(0, 10),
+    // The BASE deposit. Acceptance overwrites it with the collapsed ask, which
+    // is the assertion: seeding 500 here would prove nothing about the rule.
+    deposit_amount: 100,
+    accept_token: SEED.lateQuote.acceptToken,
+    email_sent_at: at(-1),
+    collect_addr: "3 Late Lane, Shaftesbury, SP7 8AA",
+    dest_addr: "4 Hurry Road, Gillingham, SP8 4AB",
+    vat_enabled: true,
+    breakdown: { vehicle: "1luton", totalMiles: 20 },
+    state_blob: { seeded: MARKER },
+  });
+  if (error) die(`${SEED.lateQuote.name} late sent quote`, error);
+  console.log(`seeded late sent quote: ${SEED.lateQuote.name} (/q/${SEED.lateQuote.acceptToken}, moving in 3 days)`);
 }
 
 // 6. A second SENT quote with a token — the public DECLINE flow (kept separate

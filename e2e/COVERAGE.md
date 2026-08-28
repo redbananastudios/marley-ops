@@ -86,7 +86,8 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 ## Public (no auth)
 | Flow | Status | Spec |
 |---|---|---|
-| /q accept → deposit invoice (staging) | ✅ | public/customer.spec.ts |
+| /q accept → deposit invoice (staging), and NO balance on an ordinary booking | ✅ | public/customer.spec.ts |
+| /q accept a move inside T-7 → collapsed 25% ask AND balance both raised, summing to the agreed price (staging) | ✅ | public/customer.spec.ts |
 | /q decline with reason | ✅ | public/decline.spec.ts |
 | /s storage-agreement signing (render + affordance + bad-token 404) | ✅ | public/signing.spec.ts |
 | /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
