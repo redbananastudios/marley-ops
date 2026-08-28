@@ -18,6 +18,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { lookupPlaceDetails } from "@/lib/places/lookup";
 import { addressFromString as parseAddressString, type ParsedAddress } from "@/lib/places/parse";
+import { formatUkPostcode } from "@/lib/leads/format";
 
 export type AddressValue = ParsedAddress;
 
@@ -29,9 +30,18 @@ export const BLANK_ADDRESS: AddressValue = {
   country: "United Kingdom",
 };
 
-/** One-line string (line1, town, postcode) for storage in a single text column. */
+/** One-line string (line1, town, postcode) for storage in a single text column.
+ *
+ *  The postcode goes through the SAME canonical normaliser the server applies
+ *  to leads.from_postcode / to_postcode. Without it a hand-typed postcode (no
+ *  Places pick) was stored raw here while the sibling column was normalised, so
+ *  the lead page showed Route "BH21 8NB" beside Pickup address "bh218nb" - one
+ *  value, two renderings, on one screen (QA-20260827-05).
+ *
+ *  formatUkPostcode returns "" for empty input, so a blank postcode is
+ *  unchanged. */
 export function formatAddress(a: AddressValue): string {
-  return [a.line1, a.town, a.postcode].filter((s) => s && s.trim()).join(", ").trim();
+  return [a.line1, a.town, formatUkPostcode(a.postcode)].filter((s) => s && s.trim()).join(", ").trim();
 }
 
 /** Seed an AddressValue from a stored one-line string (shared parser in lib/places/parse). */

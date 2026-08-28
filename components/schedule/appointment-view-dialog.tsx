@@ -14,6 +14,7 @@ import { Phone, MessageCircle, MessageSquare, Pencil, FileText, Ban, Loader2, Cl
 import { toast } from "sonner";
 import { reportSurveySend, duplicateWarning } from "@/lib/comms/survey-send-report";
 import { cn } from "@/lib/utils";
+import { UK_TZ } from "@/lib/uk-time";
 import {
   Dialog,
   DialogContent,
@@ -27,7 +28,7 @@ import { CommsDialog } from "@/components/comms/comms-dialog";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
 import { JobSummary } from "@/components/schedule/job-summary";
 import { updateAppointment } from "@/app/(dashboard)/schedule/actions";
-import { liveQuoteForLead } from "@/app/(dashboard)/quotes/actions";
+import { createDraftQuote, liveQuoteForLead } from "@/app/(dashboard)/quotes/actions";
 import { LeadContextPanels, type EditTarget, type LeadOption } from "./appointment-dialog";
 
 function waNumber(phone: string | null | undefined): string | null {
@@ -140,8 +141,13 @@ export function AppointmentViewDialog({
   if (!target) return null;
 
   const when = target.startsAt ? new Date(target.startsAt) : null;
+  // Europe/London, like every sibling schedule component. Without it these two
+  // formatters take the VIEWER's zone, so the header renders the raw UTC hour
+  // and disagrees with the day-panel card that opened it - correct only by
+  // coincidence, on a machine that happens to be on UK local time
+  // (QA-20260827-02).
   const whenLabel = when
-    ? `${when.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })} · ${when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}`
+    ? `${when.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: UK_TZ })} · ${when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ })}`
     : "—";
   const badge = STATUS_BADGE[target.status ?? "scheduled"] ?? STATUS_BADGE.scheduled;
   const wa = waNumber(lead?.phone);
@@ -206,8 +212,26 @@ export function AppointmentViewDialog({
           return;
         }
       }
+      // Create the draft HERE, as a direct server-action call, rather than
+      // pushing to /quotes/new?leadId=… and letting that page's render do the
+      // write. Next can invoke a Server Component render twice for one
+      // client-side navigation - createDraftQuote's own comment says so, and
+      // handles the resulting DB race - but nothing handled the TWO redirect()
+      // throws that came with it, which corrupted the in-flight soft navigation
+      // and showed the generic error boundary even though the draft was created
+      // fine. A hard load is one render pass, which is why reloading the very
+      // same URL always worked (QA-20260827-03).
+      let quoteId = openExisting && existing ? existing.id : undefined;
+      if (!quoteId) {
+        const res = await createDraftQuote({ leadId: lead.id });
+        if (!res.ok) {
+          toast.error(res.error || "Could not create a new quote.");
+          return;
+        }
+        quoteId = res.id;
+      }
       onOpenChange(false);
-      router.push(openExisting && existing ? `/quotes/${existing.id}` : `/quotes/new?leadId=${lead.id}`);
+      router.push(`/quotes/${quoteId}`);
     } finally {
       setBusy(false);
     }
