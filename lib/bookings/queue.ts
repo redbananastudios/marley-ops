@@ -103,13 +103,22 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
 
   const days = s.apptDayUk ? daysBetweenUk(todayUk, s.apptDayUk) : null;
   const balanceAmount = Number(s.balanceAmount ?? 0);
-  // A balance is only askable once there is a real move behind it: a booking
-  // with no date owes nothing *today*, however large the job.
+  // An INVOICED balance is owed on its own authority: the customer has been
+  // sent a document asking for it, so a diary entry is not what makes it real.
+  // Requiring a removal appointment for that case hid gate 9b's late-booking
+  // balance and gate 9c's settle-in-full balance from BOTH money headlines —
+  // each is raised at acceptance, days before the office allocates the slot,
+  // and 9b only fires for moves already inside T-7. So the jobs moving soonest
+  // were the ones reporting £0 owed.
+  //
+  // The window-implied case still needs the appointment, which is what the
+  // guard was written for: inferring a balance from a date nobody has
+  // committed to would have a booking with no date owe money today, however
+  // large the job. Issued and inferred are different claims.
   const balanceIsDue =
     !s.balancePaidAt &&
     balanceAmount > 0 &&
-    s.hasRemovalAppt &&
-    (!!s.balanceInvoiceNumber || (days !== null && days <= BALANCE_WINDOW_DAYS));
+    (!!s.balanceInvoiceNumber || (s.hasRemovalAppt && days !== null && days <= BALANCE_WINDOW_DAYS));
   const balanceOwed = balanceIsDue ? balanceAmount : 0;
   const balancePastDue = balanceOwed > 0 && days !== null && days < 0;
 
@@ -137,6 +146,67 @@ export function moneyTileCounts(rows: ReadonlyArray<{ bucket: BookingBucket }>):
     else if (r.bucket === "balance_due" || r.bucket === "balance_overdue") balanceDue++;
   }
   return { awaitingDeposit, balanceDue };
+}
+
+/** Every money headline on /bookings and /payments Due, from ONE ledger and
+ *  computed per OBLIGATION, never per bucket.
+ *
+ *  `classifyBooking` puts a row in exactly one rung, and it only reaches
+ *  `commitment_*` once the deposit is paid AND a removal appointment exists.
+ *  `ensureCommitmentInvoice` requires neither: a confirmed date and the
+ *  customer's date_confirm signature are enough. So a bucket-based sum
+ *  silently drops every invoiced-and-unpaid 25% sitting in
+ *  `deposit_outstanding`, `no_date` or `provisional` — money the office is
+ *  actively chasing, absent from the tile that names it. That is the same
+ *  shape that once hid balances behind an unpaid deposit (QA-20260820-04);
+ *  the balance tile was fixed then and the 25% tile was left behind
+ *  (QA-20260826-01).
+ *
+ *  Bucket membership decides which LIST a row appears in, and nothing else.
+ *  Deposits stay out of `owedNow` (Peter, 2026-08-20) and are reported
+ *  separately, so the two are never added together by accident. */
+export interface QueueMoney {
+  /** Deposit money still outstanding — its own tile, never part of owedNow. */
+  depositsOutstanding: number;
+  depositJobs: number;
+  commitment: number;
+  /** Rows carrying an unpaid 25%, however they are bucketed. */
+  commitmentJobs: number;
+  balance: number;
+  /** commitment + balance — /payments "Owed right now". */
+  owedNow: number;
+  /** The portion of owedNow already past its date. */
+  overdue: number;
+}
+
+export function queueMoney(
+  rows: ReadonlyArray<{ bucket: BookingBucket; deposit: number; owed: OwedNow }>,
+): QueueMoney {
+  let depositsOutstanding = 0;
+  let depositJobs = 0;
+  let commitment = 0;
+  let commitmentJobs = 0;
+  let balance = 0;
+  let overdue = 0;
+  for (const r of rows) {
+    if (r.bucket === "deposit_outstanding") {
+      depositsOutstanding += r.deposit;
+      depositJobs++;
+    }
+    if (r.owed.commitment > 0) commitmentJobs++;
+    commitment += r.owed.commitment;
+    balance += r.owed.balance;
+    overdue += r.owed.overdue;
+  }
+  return {
+    depositsOutstanding,
+    depositJobs,
+    commitment,
+    commitmentJobs,
+    balance,
+    owedNow: commitment + balance,
+    overdue,
+  };
 }
 
 export function classifyBooking(s: QueueSignals, todayUk: string): BookingBucket {
