@@ -25,8 +25,15 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
+    // push() alone. `router.refresh()` used to follow it and fired a SECOND
+    // full render of "/" — measured at 8.53s + 2.37s (office), 6.87s + 3.29s
+    // (estimator) and 1.48s + 6.65s (crew) in CI run 33121391706, roughly
+    // doubling the time to leave this page. It bought nothing: the auth cookie
+    // is already set by the time signInWithPassword resolves, the push's own
+    // RSC request carries it (those requests returned the authenticated
+    // dashboard, not a redirect back here), and "/" is `force-dynamic`, so the
+    // client router cache has no stale entry to clear.
     router.push("/");
-    router.refresh();
   }
 
   return (
