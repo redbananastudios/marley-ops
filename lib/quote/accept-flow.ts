@@ -2868,6 +2868,23 @@ export async function createBalanceInvoiceFlow(
   }
 
   const ref = balanceReference(quote.quote_ref);
+  // COMMERCIAL: this raise IS the completion invoice (Peter, 2026-08-28 —
+  // commercial invoices are raised BY HAND on completion, so this office
+  // action is the moment, and there is no automation to add). It falls due on
+  // the client's own terms rather than before move day, and that date is what
+  // `commercial_due_date` carries.
+  //
+  // Written HERE, in the same update as the invoice number, because the three
+  // readers of the column (classifyBooking, owedNow, /bookings) all key off
+  // that number: stamping it in a second write would open a window where the
+  // invoice is readable and its terms are not. Nothing wrote this column at
+  // all until now, which made `pastTerms` false on every row forever — the
+  // overdue state and its internal alert were unreachable code, and a
+  // commercial invoice could age indefinitely while the board said "in terms".
+  const commercialDueDate =
+    policyOfQuote(quote) === "commercial"
+      ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
+      : null;
   try {
     let inv = await findInvoiceByReference(ref); // crash-recovery orphan adoption
     if (inv && !adoptedInvoiceMatches(inv.total, amount)) {
@@ -2942,26 +2959,15 @@ export async function createBalanceInvoiceFlow(
         notes: commercialInvoice
           ? `Removal completed, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}.${poClause} ${payClause}`
           : `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
+        // The terms date on the DOCUMENT, not only in our own column. Without
+        // it the client's accounts department — the one party who has to act on
+        // the terms — receives an invoice with no due date at all, while
+        // /bookings quietly counts the days. Residential passes nothing and
+        // keeps the provider's default.
+        ...(commercialDueDate ? { dueDate: commercialDueDate } : {}),
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
-    // COMMERCIAL: this raise IS the completion invoice (Peter, 2026-08-28 —
-    // commercial invoices are raised BY HAND on completion, so this office
-    // action is the moment, and there is no automation to add). It falls due on
-    // the client's own terms rather than before move day, and that date is what
-    // `commercial_due_date` carries.
-    //
-    // Written HERE, in the same update as the invoice number, because the three
-    // readers of the column (classifyBooking, owedNow, /bookings) all key off
-    // that number: stamping it in a second write would open a window where the
-    // invoice is readable and its terms are not. Nothing wrote this column at
-    // all until now, which made `pastTerms` false on every row forever — the
-    // overdue state and its internal alert were unreachable code, and a
-    // commercial invoice could age indefinitely while the board said "in terms".
-    const commercialDueDate =
-      policyOfQuote(quote) === "commercial"
-        ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
-        : null;
     // The date everything DOWNSTREAM of this raise is dated by — the lead's
     // balance_due_date and the balance follow-up's due_at. `balanceDueDate`
     // works back from the MOVE, which on a commercial job has already

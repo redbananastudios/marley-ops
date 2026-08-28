@@ -641,6 +641,11 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<LedgerIn
         Reference: reference,
         Status: "AUTHORISED",
         Date: ukTodayDate(),
+        // Omitted unless a caller states one, so Xero keeps applying the
+        // contact's or org's default exactly as it did before gate 10b. The
+        // commercial ladder passes the client's agreed terms date — which is
+        // also what makes Xero's own `overdue` status reachable at all.
+        ...(input.dueDate ? { DueDate: input.dueDate } : {}),
         ...(brandingThemeId ? { BrandingThemeID: brandingThemeId } : {}),
       },
     ],
