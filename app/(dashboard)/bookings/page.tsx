@@ -6,13 +6,15 @@ import { moveDateLabel } from "@/lib/quote/payments";
 import { daysBetweenUk, queueMoney, type BookingBucket } from "@/lib/bookings/queue";
 import { loadBookingRows, ukDayOfInstant as ukDayOf, type BookingRow as Row } from "@/lib/bookings/load-signals";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
-import { listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip } from "@/components/brand/brand-chip";
 import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { BalanceInvoiceButton } from "@/components/leads/balance-invoice-button";
+import { SendPaymentLinkButton } from "@/components/leads/send-payment-link-button";
+import { cardEnabledBrands } from "@/lib/payments/card-payments";
 import { ResendInvoiceButton } from "@/components/leads/resend-invoice-button";
 import { BookingDetailsButton } from "@/components/bookings/booking-details-dialog";
 import { CopyLinkButton, MarkPaidButton } from "@/components/bookings/booking-actions";
@@ -216,6 +218,11 @@ export default async function BookingsPage({
   // /payments counted it (QA-20260826-01). The balance tile had already been
   // fixed for the identical shape (QA-20260820-04); this puts both on one seam.
   const money = queueMoney(rows);
+  // Gate 9d: resolved once for the page rather than per row, and by the one
+  // helper that ANDs the global kill switch with each brand's own switch
+  // (PRD §11.10). A brand with card off never renders the action, so the
+  // word 'card' never reaches one of its surfaces.
+  const cardBrands = await cardEnabledBrands(sb);
   const needsCrew = (r: Row) =>
     !!r.apptStartsAt && r.crewAssigned === 0 && daysBetweenUk(todayUk, ukDayOf(r.apptStartsAt)) >= 0;
   const toAllocate = rows.filter(needsCrew);
@@ -448,6 +455,17 @@ export default async function BookingsPage({
                 row that names them — no hand-typed message, same figure, same
                 link. Copying the link only helps if someone is on the phone. */}
             <ResendInvoiceButton leadId={r.leadId} rail="deposit" />
+            {/* The customer who phones in unable to do a bank transfer: send
+                them a card page instead of reading card details down the line.
+                Only for a brand whose card channel is actually live. */}
+            {cardBrands.has(brandByLead.get(r.leadId) ?? DEFAULT_BRAND) ? (
+              <SendPaymentLinkButton
+                quoteId={r.quoteId}
+                amount={r.deposit}
+                hasEmail={!!r.customerEmail}
+                hasPhone={!!r.customerPhone}
+              />
+            ) : null}
             <MarkPaidButton
               quoteId={r.quoteId}
               kind="deposit"
