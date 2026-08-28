@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
 import { step } from "../fixtures/artefacts";
 
 /**
@@ -155,5 +156,134 @@ test.describe.serial("Estimator — book survey (past slot) then Create Quote fr
       // IS the quote builder for the row createDraftQuote just inserted.
       await expect(page.getByText(/Something went wrong|Application error/i)).toHaveCount(0);
     });
+  });
+});
+
+/**
+ * QA-20260827-03: a SEPARATE entry point to the same page — "Create Quote" in
+ * the survey visit's view dialog (components/schedule/appointment-view-dialog.tsx),
+ * reached from /schedule/surveys. This is a client-side `router.push`, not the
+ * <Link> the "New quote" test above drives — Next rendered
+ * app/(dashboard)/quotes/new/page.tsx twice for that navigation and only one of
+ * the two redirect() throws survived, so the FIRST visit crashed to the generic
+ * error boundary even though the draft quote committed underneath. Fixed by
+ * calling createDraftQuote directly from the click handler instead of routing
+ * through the page's write-during-render. Needs a lead with NO prior quote —
+ * a fresh lead guarantees that, same reasoning as the block above.
+ */
+test.describe.serial("Estimator — Create Quote from the survey visit dialog (QA-20260827-03)", () => {
+  const marker = `E2E Estimator Visit Quote ${Date.now()}`;
+  let leadUrl = "";
+  let leadId = "";
+
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  test.skip(!process.env.E2E_ESTIMATOR_PASSWORD, "same credential gap as the block above.");
+  test.skip(!url || !serviceKey, "needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for the quote-count read-back.");
+
+  test("create a fresh lead via the diary Add lead form", async ({ page }) => {
+    await step("open Add lead", page, async () => {
+      await page.goto("/leads/new", { waitUntil: "networkidle" });
+      await page.waitForTimeout(500);
+    });
+
+    await step("fill the customer and submit", page, async () => {
+      const name = page.getByLabel(/^Name/i).first();
+      for (let i = 0; i < 3; i++) {
+        await name.fill(marker);
+        if ((await name.inputValue()) === marker) break;
+        await page.waitForTimeout(400);
+      }
+      await expect(name).toHaveValue(marker);
+
+      const phone = page.getByLabel(/Phone/i).first();
+      if (await phone.count()) await phone.fill("07700900998");
+
+      const brandPick = page.getByTestId("brand-picker").locator('[data-brand="marley"]');
+      if (await brandPick.count()) await brandPick.click();
+
+      let created = false;
+      for (let attempt = 1; attempt <= 3 && !created; attempt++) {
+        if (await brandPick.count()) await brandPick.click();
+        await page.getByRole("button", { name: "Add lead", exact: true }).click();
+        try {
+          await page.waitForURL(/\/leads\/[0-9a-f-]{36}/, { timeout: 15000 });
+          created = true;
+        } catch {
+          await page.waitForLoadState("networkidle").catch(() => {});
+          await page.waitForTimeout(600);
+        }
+      }
+      expect(created, "lead creation should navigate to /leads/{id}").toBe(true);
+      leadUrl = page.url();
+      leadId = leadUrl.match(/\/leads\/([0-9a-f-]{36})/)?.[1] ?? "";
+      expect(leadId).toBeTruthy();
+    });
+  });
+
+  test("book a survey for a past slot today — it counts as attended immediately", async ({ page }) => {
+    await step("open the Book survey dialog for this lead", page, async () => {
+      await page.goto(`/schedule/surveys?leadId=${leadId}`, { waitUntil: "networkidle" });
+      await expect(page.getByRole("dialog")).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Book survey" })).toBeVisible();
+    });
+
+    await step("set the slot 2 hours in the past (so it's already attended) and Book", page, async () => {
+      const start = page.locator("#appt-start");
+      const past = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString().slice(0, 16);
+      await start.fill(past);
+      await expect(start).toHaveValue(past);
+
+      const dialog = page.getByRole("dialog");
+      let booked = false;
+      for (let attempt = 1; attempt <= 3 && !booked; attempt++) {
+        await dialog.getByRole("button", { name: "Book", exact: true }).click();
+        try {
+          await dialog.waitFor({ state: "hidden", timeout: 15000 });
+          booked = true;
+        } catch {
+          await page.waitForTimeout(700);
+        }
+      }
+      expect(booked, "the Book survey dialog should close on submit").toBe(true);
+    });
+  });
+
+  test("Create Quote from the visit's view dialog (router.push) lands on /quotes/{id} with no error boundary", async ({ page }) => {
+    await step("open the survey's view dialog from the diary", page, async () => {
+      await page.goto("/schedule/surveys", { waitUntil: "networkidle" });
+      const event = page.locator(".fc-event").filter({ hasText: marker });
+      await expect(event.first()).toBeVisible({ timeout: 15000 });
+      await event.first().click();
+      await expect(page.getByRole("dialog")).toBeVisible();
+    });
+
+    await step("click Create Quote (client-side router.push, not a page.goto)", page, async () => {
+      const dialog = page.getByRole("dialog");
+      await dialog.getByRole("button", { name: "Create Quote", exact: true }).click();
+      await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15000 });
+    });
+
+    await step("no generic error boundary, and exactly one quotes row exists for this lead", page, async () => {
+      await expect(page.getByText(/Something went wrong|Application error/i)).toHaveCount(0);
+
+      const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
+      const { data, error } = await sb.from("quotes").select("id").eq("lead_id", leadId);
+      if (error) throw new Error(`quotes read-back: ${error.message}`);
+      expect(data?.length, "exactly one draft quote row for this lead, no duplicate from the double-render race").toBe(1);
+      expect(page.url()).toContain(`/quotes/${data![0].id}`);
+    });
+  });
+
+  test.afterAll(async () => {
+    if (!leadId || !url || !serviceKey) return;
+    const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
+    await sb.from("quotes").delete().eq("lead_id", leadId);
+    await sb.from("appointments").delete().eq("lead_id", leadId);
+    await sb.from("activities").delete().eq("lead_id", leadId);
+    await sb.from("communications").delete().eq("lead_id", leadId);
+    const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).maybeSingle();
+    await sb.from("leads").delete().eq("id", leadId);
+    if (lead?.client_id) await sb.from("clients").delete().eq("id", lead.client_id);
   });
 });

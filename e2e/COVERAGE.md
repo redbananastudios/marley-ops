@@ -60,7 +60,8 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | Settings trimmed (no admin money/team controls) | ✅ | estimator/settings.spec.ts |
 | Leads scoped to own / Mine preset | ✅ | estimator/work.spec.ts |
 | Build + send a quote | ⬜ | estimator/quote.spec.ts |
-| Book survey (past slot, attended) → Create Quote from the visit | 🟡 | estimator/work-quote.spec.ts — proven live 2026-08-22 via a throwaway login + SQL read-back (0 findings), but the spec itself is `test.skip`'d: this env has no `E2E_ESTIMATOR_PASSWORD` so `auth.setup.ts` can't sign in the persistent estimator fixture, so it has never actually executed |
+| Book survey (past slot, attended) → Create Quote from the visit (Quotes-tab `<Link>` entry) | 🟡 | estimator/work-quote.spec.ts — proven live 2026-08-22 via a throwaway login + SQL read-back (0 findings), but the spec itself is `test.skip`'d: this env has no `E2E_ESTIMATOR_PASSWORD` so `auth.setup.ts` can't sign in the persistent estimator fixture, so it has never actually executed |
+| Book survey → Create Quote from the survey visit's view dialog (`router.push` entry, QA-20260827-03) | 🟡 | estimator/work-quote.spec.ts (2nd describe block) — ran green live against staging 2026-08-28 via a throwaway minted login (3/3 passed, SQL read-back confirmed exactly 1 `quotes` row, no error boundary); same `E2E_ESTIMATOR_PASSWORD` gap as the row above keeps it `test.skip`'d in CI |
 | My invoices — invoicing unlocked (gates pass) | ✅ | estimator/pay.spec.ts |
 | My invoices — create/add a line by hand/edit/submit | ✅ | estimator/pay-statement.spec.ts |
 

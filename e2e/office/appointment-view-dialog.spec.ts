@@ -85,7 +85,16 @@ async function seed(): Promise<Fixture> {
 
   const { data: vehicle } = await sb.from("vehicles").select("id, name").eq("is_active", true).limit(1).maybeSingle();
 
-  const start = new Date(Date.now() + 86_400_000).toISOString();
+  // Fixed UTC wall-clock, one day out, at a time that differs from UK local
+  // (BST = UTC+1) so a timezone-naive render is visibly wrong: 09:00 UTC must
+  // display as 10:00 on any UK-facing surface.
+  const tomorrow = new Date(Date.now() + 86_400_000);
+  const start = new Date(
+    Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 9, 0, 0),
+  ).toISOString();
+  const end = new Date(
+    Date.UTC(tomorrow.getUTCFullYear(), tomorrow.getUTCMonth(), tomorrow.getUTCDate(), 14, 0, 0),
+  ).toISOString();
   const { data: appt, error: aErr } = await sb
     .from("appointments")
     .insert({
@@ -94,7 +103,7 @@ async function seed(): Promise<Fixture> {
       lead_id: lead.id,
       title: `${MARKER} Client`,
       starts_at: start,
-      ends_at: start,
+      ends_at: end,
       status: "scheduled",
       location: "seed",
       notes: APPT_NOTES,
@@ -135,6 +144,13 @@ async function teardown(fx: Fixture | null) {
 }
 
 test.describe("Office — appointment view dialog (job summary)", () => {
+  // Pin the browser's own clock to UK local. FullCalendar's grid formats event
+  // chips in the browser's local timezone by default, so on a non-UK CI runner
+  // the "ground truth" card and the dialog would both drift together and the
+  // assertion below would prove nothing. Europe/London makes both surfaces
+  // exercise the real Europe/London-vs-omitted-timeZone bug (QA-20260827-02).
+  test.use({ timezoneId: "Europe/London" });
+
   let fx: Fixture | null = null;
 
   test.afterEach(async () => {
@@ -162,6 +178,16 @@ test.describe("Office — appointment view dialog (job summary)", () => {
         if (vehicle?.name) await expect(dialog.getByText(vehicle.name, { exact: false })).toBeVisible();
       }
       await expect(dialog.getByText(APPT_NOTES, { exact: false })).toBeVisible();
+    });
+
+    // QA-20260827-02: the header rendered the viewer's local clock, not
+    // Europe/London — 09:00 UTC (10:00 BST) showed as "09:00" whenever the
+    // runner's own timezone wasn't UK. Assert the header agrees with the
+    // day-panel card that opened it (both must read UK-local "10:00").
+    await step("view-dialog header time matches the day-panel card (UK local, not the runner's own timezone)", page, async () => {
+      await expect(page.locator(".fc-event").filter({ hasText: `${MARKER} Client` }).first()).toContainText("10:00");
+      await expect(dialog).toContainText("10:00");
+      await expect(dialog).not.toContainText("09:00");
     });
 
     await step("the panel never shows a price — money lives behind View full quote", page, async () => {
