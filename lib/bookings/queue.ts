@@ -26,6 +26,14 @@ export type BookingBucket =
   | "commitment_due"
   | "balance_overdue"
   | "balance_due"
+  /** Commercial: the job is booked and not yet done, so nothing is owed and
+   *  nothing is chased. It sits here purely so the office can see it. */
+  | "commercial_awaiting_completion"
+  /** Commercial: completed, invoiced, inside the client's terms. */
+  | "commercial_invoiced"
+  /** Commercial: past the client's terms. Raises an INTERNAL alert only —
+   *  a commercial customer is never chased by email (PRD §3.10). */
+  | "commercial_overdue"
   | "all_set";
 
 export interface QueueSignals {
@@ -45,6 +53,17 @@ export interface QueueSignals {
   dateReleasableAt: string | null;
   balancePaidAt: string | null;
   balanceInvoiceNumber: string | null;
+  /** The policy SNAPSHOTTED on the quote at acceptance (gate 8), never
+   *  re-derived from the client - editing a client's type must not rewrite
+   *  the schedule of a booking already in flight. Absent/unknown is
+   *  residential, which is what every booking before gate 8 ran. */
+  paymentPolicy?: "residential" | "commercial" | null;
+  /** Commercial only: the removal appointment is marked completed, which is
+   *  what makes the invoice raisable. */
+  jobCompleted?: boolean;
+  /** Commercial only: yyyy-mm-dd the completion invoice falls due, from the
+   *  client's own terms. Null until the invoice is raised. */
+  commercialDueDate?: string | null;
 }
 
 /** Days from `todayUk` to a yyyy-mm-dd day (negative = past). Pure string maths
@@ -74,6 +93,10 @@ export const BALANCE_WINDOW_DAYS = 7;
  *  agreed − deposit − commitment (see load-signals), so commitment + balance
  *  is exactly what is outstanding after the deposit. */
 export interface OwedSignals {
+  /** See QueueSignals.paymentPolicy - snapshotted, never re-derived. */
+  paymentPolicy?: "residential" | "commercial" | null;
+  /** Commercial only: when the completion invoice falls due. */
+  commercialDueDate?: string | null;
   commitmentInvoiceAmount: number;
   commitmentPaidAt: string | null;
   commitmentDueDate: string | null;
@@ -95,7 +118,45 @@ export interface OwedNow {
   overdue: number;
 }
 
+/**
+ * The commercial ladder: no deposit, no commitment, no customer chase. One
+ * invoice, raised when the job is done, due on the client's own terms.
+ *
+ * The balance columns carry it - `-BAL` is the last invoice on a job either
+ * way, so reusing them keeps /finance, the bank-feed matcher and the ledger
+ * adapter working with no new suffix and no new match_kind (PRD §10). What
+ * differs is only WHEN it is raised (completion, not T-7) and when it falls
+ * due (the client's terms, not before move day).
+ */
+function classifyCommercial(s: QueueSignals, todayUk: string): BookingBucket {
+  if (s.balancePaidAt) return "all_set";
+  // Not invoiced yet. Before completion that is simply where the job lives;
+  // AFTER completion it means the completion invoice has not been raised, and
+  // the office needs to see that just as plainly - so both states share the
+  // awaiting bucket rather than one of them vanishing into all_set.
+  if (!s.balanceInvoiceNumber) return "commercial_awaiting_completion";
+  const pastTerms = !!s.commercialDueDate && s.commercialDueDate < todayUk;
+  return pastTerms ? "commercial_overdue" : "commercial_invoiced";
+}
+
 export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
+  // Commercial owes NOTHING until its completion invoice exists - there is no
+  // deposit and no 25%, and inventing an obligation from the agreed price
+  // would put money on the /payments headline that nobody has been asked for.
+  // Once raised it owes the whole invoice, and goes overdue on the client's
+  // terms rather than on the move date.
+  if (s.paymentPolicy === "commercial") {
+    const amount = Number(s.balanceAmount ?? 0);
+    const owed = !s.balancePaidAt && amount > 0 && !!s.balanceInvoiceNumber ? amount : 0;
+    const pastTerms = owed > 0 && !!s.commercialDueDate && s.commercialDueDate < todayUk;
+    return {
+      commitment: 0,
+      balance: owed,
+      total: owed,
+      overdue: pastTerms ? owed : 0,
+    };
+  }
+
   const commitmentAmount = Number(s.commitmentInvoiceAmount ?? 0);
   const commitmentOwed = commitmentAmount > 0 && !s.commitmentPaidAt ? commitmentAmount : 0;
   const commitmentPastDue =
@@ -210,6 +271,12 @@ export function queueMoney(
 }
 
 export function classifyBooking(s: QueueSignals, todayUk: string): BookingBucket {
+  // Commercial runs a different ladder entirely and must be answered FIRST:
+  // every rung below is residential, and a commercial booking has no deposit,
+  // so falling through would park it in `deposit_outstanding` forever - on a
+  // chase queue for money nobody agreed to pay up front.
+  if (s.paymentPolicy === "commercial") return classifyCommercial(s, todayUk);
+
   if (!s.depositPaidAt) return "deposit_outstanding";
 
   if (!s.hasRemovalAppt) {

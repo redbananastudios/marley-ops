@@ -346,6 +346,53 @@ to, because `/q` is what the customer reads and `/quotes` is what the office rea
 
 ---
 
+## `0113_commercial_path.sql` — gate 10, the commercial completion invoice
+
+Two nullable columns on `quotes` plus a partial index. **Inert for every existing
+row**: both are read only when `payment_policy = 'commercial'`, and `0111`
+backfilled every accepted quote to `'residential'`. No residential booking
+changes behaviour, and the prod pre-flight recorded on `0111` found zero clients
+carrying `is_company`, so there are no commercial rows to affect either.
+
+Applied and verified on staging 2026-08-28 before the gate merged.
+
+```sql
+select column_name, data_type, is_nullable
+from information_schema.columns
+where table_name = 'quotes'
+  and column_name in ('commercial_due_date', 'po_number')
+order by column_name;
+```
+
+Expected: `commercial_due_date` / `date` / `YES`, and `po_number` / `text` / `YES`.
+
+Then prove the length constraint bites (it rolls back either way):
+
+```sql
+begin;
+  update quotes set po_number = repeat('x', 65)
+  where id = (select id from quotes limit 1);
+rollback;
+```
+
+Expected: fails on `quotes_po_number_len`.
+
+**Why the completion invoice reuses the BALANCE columns rather than getting its
+own:** `-BAL` is the last invoice on a job under either policy, so reusing
+`zoho_balance_invoice_*` and `balance_invoice_amount` keeps `/finance`, the
+bank-feed matcher, the ledger adapter and the five-value `match_kind` set working
+with no new suffix and no new kind (PRD §10). Only the timing differs: raised at
+completion rather than T-7, due on the client's terms rather than before move day.
+A parallel set of invoice columns would have doubled every "what is outstanding
+on this job" read, and every one of them would have been a place to forget the
+second set.
+
+App-side, after the deploy: `/bookings` must look **byte-identical** to before
+while no commercial client exists — both new sections hide when empty. Confirm
+that before creating one.
+
+---
+
 ## Activation (separate, later step — never part of the migration batch)
 
 Pitmans goes `active = true` on prod only when the promoted build is verified, always BEFORE the prod import (PRD §5 cutover):

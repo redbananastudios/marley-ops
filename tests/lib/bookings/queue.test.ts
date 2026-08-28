@@ -306,3 +306,159 @@ describe("queueMoney", () => {
     });
   });
 });
+
+/**
+ * The commercial ladder (gate 10, PRD §3.10). A different schedule entirely:
+ * no deposit, no 25%, no customer chase. One invoice raised when the job is
+ * done, due on the client's own terms.
+ *
+ * The residential assertions above are the control. Every one of them still
+ * passes because commercial is answered FIRST and never falls through - which
+ * is the property that matters, since the PRD's headline promise is that
+ * residential behaviour is unchanged.
+ */
+describe("classifyBooking — commercial", () => {
+  const commercial: QueueSignals = {
+    ...base,
+    paymentPolicy: "commercial",
+    // No deposit is ever taken on a commercial booking. Left null on purpose:
+    // if the ladder ever fell through to the residential rungs this would park
+    // it in deposit_outstanding, on a chase queue for money nobody agreed to
+    // pay up front.
+    depositPaidAt: null,
+  };
+
+  it("an unpaid deposit does NOT drag a commercial booking onto the deposit queue", () => {
+    expect(classifyBooking(commercial, TODAY)).toBe("commercial_awaiting_completion");
+  });
+
+  it("stays awaiting until the completion invoice actually exists", () => {
+    // Before the job is done, and after it is done but before the invoice is
+    // raised, both read the same on the board - because in both states the
+    // office has something outstanding to do and nothing has been asked for.
+    const booked = { ...commercial, hasRemovalAppt: true, apptDayUk: "2026-08-20" };
+    expect(classifyBooking(booked, TODAY)).toBe("commercial_awaiting_completion");
+    expect(classifyBooking({ ...booked, jobCompleted: true }, TODAY)).toBe(
+      "commercial_awaiting_completion",
+    );
+  });
+
+  it("goes overdue on the CLIENT TERMS, not on the move date", () => {
+    // The move being long past means nothing here: a 30-day-terms invoice
+    // raised on completion is not late until day 31.
+    const invoiced = {
+      ...commercial,
+      hasRemovalAppt: true,
+      apptDayUk: "2026-07-01",
+      jobCompleted: true,
+      balanceInvoiceNumber: "INV-000401",
+    };
+    expect(classifyBooking({ ...invoiced, commercialDueDate: "2026-08-31" }, TODAY)).toBe(
+      "commercial_invoiced",
+    );
+    expect(classifyBooking({ ...invoiced, commercialDueDate: "2026-07-29" }, TODAY)).toBe(
+      "commercial_overdue",
+    );
+    // Due today is not overdue yet - same boundary as the residential rungs.
+    expect(classifyBooking({ ...invoiced, commercialDueDate: TODAY }, TODAY)).toBe(
+      "commercial_invoiced",
+    );
+  });
+
+  it("settles to all_set once paid", () => {
+    expect(
+      classifyBooking(
+        {
+          ...commercial,
+          balanceInvoiceNumber: "INV-000401",
+          commercialDueDate: "2026-07-01",
+          balancePaidAt: "2026-07-05T10:00:00Z",
+        },
+        TODAY,
+      ),
+    ).toBe("all_set");
+  });
+
+  it("an absent or residential policy runs the residential ladder unchanged", () => {
+    // The default direction matters: guessing commercial would switch a
+    // booking's chase off silently.
+    expect(classifyBooking({ ...base, depositPaidAt: null }, TODAY)).toBe("deposit_outstanding");
+    expect(classifyBooking({ ...base, depositPaidAt: null, paymentPolicy: "residential" }, TODAY)).toBe(
+      "deposit_outstanding",
+    );
+    expect(classifyBooking({ ...base, depositPaidAt: null, paymentPolicy: null }, TODAY)).toBe(
+      "deposit_outstanding",
+    );
+  });
+});
+
+describe("owedNow — commercial", () => {
+  const commercialOwed = {
+    ...owedBase,
+    paymentPolicy: "commercial" as const,
+    balanceAmount: 2400,
+    hasRemovalAppt: true,
+  };
+
+  it("owes NOTHING until the completion invoice is raised", () => {
+    // There is no deposit and no 25%, so inventing an obligation from the
+    // agreed price would put money on the /payments headline that nobody has
+    // been asked for.
+    const v = owedNow({ ...commercialOwed, balanceInvoiceNumber: null }, TODAY);
+    expect(v.total).toBe(0);
+    expect(v.commitment).toBe(0);
+  });
+
+  it("owes the whole invoice once raised, and never a commitment", () => {
+    const v = owedNow(
+      { ...commercialOwed, balanceInvoiceNumber: "INV-000401", commercialDueDate: "2026-08-31" },
+      TODAY,
+    );
+    expect(v.balance).toBe(2400);
+    expect(v.total).toBe(2400);
+    // A commercial job has no 25% rung at all, even if a stale figure were
+    // somehow present on the row.
+    expect(
+      owedNow(
+        {
+          ...commercialOwed,
+          balanceInvoiceNumber: "INV-000401",
+          commitmentInvoiceAmount: 999,
+        },
+        TODAY,
+      ).commitment,
+    ).toBe(0);
+  });
+
+  it("is overdue on the terms date, not the move date", () => {
+    const late = owedNow(
+      { ...commercialOwed, balanceInvoiceNumber: "INV-000401", commercialDueDate: "2026-07-20", apptDayUk: "2026-07-01" },
+      TODAY,
+    );
+    expect(late.overdue).toBe(2400);
+    const inTerms = owedNow(
+      { ...commercialOwed, balanceInvoiceNumber: "INV-000401", commercialDueDate: "2026-08-31", apptDayUk: "2026-07-01" },
+      TODAY,
+    );
+    // The move is a month past and it is still not late. That is the whole
+    // point of commercial terms.
+    expect(inTerms.overdue).toBe(0);
+    expect(inTerms.total).toBe(2400);
+  });
+
+  it("a commercial job with no diary entry still owes its raised invoice", () => {
+    // Same principle as the residential fix in QA-20260826-01: an ISSUED
+    // invoice is owed on its own authority.
+    const v = owedNow(
+      {
+        ...commercialOwed,
+        hasRemovalAppt: false,
+        apptDayUk: null,
+        balanceInvoiceNumber: "INV-000401",
+        commercialDueDate: "2026-08-31",
+      },
+      TODAY,
+    );
+    expect(v.total).toBe(2400);
+  });
+});
