@@ -169,7 +169,7 @@ async function snapshotPaymentPolicy(
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, brand, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -212,6 +212,10 @@ export type AcceptQuoteRow = {
   balance_invoice_provider: string | null;
   commitment_invoice_provider: string | null;
   zoho_deposit_invoice_id: string | null;
+  /** The policy snapshotted at acceptance (gate 8). Read here so the money
+   *  rungs can refuse a policy they do not belong to - notably the DEPOSIT
+   *  rung, which commercial does not have. */
+  payment_policy: string | null;
   zoho_deposit_invoice_number: string | null;
   zoho_deposit_invoice_url: string | null;
   zoho_deposit_error: string | null;
@@ -656,6 +660,25 @@ export async function acceptQuoteOnline(
 
   const acceptedAt = new Date().toISOString();
   const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
+  // A COMMERCIAL quote is never self-accepted (PRD §3.10): it renders on /q
+  // for review and the office confirms it. Refused HERE, on the server, and
+  // not merely hidden on the page - a hidden button is not a closed door,
+  // and this action is reachable by anyone holding the token.
+  //
+  // What the hole would cost: the row would take status='accepted' with
+  // payment_policy='commercial', and the very next line raises a DEPOSIT
+  // invoice - a rung commercial does not have. The customer would hold a
+  // -DEP invoice nobody meant to send, on a booking the office had not
+  // confirmed.
+  //
+  // Resolved from the same snapshot the write uses, so the page and the
+  // server can never disagree about which policy this quote is on.
+  if (paymentPolicy === "commercial") {
+    return {
+      ok: false,
+      error: "This quote is on business terms - we'll confirm it with you and invoice on your account.",
+    };
+  }
   const { data: won, error } = await sb
     .from("quotes")
     .update({
@@ -1185,6 +1208,22 @@ export function invoicePayClause(brand: Brand, quoteRef: string, lead: string): 
 export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<AcceptQuoteRow | null> {
   const quote = await fetchQuoteById(sb, quoteId);
   if (!quote || quote.status !== "accepted") return quote;
+  // COMMERCIAL has no deposit rung at all (PRD §3.10) - one invoice on the
+  // client's own terms, and nothing up front.
+  //
+  // This guard is load-bearing rather than tidy. Unlike ensureCommitmentInvoice
+  // (which carries legacyLocked, booking_cancelled_at, the MMR020 balance guard
+  // and `if (amount <= 0) return quote`), this function has only ever gated on
+  // status and an existing id. A commercial quote has neither a deposit amount
+  // nor an id, so it would sail through, and `0 ?? defaultDeposit` is 0 under
+  // nullish coalescing - meaning the ledger would create AND SEND a real GBP 0
+  // invoice to a commercial customer. Both adapters do it without complaint.
+  //
+  // Placed BEFORE the CAS claim on purpose: claiming first and refusing after
+  // would leave zoho_deposit_invoice_id stuck on 'pending', which every other
+  // caller reads as "another writer holds this slot" and backs off from
+  // forever.
+  if (quote.payment_policy === "commercial") return quote;
   if (isRealZohoId(quote.zoho_deposit_invoice_id)) return quote;
 
   // Which ledger this raise talks to. Read ONCE per raise and written to the

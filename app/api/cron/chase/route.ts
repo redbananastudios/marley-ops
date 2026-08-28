@@ -28,7 +28,7 @@ import {
 import { ukTimeAt } from "@/lib/uk-time";
 import { legacyLocked } from "@/lib/legacy";
 import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
-import { requestedDeposit } from "@/lib/payments-policy";
+import { policyOfQuote, requestedDeposit } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
 import { accountsFromFor, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { getBrandOrDefault, type Brand } from "@/lib/brand";
@@ -357,14 +357,26 @@ export async function GET(req: Request) {
 
   const { data: quotes, error: quotesError } = await sb
     .from("quotes")
-    .select("id, lead_id, quote_ref, status, brand, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
+    .select("id, lead_id, quote_ref, status, brand, payment_policy, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
   if (quotesError) {
     log.error("cron.chase.quotes_query_failed", { error: quotesError.message });
     throw new Error(`chase: quotes query failed — ${quotesError.message}`);
   }
-  const allQuotes = (quotes ?? []) as QuoteRow[];
+  // COMMERCIAL IS EXCLUDED FROM THE CHASE ENGINE ENTIRELY (PRD §3.10).
+  // Filtered once, here, because this one array feeds BOTH the quote chase
+  // and the deposit chase below - excluding at each loop instead would be two
+  // places to forget, and the second would be silent.
+  //
+  // Filtered in code rather than as .neq("payment_policy","commercial") on the
+  // query: in Postgres a NOT-EQUAL also drops NULLs, and payment_policy is
+  // NULL on every UNACCEPTED quote - which is exactly the population the quote
+  // chase exists to chase. That filter would have silently stopped chasing
+  // every unaccepted residential quote.
+  const allQuotes = (quotes ?? []).filter(
+    (q) => policyOfQuote(q as { payment_policy?: string | null }) !== "commercial",
+  ) as QuoteRow[];
 
   // Survey-derived owner fallback: a lead with no explicit estimator_id is
   // owned by whoever is assigned its booked survey — the SAME rule as the
@@ -709,7 +721,7 @@ export async function GET(req: Request) {
       const { data: q } = await sb
         .from("quotes")
         .select(
-          "id, quote_ref, agreed_price, grand_total, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, estimator_id, client_id, booking_cancelled_at",
+          "id, quote_ref, payment_policy, agreed_price, grand_total, deposit_amount, deposit_paid_at, commitment_invoice_amount, commitment_paid_at, estimator_id, client_id, booking_cancelled_at",
         )
         .eq("lead_id", leadId)
         .eq("status", "accepted")
@@ -720,6 +732,17 @@ export async function GET(req: Request) {
       // behind historically) must never auto-complete, review-request, or
       // raise an OVERDUE alarm — its money lives in the refund queue.
       if (q?.booking_cancelled_at) continue;
+      // COMMERCIAL never reaches the post-move sweep (PRD §3.10). Its money is
+      // invoiced BY HAND on completion and settled on the client's own terms,
+      // so nothing here is a fact about it.
+      //
+      // Without this it alarms on every commercial job, the day after every
+      // move, for the FULL agreed price: postMoveOutstanding subtracts only
+      // money that LANDED, and commercial has no paid deposit and no paid
+      // commitment to subtract. Worse, it never stops - balance_paid_at is the
+      // only thing that zeroes it, and with manual invoicing nothing in Ops
+      // ever stamps it. An ops alert and an urgent task, per job, forever.
+      if (policyOfQuote(q) === "commercial") continue;
       const agreed = Number(q?.agreed_price ?? q?.grand_total ?? 0);
       // Outstanding counts only money that actually LANDED (Payments Policy
       // v2): agreed − paid deposit − paid commitment, zeroed by the office's
@@ -827,7 +850,7 @@ export async function GET(req: Request) {
   const { data: commitmentQuotes, error: commitmentQueryError } = await sb
     .from("quotes")
     .select(
-      "id, lead_id, quote_ref, source, brand, standard_comms_at, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
+      "id, lead_id, quote_ref, source, brand, payment_policy, standard_comms_at, accept_token, accepted_at, created_at, moving_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, commitment_chase_t10_at, date_confirm_nudge_at, date_releasable_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url",
     )
     .eq("status", "accepted")
     .is("commitment_paid_at", null)
@@ -857,6 +880,9 @@ export async function GET(req: Request) {
     // under the old system's terms, so a T-10 chase or T-7 "date at risk" flag
     // would be chasing money they never owed (Peter, 2026-08-07 / 2026-08-13).
     if (legacyLocked(q)) continue;
+    // Commercial has no 25% rung, so neither the T-10 chase nor the T-7
+    // date-at-risk flag means anything for it - and both reach the customer.
+    if (policyOfQuote(q) === "commercial") continue;
     const leadId = q.lead_id as string;
     const prev = commitByLead.get(leadId);
     const stamp = (row: CommitmentQuoteRow) => row.accepted_at ?? row.created_at ?? "";
@@ -1135,7 +1161,7 @@ export async function GET(req: Request) {
     const { data: balQuotes, error: balQueryError } = await sb
       .from("quotes")
       .select(
-        "id, quote_ref, lead_id, moving_date, source, standard_comms_at, zoho_balance_invoice_id, booking_cancelled_at, status, accepted_at, created_at",
+        "id, quote_ref, lead_id, moving_date, source, payment_policy, standard_comms_at, zoho_balance_invoice_id, booking_cancelled_at, status, accepted_at, created_at",
       )
       .eq("status", "accepted")
       .is("zoho_balance_invoice_id", null)

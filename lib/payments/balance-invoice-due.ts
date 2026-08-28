@@ -15,6 +15,10 @@
 import { legacyLocked, type LegacyLockFields } from "@/lib/legacy";
 
 export interface BalanceInvoiceQuote extends LegacyLockFields {
+  /** The policy snapshotted at acceptance. Commercial invoices are raised BY
+   *  HAND on completion (Peter, 2026-08-28), so this rule must never queue one
+   *  automatically at T-7. */
+  payment_policy?: string | null;
   status: string;
   moving_date: string | null;
   zoho_balance_invoice_id: string | null;
@@ -46,6 +50,12 @@ export function balanceInvoiceDue(
   todayDay: string,
   t7Day: string,
 ): boolean {
+  // Commercial is invoiced by hand on completion, so the T-7 automation must
+  // not raise one. Without this the cron would create AND EMAIL a full-price
+  // invoice a week before the move, on a booking whose invoice the office is
+  // going to raise itself - two invoices for one job, the customer holding
+  // the one nobody meant to send.
+  if (quote.payment_policy === "commercial") return false;
   if (quote.status !== "accepted") return false;
   if (quote.booking_cancelled_at) return false;
   // Already raised — or mid-raise: the flow CAS-claims the column with
