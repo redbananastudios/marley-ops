@@ -75,6 +75,10 @@ export interface QuoteHeaderActionsProps {
    *  attached PDF's DocBrand via docBrandFrom(), which returns null for the
    *  default row — so absent/marley renders today's exact email and PDF. */
   brand?: Brand | null;
+  /** Which ladder this quote runs (PRD §3.10), resolved on the server. Passed
+   *  to the re-send dialog so a second copy of a commercial quote says exactly
+   *  what the first did. Absent means residential. */
+  paymentPolicy?: "residential" | "commercial";
 }
 
 export function QuoteHeaderActions({
@@ -96,6 +100,7 @@ export function QuoteHeaderActions({
   vatNumber,
   acceptUrl,
   brand,
+  paymentPolicy,
 }: QuoteHeaderActionsProps) {
   const [resendOpen, setResendOpen] = useState(false);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -208,6 +213,7 @@ export function QuoteHeaderActions({
           depositAmount={depositAmount}
           acceptUrl={acceptUrl}
           brand={brand}
+          paymentPolicy={paymentPolicy}
           open={resendOpen}
           onOpenChange={setResendOpen}
         />

@@ -55,6 +55,7 @@ export function SendQuoteDialog({
   depositAmount,
   acceptUrl,
   brand,
+  paymentPolicy,
   resend,
   onSent,
 }: {
@@ -83,6 +84,11 @@ export function SendQuoteDialog({
    *  from it below (docBrandFrom), so one prop still carries both gates. Absent,
    *  or marley, composes today's exact email and today's exact Marley PDF. */
   brand?: Brand | null;
+  /** Which ladder this quote runs (PRD §3.10), resolved on the server. Drives
+   *  BOTH the email body and the attached PDF from one value, so the two can
+   *  never disagree about whether this customer owes a deposit. Absent means
+   *  residential — today's exact email and today's exact document. */
+  paymentPolicy?: "residential" | "commercial";
   /** Re-send of an already-sent/accepted quote (customer asked again). Preserves
    *  the quote's status — a re-send must never bump an accepted quote back to
    *  "sent" — and the duplicate override is reasoned "customer requested re-send". */
@@ -163,7 +169,7 @@ export function SendQuoteDialog({
         }
       }
 
-      const emailMeta = { quoteRef, acceptUrl, depositAmount, brand };
+      const emailMeta = { quoteRef, acceptUrl, depositAmount, brand, paymentPolicy };
       const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
       // Server prefers the published Resend template (dashboard-editable copy)
       // when its env id is set; bodyHtml stays as the fallback body.
@@ -175,6 +181,7 @@ export function SendQuoteDialog({
         depositAmount,
         acceptUrl,
         brand: pdfBrand,
+        paymentPolicy,
       });
 
       const result = await sendCommunication({

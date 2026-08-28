@@ -69,6 +69,16 @@ export interface QuoteEmailMeta {
   /** Card-at-accept availability for NON-default brands (global AND brand
    *  card switches, PRD §11.10). Ignored for marley — its literals stand. */
   offerCard?: boolean;
+  /**
+   * Which ladder this quote runs (PRD §3.10). Absent means residential, so
+   * every existing caller composes today's exact email.
+   *
+   * Commercial takes no deposit and cannot be accepted online. This email
+   * currently leads with an "Accept your quote online" button and a "£100
+   * deposit" step — the same defect QA-20260828-03 recorded against `/q`, and
+   * the email is where the customer meets it first.
+   */
+  paymentPolicy?: "residential" | "commercial";
 }
 
 /** The deposit-step copy for the accept-link path: today's literal for
@@ -97,6 +107,15 @@ export function quoteEmailTemplateVars(
   meta: QuoteEmailMeta,
 ): Record<string, string> | null {
   if (!meta.acceptUrl) return null;
+  // COMMERCIAL falls back to the in-repo body deliberately. The published
+  // template's slots are fixed — DEPOSIT_AMOUNT and ACCEPT_URL are baked into
+  // its layout — so a commercial quote could only be rendered correctly by
+  // editing that template, and `scripts/create-resend-templates.mjs` PATCHes
+  // hosted templates BY NAME: an edit aimed at commercial would land on the
+  // live Marley template every residential customer receives (PRD §11.7 trap
+  // 4). Returning null costs a commercial customer the dashboard-editable copy
+  // and nothing else; the alternative risks Marley's live email.
+  if (meta.paymentPolicy === "commercial") return null;
   const t = emailTheme(meta.brand);
   const UK = "Europe/London";
   const job = values.job;
@@ -183,7 +202,19 @@ export function buildQuoteEmailHtml(
     ? ' <span style="color:#92400E;font-weight:400;font-size:11px;">(estimated)</span>'
     : "";
 
-  const lockIn = meta.acceptUrl ? "Accept online in 30 seconds to lock it in" : "Reply to lock it in";
+  // Commercial cannot be accepted online, so the link is dropped ONCE here and
+  // every reader below takes its no-link branch — the same single-binding rule
+  // the attached PDF uses. Blanking it at each of the six read sites instead
+  // would leave six places to forget, and the one forgotten is a live button
+  // to a page that turns this customer away.
+  const commercial = meta.paymentPolicy === "commercial";
+  const acceptUrl = commercial ? undefined : meta.acceptUrl;
+
+  const lockIn = commercial
+    ? "We will confirm this booking with you"
+    : acceptUrl
+      ? "Accept online in 30 seconds to lock it in"
+      : "Reply to lock it in";
   const subline = moveDateForSubline
     ? `Here is the full price for your move on <strong style="color:#1A1A1A;">${moveDateForSubline}${
         job.moveDateEstimated ? " (estimated)" : ""
@@ -203,9 +234,51 @@ export function buildQuoteEmailHtml(
   const packingLabel = PACKING_LABEL[values.packing] || "—";
 
   const replyHref = `mailto:${t.helloAddress}?subject=${encodeURIComponent("Confirming quote " + meta.quoteRef)}`;
-  const ctaHref = meta.acceptUrl ?? replyHref;
-  const ctaLabel = meta.acceptUrl ? "Accept your quote online &rarr;" : "Reply to confirm this quote &rarr;";
+  const ctaHref = acceptUrl ?? replyHref;
+  const ctaLabel = commercial
+    ? "Reply with any questions &rarr;"
+    : acceptUrl
+      ? "Accept your quote online &rarr;"
+      : "Reply to confirm this quote &rarr;";
   const depositLabel = gbp(meta.depositAmount ?? 100);
+  /**
+   * The "what happens next" three steps. Residential keeps today's exact copy,
+   * conditionals and order — byte-identical, which is the property gate 10b
+   * rests on.
+   *
+   * Commercial does not merely drop the deposit rung: dropping it would leave
+   * the customer with two steps and no statement of when they get billed, which
+   * is the question a business customer actually has. So the rung is REPLACED
+   * by what genuinely happens in its place — the office confirms — and the
+   * invoice becomes the third step.
+   */
+  const steps: readonly (readonly [string, string])[] = commercial
+    ? [
+        [
+          "We confirm it",
+          "Our office will confirm this booking with you. There is nothing to pay up front.",
+        ],
+        ["Move day", "We arrive on time and complete your move."],
+        [
+          "Your invoice",
+          "We invoice your account once the move is complete, payable on your agreed terms.",
+        ],
+      ]
+    : [
+        [
+          acceptUrl ? "Accept your quote" : "Reply to confirm",
+          acceptUrl
+            ? "Tap the button above (takes about 30 seconds) and your price is locked in."
+            : "Just hit reply and let us know you are happy with the price.",
+        ],
+        [
+          `${depositLabel} deposit`,
+          acceptUrl
+            ? depositStepCopy(meta)
+            : "Secures your booking and the team. Bank details are on the attached PDF.",
+        ],
+        ["Move day", "We arrive on time. Balance due on completion."],
+      ];
   const groupRow = t.groupLine
     ? `\n          <div style="margin-top:2px;">${escapeHtml(t.groupLine)}</div>`
     : "";
@@ -282,12 +355,12 @@ ${themedPill(`Ref ${ref}`, t)}
     </table>
   </td></tr>
 
-  <tr><td align="center" style="padding:0 36px ${meta.acceptUrl ? "10px" : "22px"};">
+  <tr><td align="center" style="padding:0 36px ${acceptUrl ? "10px" : "22px"};">
     <table cellpadding="0" cellspacing="0" border="0"><tr><td bgcolor="${t.accent}" style="border-radius:6px;">
       <a href="${ctaHref}" style="display:inline-block;padding:15px 38px;background:${t.accent};color:#FFFFFF;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;font-weight:600;text-decoration:none;border-radius:6px;letter-spacing:0.04em;">${ctaLabel}</a>
     </td></tr></table>
   </td></tr>${
-    meta.acceptUrl
+    acceptUrl
       ? `
   <tr><td align="center" style="padding:0 36px 22px;">
     <p style="font-size:11px;color:#9CA3AF;margin:0;">Prefer email? <a href="${replyHref}" style="color:#6E6A65;">Reply to confirm</a> instead.</p>
@@ -300,26 +373,18 @@ ${themedPill(`Ref ${ref}`, t)}
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
       <td style="width:33%;vertical-align:top;padding-right:10px;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">1</div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${meta.acceptUrl ? "Accept your quote" : "Reply to confirm"}</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
-          meta.acceptUrl
-            ? "Tap the button above (takes about 30 seconds) and your price is locked in."
-            : "Just hit reply and let us know you are happy with the price."
-        }</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${steps[0][0]}</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${steps[0][1]}</div>
       </td>
       <td style="width:34%;vertical-align:top;padding-right:10px;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">2</div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${depositLabel} deposit</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${
-          meta.acceptUrl
-            ? depositStepCopy(meta)
-            : "Secures your booking and the team. Bank details are on the attached PDF."
-        }</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${steps[1][0]}</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${steps[1][1]}</div>
       </td>
       <td style="width:33%;vertical-align:top;">
         <div style="width:30px;height:30px;background:#1A1A1A;color:#FFFFFF;text-align:center;line-height:30px;font-size:13px;font-weight:700;font-family:Georgia,'Times New Roman',serif;border-radius:50%;">3</div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">Move day</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">We arrive on time. Balance due on completion.</div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-top:8px;">${steps[2][0]}</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:3px;line-height:1.5;">${steps[2][1]}</div>
       </td>
     </tr></table>
   </td></tr>

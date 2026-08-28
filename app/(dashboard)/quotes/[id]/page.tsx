@@ -8,7 +8,7 @@ import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
-import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
+import { ensureAcceptToken, acceptUrlFor, snapshotPaymentPolicy } from "@/lib/quote/accept-flow";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
 import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
@@ -27,7 +27,7 @@ import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
-import { requestedDeposit } from "@/lib/payments-policy";
+import { policyOfQuote, requestedDeposit, type PaymentPolicy } from "@/lib/payments-policy";
 import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 
@@ -61,12 +61,31 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand, payment_policy",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!quote) notFound();
+
+  /**
+   * Which ladder this quote runs — the customer-facing quote PDF and email are
+   * composed from this page's props, so it decides what the customer is asked
+   * for (PRD §3.10).
+   *
+   * The column WINS once it is set: it is the snapshot taken at acceptance, and
+   * re-typing a client afterwards must never re-write the documents of a
+   * booking already in flight. But it is null on every draft and sent quote —
+   * which is precisely the window in which the quote is in front of the
+   * customer — so a page that only read the column would resolve every live
+   * commercial quote to residential and print a deposit demand. That is the
+   * defect QA-20260828-03 recorded against /q; the fix there was to resolve
+   * live, and it has to be the same rule here or the page and its own PDF
+   * would disagree.
+   */
+  const paymentPolicy: PaymentPolicy = quote.payment_policy
+    ? policyOfQuote(quote)
+    : await snapshotPaymentPolicy(sb, quote);
 
   // Estimator name for the PDF "Prepared by" line.
   const {
@@ -319,6 +338,7 @@ export default async function QuoteDetailPage({
           estimatorName={estimatorName}
           vatNumber={settings.vatNumber || undefined}
           acceptUrl={acceptUrl}
+          paymentPolicy={paymentPolicy}
         />
       </PageHeader>
 
@@ -352,6 +372,7 @@ export default async function QuoteDetailPage({
           settings={settings}
           acceptUrl={acceptUrl}
           cubicHint={cubicHint}
+          paymentPolicy={paymentPolicy}
         />
       ) : (
         <>

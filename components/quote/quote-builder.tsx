@@ -95,6 +95,7 @@ export function QuoteBuilder({
   acceptUrl,
   cubicHint,
   brand,
+  paymentPolicy,
 }: {
   quoteId: string;
   quoteRef: string;
@@ -120,6 +121,11 @@ export function QuoteBuilder({
    *  the PDF document itself. Absent/marley sends today's exact email and
    *  renders today's byte-identical Marley document. */
   brand?: Brand | null;
+  /** Which ladder this quote runs (PRD §3.10), resolved on the server — the
+   *  column once accepted, live from the client before that. Commercial takes
+   *  no deposit and cannot be accepted online, so the downloaded PDF and the
+   *  sent email must not ask for one. Absent means residential. */
+  paymentPolicy?: "residential" | "commercial";
 }) {
   const router = useRouter();
   const [values, setValues] = useState<QuoteFormValues>(() => ({
@@ -196,6 +202,7 @@ export function QuoteBuilder({
         // returns null for the default brand, so Marley still renders from
         // the doc-def's own literals (gate 14's byte-parity contract).
         brand: brand ? docBrandFrom(brand) : null,
+        paymentPolicy,
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not generate the PDF.");
@@ -426,6 +433,7 @@ export function QuoteBuilder({
         vatNumber={settings?.vatNumber || undefined}
         depositAmount={settings?.defaultDeposit || undefined}
         acceptUrl={acceptUrl}
+        paymentPolicy={paymentPolicy}
         onSent={() => {
           // Sent successfully — leave the editable wizard for the read-only job
           // card (the quote is now "sent"), so the estimator isn't stranded mid-form.

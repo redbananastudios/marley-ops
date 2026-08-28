@@ -57,8 +57,21 @@ cannot reach the live books.
 
 The app runs on i9; local dev is the E2E target for everything that doesn't hit
 Zoho/takepayments. `.env.e2e` (gitignored) holds only the overrides — it's
-layered over `.env.local`, and critically pins `ZOHO_ORG_ID` to a dummy so a
-stray Zoho call fails closed instead of touching the live books.
+layered over `.env.local`, and pins `ZOHO_ORG_ID` to the **staging org** so a
+Zoho call can never reach the live books.
+
+**Staging is a REAL org, not a dummy** (this said "a dummy" until 2026-08-28,
+which is the more reassuring reading and the wrong one). Two consequences a
+local run has to plan for: money specs spend that org's 1,000-call daily budget
+exactly as a CI run does, and they fail outright whenever its refresh token is
+dead — neither of which is a fact about the code under test. If you only need
+the non-money specs, run them by path rather than running the suite and reading
+Zoho failures as regressions.
+
+Both env files are needed on the PLAYWRIGHT process, not just the seeds:
+`.env.e2e` carries no Supabase credentials, so sourcing it alone leaves
+`e2e/fixtures/db.ts` unable to build its admin client and every seeding spec
+fails on a missing-key error that looks nothing like the real cause.
 
 ```
 # 1. Provision the three role logins in local Supabase
@@ -70,10 +83,11 @@ ZOHO_ORG_ID=E2E-STAGING-PENDING COMMS_DRYRUN=true npx next dev -H 0.0.0.0 -p 301
 # 3. Seed the known state
 SEED_CONFIRM=yes node --env-file=.env.local --env-file=.env.e2e scripts/seed-e2e.mjs
 
-# 4. Run (env comes from .env.e2e)
-set -a; source .env.e2e; set +a
+# 4. Run — BOTH layers, or db.ts has no service-role key (see above)
+set -a; source .env.local; source .env.e2e; set +a
 npx playwright test                 # 100 pass, 6 skipped (money fixmes; +2 more when staging Zoho is wired)
 npx playwright test --project=crew  # just the crew role
+npx playwright test e2e/public/commercial-accept.spec.ts   # one spec, no Zoho
 ```
 
 **Re-run hygiene:** re-seed (step 3) before every full run. Several specs mutate
