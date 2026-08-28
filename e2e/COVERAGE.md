@@ -92,6 +92,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | /q commitment step offers 25% (default) or settle in full, bank Amount follows the choice | ✅ | public/settle-in-full.spec.ts |
 | /q settle in full → the T-7 balance is raised early, once, for the remainder (staging) | ✅ | public/settle-in-full.spec.ts |
 | /q decline with reason | ✅ | public/decline.spec.ts |
+| /q a sent commercial quote renders review-only, no accept button/deposit copy (PRD §3.10) | 🟡 | public/commercial-accept.spec.ts — `test.skip`'d: QA-20260828-03, the page never gates on payment_policy/is_company; un-skips in the repair PR |
 | /s storage-agreement signing (render + affordance + bad-token 404) | ✅ | public/signing.spec.ts |
 | /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
 | /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
