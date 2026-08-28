@@ -83,6 +83,22 @@ state — a re-run without re-seeding will fail those specs. The seed refuses an
 non-local target (and hard-refuses the prod Supabase host); pass
 `SEED_REMOTE_CONFIRM=yes` only for a deliberate staging seed.
 
+**Never seed staging while a staging CI run is in flight.** There is ONE set of
+fixtures and both runs share it, so a hand-run seed (or the specs it feeds, which
+accept the sent quote and decline the decline quote) pulls the state out from
+under whatever CI is doing. It does not fail loudly: CI reports ordinary spec
+failures against fixtures that were correct when its own seed created them.
+
+Caught 2026-08-28 — run `33177250098` failed **every public spec**, including
+four that had passed for weeks and had passed locally minutes earlier, purely
+because a hand-run seed overlapped its e2e job. The tell is the shape: whole
+projects failing at once while the office/crew/estimator specs stay green points
+at the shared fixtures, not at the deployment or the code. Check first:
+
+```bash
+gh run list --branch staging --limit 1
+```
+
 ## Turning on the money-path tests
 
 The staging org (**Demo Removals**, `20117092566`) is a **separate Zoho account**
