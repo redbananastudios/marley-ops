@@ -2,7 +2,7 @@
  *  success so the panel's send + duplicate-guard flow is testable locally without real sends. */
 
 import { createHash } from "node:crypto";
-import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
+import { DEFAULT_BRAND, GROUP_BRAND, type Brand } from "@/lib/brand";
 
 export interface SendResult {
   ok: boolean;
@@ -217,16 +217,29 @@ export async function sendEmail(input: SendEmailInput): Promise<SendResult> {
 }
 
 /**
- * The SMS sender id fronting a message (PRD §11.7 trap 7). A non-default brand
- * with a non-null brands.sms_sender uses it; everything else — brand absent,
- * marley, or a brand whose sms_sender is still a pending Phase 0 blank —
- * resolves through EXACTLY today's env chain, so every existing send is
- * unchanged. Pure and exported so the fallback reasoning stays unit-locked,
- * like shouldSmtpFallback above.
+ * The SMS sender id fronting a message (PRD §11.7 trap 7). A brand that is not
+ * the default answers for ITSELF: its brands.sms_sender, or nothing. The env
+ * pair is the default brand's chain and stays the default brand's, exactly like
+ * templateIdFor's env fallback (trap 4). The group pseudo-brand comes through
+ * it too, because group comms deliberately keep the operating company's
+ * identity (§11.10).
+ *
+ * Undefined means sendSms REFUSES, which is the point. Falling back put the
+ * default brand's sender id on another brand's money chase: the body says one
+ * brand, the handset says another, and the customer's reply routes to a rail
+ * with no record of them (QA-20260826-08). A refusal is loud — a failed
+ * communication row, a comm.provider.failed issue on the ops board, and an
+ * error toast on the click — whereas a misattributed chase is visible only to
+ * the customer. Pure and exported so the reasoning stays unit-locked, like
+ * shouldSmtpFallback above.
  */
 export function smsSenderFor(brand?: Pick<Brand, "slug" | "smsSender"> | null): string | undefined {
-  const brandSender = brand && brand.slug !== DEFAULT_BRAND ? brand.smsSender : null;
-  return brandSender || process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
+  if (brand && brand.slug !== DEFAULT_BRAND && brand.slug !== GROUP_BRAND) {
+    // `||` not `??`: callers build this Pick by hand, so an empty string must
+    // not become the sender id.
+    return brand.smsSender || undefined;
+  }
+  return process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
 }
 
 export async function sendSms(input: {
@@ -240,7 +253,19 @@ export async function sendSms(input: {
   const key = process.env.WEBEX_API_KEY;
   const sender = smsSenderFor(input.brand);
   if (!key) return { ok: false, error: "WebEx API key not configured" };
-  if (!sender) return { ok: false, error: "WebEx sender ID not configured" };
+  if (!sender) {
+    // Name the actual remedy: for a non-default brand the env vars are fine and
+    // the missing value is a database column, so the generic message would send
+    // whoever reads the ops board to the wrong place.
+    const slug = input.brand?.slug;
+    const brandScoped = !!slug && slug !== DEFAULT_BRAND && slug !== GROUP_BRAND;
+    return {
+      ok: false,
+      error: brandScoped
+        ? `No SMS sender id configured for brand ${slug}. Set brands.sms_sender before sending.`
+        : "WebEx sender ID not configured",
+    };
+  }
   // WebEx wants E.164 — leads often carry the raw UK "07…" form.
   let to = input.to.replace(/[\s()-]/g, "");
   if (/^0\d{10}$/.test(to)) to = "+44" + to.slice(1);

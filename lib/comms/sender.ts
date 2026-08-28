@@ -189,19 +189,34 @@ export function shouldForwardUnmatched(
 }
 
 /**
- * The inbound/reply own-domain set from brands rows — email + reply domains,
- * deduped, nulls dropped (the group pseudo-brand contributes nothing). Feed
- * ALL brands rows, not just active ones: recognition is a loop guard, and a
- * deactivated brand's reply address is still ours — mail from it must never be
- * forwarded back out as a "customer". Wired where a supabase client already
- * exists (the inbound webhook); sync callers keep the Marley-only default.
+ * The inbound/reply own-domain set from brands rows — deduped, nulls dropped
+ * (the group pseudo-brand contributes nothing). Feed ALL brands rows: the two
+ * columns carry DIFFERENT risk, so the filtering belongs here rather than at
+ * the call site, where a future caller could silently drop it.
+ *
+ *  - reply_domain is a MACHINE domain: no human mailbox exists there, so
+ *    counting it can never suppress a person. It counts for every row, active
+ *    or not — a deactivated brand's relay address is still ours and must never
+ *    be forwarded back out as a "customer". That is the loop guard.
+ *
+ *  - email_domain is a HUMAN staff domain, and it is only ours in that sense
+ *    while we actually send from it. An inactive brand sends nothing, so adding
+ *    its staff domain does not widen anything useful: recognising an address as
+ *    OURS is what stops it being forwarded, so widening the own-domain set
+ *    NARROWS the forward set. A real person writing in from that domain then
+ *    stops reaching a human, and the ops alert calls their message automated
+ *    (QA-20260826-06). PRD §11.7 trap 3 is explicit: widen to every ACTIVE
+ *    brand's domains.
+ *
+ * Marley recognition can never narrow either way — shouldForwardUnmatched
+ * hardcodes its domains and only appends these.
  */
 export function brandInboundDomains(
-  brands: readonly Pick<Brand, "emailDomain" | "replyDomain">[],
+  brands: readonly Pick<Brand, "emailDomain" | "replyDomain" | "active">[],
 ): string[] {
   const out = new Set<string>();
   for (const b of brands) {
-    for (const d of [b.emailDomain, b.replyDomain]) {
+    for (const d of b.active ? [b.emailDomain, b.replyDomain] : [b.replyDomain]) {
       const domain = (d ?? "").trim().toLowerCase();
       if (domain) out.add(domain);
     }

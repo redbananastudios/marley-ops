@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseMediaStorageDriver } from "@/lib/storage/media-store";
 import { getTakepaymentsConfig } from "@/lib/payments/takepayments";
+import { DEFAULT_BRAND, GROUP_BRAND } from "@/lib/brand";
 
 export interface HealthCheck {
   name: string;
@@ -106,6 +107,16 @@ async function checkResend(): Promise<HealthCheck> {
   }
 }
 
+/**
+ * SMS readiness. The env pair is the DEFAULT brand's chain; every other active
+ * brand answers for itself through brands.sms_sender and no longer falls back
+ * to it (QA-20260826-08), so a probe that reads only the env vars would report
+ * ok for a brand that cannot send a single message. A health check must
+ * exercise the same scope it certifies, or its green is worth nothing.
+ *
+ * A brands read that FAILS is reported as a warning, never as ok: not being
+ * able to check is a different answer from nothing being wrong.
+ */
 async function checkWebex(): Promise<HealthCheck> {
   const name = "SMS (WebEx)";
   const dry = process.env.COMMS_DRYRUN === "true";
@@ -113,8 +124,36 @@ async function checkWebex(): Promise<HealthCheck> {
   const sender = process.env.WEBEX_SMS_SENDER_MARLEY_MOVES || process.env.WEBEX_SMS_SENDER;
   if (!key) return { name, status: "fail", detail: "No WebEx API key configured" };
   if (!sender) return { name, status: "fail", detail: "No WebEx sender ID configured" };
+
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("brands")
+      .select("slug, sms_sender")
+      .eq("active", true)
+      .neq("slug", DEFAULT_BRAND)
+      .neq("slug", GROUP_BRAND);
+    if (error) throw new Error(error.message);
+    const missing = (data ?? [])
+      .filter((b) => !String((b as { sms_sender: string | null }).sms_sender ?? "").trim())
+      .map((b) => (b as { slug: string }).slug);
+    if (missing.length) {
+      return {
+        name,
+        status: "fail",
+        detail: `No sender id for active brand${missing.length === 1 ? "" : "s"} ${missing.join(", ")} — their SMS will refuse to send. Set brands.sms_sender.`,
+      };
+    }
+  } catch (e) {
+    return {
+      name,
+      status: "warn",
+      detail: `Key + sender configured, but the per-brand sender check could not run: ${e instanceof Error ? e.message : "unknown"}`,
+    };
+  }
+
   // No cheap read endpoint — presence check only (a real send is the true test).
-  const base = "Key + sender configured (not pinged — sends are the real test)";
+  const base = "Key + sender configured for every active brand (not pinged — sends are the real test)";
   return dry
     ? { name, status: "warn", detail: `${base} — COMMS_DRYRUN is ON, sends are simulated` }
     : { name, status: "ok", detail: base };

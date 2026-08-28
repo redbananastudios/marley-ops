@@ -52,14 +52,36 @@ describe("provider delivery safety", () => {
       .resolves.toMatchObject({ ok: false, outcomeUnknown: true });
   });
 
-  it("smsSenderFor: brands.sms_sender fronts a non-default brand; everything else is today's env chain (trap 7)", () => {
+  it("smsSenderFor: a non-default brand NEVER borrows the default brand's sender id (trap 7)", () => {
     // beforeEach seeds WEBEX_SMS_SENDER_MARLEY_MOVES = "Marley"
     expect(smsSenderFor()).toBe("Marley");
     expect(smsSenderFor(null)).toBe("Marley");
     expect(smsSenderFor({ slug: "marley", smsSender: "NeverUsed" })).toBe("Marley");
     expect(smsSenderFor({ slug: "pitmans", smsSender: "Pitmans" })).toBe("Pitmans");
-    // a Phase 0 blank sms_sender falls back to the Marley chain, not to nothing
-    expect(smsSenderFor({ slug: "pitmans", smsSender: null })).toBe("Marley");
+    // This assertion used to read .toBe("Marley"), with a comment calling the
+    // fallback intended. It was the defect written down as a spec: the body says
+    // one brand and the handset says another, on a money chase, and the reply
+    // routes to a rail with no record of the customer (QA-20260826-08).
+    expect(smsSenderFor({ slug: "pitmans", smsSender: null })).toBeUndefined();
+    expect(smsSenderFor({ slug: "pitmans", smsSender: "" })).toBeUndefined();
+    // Group comms keep the operating company's identity, so the group
+    // pseudo-brand must NOT be refused. Unlike templateIdFor, where an absent
+    // template degrades to inline HTML, a refusal here stops the send outright.
+    expect(smsSenderFor({ slug: "group", smsSender: null })).toBe("Marley");
+  });
+
+  it("a brand with no sender id refuses the send loudly rather than sending as another brand", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await sendSms({ to: "07000000000", body: "x", brand: { slug: "pitmans", smsSender: null } });
+    expect(res.ok).toBe(false);
+    // The message names the column to set, not an env var that is already fine.
+    expect(res.error).toContain("pitmans");
+    expect(res.error).toContain("brands.sms_sender");
+    // Nothing left the process, and the outcome is DEFINITE - a failed row that
+    // will not be re-driven as outcome-unknown.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res.outcomeUnknown).toBeFalsy();
   });
 
   it("a branded sendSms puts the brand sender on the wire; unbranded stays byte-identical", async () => {

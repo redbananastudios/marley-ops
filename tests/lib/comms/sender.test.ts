@@ -224,3 +224,48 @@ describe("brandInboundDomains", () => {
     expect(brandInboundDomains([])).toEqual([]);
   });
 });
+
+describe("brandInboundDomains - an inactive brand must not suppress a human", () => {
+  const dormant = () =>
+    mapBrand({
+      slug: "pitmans",
+      name: "Pitmans Removals & Storage",
+      email_domain: "pitmansremovals.co.uk",
+      reply_domain: "reply.pitmansremovals.co.uk",
+      active: false,
+    });
+
+  it("an INACTIVE brand contributes its machine reply domain but NOT its staff domain", () => {
+    const domains = brandInboundDomains([dormant()]);
+    // The machine domain still counts: our own relay must never be forwarded
+    // back out as a customer, whether the brand is live or not.
+    expect(domains).toContain("reply.pitmansremovals.co.uk");
+    // The STAFF domain must not, because recognising an address as OURS is
+    // exactly what stops it being forwarded (QA-20260826-06).
+    expect(domains).not.toContain("pitmansremovals.co.uk");
+  });
+
+  it("the consequence: a real person at a dormant brand's domain still reaches a human", () => {
+    const domains = brandInboundDomains([dormant()]);
+    expect(shouldForwardUnmatched("mark@pitmansremovals.co.uk", domains)).toBe(true);
+    // ...while our own relay is still never forwarded back out.
+    expect(shouldForwardUnmatched("q-t0k@reply.pitmansremovals.co.uk", domains)).toBe(false);
+    // ...and the default brand's recognition is untouched either way, because
+    // shouldForwardUnmatched hardcodes its domains and only appends these.
+    expect(shouldForwardUnmatched("q-abc@reply.marleymoves.co.uk", domains)).toBe(false);
+  });
+
+  it("an ACTIVE brand still contributes both domains", () => {
+    const live = mapBrand({
+      slug: "pitmans",
+      name: "Pitmans Removals & Storage",
+      email_domain: "pitmansremovals.co.uk",
+      reply_domain: "reply.pitmansremovals.co.uk",
+      active: true,
+    });
+    const domains = brandInboundDomains([live]);
+    expect(domains).toContain("pitmansremovals.co.uk");
+    expect(domains).toContain("reply.pitmansremovals.co.uk");
+    expect(shouldForwardUnmatched("mark@pitmansremovals.co.uk", domains)).toBe(false);
+  });
+});
