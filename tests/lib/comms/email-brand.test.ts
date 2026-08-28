@@ -157,3 +157,27 @@ describe("emailTheme — non-default brand", () => {
     expect(html).not.toContain("card over the phone");
   });
 });
+
+describe("themedDarkFooter - the legal identity on a document the customer keeps", () => {
+  it("the default brand's footer is byte-locked to today's literal", () => {
+    const html = themedDarkFooter();
+    expect(html).toContain("Marley Moves \u00b7 Company No. 15914266 \u00b7 01747 637070");
+    // The light-footer meta line must not leak into the dark footer.
+    expect(html).not.toContain("Shaftesbury, SP7");
+  });
+
+  it("another brand carries its own legal line, not a bare company number", () => {
+    const html = themedDarkFooter(emailTheme(pitmans));
+    expect(html).toContain("Part of the Marley Group");
+    // The whole point: the operating company is NAMED as the operating company
+    // and the VAT number is present. This footer goes on a storage invoice, the
+    // one document a customer keeps for a VAT-bearing charge (QA-20260826-04).
+    expect(html).toContain("trading name of MarleyMoves Ltd");
+    expect(html).toContain("VAT 520 2213 58");
+    // The defect shape: the brand's own name followed straight by someone
+    // else's registration, reading as though it were the brand's own.
+    expect(html).not.toMatch(/Storage \u00b7 Company No\./);
+    // ...and no default-brand contact details anywhere on it.
+    expect(html).not.toContain("01747 637070");
+  });
+});

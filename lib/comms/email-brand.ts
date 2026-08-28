@@ -380,11 +380,29 @@ export function themedBankCard(reference: string, t: EmailTheme = MARLEY_THEME):
 }
 
 /** The dark (#1A1A1A) footer used by the completion, survey and storage
- *  emails — brand identity, group disclosure and contact links. */
+ *  emails — brand identity, group disclosure and contact links.
+ *
+ *  The company number is a LITERAL for the default brand only, because it is
+ *  that brand's own registration and keeping it inline holds the marley render
+ *  byte-identical. Every other brand takes the row's legal line from
+ *  footerMetaHtml instead, in the same identity → group → legal order
+ *  themedEmailShell uses.
+ *
+ *  Printing `<Brand> · Company No. 15914266` states the OPERATING company's
+ *  registration as if it were the trading brand's, and drops the VAT number
+ *  entirely — on a storage invoice, which is the one document a customer keeps
+ *  for a VAT-bearing charge. The same brand's quote and balance-invoice emails
+ *  render the correct disclosure through themedEmailShell, so two money
+ *  documents from one brand stated two different legal identities and the
+ *  wrong one was on the invoice (QA-20260826-04).
+ *
+ *  footerMetaHtml is pre-escaped at build time — do NOT escape it again. */
 export function themedDarkFooter(t: EmailTheme = MARLEY_THEME): string {
   const groupPart = t.groupLine ? `${escapeHtml(t.groupLine)}<br>\n    ` : "";
+  const companyPart = t.isDefault ? "Company No. 15914266 · " : "";
+  const legalPart = t.isDefault ? "" : `${t.footerMetaHtml}<br>\n    `;
   return `  <tr><td style="padding:20px 36px;background:#1A1A1A;">
-    <p style="margin:0;font-size:12px;color:#B8B3AC;line-height:1.7;">${escapeHtml(t.name)} · Company No. 15914266 · ${escapeHtml(t.phone)}<br>
-    ${groupPart}<a href="mailto:${escAttr(t.helloAddress)}" style="color:${t.accentOnDark};text-decoration:none;">${escapeHtml(t.helloAddress)}</a> · <a href="${t.websiteUrl}" style="color:${t.accentOnDark};text-decoration:none;">${escapeHtml(t.websiteLabel)}</a></p>
+    <p style="margin:0;font-size:12px;color:#B8B3AC;line-height:1.7;">${escapeHtml(t.name)} · ${companyPart}${escapeHtml(t.phone)}<br>
+    ${groupPart}${legalPart}<a href="mailto:${escAttr(t.helloAddress)}" style="color:${t.accentOnDark};text-decoration:none;">${escapeHtml(t.helloAddress)}</a> · <a href="${t.websiteUrl}" style="color:${t.accentOnDark};text-decoration:none;">${escapeHtml(t.websiteLabel)}</a></p>
   </td></tr>`;
 }
