@@ -75,6 +75,7 @@ import {
   canResendDepositInvoice,
   type InvoiceResend,
 } from "@/lib/payments/invoice-resend";
+import { lateBalanceDueAtAcceptance } from "@/lib/payments/late-balance";
 import { legacyLocked } from "@/lib/legacy";
 import { parseHeld, retainedPenceFor } from "@/lib/refunds/queue-view";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -627,6 +628,7 @@ export async function acceptQuoteOnline(
       .maybeSingle();
     if (!signature) return { ok: false, error: "We couldn't verify the acceptance record — please call 01747 637070." };
     await ensureDepositInvoice(sb, quote.id); // self-heal, then treat as success
+    await ensureLateBookingBalanceInvoice(sb, quote.id, null);
     return { ok: true, alreadyAccepted: true };
   }
   if (quote.status !== "sent") return { ok: false, error: "This quote link is no longer valid." };
@@ -796,6 +798,10 @@ export async function acceptQuoteOnline(
   // commitment invoice at the NEW price. Self-guarded — no-op unless the lead
   // is confirmed and 25% x gross exceeds the deposit.
   await ensureCommitmentInvoice(sb, quote.id);
+  // Move inside T-7: the balance is raised now rather than trailing from the
+  // T-7 cron tomorrow (PRD §3.10 Addition 2). No-op for every other booking,
+  // and for a small job whose ask already took the whole price.
+  await ensureLateBookingBalanceInvoice(sb, quote.id, null);
 
   await sendOpsAlert(`Quote ${quote.quote_ref} accepted online`, [
     `<strong>${escapeHtml(quote.customer_name ?? "Customer")}</strong> accepted quote <strong>${quote.quote_ref}</strong> (signed "${escapeHtml(name)}").`,
@@ -842,6 +848,7 @@ export async function acceptQuoteByStaff(
 
   if (quote.status === "accepted") {
     await ensureDepositInvoice(sb, quote.id); // self-heal, then no-op
+    await ensureLateBookingBalanceInvoice(sb, quote.id, actorId);
     return {
       ok: true,
       alreadyAccepted: true,
@@ -882,6 +889,7 @@ export async function acceptQuoteByStaff(
     .select("id");
   if (!won?.length) {
     await ensureDepositInvoice(sb, quote.id);
+    await ensureLateBookingBalanceInvoice(sb, quote.id, actorId);
     return { ok: true, alreadyAccepted: true, agreed, deposit, emailed: false };
   }
 
@@ -951,10 +959,15 @@ export async function acceptQuoteByStaff(
     // A date-confirmed lead still gets its commitment re-raised at the new
     // price (the supersede voided the old -COM; self-guarded no-op otherwise).
     await ensureCommitmentInvoice(sb, quote.id);
+    await ensureLateBookingBalanceInvoice(sb, quote.id, actorId);
     return { ok: true, alreadyAccepted: false, agreed, deposit, emailed: false };
   }
 
   await ensureDepositInvoice(sb, quote.id);
+  // Same rule as the online path, and today a no-op here BY DESIGN: office
+  // 'Mark won' collects no customer signature, so a staff-accepted late
+  // booking keeps waiting for the cron. See lib/payments/late-balance.ts.
+  await ensureLateBookingBalanceInvoice(sb, quote.id, actorId);
 
   // Payment instructions to the customer, right now (dup-guarded). Reuses the
   // day-1 reminder copy — sending it here advances the chase to step 1 so the
@@ -2503,6 +2516,14 @@ async function sendBalanceInvoiceEmail(
     });
   }
   const brand = await getBrandOrDefault(sb, quote.brand);
+  // What the deposit rail still owes. The default copy tells the customer their
+  // deposit "is already accounted for" — true of the arithmetic (the balance is
+  // agreed − deposit whether or not it has been paid) and read by someone who
+  // has paid nothing as "you have already paid it". That combination used to be
+  // near-impossible; gate 9b makes it ordinary, because a late booking now meets
+  // this email BEFORE paying anything. Derived from the quote rather than passed
+  // in, so the raise, the early raise and the office re-send all tell one truth.
+  const depositOutstanding = quote.deposit_paid_at ? 0 : round2(Number(quote.deposit_amount ?? 0));
   const meta: BalanceInvoiceMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2510,15 +2531,26 @@ async function sendBalanceInvoiceEmail(
     moveDateLabel: moveDateLabel(quote.moving_date),
     invoiceUrl: inv.invoiceUrl,
     invoiceNumber: inv.invoiceNumber,
+    depositOutstanding,
     brand,
   };
-  const templateId = templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE");
+  // The hosted Resend twin is a separately hand-written copy of this email
+  // (scripts/create-resend-templates.mjs) with no slot for the outstanding
+  // deposit, so sending through it would show the "already accounted for" line
+  // to exactly the customer it is wrong for. Fall back to the locally built
+  // HTML — the same shell, and the one that carries the correct figures.
+  const templateId =
+    depositOutstanding > 0 ? null : templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE");
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
     from: accountsFromFor(brand),
     to: quote.customer_email,
     subject: `Your final balance: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`,
-    bodyText: `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). Payment in full is due before move day.`,
+    bodyText:
+      `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). ` +
+      (depositOutstanding > 0
+        ? `Your £${depositOutstanding.toFixed(2)} deposit is invoiced separately and still to pay, so £${(depositOutstanding + inv.amount).toFixed(2)} is due before move day.`
+        : `Payment in full is due before move day.`),
     ...(templateId
       ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
       : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
@@ -2813,6 +2845,76 @@ export async function createBalanceInvoiceFlow(
         `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
       ], "system");
     return { ok: false, error: msg };
+  }
+}
+
+/**
+ * Late booking: raise the balance in the same breath as the ask (PRD §3.10
+ * Addition 2). Called on every acceptance — it is a no-op for the ordinary
+ * booking, whose balance keeps waiting for the T-7 cron.
+ *
+ * A move inside T-7 already collapses its ask to max(deposit, 25%) in one
+ * payment. What did not collapse was the paperwork: the balance waited for the
+ * chase cron, which cannot run before 09:00 tomorrow and then waits again for
+ * the deposit to be paid and the date confirmed. For a move on Thursday that
+ * is a second email days later, sometimes after the move itself. This raises
+ * it now, so the customer meets the whole bill in one moment.
+ *
+ * The eligibility rules — including *why* the customer's contract signature is
+ * one of them — live in `lib/payments/late-balance.ts`, pure and tested.
+ *
+ * Entirely fail-soft, in both directions:
+ *  - It never throws. An acceptance that succeeded must not be reported as
+ *    failed because a ledger call did; `createBalanceInvoiceFlow` already
+ *    alerts ops on a real failure and leaves the column null for the cron to
+ *    pick up at T-7, which is exactly today's behaviour.
+ *  - A small job (gate 9a — the ask IS the gross) refuses inside the flow with
+ *    "nothing left to invoice", before it claims anything. That is the PRD's
+ *    "late AND ≤ threshold → the small-job rule wins", and it is silent.
+ */
+export async function ensureLateBookingBalanceInvoice(
+  sb: Sb,
+  quoteId: string,
+  actorId: string | null,
+): Promise<void> {
+  try {
+    const quote = await fetchQuoteById(sb, quoteId);
+    if (!quote) return;
+    // Cheap gates first: only read the signature for a booking that could
+    // actually qualify, so an ordinary acceptance costs nothing extra.
+    if (!lateBalanceDueAtAcceptance(quote, true)) return;
+    const { data: signature } = await sb
+      .from("signatures")
+      .select("id")
+      .eq("quote_id", quoteId)
+      .eq("kind", "contract")
+      .limit(1)
+      .maybeSingle();
+    if (!lateBalanceDueAtAcceptance(quote, !!signature)) return;
+
+    const res = await createBalanceInvoiceFlow(sb, quoteId, actorId);
+    if (res.ok) {
+      log.info("quote.late_balance.raised", {
+        quoteId,
+        quoteRef: quote.quote_ref,
+        invoiceNumber: res.invoiceNumber,
+        amount: res.amount,
+        emailed: res.emailed,
+      });
+    } else if (/nothing left to invoice/i.test(res.error ?? "")) {
+      // The small-job rule already collected the whole job. Nothing to say.
+    } else {
+      // Not an alert of its own: the flow has already raised the right one for
+      // a genuine ledger failure, and the T-7 cron will retry. Logged so a
+      // pattern of these is visible rather than inferred from silence.
+      log.warn("quote.late_balance.not_raised", {
+        quoteId,
+        quoteRef: quote.quote_ref,
+        reason: res.error,
+      });
+    }
+  } catch (err) {
+    log.error("quote.late_balance.failed", { quoteId, ...errorContext(err) });
   }
 }
 

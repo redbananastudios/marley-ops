@@ -214,6 +214,21 @@ An internal uplift on the quote — amount plus a short reason (`commercial acce
 
 **Addition 2 — late bookings raise the balance in the same breath** (Peter, 2026-08-25). The existing ≤7-day collapse (`requestedDeposit` = max(deposit, 25% × gross) — Peter, 2026-08-05) stays exactly as it is. What changes: when the move is inside T-7 at acceptance, the **balance invoice raises at acceptance alongside the ask** instead of trailing from the T-7 cron a day later — the customer sees the whole picture in one comms moment, two invoices payable separately or together. When a booking is late AND ≤ £300, Addition 1 wins: one full ask, nothing else.
 
+> **Built narrower than this paragraph, deliberately (gate 9b, 2026-08-28).** The early raise is
+> conditional on the customer's own **contract signature**, so it fires on the `/q` acceptance and
+> not on the office's "Mark won". The reason is that the T-7 cron's guard is
+> `leads.date_confirmed_at` — *"a final invoice names a move date, so it must never be raised
+> against a date nobody confirmed"* (Marks Davis MMR019, 2026-08-13) — and that stamp **cannot
+> exist at acceptance**, because confirming the date requires the deposit to be paid first. An
+> unconditional raise would therefore not run ahead of that guard, it would bypass it on every
+> late booking, on the one path (office marks won) that produced the incident. The signature is
+> the nearest evidence of the same kind available at acceptance: a typed name against the
+> acknowledgment set, on a quote that names the move date. It is one rule run by both accept
+> paths — *raise early when the customer has signed for this booking* — which happens to be a
+> no-op for the office path today. `ensureCommitmentInvoice` already gates on a signature read
+> for exactly this reason, so the shape is the house precedent, not a new idea. Rules and
+> reasoning: `lib/payments/late-balance.ts`.
+
 **Addition 3 — pay in full at the commitment step** (Peter, earlier this session). The commitment email and its `/q` payment state offer both figures: the 25% now, or settle in full. Opting full raises the T-7 balance invoice early alongside the commitment — two open invoices, individually matchable, **no new `match_kind`, no new suffix**. A single bank transfer covering both is exactly the case `#73`'s **whole-quote link** (match kind `full`, migration `0103`) now handles: offered to the office only when the transfer equals the recorded payments to the penny, picked by a human, never auto-matched. Ignoring the option changes nothing.
 
 **Office "Send payment link"** (Peter, 2026-08-25 — the one piece kept from the abandoned channel redesign). A new office action on the quote detail and `/bookings`: generates a tokenised card page for exactly one invoice (deposit, commitment, full or balance) and emails/texts it — for the customer who phones in unable to do a bank transfer. Behind the global card kill switch AND `brands.card_payments_enabled`; absent for Pitmans at launch. All other payment copy and channels stay exactly as today.
@@ -733,7 +748,16 @@ Production seeds `active = false` regardless, so the two environments differ del
 
 **The Zoho→Xero flip in prod is an env change, executed by Peter — but only after the promotion.** The adapter reads its choice from config, so the flip itself is edit `app.env` + restart container. The dependency chain is fixed though: the adapter code reaches prod **only via the single promotion**, so the earliest prod flip is promotion day, and Xero must be live before the 28th. Making the promotion work-bound *widens* that window rather than narrowing it — but it does not widen the accountant's, which is why the Xero migration stays a Phase 0 item rather than a September one. Staging flips first and runs Xero for at least one full gate before prod follows. The **Zoho history snapshot runs before the flip**, and again before the Zoho account lapses if those differ.
 
-**Late-booking comms are ONE moment, not two.** When Addition 2 fires (move inside T-7 at acceptance), the acceptance email carries both the collapsed ask and the balance invoice together, with copy explaining the whole amount is due before the move — assert in §6 that nothing trails from the T-7 cron afterwards. The acceptance email for a normal-notice booking is unchanged from today.
+**Late-booking comms are ONE moment, not two.** When Addition 2 fires (move inside T-7 at acceptance), the customer meets the collapsed ask and the balance invoice together, with copy explaining the whole amount is due before the move — assert in §6 that nothing trails from the T-7 cron afterwards. The comms for a normal-notice booking are unchanged from today.
+
+> **Where that one moment actually is (gate 9b, 2026-08-28).** This paragraph assumed an
+> "acceptance email" that the online path does not send: a customer accepting at `/q` stays on
+> the page and pays there, and their first email is the day-1 deposit chase. So the one moment is
+> **the balance-invoice email plus the `/q` page**, and both were made to carry both figures: the
+> email drops its "your deposit is already accounted for" line whenever the deposit is genuinely
+> unpaid and states the deposit, the balance and the total; `/q`'s deposit state — previously the
+> only screen in the ladder that could not see a raised balance — now names it too. Nothing new
+> is sent at acceptance, so the count is one email, not two.
 
 **Group comms keep Marley's from-address.** Crew invites, day sheets, contractor statements and join approvals are internal/crew surfaces sent by the operating company — they continue to send from `hello@marleymoves.co.uk` exactly as today. The `group` brand row needs no email domain and no Resend set; zero change is the correct amount of work.
 

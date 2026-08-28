@@ -314,6 +314,18 @@ export interface BalanceInvoiceMeta {
    *  Peter, 2026-07-09) — never card copy here, even once Stripe is live. */
   invoiceUrl?: string | null;
   invoiceNumber?: string | null;
+  /**
+   * The deposit still to pay, when this balance was raised EARLY because the
+   * move is inside T-7 (PRD §3.10 Addition 2). Absent/0 on the ordinary T-7
+   * raise, where the deposit is long since settled.
+   *
+   * It exists because the default copy tells the customer their deposit "is
+   * already accounted for" — true of the arithmetic, and read by someone who
+   * has paid nothing yet as "you have already paid it". A late booker meets
+   * both invoices in this one email, so it has to say what each is and what
+   * they add up to.
+   */
+  depositOutstanding?: number | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
   brand?: Brand | null;
 }
@@ -325,12 +337,15 @@ export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
     ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
     : "";
   const btn = m.invoiceUrl ? themedButtonRow(m.invoiceUrl, "View your invoice &rarr;", t) : "";
+  const depositDue = Number(m.depositOutstanding ?? 0) > 0 ? Number(m.depositOutstanding) : 0;
 
   const inner = [
     themedPill(`Final balance · ${escapeHtml(m.quoteRef)}`, t),
     headline(`Your final balance${name ? ", " + escapeHtml(name) : ""}`),
     subline(
-      `Ahead of your move${when}, here is the final balance. Payment in full is due before move day so everything is settled and the crew can focus on the job.`,
+      depositDue > 0
+        ? `Your move${when} is close, so rather than send this on separately in a few days, here is the rest of your bill now. Payment in full is due before move day.`
+        : `Ahead of your move${when}, here is the final balance. Payment in full is due before move day so everything is settled and the crew can focus on the job.`,
     ),
     `  <tr><td style="padding:0 36px 22px;">
     <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
@@ -339,10 +354,23 @@ export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
           m.invoiceNumber ? ` · Invoice ${escapeHtml(m.invoiceNumber)}` : ""
         }</div>
         <div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(m.amount)}</div>
-        <div style="font-size:11px;color:#6E6A65;margin-top:6px;">Your ${escapeHtml(m.quoteRef)} deposit is already accounted for.</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:6px;">${
+          depositDue > 0
+            ? `This is what is left after your ${gbp(depositDue)} deposit, which is invoiced separately and still to pay.`
+            : `Your ${escapeHtml(m.quoteRef)} deposit is already accounted for.`
+        }</div>
       </td></tr>
     </table>
   </td></tr>`,
+    ...(depositDue > 0
+      ? [
+          subline(
+            `With the deposit that comes to <strong style="color:#1A1A1A;">${gbp(depositDue + m.amount)}</strong> before your move. ` +
+              `The two invoices can be paid separately or in one transfer. Either way, use reference ` +
+              `<strong style="color:#1A1A1A;">${escapeHtml(m.quoteRef)}</strong> so we can match it.`,
+          ),
+        ]
+      : []),
     btn,
     themedBankCard(m.quoteRef, t),
     // Disclosure (b) — pre-move: the crew that arrives may be Marley-liveried.
@@ -352,5 +380,11 @@ export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
     ),
   ].join("\n");
 
-  return themedEmailShell(`Your final balance of ${gbp(m.amount)} is due before move day.`, inner, t);
+  return themedEmailShell(
+    depositDue > 0
+      ? `${gbp(depositDue)} deposit plus a ${gbp(m.amount)} balance, ${gbp(depositDue + m.amount)} in all, due before move day.`
+      : `Your final balance of ${gbp(m.amount)} is due before move day.`,
+    inner,
+    t,
+  );
 }

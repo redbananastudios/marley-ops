@@ -542,6 +542,17 @@ export default async function AcceptPage({
   // (QA-20260826-07). That is exactly the combination Pitmans launches in.
   const cardOk = await cardPaymentsAvailable(sb, quote.brand).catch(() => false);
 
+  // A move inside T-7 has its final balance raised at acceptance rather than
+  // by the T-7 cron the next morning (PRD §3.10 Addition 2), so this state —
+  // deposit still unpaid — is now the FIRST place a customer can meet both
+  // invoices. The page said only "deposit to secure your date" while a second,
+  // larger invoice sat in their inbox: the same gap Greig James found on the
+  // settled side (MMR015). Bank transfer, phone card or cash for the balance,
+  // per 2026-07-09 — the card button above stays deposit-only.
+  const earlyBalanceAmount = isRealZohoId(quote.zoho_balance_invoice_id)
+    ? Number(quote.balance_invoice_amount ?? 0)
+    : 0;
+
   return (
     <Shell>
       <Card>
@@ -584,6 +595,36 @@ export default async function AcceptPage({
             secures your booking; once it arrives, you can confirm your moving date right here to
             lock it in.
           </p>
+
+          {earlyBalanceAmount > 0 ? (
+            <div className="rounded-md border border-mist-200 bg-mist-50 p-4">
+              <p className="text-sm leading-relaxed text-mist-500">
+                Your move is close, so your final balance of{" "}
+                <strong className="text-ink">{gbp(earlyBalanceAmount)}</strong>
+                {quote.zoho_balance_invoice_number ? (
+                  <>
+                    {" "}
+                    (invoice{" "}
+                    {quote.zoho_balance_invoice_url ? (
+                      <a
+                        href={quote.zoho_balance_invoice_url}
+                        className="font-semibold text-ink underline underline-offset-2"
+                      >
+                        {quote.zoho_balance_invoice_number}
+                      </a>
+                    ) : (
+                      <strong className="text-ink">{quote.zoho_balance_invoice_number}</strong>
+                    )}
+                    )
+                  </>
+                ) : null}{" "}
+                has been invoiced at the same time rather than a few days from now. That is{" "}
+                <strong className="text-ink">{gbp(deposit + earlyBalanceAmount)}</strong> in total
+                before move day. You can pay the two separately or in one transfer — either way,
+                use reference <strong className="text-ink">{quote.quote_ref}</strong>.
+              </p>
+            </div>
+          ) : null}
 
           {cardOk ? (
             <>
