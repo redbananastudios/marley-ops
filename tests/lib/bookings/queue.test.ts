@@ -223,19 +223,34 @@ describe("owedNow", () => {
 const money = (
   bucket: string,
   deposit: number,
-  owed: { commitment: number; balance: number; overdue: number },
-) => ({
-  bucket: bucket as never,
-  deposit,
-  owed: { ...owed, total: owed.commitment + owed.balance },
-});
+  owed: { commitment: number; balance: number; commitmentOverdue?: number; balanceOverdue?: number },
+) => {
+  // Overdue is stated per obligation, never as one lump: the 25% and the
+  // balance are chased in different sections, so a combined figure cannot say
+  // which list holds it. `overdue` is derived here rather than passed, so a
+  // fixture can never claim a total its two halves do not add up to.
+  const commitmentOverdue = owed.commitmentOverdue ?? 0;
+  const balanceOverdue = owed.balanceOverdue ?? 0;
+  return {
+    bucket: bucket as never,
+    deposit,
+    owed: {
+      commitment: owed.commitment,
+      balance: owed.balance,
+      total: owed.commitment + owed.balance,
+      commitmentOverdue,
+      balanceOverdue,
+      overdue: commitmentOverdue + balanceOverdue,
+    },
+  };
+};
 
 describe("queueMoney", () => {
   it("counts an invoiced 25% the bucket ladder cannot reach", () => {
     // Date confirmed and the 25% raised, but the office has not booked the
     // slot - so classifyBooking says no_date and no commitment_* bucket holds
     // it. The tile must still show the money.
-    const m = queueMoney([money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 })]);
+    const m = queueMoney([money("no_date", 0, { commitment: 450, balance: 0 })]);
     expect(m.commitment).toBe(450);
     expect(m.commitmentJobs).toBe(1);
     expect(m.owedNow).toBe(450);
@@ -244,9 +259,12 @@ describe("queueMoney", () => {
   it("counts an invoiced 25% behind an unpaid deposit too", () => {
     // ensureCommitmentInvoice requires a confirmed date and the customer's
     // signature - NOT a paid deposit - so this combination is reachable.
-    const m = queueMoney([money("deposit_outstanding", 100, { commitment: 450, balance: 0, overdue: 450 })]);
+    const m = queueMoney([money("deposit_outstanding", 100, { commitment: 450, balance: 0, commitmentOverdue: 450 })]);
     expect(m.commitment).toBe(450);
     expect(m.overdue).toBe(450);
+    // Split the way the sections are split, so the tile can name the list.
+    expect(m.commitmentOverdue).toBe(450);
+    expect(m.balanceOverdue).toBe(0);
     // The deposit is reported separately and never joins owedNow.
     expect(m.depositsOutstanding).toBe(100);
     expect(m.depositJobs).toBe(1);
@@ -258,12 +276,12 @@ describe("queueMoney", () => {
     // outstanding matches Due exactly), which only ever held on a day with no
     // unpaid 25%. Neither tile alone equals the headline.
     const rows = [
-      money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 }),
-      money("deposit_outstanding", 100, { commitment: 300, balance: 0, overdue: 300 }),
-      money("commitment_due", 0, { commitment: 500, balance: 0, overdue: 0 }),
-      money("balance_due", 0, { commitment: 0, balance: 1700, overdue: 0 }),
-      money("balance_overdue", 0, { commitment: 0, balance: 900, overdue: 900 }),
-      money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 }),
+      money("no_date", 0, { commitment: 450, balance: 0 }),
+      money("deposit_outstanding", 100, { commitment: 300, balance: 0, commitmentOverdue: 300 }),
+      money("commitment_due", 0, { commitment: 500, balance: 0 }),
+      money("balance_due", 0, { commitment: 0, balance: 1700 }),
+      money("balance_overdue", 0, { commitment: 0, balance: 900, balanceOverdue: 900 }),
+      money("all_set", 0, { commitment: 0, balance: 0 }),
     ];
     const m = queueMoney(rows);
     expect(m.commitment).toBe(1250);
@@ -271,6 +289,10 @@ describe("queueMoney", () => {
     expect(m.commitment + m.balance).toBe(m.owedNow);
     expect(m.owedNow).toBe(3850);
     expect(m.overdue).toBe(1200);
+    // And the overdue half splits the same way the danger sections do.
+    expect(m.commitmentOverdue).toBe(300);
+    expect(m.balanceOverdue).toBe(900);
+    expect(m.commitmentOverdue + m.balanceOverdue).toBe(m.overdue);
     // Deposits are disjoint from every owed figure.
     expect(m.depositsOutstanding).toBe(100);
   });
@@ -279,19 +301,32 @@ describe("queueMoney", () => {
     // Gate 9c: settling in full raises the balance alongside the unpaid 25%.
     // The bucket carries only half the story, which is why money is never
     // read off the bucket.
-    const m = queueMoney([money("commitment_due", 0, { commitment: 400, balance: 1500, overdue: 0 })]);
+    const m = queueMoney([money("commitment_due", 0, { commitment: 400, balance: 1500 })]);
     expect(m.commitment).toBe(400);
     expect(m.balance).toBe(1500);
     expect(m.owedNow).toBe(1900);
     expect(m.commitmentJobs).toBe(1);
+    // One row, both job counters — it is on two chase lists, not one.
+    expect(m.balanceJobs).toBe(1);
   });
 
   it("a small job (gate 9a) contributes nothing to owed money", () => {
     // The full price was asked once at acceptance, so there is no 25% and no
     // balance for the rest of its life.
-    const m = queueMoney([money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 })]);
+    const m = queueMoney([money("all_set", 0, { commitment: 0, balance: 0 })]);
     expect(m.owedNow).toBe(0);
     expect(m.commitmentJobs).toBe(0);
+    expect(m.balanceJobs).toBe(0);
+  });
+
+  it("counts a commercial completion invoice, which reaches no balance_* bucket", () => {
+    // The dashboard card read "No balances outstanding" against a live unpaid
+    // commercial invoice, because it tested the two balance BUCKETS and the
+    // commercial ladder never enters either of them.
+    const m = queueMoney([money("commercial_invoiced", 0, { commitment: 0, balance: 2400 })]);
+    expect(m.balance).toBe(2400);
+    expect(m.balanceJobs).toBe(1);
+    expect(m.owedNow).toBe(2400);
   });
 
   it("is empty for no rows", () => {
@@ -301,8 +336,11 @@ describe("queueMoney", () => {
       commitment: 0,
       commitmentJobs: 0,
       balance: 0,
+      balanceJobs: 0,
       owedNow: 0,
       overdue: 0,
+      commitmentOverdue: 0,
+      balanceOverdue: 0,
     });
   });
 });

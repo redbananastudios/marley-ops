@@ -121,6 +121,15 @@ export interface OwedNow {
   total: number;
   /** The portion of `total` already past its date — chase first. */
   overdue: number;
+  /** The 25% half of `overdue`, and the balance half. Split because the two
+   *  are chased in DIFFERENT sections: a combined figure can be shown in a
+   *  headline but cannot say which list holds it, and a headline whose money
+   *  is in no list is the defect this seam exists to stop. Each is all-or-
+   *  nothing — an obligation is past its date or it is not — so
+   *  `commitmentOverdue` is either 0 or `commitment`, and likewise for the
+   *  balance. `overdue` stays their sum. */
+  commitmentOverdue: number;
+  balanceOverdue: number;
 }
 
 /**
@@ -172,6 +181,8 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
       balance: owed,
       total: owed,
       overdue: pastTerms ? owed : 0,
+      commitmentOverdue: 0,
+      balanceOverdue: pastTerms ? owed : 0,
     };
   }
 
@@ -206,6 +217,8 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
     balance: balanceOwed,
     total: commitmentOwed + balanceOwed,
     overdue: (commitmentPastDue ? commitmentOwed : 0) + (balancePastDue ? balanceOwed : 0),
+    commitmentOverdue: commitmentPastDue ? commitmentOwed : 0,
+    balanceOverdue: balancePastDue ? balanceOwed : 0,
   };
 }
 
@@ -213,18 +226,25 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
  *  ledger so tile and queue can never disagree (QA-20260820-02: the tile
  *  counted leads.status='provisional', which diverges the moment a lead is
  *  hand-confirmed with the deposit unpaid). balanceDue is money owed NOW —
- *  a far-future all_set booking owes nothing yet. */
-export function moneyTileCounts(rows: ReadonlyArray<{ bucket: BookingBucket }>): {
+ *  a far-future all_set booking owes nothing yet.
+ *
+ *  It counts OBLIGATIONS, via `queueMoney`, rather than the two balance
+ *  BUCKETS it used to test. The bucket ladder only reaches `balance_*` once
+ *  the deposit is paid and a removal appointment exists, so a gate 9b late
+ *  booking — balance invoice raised at acceptance, deposit unpaid, slot not
+ *  yet allocated — bucketed as `deposit_outstanding` and the card read "No
+ *  balances outstanding" against a live unpaid invoice. Commercial rows were
+ *  counted by neither branch: their completion invoice is never a `balance_*`
+ *  bucket at all. Delegating means the card, the /bookings tile and the
+ *  /payments headline can only ever be three renderings of one sum. */
+export function moneyTileCounts(
+  rows: ReadonlyArray<{ bucket: BookingBucket; deposit: number; owed: OwedNow }>,
+): {
   awaitingDeposit: number;
   balanceDue: number;
 } {
-  let awaitingDeposit = 0;
-  let balanceDue = 0;
-  for (const r of rows) {
-    if (r.bucket === "deposit_outstanding") awaitingDeposit++;
-    else if (r.bucket === "balance_due" || r.bucket === "balance_overdue") balanceDue++;
-  }
-  return { awaitingDeposit, balanceDue };
+  const m = queueMoney(rows);
+  return { awaitingDeposit: m.depositJobs, balanceDue: m.balanceJobs };
 }
 
 /** Every money headline on /bookings and /payments Due, from ONE ledger and
@@ -252,10 +272,17 @@ export interface QueueMoney {
   /** Rows carrying an unpaid 25%, however they are bucketed. */
   commitmentJobs: number;
   balance: number;
+  /** Rows carrying an unpaid balance, however they are bucketed — includes a
+   *  commercial completion invoice, which reaches no `balance_*` bucket. */
+  balanceJobs: number;
   /** commitment + balance — /payments "Owed right now". */
   owedNow: number;
   /** The portion of owedNow already past its date. */
   overdue: number;
+  /** `overdue` split the way the SECTIONS below the tile are split, so each
+   *  tile can name the lists that add up to it. */
+  commitmentOverdue: number;
+  balanceOverdue: number;
 }
 
 export function queueMoney(
@@ -266,16 +293,20 @@ export function queueMoney(
   let commitment = 0;
   let commitmentJobs = 0;
   let balance = 0;
-  let overdue = 0;
+  let balanceJobs = 0;
+  let commitmentOverdue = 0;
+  let balanceOverdue = 0;
   for (const r of rows) {
     if (r.bucket === "deposit_outstanding") {
       depositsOutstanding += r.deposit;
       depositJobs++;
     }
     if (r.owed.commitment > 0) commitmentJobs++;
+    if (r.owed.balance > 0) balanceJobs++;
     commitment += r.owed.commitment;
     balance += r.owed.balance;
-    overdue += r.owed.overdue;
+    commitmentOverdue += r.owed.commitmentOverdue;
+    balanceOverdue += r.owed.balanceOverdue;
   }
   return {
     depositsOutstanding,
@@ -283,8 +314,11 @@ export function queueMoney(
     commitment,
     commitmentJobs,
     balance,
+    balanceJobs,
     owedNow: commitment + balance,
-    overdue,
+    overdue: commitmentOverdue + balanceOverdue,
+    commitmentOverdue,
+    balanceOverdue,
   };
 }
 

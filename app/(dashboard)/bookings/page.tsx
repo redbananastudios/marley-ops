@@ -4,6 +4,12 @@ import { createClient } from "@/lib/supabase/server";
 import { acceptUrlFor } from "@/lib/quote/accept-flow";
 import { moveDateLabel } from "@/lib/quote/payments";
 import { daysBetweenUk, queueMoney, type BookingBucket } from "@/lib/bookings/queue";
+import {
+  COMMERCIAL_SECTION_IDS,
+  groupMoneySections,
+  sectionTotal,
+  type MoneySectionId,
+} from "@/lib/bookings/sections";
 import { loadBookingRows, ukDayOfInstant as ukDayOf, type BookingRow as Row } from "@/lib/bookings/load-signals";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
 import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
@@ -35,7 +41,16 @@ import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
  *   25% TO COLLECT       invoiced, inside its due window
  *   BALANCE OVERDUE      moved with money outstanding — chase now
  *   BALANCE TO COLLECT   invoice → paid, due in full before move day
+ *   COMMERCIAL           the other ladder: awaiting completion, then invoiced
  *   BOOKED — ALL SET     nothing owed right now (change/cancel still here)
+ *
+ * The lifecycle sections are filtered by BUCKET (one row, one rung). The MONEY
+ * sections are filtered by OBLIGATION, off the seam /payments Due renders
+ * (lib/bookings/sections.ts): a booking sits in one bucket but can owe two
+ * things at once, so a bucket-filtered list cannot hold everything the tiles
+ * above it count. Each tile is a total over obligations and its `sub` names
+ * the sections it decomposes into, so no tile ever repeats a section's title
+ * while showing different money.
  *
  * "Confirmed, not allocated" is a CHIP + headline count (deep-links into
  * /schedule Day Allocation), never a bucket — allocation is orthogonal to
@@ -80,12 +95,17 @@ function Section({
   title,
   hint,
   count,
+  total,
   tone,
   children,
 }: {
   title: string;
   hint: string;
   count: number;
+  /** Money sections print their own total, so the tiles above decompose into
+   *  the lists below and a reader can add up what they see. Omitted on the
+   *  lifecycle sections, which are a queue of work rather than a sum. */
+  total?: number;
   tone?: "danger";
   children: React.ReactNode;
 }) {
@@ -102,6 +122,9 @@ function Section({
           {count}
         </span>
         <span className="ml-auto hidden text-xs text-mist-400 sm:block">{hint}</span>
+        {total === undefined ? null : (
+          <span className="tabular text-sm font-bold text-foreground">{gbp(total)}</span>
+        )}
       </div>
       {count === 0 ? (
         <p className="px-5 py-4 text-sm text-mist-400">Nothing here — all clear.</p>
@@ -200,16 +223,11 @@ export default async function BookingsPage({
   const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
 
   const by = (b: BookingBucket) => rows.filter((r) => r.bucket === b);
-  const awaiting = by("deposit_outstanding").sort((a, b) => (a.acceptedAt ?? "").localeCompare(b.acceptedAt ?? ""));
+  const byMoveDay = (a: Row, b: Row) => (a.apptStartsAt ?? "").localeCompare(b.apptStartsAt ?? "");
   const noDate = by("no_date").sort((a, b) => (a.depositPaidAt ?? "").localeCompare(b.depositPaidAt ?? ""));
   const provisional = by("provisional").sort((a, b) =>
     (a.provisionalDate ?? a.approxMonth ?? "9999").localeCompare(b.provisionalDate ?? b.approxMonth ?? "9999"),
   );
-  const byMoveDay = (a: Row, b: Row) => (a.apptStartsAt ?? "").localeCompare(b.apptStartsAt ?? "");
-  const commitmentOverdue = by("commitment_overdue").sort(byMoveDay);
-  const commitmentDue = by("commitment_due").sort(byMoveDay);
-  const balanceOverdue = by("balance_overdue").sort(byMoveDay);
-  const balanceDueRows = by("balance_due").sort(byMoveDay);
   const allSet = by("all_set").sort(byMoveDay);
   // Commercial (gate 10). A different ladder: no deposit, no 25%, no customer
   // chase - one invoice raised when the job is done, due on the client's own
@@ -220,11 +238,29 @@ export default async function BookingsPage({
   // invoice is late is a worse position than knowing it is, and it is the only
   // one nobody can act on until someone looks.
   const commercialAwaiting = by("commercial_awaiting_completion").sort(byMoveDay);
-  const commercialOverdue = by("commercial_overdue").sort(byMoveDay);
-  const commercialUndated = by("commercial_terms_unknown").sort(byMoveDay);
-  const commercialInvoiced = commercialUndated
-    .concat(commercialOverdue)
-    .concat(by("commercial_invoiced").sort(byMoveDay));
+
+  // The money sections take their rows per OBLIGATION, off the same seam
+  // /payments Due renders. Filtering them by bucket is what let a tile and a
+  // section share a title and disagree: a gate 9b late booking raises the
+  // balance invoice AT acceptance with the deposit unpaid and no slot in the
+  // diary, so it classifies deposit_outstanding, and this page showed
+  // "Balance to collect £1,700" directly above a "Balance to collect" section
+  // reading "0 — nothing here, all clear" while the row sat under Deposits
+  // outstanding showing £100. A booking now appears in as many money lists as
+  // it owes money in, each for that obligation's own share.
+  const sections = groupMoneySections(rows);
+  const sectionSum = (id: MoneySectionId) => sectionTotal(sections[id], id);
+  const awaiting = sections.deposits_outstanding.sort((a, b) =>
+    (a.acceptedAt ?? "").localeCompare(b.acceptedAt ?? ""),
+  );
+  const commitmentOverdue = sections.commitment_overdue.sort(byMoveDay);
+  const commitmentDue = sections.commitment_due.sort(byMoveDay);
+  const balanceOverdue = sections.balance_overdue.sort(byMoveDay);
+  const balanceDueRows = sections.balance_due.sort(byMoveDay);
+  const commercialInvoiced = sections.commercial_terms_unknown
+    .sort(byMoveDay)
+    .concat(sections.commercial_overdue.sort(byMoveDay))
+    .concat(sections.commercial_due.sort(byMoveDay));
 
   // Both money tiles read the SAME per-obligation ledger as /payments. The 25%
   // tile used to sum the commitment_* BUCKETS, which the ladder only reaches
@@ -233,6 +269,14 @@ export default async function BookingsPage({
   // /payments counted it (QA-20260826-01). The balance tile had already been
   // fixed for the identical shape (QA-20260820-04); this puts both on one seam.
   const money = queueMoney(rows);
+  // A tile is a TOTAL over obligations; a section is one rung of it. So the
+  // tile names the rungs it splits into rather than borrowing one of their
+  // titles — same words on both, different money, was the whole defect. Parts
+  // worth £0 are dropped so a single-brand Marley reads exactly as before.
+  const tileSub = (parts: ReadonlyArray<readonly [number, string]>, fallback: string): string => {
+    const named = parts.filter(([n]) => n > 0).map(([n, label]) => `${gbp(n)} ${label}`);
+    return named.length ? named.join(" · ") : fallback;
+  };
   // Gate 9d: resolved once for the page rather than per row, and by the one
   // helper that ANDs the global kill switch with each brand's own switch
   // (PRD §11.10). A brand with card off never renders the action, so the
@@ -323,10 +367,18 @@ export default async function BookingsPage({
     return days === null ? "" : days === 0 ? " (today)" : days > 0 ? ` (in ${days}d)` : ` (${-days}d ago)`;
   };
 
+  // Money rows can now reach a section before the slot is in the diary — the
+  // 25% is raised on the customer's date-confirm signature and gates 9b/9c
+  // raise a balance at acceptance, neither of which waits for an appointment.
+  // Without this the detail line ended on a bare "moving " with nothing after
+  // it, which reads as a missing date rather than a date not set yet.
+  const movingLine = (r: Row, verb: string) =>
+    r.apptStartsAt ? `${verb} ${dateLabel(r.apptStartsAt)}${moveIn(r)}` : "no move date yet";
+
   const commitmentRow = (r: Row, overdue: boolean) => (
     <div key={r.quoteId} className="px-5 py-3.5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {nameAndRef(r, `${r.quoteRef} · ${gbp(r.agreed)} · moving ${dateLabel(r.apptStartsAt)}${moveIn(r)}`)}
+        {nameAndRef(r, `${r.quoteRef} · ${gbp(r.agreed)} · ${movingLine(r, "moving")}`)}
         {r.dateReleasableAt ? (
           <span className="inline-flex items-center gap-1 rounded-pill bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
             <AlertTriangle className="size-3.5" strokeWidth={2} /> DATE AT RISK
@@ -358,10 +410,7 @@ export default async function BookingsPage({
   const balanceRow = (r: Row, overdue: boolean) => (
     <div key={r.quoteId} className="px-5 py-3.5">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {nameAndRef(
-          r,
-          `${r.quoteRef} · ${gbp(r.agreed)} · ${overdue ? "moved" : "moving"} ${dateLabel(r.apptStartsAt)}${moveIn(r)}`,
-        )}
+        {nameAndRef(r, `${r.quoteRef} · ${gbp(r.agreed)} · ${movingLine(r, overdue ? "moved" : "moving")}`)}
         {overdue ? (
           <span className="inline-flex items-center gap-1 rounded-pill bg-danger-bg px-2.5 py-1 text-xs font-bold text-danger">
             <AlertTriangle className="size-3.5" strokeWidth={2} /> OVERDUE
@@ -407,21 +456,37 @@ export default async function BookingsPage({
       </PageHeader>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* The one tile that keeps a section's title — so it reads off that
+            section's own total rather than a second expression that merely
+            happens to agree today. */}
         <Stat
           label="Deposits outstanding"
-          value={gbp(money.depositsOutstanding)}
+          value={gbp(sectionSum("deposits_outstanding"))}
           sub={`${money.depositJobs} job${money.depositJobs === 1 ? "" : "s"} · auto-chased day 1 and 3`}
         />
         <Stat
-          label="25% to collect"
+          label="25% outstanding"
           value={gbp(money.commitment)}
-          sub={
-            commitmentOverdue.length
-              ? `${commitmentOverdue.length} overdue · ${money.commitmentJobs} invoiced · chased at T-10`
-              : `${money.commitmentJobs} invoiced · chased at T-10`
-          }
+          sub={tileSub(
+            [
+              [sectionSum("commitment_overdue"), "overdue"],
+              [sectionSum("commitment_due"), "to collect"],
+            ],
+            "nothing invoiced · chased at T-10",
+          )}
         />
-        <Stat label="Balance to collect" value={gbp(money.balance)} sub="final balances only, not the 25%" />
+        <Stat
+          label="Balances outstanding"
+          value={gbp(money.balance)}
+          sub={tileSub(
+            [
+              [sectionSum("balance_overdue"), "overdue"],
+              [sectionSum("balance_due"), "to collect"],
+              [COMMERCIAL_SECTION_IDS.reduce((n, id) => n + sectionSum(id), 0), "commercial"],
+            ],
+            "final balances only, not the 25%",
+          )}
+        />
         <Stat
           label="To allocate"
           value={String(toAllocate.length)}
@@ -439,6 +504,7 @@ export default async function BookingsPage({
         title="Deposits outstanding"
         hint="accepted online — locks in when the deposit lands"
         count={awaiting.length}
+        total={sectionSum("deposits_outstanding")}
       >
         {awaiting.map((r) => (
           <div key={r.quoteId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
@@ -546,6 +612,7 @@ export default async function BookingsPage({
         title="25% overdue"
         hint="past due or date at risk — call them today"
         count={commitmentOverdue.length}
+        total={sectionSum("commitment_overdue")}
         tone="danger"
       >
         {commitmentOverdue.map((r) => commitmentRow(r, true))}
@@ -556,6 +623,7 @@ export default async function BookingsPage({
         title="25% to collect"
         hint="invoiced at date confirmation — auto-chased at T-10"
         count={commitmentDue.length}
+        total={sectionSum("commitment_due")}
       >
         {commitmentDue.map((r) => commitmentRow(r, false))}
       </Section>
@@ -565,15 +633,29 @@ export default async function BookingsPage({
         title="Balance overdue"
         hint="moved with money outstanding — chase it now"
         count={balanceOverdue.length}
+        total={sectionSum("balance_overdue")}
         tone="danger"
       >
         {balanceOverdue.map((r) => balanceRow(r, true))}
       </Section>
 
       {/* ---------------- balance to collect ---------------- */}
+      <Section
+        title="Balance to collect"
+        hint="payment in full is due before move day"
+        count={balanceDueRows.length}
+        total={sectionSum("balance_due")}
+      >
+        {balanceDueRows.map((r) => balanceRow(r, false))}
+      </Section>
+
       {/* ---------------- commercial ---------------- */}
-      {/* Both hide when empty: with no commercial clients this page is
-          byte-identical to before gate 10. */}
+      {/* AFTER the residential balance pair, not between its two halves: the
+          sections ARE the money lifecycle, and splitting "Balance overdue"
+          from "Balance to collect" put a different ladder in the middle of one
+          rung and orphaned this comment from the section it names. Both hide
+          when empty, so with no commercial clients the page is byte-identical
+          to before gate 10. */}
       {commercialAwaiting.length ? (
         <Section
           title="Commercial — awaiting completion"
@@ -596,6 +678,7 @@ export default async function BookingsPage({
           title="Commercial — invoiced, awaiting payment"
           hint="past its terms is OUR credit control — a commercial customer is never chased by email"
           count={commercialInvoiced.length}
+          total={COMMERCIAL_SECTION_IDS.reduce((n, id) => n + sectionSum(id), 0)}
         >
           {commercialInvoiced.map((r) => {
             const overdue = r.bucket === "commercial_overdue";
@@ -622,20 +705,12 @@ export default async function BookingsPage({
         </Section>
       ) : null}
 
-      <Section
-        title="Balance to collect"
-        hint="payment in full is due before move day"
-        count={balanceDueRows.length}
-      >
-        {balanceDueRows.map((r) => balanceRow(r, false))}
-      </Section>
-
       {/* ---------------- booked, all set ---------------- */}
       <Section title="Booked — all set" hint="nothing owed right now" count={allSet.length}>
         {allSet.map((r) => (
           <div key={r.quoteId} className="px-5 py-3.5">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              {nameAndRef(r, `${r.quoteRef} · ${gbp(r.agreed)} · moving ${dateLabel(r.apptStartsAt)}${moveIn(r)}`)}
+              {nameAndRef(r, `${r.quoteRef} · ${gbp(r.agreed)} · ${movingLine(r, "moving")}`)}
               {needsCrew(r) ? <AllocateChip day={ukDayOf(r.apptStartsAt!)} /> : null}
               {r.balancePaidAt ? (
                 <span className="inline-flex items-center gap-1 rounded-pill bg-success-bg px-2.5 py-1 text-xs font-semibold text-success">
