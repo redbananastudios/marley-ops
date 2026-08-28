@@ -71,10 +71,13 @@ export function wpExternalLeadId(rowId: number): string {
 }
 
 /**
- * Sign one poll. The canonical string is exactly `limit=<n>&ts=<unix>` —
- * plain integers, that order, nothing else — HMAC-SHA256, hex. The verifying
- * half is plb_rest_permission in the plugin; change both together or not at
- * all. `ts` bounds replay to ±300s on the plugin side.
+ * Sign one poll. The canonical string is exactly
+ * `limit=<n>&since_id=<n>&ts=<unix>` — plain integers, that order, nothing
+ * else — HMAC-SHA256, hex. The verifying half is plb_rest_permission in the
+ * plugin; change both together or not at all. `ts` bounds replay to ±300s on
+ * the plugin side, and `since_id` is inside the signature so an on-path
+ * observer cannot advance the reader's window and hide a row from the only
+ * backstop the enquiry has.
  */
 export function signPullQuery(
   limit: number,
@@ -100,7 +103,7 @@ export function buildPullUrl(
 }
 
 /**
- * The highest plugin row id below which EVERY row has landed here.
+ * The highest plugin row id below which EVERY row that EXISTS has landed here.
  *
  * Derived from our own leads table, never persisted: a stored cursor is state
  * that can be lost or reset, and a lost cursor skips rows in silence, which is
@@ -108,15 +111,33 @@ export function buildPullUrl(
  * already records what landed, so it IS the record of what has been
  * reconciled.
  *
- * Stopping at the first gap is deliberate. A submission we cannot land keeps
- * the cursor beneath it, so it is re-offered on every poll rather than
- * scrolling away. The cost is that a permanently unlandable row pins the
- * window: rows beyond it are only reachable while they fit inside one page.
- * That is a LOUD failure, not a silent one — `unaccounted` below counts them
- * and holds the operational issue open until a human clears the blockage.
+ * `floorId` is the first id that CAN exist — the plugin's own MIN(id), read
+ * back from the poll response (`min_id`). Walking up from a hardcoded 1 was a
+ * way to pin the rail shut permanently: a table with no row 1 — erased on a
+ * GDPR request, cleared with the install-test rows, or never numbered from 1
+ * after a host move or a dump/restore that reseeded AUTO_INCREMENT — has no
+ * row 1 to find, so the walk returned 0 on EVERY poll and the window never
+ * moved off the oldest page. With ids 5..204 held, the rail asked for `id > 0`
+ * forever, re-read the same 200 rows, and rows 205 onwards were offered by no
+ * poll ever. Worse than a genuine gap, because a genuine gap clears when a
+ * human lands the row and this one cannot: the id a human would have to land
+ * does not exist, so the standing unaccounted issue becomes permanent noise.
+ *
+ * The floor is never trusted above one past the highest id we hold, so an
+ * endpoint reporting a wrong (or hostile) floor costs re-reads, never a skip.
+ *
+ * Stopping at the first gap ABOVE the floor is still deliberate. A submission
+ * we cannot land keeps the cursor beneath it, so it is re-offered on every poll
+ * rather than scrolling away. The cost is that a permanently unlandable row
+ * pins the window: rows beyond it are only reachable while they fit inside one
+ * page. That is a LOUD failure, not a silent one — `unaccounted` below counts
+ * them and holds the operational issue open until a human clears the blockage.
  */
-export function contiguousReconciledUpTo(ids: ReadonlySet<number>): number {
-  let n = 0;
+export function contiguousReconciledUpTo(ids: ReadonlySet<number>, floorId = 1): number {
+  let highestHeld = 0;
+  for (const id of ids) if (id > highestHeld) highestHeld = id;
+  const floor = Math.max(1, Math.min(Math.trunc(floorId), highestHeld + 1));
+  let n = floor - 1;
   while (ids.has(n + 1)) n += 1;
   return n;
 }
@@ -194,6 +215,15 @@ const wpPullResponseSchema = z.object({
    *  that omits it proves nothing, and is handled below as UNKNOWN, never as
    *  zero. */
   total: z.number().int().nonnegative().optional(),
+  /** MIN(id) over the plugin's whole table, or null when it is empty. The
+   *  cursor's floor: only the endpoint knows where its own ids start, and
+   *  assuming 1 pins the window shut on any table that does not (see
+   *  contiguousReconciledUpTo). Optional in SHAPE only, for the same reason
+   *  `total` is — an endpoint that omits it leaves the floor at 1, which is
+   *  the safe answer (it can only cost re-reads) and stays LOUD, because a
+   *  window that cannot advance shows up as `unaccounted` the moment it costs
+   *  a row. */
+  min_id: z.number().int().positive().nullable().optional(),
   submissions: z.array(z.unknown()),
 });
 
@@ -224,8 +254,13 @@ export interface WpLeadsSummary {
    *  Reported as a standing operational issue, retried next poll. */
   failures: number;
   /** Where this poll's window started — the highest id below which every
-   *  plugin row has landed here. */
+   *  plugin row that exists has landed here. */
   sinceId: number;
+  /** The floor the cursor was anchored to: the plugin's lowest row id, or
+   *  null when the endpoint did not report one (or the table is empty). Worth
+   *  reporting because `sinceId` alone cannot be read without it — a rail
+   *  sitting at sinceId 0 is healthy when minId is 1 and stuck when it is 5. */
+  minId: number | null;
   /** Submissions on the WordPress side this rail has neither landed nor seen.
    *  `null` means the endpoint reported no total, i.e. UNKNOWN — which is a
    *  different answer from 0 and must never resolve the issue. */
@@ -239,6 +274,7 @@ const emptyCounts = {
   inserted: 0,
   failures: 0,
   sinceId: 0,
+  minId: null,
   unaccounted: null,
 };
 
@@ -288,50 +324,82 @@ export async function syncWpLeads(
       ...emptyCounts,
     };
   }
-  const sinceId = contiguousReconciledUpTo(held);
+  let sinceId = contiguousReconciledUpTo(held);
 
   // ---- Fetch over the disjoint channel -------------------------------------
-  const url = buildPullUrl(
-    config.url,
-    WP_PULL_LIMIT,
-    sinceId,
-    Math.floor(now.getTime() / 1000),
-    config.secret,
-  );
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  let res: Response;
-  try {
-    res = await doFetch(url, { cache: "no-store", signal: controller.signal });
-  } catch (err) {
-    clearTimeout(timer);
-    const detail = errorContext(err);
-    log.error("wp-leads.fetch_failed", detail);
-    return { ok: false, configured: true, error: `WP pull fetch failed: ${detail.error}`, ...emptyCounts };
-  }
-  clearTimeout(timer);
-
-  if (!res.ok) {
-    // The body is the plugin's own diagnostic (403 bad signature / clock skew,
-    // 503 unconfigured pull secret) — worth carrying, but bounded.
-    const body = (await res.text().catch(() => "")).slice(0, 300);
-    log.error("wp-leads.fetch_rejected", { status: res.status, body });
-    return {
+  /** One signed poll from `from`, parsed. Every failure comes back as this
+   *  run's own FAILED summary, so a poll that could not read the table can
+   *  never fall through into the reconcile below and report clean counts. */
+  type Poll =
+    | { ok: true; body: z.infer<typeof wpPullResponseSchema> }
+    | { ok: false; summary: WpLeadsSummary };
+  const pollFrom = async (from: number): Promise<Poll> => {
+    const failed = (error: string): Poll => ({
       ok: false,
-      configured: true,
-      error: `WP pull endpoint answered ${res.status}${body ? `: ${body}` : ""}`,
-      ...emptyCounts,
-    };
-  }
+      summary: { ok: false, configured: true, error, ...emptyCounts, sinceId: from },
+    });
+    const url = buildPullUrl(
+      config.url,
+      WP_PULL_LIMIT,
+      from,
+      Math.floor(now.getTime() / 1000),
+      config.secret,
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await doFetch(url, { cache: "no-store", signal: controller.signal });
+    } catch (err) {
+      clearTimeout(timer);
+      const detail = errorContext(err);
+      log.error("wp-leads.fetch_failed", detail);
+      return failed(`WP pull fetch failed: ${detail.error}`);
+    }
+    clearTimeout(timer);
 
-  let parsed: z.infer<typeof wpPullResponseSchema>;
-  try {
-    parsed = wpPullResponseSchema.parse(await res.json());
-  } catch (err) {
-    const detail = errorContext(err);
-    log.error("wp-leads.response_unusable", detail);
-    return { ok: false, configured: true, error: `WP pull response unusable: ${detail.error}`, ...emptyCounts };
+    if (!res.ok) {
+      // The body is the plugin's own diagnostic (403 bad signature / clock skew,
+      // 503 unconfigured pull secret) — worth carrying, but bounded.
+      const body = (await res.text().catch(() => "")).slice(0, 300);
+      log.error("wp-leads.fetch_rejected", { status: res.status, body });
+      return failed(`WP pull endpoint answered ${res.status}${body ? `: ${body}` : ""}`);
+    }
+
+    try {
+      return { ok: true, body: wpPullResponseSchema.parse(await res.json()) };
+    } catch (err) {
+      const detail = errorContext(err);
+      log.error("wp-leads.response_unusable", detail);
+      return failed(`WP pull response unusable: ${detail.error}`);
+    }
+  };
+
+  let poll = await pollFrom(sinceId);
+  if (!poll.ok) return poll.summary;
+
+  // ---- Re-anchor to the table's real floor ---------------------------------
+  // The cursor above had to assume ids start at 1, because only the endpoint
+  // knows where its own do and asking it is what this request was for. If the
+  // answer lifts the cursor, poll once more from the corrected anchor — one
+  // correction, never a loop.
+  //
+  // Discarding the first page is lossless, not a gamble: the walk only ever
+  // advances over ids we already hold, and the ids it skips below the floor
+  // cannot exist at all, so every row the first page could have landed is still
+  // inside the second one. Without this, a table numbered from anything but 1
+  // re-read its oldest page every 15 minutes and never reached the rest.
+  const minId = poll.body.min_id ?? null;
+  if (minId !== null) {
+    const anchored = contiguousReconciledUpTo(held, minId);
+    if (anchored > sinceId) {
+      log.info("wp-leads.cursor_reanchored", { from: sinceId, to: anchored, minId });
+      sinceId = anchored;
+      poll = await pollFrom(sinceId);
+      if (!poll.ok) return poll.summary;
+    }
   }
+  const parsed = poll.body;
 
   // ---- Reconcile -----------------------------------------------------------
   // The endpoint answers oldest-first FROM the cursor, so this is already
@@ -462,6 +530,7 @@ export async function syncWpLeads(
       failures,
       unaccounted,
       sinceId,
+      minId,
       failedIds,
       firstError,
     });
@@ -471,7 +540,7 @@ export async function syncWpLeads(
       source: "wp-leads",
       event: "wp_leads.reconcile_failed",
       message: `Pitmans WordPress submissions are unaccounted for: ${parts.join("; ")}. They retry each poll, but a persistent entry here is an enquiry no one is answering.`,
-      context: { failures, unaccounted, sinceId, failedIds: failedIds.slice(0, 20), firstError },
+      context: { failures, unaccounted, sinceId, minId, failedIds: failedIds.slice(0, 20), firstError },
     });
   } else {
     await resolveOperationalIssue(sb, WP_RECONCILE_ISSUE_KEY);
@@ -482,6 +551,7 @@ export async function syncWpLeads(
     configured: true,
     seen: rows.length,
     sinceId,
+    minId,
     unaccounted,
     alreadyPresent,
     inserted,
