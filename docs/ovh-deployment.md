@@ -177,3 +177,67 @@ install checklist, not noise. A half-set pair is a FAILED run on purpose.
   vps1 untouched). On-disk data left at `/opt/rbs/supabase/volumes` on vps1 as a short-term
   safety net — delete it (`docker compose down -v` + `rm -rf volumes`) once fully confident.
 - Optional: raise the two IONOS DNS TTLs back to 3600 once the setup has stabilised.
+
+## Xero (gate 18) — env, and what a Demo Company reset destroys
+
+The ledger seam picks its provider from **`LEDGER_PROVIDER`** (`zoho` | `xero`; unset
+means `zoho`, which is today's behaviour). An unrecognised value **throws** rather than
+falling back — a typo'd `xerro` that silently resolved to Zoho would keep raising real
+customer invoices in the system everyone had just stopped reading.
+
+Flipping a box to Xero is an `app.env` edit plus a container recreate (as above). Every
+variable below is **org-specific**, and every one fails closed naming itself rather than
+guessing: putting real customer money in the wrong nominal account is the failure the
+whole seam exists to make impossible.
+
+| Var | What it holds | Unset behaviour |
+|---|---|---|
+| `LEDGER_PROVIDER` | `zoho` or `xero` | defaults to `zoho`; anything else throws |
+| `XERO_CLIENT_ID` / `XERO_CLIENT_SECRET` | the developer app. Staging and prod are **separate apps** — Xero meters connections and API volume per app and they cannot share | integration unconfigured |
+| `XERO_REDIRECT_URI` | must match the app's registered URI exactly | OAuth fails at consent |
+| `XERO_ACCOUNT_BANKTRANSFER` / `_CASH` / `_CREDITCARD` | the **AccountID (GUID)** each payment rail posts to. Not the Code — Code is user-editable in the Chart of Accounts UI, so a bookkeeper renumbering the chart would silently re-point a rail | that rail throws; the others keep working |
+| `XERO_ACCOUNT_INCOME` | the account **CODE** (e.g. `200`) that invoice lines post to. Deliberately the opposite form to the rails above — the two Xero APIs genuinely disagree, so the variables do too | every invoice raise throws |
+| `XERO_ACCOUNT_STORAGE_INCOME` | optional; keeps storage income separate from Removals Income | falls back to `XERO_ACCOUNT_INCOME` with a logged warning |
+| `XERO_TAX_TYPE_VAT` / `_NO_VAT` | UK 20% output VAT is **`OUTPUT2`** — `OUTPUT` is the legacy 17.5% rate and is DELETED | throws rather than guess a tax rate |
+| `XERO_CARD_ENABLED` | `"true"` or `"false"` — **a human attestation**, not a preference | a card-suppressed invoice **throws**. See below |
+| `XERO_BRANDING_THEME_DEFAULT` | optional; omit to use the org's own default theme | Xero applies the org default |
+| `XERO_BRANDING_THEME_NO_CARD` | a theme with **no payment service attached** | required only when `XERO_CARD_ENABLED=true` |
+| `XERO_ORG_SHORTCODE` | the org's short code, for the "open in Xero" deep link on /finance | the button renders inert rather than pointing at the wrong organisation |
+| `XERO_ALLOW_LIVE_WRITES` | **leave unset.** Set only at the cutover, deliberately | non-demo orgs are read-only |
+
+### `XERO_CARD_ENABLED` has no safe default, on purpose
+
+Balance invoices are BACS/cash only — card fees are too high at those values (Peter,
+2026-07-09). Zoho honours that per invoice; **Xero cannot**, because online payment
+services attach to a *branding theme*, so the only way to express "this invoice must not
+be payable by card" is to raise it under a theme with no service attached.
+
+Nothing in the app can ask Xero whether a theme offers card: the PaymentServices API is
+open only to certified payment-service partners. So a human has to declare it — and an
+**unset** variable is not a declaration. It is the state a cutover leaves behind, and
+treating it as "card is off" is how that pricing decision gets reversed silently, with
+the merchant statement as the only surface that would ever show it.
+
+### The Demo Company resets every 28 days
+
+Staging runs against Xero's Demo Company (there is no Xero sandbox). The reset destroys
+**configuration, not just data**: the bank/cash/clearing accounts, any branding themes,
+the VAT rates, the org short code, and the `ledger_tokens` row's `refresh_token` **and**
+`tenant_id`. After each reset staging needs re-authorising AND every `XERO_*` id above
+re-stamped. Next reset ~2026-09-24.
+
+Two constraints with no workaround, both worth knowing before the cutover window rather
+than inside it:
+
+- **You cannot invite other users to a Demo Company.** Connor and Mark cannot be given a
+  login to look at staging invoices the way they could with Zoho's Demo Removals.
+- **An organisation may connect at most two uncertified apps.** If Connor's live org
+  already has two (a bank feed, a receipt scanner), the prod app is refused at consent.
+
+### Xero refresh tokens rotate on every use
+
+Unlike Zoho's, a Xero refresh token is invalidated the moment it is used, so it **cannot**
+live in `app.env` — two containers would race and lock the integration out. It lives in
+the `ledger_tokens` table (migration `0108_ledger.sql`) under a single-writer row lock,
+and `tenant_id` is read per call rather than latched (Xero: "always treat xero-tenant-id
+as dynamic per request").
