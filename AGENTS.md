@@ -75,53 +75,47 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-08-28 - gate 10b COMPLETE on `gate10b/commercial-office`; staging Zoho token still dead)
+## Current State (2026-08-29 - gates 10b AND 16 complete on `gate10b/commercial-office`; staging Zoho token STILL dead)
 
-Last touched: 2026-08-28 on i9. Gate 10's remaining scope turned out to be larger than the
-previous block recorded - two items came back EMPTY on a grep that expected to find them (the
-overdue ops alert, and storage terms), and two customer-facing documents carried the same defect
-QA-20260828-03 recorded against /q. Built as five small chunks, all four gates re-run after each,
-every guard mutation-tested. Branch is 18 commits ahead of `staging`. **Not merged - the Zoho
-blocker below is unchanged and is Peter's.**
+Last touched: 2026-08-29 on i9. Gate 10b finished in five tested chunks, then gate 16 (all five
+public token pages) in two. Branch is 22 commits ahead of `staging` with `origin/staging` merged
+in and all four gates re-run on the merged tree. **Not merged - the Zoho blocker is unchanged.**
 
-- **BLOCKER (unchanged): the staging Zoho refresh token is dead.** `POST
-  accounts.zoho.eu/oauth/v2/token` returns HTTP 200 with `{"error":"invalid_code"}` for the
-  `.env.e2e` credential set. Every e2e money spec fails on staging until it is re-minted, whatever
-  the code does. Re-minting is an interactive OAuth login - Peter's, not the build agent's.
-- **A commercial customer was emailed a GBP 100 deposit demand and a PDF with an accept QR.** The
-  figure was invented, not stored: deposit_amount is 0 and both `?? 100` fallbacks only defend
-  against null. The PDF said it in three places, which is why the test now scans the WHOLE
-  document for the word rather than those three. Commercial deliberately falls back to the in-repo
-  email body - the hosted Resend template's slots are fixed and create-resend-templates.mjs
-  PATCHes BY NAME, so editing it for commercial would overwrite the live Marley template.
-- **The office confirm dialog described the residential machine.** acceptQuoteByStaff has been
-  correct for commercial since gate 10b; the one screen the office must trust was the wrong one.
-  It also demanded a deposit the server discards and REFUSED to proceed on 0 - the honest figure
-  was the one value the field would not take. The dialog now resolves the policy itself on open
-  (the quotes LIST has no client join and payment_policy is null pre-acceptance, so a prop-only
-  design would be right on the detail page and wrong on the list) and fails CLOSED.
-- **`quotes.po_number` had no writer, no reader and no field** - a column with a length constraint
-  and no code. Now captured, persisted, displayed, and printed on the completion invoice.
-- **Nothing alarmed when a commercial invoice went unpaid.** The alert PRD 3.10 requires did not
-  exist. TWO alarms now: overdue, and terms-date-missing - the second because an invoice with no
-  due date can never BE overdue, so alarm 1 alone has a hole the size of its own blind spot. A
-  failed read clears nothing and reports -1, not 0.
-- **No invoice this system has ever raised carried a due date** (`lib/ledger/types.ts` said so
-  outright). commercial_due_date drove our screens while the document the client's accounts
-  department receives showed no due date at all. Added to both adapters, omitted when absent.
-- **`lib/ledger/xero-invoices.ts` is LF, not CRLF.** This repo is mixed; a CRLF-assuming edit
-  script silently matches nothing there.
-- **Local e2e is the fast loop and it works.** commercial-accept.spec.ts un-skipped and green
-  locally three times; office/quotes.spec.ts green. Both env layers must be sourced onto the
-  playwright process - `.env.e2e` carries no Supabase key, and sourcing it alone fails every
-  seeding spec on an error that looks nothing like the cause. e2e/README corrected: it claimed
-  `.env.e2e` pins ZOHO_ORG_ID to "a dummy"; it pins the real staging org.
+- **BLOCKER (re-tested 2026-08-29, still dead): the staging Zoho refresh token.** `POST
+  accounts.zoho.eu/oauth/v2/token` returns HTTP 200 `{"error":"invalid_code"}`. A NEW DAY DOES NOT
+  FIX THIS - `invalid_code` is a revoked/invalid refresh token, not the 1,000/day rate limit that
+  resets. Re-mint per `scripts/zoho-staging-token.mjs`: sign in as demo@marleymoves.co.uk at
+  api-console.zoho.eu, Self Client -> Generate Code (scope ZohoInvoice.fullaccess.all, 10 min),
+  then run the script with --org 20117092566. Interactive OAuth - Peter's, not the build agent's.
+  NOTE there are TWO credential sets: `.env.local` = the LIVE org (20106952968), `.env.e2e` = the
+  staging org. Only the staging one needs re-minting; do not probe the live one.
+- **Gate 10b (5 chunks):** the commercial quote email + PDF asked for a GBP 100 deposit that exists
+  nowhere in the database (deposit_amount is 0; both `?? 100` fallbacks only defend against null);
+  the office confirm dialog described the residential machine and REFUSED to proceed on 0; the PO
+  column had no writer, reader or field; nothing alarmed when a commercial invoice went unpaid; and
+  no invoice this system raises has ever carried a due date on EITHER ledger rail.
+- **Gate 16 (2 chunks):** all five token pages resolve identity from `lib/brand-page-theme.ts`.
+  Two real leaks found by the leak scan rather than by reading: /q's acceptance form linked a
+  customer to the DEFAULT BRAND's terms page as the document they were signing, and the card copy
+  was gated on the brand flag alone when PRD 11.10 needs global AND brand.
+- **The accent mechanism is one CSS variable, not threaded props.** Tailwind v4 compiles
+  `.text-mm-red` to `color: var(--color-mm-red)` (verified against the built CSS), so re-pointing
+  that token on a page root recolours the whole subtree INCLUDING `hover:`/`focus:` variants, which
+  an inline style cannot express. Every utility class stays as it was, so the default render is
+  byte-identical rather than merely the same colour. All four tokens are overridden together.
+- **This repo is NOT uniformly CRLF.** `lib/ledger/xero-invoices.ts` and several app files are LF.
+  An edit script that assumes one ending silently matches nothing - and one of mine left
+  `app/q/[token]/page.tsx` MIXED (856 CRLF + 8 LF) before it was normalised. Read the file's own
+  endings, edit in LF, write back what was there.
+- **Local e2e is the fast loop.** `commercial-accept.spec.ts` green locally four times across the
+  session. Source both env layers onto the playwright process - `.env.e2e` has no Supabase key.
 
-**Open decisions:** `clients.payment_terms_days` now has a second reader (storage). **Blockers:**
-the staging Zoho token - nothing merges until it is re-minted. **Next:** re-mint, merge ONE PR and
-wait for its staging e2e run, then gate 16 (public token pages - none of the five calls getBrand;
-/q alone carries 12 hardcoded 01747 numbers) and gate 20 (importers). Gate 15 stays BLOCKED on
-Mark's document; gate 22 is the designated drop. Import CSV `jobs-imve-2026-08-13.csv` stays
-untracked (PII).
+**Open decisions:** `clients.payment_terms_days` now has two readers (removals + storage).
+**Blockers:** the staging Zoho token. **Next:** re-mint, merge PR #161 alone and wait for its
+staging e2e run before anything else, then gate 20 (importers - only import-imve.mjs and
+import-neon-quotes.mjs exist; the four Pitmans CSV importers do not). Gate 15 stays BLOCKED on
+Mark's document; gate 22 is the designated drop. Gate 16's RENDERED-page leak check (the Playwright
+half) is still outstanding and the scan's own header says so. Import CSV
+`jobs-imve-2026-08-13.csv` stays untracked (PII).
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
