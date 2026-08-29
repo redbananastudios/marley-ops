@@ -393,6 +393,63 @@ that before creating one.
 
 ---
 
+## `0114_pitmans_import.sql` — gate 20, the Pitmans importers
+
+Additive and inert. Five `add column if not exists` on tables the importers
+write, one nullable column on `quotes`, four partial indexes, and one CHECK
+**widened** (never narrowed) so `quotes.source` accepts `'pitmans'` alongside
+`'marley_ops'` and `'imve'`. Nothing existing reads or writes any of it until
+an importer runs, and a widened CHECK cannot reject a row the old one accepted.
+
+Applied and verified on staging 2026-08-29 before the gate merged.
+
+```sql
+select 'quotes.legacy_ref' as what, count(*)::text as n
+from information_schema.columns
+where table_schema = 'public' and table_name = 'quotes' and column_name = 'legacy_ref'
+union all
+select 'import_batch on 5 tables', count(*)::text
+from information_schema.columns
+where table_schema = 'public' and column_name = 'import_batch'
+  and table_name in ('storage_sites','storage_units','storage_lets','vehicles','staff')
+union all
+select 'source check allows pitmans', count(*)::text
+from pg_constraint
+where conname = 'quotes_source_check' and pg_get_constraintdef(oid) like '%pitmans%';
+```
+
+Expected: `1`, `5`, `1`.
+
+Then prove the CHECK still refuses an unknown source (it rolls back either way):
+
+```sql
+begin;
+  update quotes set source = 'not_a_system' where id = (select id from quotes limit 1);
+rollback;
+```
+
+Expected: fails on `quotes_source_check`. Widening the set must not have turned
+it into a column that accepts anything — that check is what keeps
+`legacyLocked()` meaningful.
+
+**Why `legacy_ref` rather than reusing `imve_ref`:** `imve_ref` is not a generic
+"old reference" column. It drives the "Legacy (iMVE)" pill on `/bookings` and
+sits behind the crew-paperwork suppressions, so a Pitmans reference parked there
+would label a Pitmans booking as an iMVE one on the surfaces the office reads
+every day. The customer-facing reference is `quote_ref`, minted fresh per brand
+(`PMR###`/`PMC###`, gate 6); `legacy_ref` exists purely so a row can be
+reconciled against Mark's own paperwork.
+
+**Why `import_batch` on five more tables:** `--rollback <batch>` has to find
+exactly the rows one importer created. Following `0088`'s rule, a row an
+importer **matched** rather than created is never stamped, so a rollback can
+never delete a customer, van or staff member that existed beforehand.
+
+App-side, after the deploy: nothing should change at all. No importer runs
+automatically, and `source = 'pitmans'` does not exist in prod until one does.
+
+---
+
 ## Activation (separate, later step — never part of the migration batch)
 
 Pitmans goes `active = true` on prod only when the promoted build is verified, always BEFORE the prod import (PRD §5 cutover):
