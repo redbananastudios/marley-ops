@@ -5,6 +5,8 @@ import { UNIT_TYPES } from "@/lib/storage-units";
 import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
 import { publicUrlFor } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
+import { getBrandOrDefault } from "@/lib/brand";
+import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
 import { StorageAgreementForm } from "./agreement-form";
 
 /**
@@ -16,7 +18,24 @@ import { StorageAgreementForm } from "./agreement-form";
  */
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { robots: { index: false, follow: false } };
+
+/** Brand-resolved (gate 16): the tab title names the brand whose storage this
+ *  is, resolved from the let's own brand column. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const admin = createAdminClient();
+  const { data: row } = await admin
+    .from("storage_lets")
+    .select("brand")
+    .eq("sign_token", token)
+    .maybeSingle();
+  const theme = pageTheme(row ? await getBrandOrDefault(admin, row.brand) : null);
+  return { title: pageTitle(theme, "Storage agreement"), robots: { index: false, follow: false } };
+}
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\.00$/, "");
 
@@ -35,7 +54,9 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const admin = createAdminClient();
   const { data: let_ } = await admin
     .from("storage_lets")
-    .select("id, client_id, unit_id, start_date, end_date, rate, rate_period, billing_model, min_days, min_amount")
+    .select(
+      "id, client_id, unit_id, start_date, end_date, rate, rate_period, billing_model, min_days, min_amount, brand",
+    )
     .eq("sign_token", token)
     .maybeSingle();
   if (!let_) notFound();
@@ -69,10 +90,32 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
     (a) => ({ key: a.key as string, label: a.label }),
   );
 
+  // Identity comes from the LET's own brand (gate 12 put the column there),
+  // resolved once before the render.
+  const theme = pageTheme(await getBrandOrDefault(admin, let_.brand));
+
   return (
-    <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="Marley Moves" width={170} className="mx-auto mb-6" />
+    // One CSS-variable override re-points every mm-red utility below to this
+    // brand's accent — the same mechanism /q uses. Undefined for the default
+    // brand, so its markup and colours are unchanged.
+    <main
+      className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10"
+      style={theme.rootStyle as React.CSSProperties | undefined}
+    >
+      {theme.logoUrl ? (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img src={theme.logoUrl} alt={theme.name} width={170} className="mx-auto mb-6" />
+      ) : (
+        <p
+          className="mb-6 text-center font-brand text-2xl font-bold tracking-tight"
+          style={{ color: theme.wordmarkColour }}
+        >
+          {theme.name}
+        </p>
+      )}
+      {theme.groupLine ? (
+        <p className="-mt-4 mb-6 text-center text-xs font-medium text-mist-400">{theme.groupLine}</p>
+      ) : null}
 
       <div className="rounded-lg border border-border bg-card p-6 sm:p-8">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-mm-red">Storage agreement</p>
@@ -84,8 +127,8 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
           <p className="mt-4 text-sm leading-relaxed text-mist-500">
             This agreement was signed by <strong>{existing.signer_name}</strong> on{" "}
             {prettyDay(existing.signed_at)}. Nothing more to do — any questions, call{" "}
-            <a href="tel:01747637070" className="font-semibold text-mm-red">
-              01747 637070
+            <a href={theme.telHref} className="font-semibold text-mm-red">
+              {theme.phone}
             </a>
             .
           </p>
@@ -114,7 +157,8 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
                   nothing about storage rates, access, or the notice procedure
                   behind the lien clause they are ticking. Now that storage terms
                   are published, point at those. */}
-              This agreement is with MarleyMoves Ltd (Company No. 15914266) under our{" "}
+              This agreement is with {theme.legalEntity} (Company No. 15914266)
+              {theme.groupLine ? `, trading as ${theme.name},` : ""} under our{" "}
               <a
                 href={publicUrlFor("storage-terms")}
                 target="_blank"
@@ -127,18 +171,18 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
             </p>
 
             <div className="mt-6">
-              <StorageAgreementForm token={token} ackList={ackList} />
+              <StorageAgreementForm token={token} ackList={ackList} phone={theme.phone} />
             </div>
           </>
         )}
       </div>
 
       <p className="mt-6 text-center text-xs text-mist-400">
-        Marley Moves Ltd · Company No. 15914266 · Shaftesbury, SP7
+        {theme.legalLine}
         <br />
         Questions? Call{" "}
-        <a href="tel:01747637070" className="font-semibold">
-          01747 637070
+        <a href={theme.telHref} className="font-semibold">
+          {theme.phone}
         </a>
       </p>
     </main>

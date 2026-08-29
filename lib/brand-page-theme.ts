@@ -186,6 +186,22 @@ export function pageTheme(brand?: Brand | null): PageTheme {
 }
 
 /**
+ * The GROUP surface theme — `/sheet` and `/join`, which serve one shared crew
+ * across every brand (PRD §4).
+ *
+ * Exported rather than reached by casting `{ slug: GROUP_BRAND }` to a Brand:
+ * that cast happens to work only because the group branch reads nothing else,
+ * and it would start returning undefined fields the moment that stopped being
+ * true. Identity is the operating company's; the accent is neutral, because a
+ * crew day legitimately spans brands and colouring it as one would claim
+ * something untrue about the other's jobs.
+ */
+export const GROUP_PAGE_THEME: PageTheme = pageTheme({
+  ...MARLEY_THEME,
+  slug: GROUP_BRAND,
+} as unknown as Brand);
+
+/**
  * The page `<title>` for a theme.
  *
  * A free function rather than a field on PageTheme, because the theme is

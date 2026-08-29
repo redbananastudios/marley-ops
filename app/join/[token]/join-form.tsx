@@ -305,7 +305,7 @@ export function JoinForm({ token }: { token: string }) {
         Send my details
       </button>
       <p className="text-center text-xs leading-relaxed text-mist-400">
-        Your details go straight to the Marley Moves office and nowhere else.
+        Your details go straight to our office and nowhere else.
       </p>
     </form>
   );

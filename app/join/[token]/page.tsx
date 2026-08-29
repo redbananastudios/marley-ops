@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { GROUP_PAGE_THEME as theme } from "@/lib/brand-page-theme";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tokensMatch } from "@/lib/staff/onboard-token";
 import { JoinForm } from "./join-form";
@@ -14,7 +15,7 @@ import { JoinForm } from "./join-form";
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Join the Marley Moves crew",
+  title: "Join the crew",
   robots: { index: false, follow: false },
 };
 
@@ -22,19 +23,25 @@ const LOGO_URL = "/logo.png";
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-dvh bg-mist-50 px-4 py-8 sm:py-14">
+    // GROUP surface (PRD §4): one shared crew across every brand, so the accent
+    // is neutralised rather than set to either brand's colour. The form's own
+    // mm-red utilities pick this up without being touched.
+    <main
+      className="min-h-dvh bg-mist-50 px-4 py-8 sm:py-14"
+      style={theme.rootStyle as React.CSSProperties | undefined}
+    >
       <div className="mx-auto w-full max-w-xl">
         <div className="mb-6 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={LOGO_URL} alt="Marley Moves" width={170} className="mx-auto h-auto" />
+          <img src={theme.logoUrl ?? LOGO_URL} alt={theme.name} width={170} className="mx-auto h-auto" />
         </div>
         {children}
         <p className="mt-6 text-center text-xs leading-relaxed text-mist-400">
-          MarleyMoves Ltd · Company No. 15914266 · Shaftesbury, SP7
+          {theme.legalLine}
           <br />
           Questions? Call{" "}
-          <a href="tel:01747637070" className="font-semibold text-ink">
-            01747 637070
+          <a href={theme.telHref} className="font-semibold text-ink">
+            {theme.phone}
           </a>
         </p>
       </div>
@@ -94,7 +101,10 @@ export default async function JoinPage({
     <Shell>
       <Card>
         <div className="p-5 sm:p-8">
-          <p className="eyebrow">Marley Moves crew</p>
+          {/* Group-worded: crew are engaged by the operating company and work
+              every brand's jobs, so naming one brand here would describe the
+              role wrongly to two thirds of the people reading it. */}
+          <p className="eyebrow">Removals crew</p>
           <h1 className="mt-1 font-brand text-3xl font-semibold text-ink">Join the crew</h1>
           <p className="mt-2 text-sm leading-relaxed text-mist-500">
             Fill in your details below. The office checks everything over and

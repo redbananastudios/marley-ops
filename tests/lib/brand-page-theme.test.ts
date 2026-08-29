@@ -236,3 +236,65 @@ describe("/q reads its identity from the theme, not from literals", () => {
     );
   });
 });
+
+describe("every token page reads its identity from the theme", () => {
+  const read = (rel: string) => readFileSync(join(process.cwd(), rel), "utf8");
+
+  // The five public token pages (PRD §4). /q is covered in detail above; these
+  // assert the contract holds across the whole set, because the leak this gate
+  // exists to stop is one page nobody converted rather than one line nobody
+  // changed.
+  const PAGES = [
+    "app/q/[token]/page.tsx",
+    "app/s/[token]/page.tsx",
+    "app/cv/[token]/page.tsx",
+    "app/sheet/[token]/page.tsx",
+    "app/join/[token]/page.tsx",
+  ];
+
+  it.each(PAGES)("%s hardcodes no phone number", (rel) => {
+    expect(read(rel)).not.toContain("01747");
+  });
+
+  it.each(PAGES)("%s hardcodes no brand name", (rel) => {
+    // Comments included, deliberately: a source grep cannot tell a comment from
+    // copy, and the brand-leak scan is right to be strict about it. Comments
+    // here describe the mechanism instead of naming a brand.
+    expect(read(rel)).not.toContain("Marley");
+  });
+
+  it.each(PAGES)("%s applies the accent as a root override", (rel) => {
+    // Not per element: the child components use `hover:`/`focus:` accent
+    // variants that an inline style cannot express.
+    expect(read(rel)).toContain("theme.rootStyle as React.CSSProperties | undefined");
+  });
+
+  it("the two GROUP surfaces take the group theme, not a brand's", () => {
+    // A crew day spans brands by design, so /sheet and /join must not be
+    // coloured or worded as either one.
+    for (const rel of ["app/sheet/[token]/page.tsx", "app/join/[token]/page.tsx"]) {
+      const src = read(rel);
+      expect(src, `${rel} should use the group theme`).toContain("GROUP_PAGE_THEME");
+      expect(src, `${rel} must not resolve a record's brand`).not.toContain("getBrandOrDefault");
+    }
+  });
+
+  it("the two RECORD surfaces resolve the brand of the record they show", () => {
+    // /s from the storage let, /cv from the lead — both carry a brand column
+    // (gates 12 and 1). Reading anything else would show one customer another
+    // customer's brand.
+    expect(read("app/s/[token]/page.tsx")).toContain("getBrandOrDefault(admin, let_.brand)");
+    expect(read("app/cv/[token]/page.tsx")).toContain("getBrandOrDefault(admin, lead.brand)");
+  });
+
+  it("the group theme is a real export, not a cast", () => {
+    // `pageTheme({ slug: GROUP_BRAND } as Brand)` happens to work only because
+    // the group branch reads no other field, and would start returning
+    // undefined the moment that changed.
+    const theme = read("lib/brand-page-theme.ts");
+    expect(theme).toContain("export const GROUP_PAGE_THEME: PageTheme");
+    for (const rel of ["app/sheet/[token]/page.tsx", "app/join/[token]/page.tsx"]) {
+      expect(read(rel), `${rel} still fakes a Brand row`).not.toContain("as Brand)");
+    }
+  });
+});

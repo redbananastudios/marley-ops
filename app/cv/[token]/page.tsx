@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getBusinessSettings } from "@/lib/settings";
 import { sanitizeCubicLines, type CubicLine } from "@/lib/cubic-survey";
 import { CubicBuilder } from "@/components/cubic/cubic-builder";
+import { getBrandOrDefault } from "@/lib/brand";
+import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
 import { submitCubicCustomerAction } from "./actions";
 
 /**
@@ -13,7 +15,24 @@ import { submitCubicCustomerAction } from "./actions";
  */
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { robots: { index: false, follow: false } };
+
+/** Brand-resolved (gate 16) from the LEAD this survey belongs to. */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const admin = createAdminClient();
+  const { data: row } = await admin
+    .from("cubic_surveys")
+    .select("leads(brand)")
+    .eq("share_token", token)
+    .maybeSingle();
+  const brandSlug = (row?.leads as { brand?: string } | null)?.brand ?? null;
+  const theme = pageTheme(brandSlug ? await getBrandOrDefault(admin, brandSlug) : null);
+  return { title: pageTitle(theme, "Your survey"), robots: { index: false, follow: false } };
+}
 
 export default async function CustomerCubicPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -30,18 +49,35 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
   if (!survey) notFound();
 
   const { data: lead } = survey.lead_id
-    ? await admin.from("leads").select("name").eq("id", survey.lead_id).maybeSingle()
+    ? await admin.from("leads").select("name, brand").eq("id", survey.lead_id).maybeSingle()
     : { data: null };
   const firstName = (lead?.name ?? "").trim().split(/\s+/)[0] || "there";
   const lines: CubicLine[] = sanitizeCubicLines(survey.items) ?? [];
   const settings = await getBusinessSettings(admin);
+  // The survey belongs to a LEAD, and the lead carries the brand (PRD §3.2).
+  const theme = pageTheme(lead?.brand ? await getBrandOrDefault(admin, lead.brand) : null);
 
   return (
-    <main className="min-h-screen bg-mist-50">
+    // One override re-points every mm-red utility below — including the 14 in
+    // CubicBuilder, which is SHARED with the office quote builder. The office
+    // side renders outside this element and is therefore untouched.
+    <main className="min-h-screen bg-mist-50" style={theme.rootStyle as React.CSSProperties | undefined}>
       <div className="mx-auto max-w-6xl px-5 pb-12 md:px-8">
         <div className="py-6 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Marley Moves" width={160} className="mx-auto" />
+          {theme.logoUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={theme.logoUrl} alt={theme.name} width={160} className="mx-auto" />
+          ) : (
+            <p
+              className="font-brand text-2xl font-bold tracking-tight"
+              style={{ color: theme.wordmarkColour }}
+            >
+              {theme.name}
+            </p>
+          )}
+          {theme.groupLine ? (
+            <p className="mt-1 text-xs font-medium text-mist-400">{theme.groupLine}</p>
+          ) : null}
           <h1 className="mt-4 font-brand text-3xl font-semibold text-foreground">
             {survey.status === "complete" ? "All done — thank you." : `What's moving, ${firstName}?`}
           </h1>
@@ -49,14 +85,15 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
             <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-mist-500">
               Tap everything you&apos;re taking — rough is fine, we&apos;ll confirm on the day. It helps us bring the
               right size van and crew. Questions? Call{" "}
-              <a href="tel:01747637070" className="font-semibold text-mm-red">
-                01747 637070
+              <a href={theme.telHref} className="font-semibold text-mm-red">
+                {theme.phone}
               </a>
               .
             </p>
           ) : (
             <p className="mx-auto mt-2 max-w-xl text-sm text-mist-500">
-              This survey has been finalised by our team — call us on 01747 637070 if anything has changed.
+              This survey has been finalised by our team — call us on {theme.phone} if anything has
+              changed.
             </p>
           )}
         </div>
@@ -82,7 +119,7 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
         ) : null}
 
         <p className="mt-8 text-center text-xs text-mist-400">
-          Marley Moves Ltd · Company No. 15914266 · Shaftesbury, SP7
+          {theme.legalLine}
         </p>
       </div>
     </main>
