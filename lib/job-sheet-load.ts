@@ -12,6 +12,7 @@ import { likeEscape } from "@/lib/util/like";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { SURVEY_PHOTOS_BUCKET } from "@/lib/survey-photos";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
+import { importedBooking } from "@/lib/legacy";
 import {
   computeCubicTotals,
   groupCubicLinesByRoom,
@@ -224,11 +225,11 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
   }
 
   // Contract flag: accepted quote with no signature row = collect on arrival.
-  // Legacy iMVE jobs signed the old system's paperwork — no Marley contract to
+  // IMPORTED jobs signed the other system's paperwork — no Marley contract to
   // collect, so the sheet stays silent rather than telling the crew to chase one.
   const quoteRow = quote as { id?: string; source?: string } | null;
   const quoteId = quoteRow?.id ?? null;
-  if (quoteId && quoteRow?.source !== "imve") {
+  if (quoteId && !importedBooking(quoteRow?.source ?? null)) {
     const { data: sig } = await admin
       .from("signatures")
       .select("id")

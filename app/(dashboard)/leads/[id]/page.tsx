@@ -25,6 +25,7 @@ import { DateConfirmStatus } from "@/components/quote/date-confirm-status";
 import { CancelBookingButton } from "@/components/bookings/booking-policy-actions";
 import { moveDateLabel } from "@/lib/quote/payments";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
+import { importedBooking } from "@/lib/legacy";
 import {
   CompletionCard,
   ContractSignatureCard,
@@ -174,12 +175,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
   const quoteRows = quotes ?? [];
-  // The comms switch lives on the booking's driving quote: latest accepted imve.
-  const legacyQuote =
-    lead.source_system === "imve"
-      ? (quoteRows.find((q) => q.source === "imve" && q.status === "accepted") ??
-        quoteRows.find((q) => q.source === "imve"))
-      : null;
+  // The comms switch lives on the booking's driving quote: the latest accepted
+  // one from whichever system it was imported from. Keyed on the QUOTE's source
+  // rather than the lead's source_system so the two cannot disagree — and so a
+  // Pitmans booking is reachable here at all, without which its comms lock
+  // would be permanent.
+  const legacyQuote = importedBooking(lead.source_system)
+    ? (quoteRows.find((q) => importedBooking(q.source) && q.status === "accepted") ??
+      quoteRows.find((q) => importedBooking(q.source)))
+    : null;
 
   // The chase-engine driver: the latest SENT quote while "quoted", the latest
   // ACCEPTED quote while chasing the deposit ("provisional"). quoteRows is newest

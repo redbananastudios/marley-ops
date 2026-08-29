@@ -17,6 +17,7 @@ import { isBackwardMove } from "@/lib/leads/funnel";
 import { canDeleteLead, storageLetsBlockingDelete } from "@/lib/leads/deletable";
 import { clientWriteThrough } from "@/lib/leads/shared-client";
 import { normalizePhone } from "@/lib/leads/phone";
+import { importedBooking } from "@/lib/legacy";
 import {
   editLeadSchema,
   newLeadSchema,
@@ -314,8 +315,11 @@ export async function setStandardCommsAction(quoteId: string, enable: boolean) {
     .eq("id", quoteId)
     .single();
   if (!quote) return { ok: false as const, error: "Quote not found" };
-  if (quote.source !== "imve") {
-    return { ok: false as const, error: "Only legacy (iMVE) bookings carry the standard-comms switch." };
+  if (!importedBooking(quote.source)) {
+    return {
+      ok: false as const,
+      error: "Only imported (iMVE / Pitmans) bookings carry the standard-comms switch.",
+    };
   }
   if (enable === !!quote.standard_comms_at) return { ok: true as const };
 

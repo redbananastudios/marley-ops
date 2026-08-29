@@ -75,47 +75,48 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-08-29 - gates 10b AND 16 complete on `gate10b/commercial-office`; staging Zoho token STILL dead)
+## Current State (2026-08-29 - gates 10b + 16 MERGED; gate 20 built, the four importers exist)
 
-Last touched: 2026-08-29 on i9. Gate 10b finished in five tested chunks, then gate 16 (all five
-public token pages) in two. Branch is 22 commits ahead of `staging` with `origin/staging` merged
-in and all four gates re-run on the merged tree. **Not merged - the Zoho blocker is unchanged.**
+Last touched: 2026-08-29 on i9. Merged the flaky-diary-spec fix (#162) and gates 10b + 16 (#161,
+23 commits) to `staging`, then built gate 20 - the four Pitmans CSV importers - in five tested
+chunks on `gate20/pitmans-importers`. Staging was green end to end (including e2e) between the
+two merges, so #161's own run had a clean baseline.
 
-- **BLOCKER (re-tested 2026-08-29, still dead): the staging Zoho refresh token.** `POST
-  accounts.zoho.eu/oauth/v2/token` returns HTTP 200 `{"error":"invalid_code"}`. A NEW DAY DOES NOT
-  FIX THIS - `invalid_code` is a revoked/invalid refresh token, not the 1,000/day rate limit that
-  resets. Re-mint per `scripts/zoho-staging-token.mjs`: sign in as demo@marleymoves.co.uk at
-  api-console.zoho.eu, Self Client -> Generate Code (scope ZohoInvoice.fullaccess.all, 10 min),
-  then run the script with --org 20117092566. Interactive OAuth - Peter's, not the build agent's.
-  NOTE there are TWO credential sets: `.env.local` = the LIVE org (20106952968), `.env.e2e` = the
-  staging org. Only the staging one needs re-minting; do not probe the live one.
-- **Gate 10b (5 chunks):** the commercial quote email + PDF asked for a GBP 100 deposit that exists
-  nowhere in the database (deposit_amount is 0; both `?? 100` fallbacks only defend against null);
-  the office confirm dialog described the residential machine and REFUSED to proceed on 0; the PO
-  column had no writer, reader or field; nothing alarmed when a commercial invoice went unpaid; and
-  no invoice this system raises has ever carried a due date on EITHER ledger rail.
-- **Gate 16 (2 chunks):** all five token pages resolve identity from `lib/brand-page-theme.ts`.
-  Two real leaks found by the leak scan rather than by reading: /q's acceptance form linked a
-  customer to the DEFAULT BRAND's terms page as the document they were signing, and the card copy
-  was gated on the brand flag alone when PRD 11.10 needs global AND brand.
-- **The accent mechanism is one CSS variable, not threaded props.** Tailwind v4 compiles
-  `.text-mm-red` to `color: var(--color-mm-red)` (verified against the built CSS), so re-pointing
-  that token on a page root recolours the whole subtree INCLUDING `hover:`/`focus:` variants, which
-  an inline style cannot express. Every utility class stays as it was, so the default render is
-  byte-identical rather than merely the same colour. All four tokens are overridden together.
-- **This repo is NOT uniformly CRLF.** `lib/ledger/xero-invoices.ts` and several app files are LF.
-  An edit script that assumes one ending silently matches nothing - and one of mine left
-  `app/q/[token]/page.tsx` MIXED (856 CRLF + 8 LF) before it was normalised. Read the file's own
-  endings, edit in LF, write back what was there.
-- **Local e2e is the fast loop.** `commercial-accept.spec.ts` green locally four times across the
-  session. Source both env layers onto the playwright process - `.env.e2e` has no Supabase key.
+- **Staging e2e is green again.** It had been failing on `e2e/estimator/work-quote.spec.ts:252`
+  with "Expected 1, Received 0" quote rows. Cause: `click({ force: true })` skips actionability
+  CHECKS but still clicks a COORDINATE, so an overlapping FullCalendar sibling took the click and
+  a draft was created against SOMEBODY ELSE'S lead. Fixed with `dispatchEvent("click")`, which
+  fires on the node itself. **Measured, not reasoned**: a throwaway probe put six surveys in one
+  identical slot - force opened `slot4` when told `slot3`, dispatch opened `slot3`.
+  A plain local pass proves nothing here; an ordinary local diary is not dense enough to
+  reproduce it, and the old code passed locally too.
+- **Gate 20 is built and locally proven, NOT merged.** `import-pitmans-{bookings,storage,vehicles,staff}.mjs`
+  plus `scripts/lib/import-csv.mjs` (25 unit tests) and four CSV templates + README in
+  `docs/import-templates/`. Every one exercised end to end against LOCAL Supabase: dry run,
+  guards, `--commit`, SQL read-back, re-run idempotency, `--rollback`, and rollback REFUSAL with
+  real records seeded.
+- **The safety seam is `lib/legacy.ts`.** `IMPORTED_SOURCES = ["imve","pitmans"]` now drives
+  `legacyLocked()`, so imported bookings are excluded from chases, commitment invoicing and the
+  T-7 final invoice through ONE predicate rather than six rails. A second predicate,
+  `importedBooking()`, covers crew paperwork and is never lifted. Widening `leads/actions.ts` +
+  `leads/[id]/page.tsx` mattered most: without them the Pitmans comms lock had no key.
+- **Two real bugs found by running the importers, not by reading them.** The storage import
+  created THREE sites called Blandford (the write loop trusted what planning captured instead of
+  the map it had just updated); the same bug was latent for CLIENTS in the bookings importer. A
+  dry run cannot show either - it performs no inserts, so every row legitimately says "would
+  create".
+- **Migration 0114 applied to staging AND local**, runbook appended. Widens the
+  `quotes_source_check` to accept 'pitmans', adds `quotes.legacy_ref` (NOT `imve_ref`, which
+  drives the "Legacy (iMVE)" pill), and `import_batch` on the five tables the importers write.
+- **Local e2e is the fast loop, and 3016 was already mine.** Next refuses a second dev server for
+  the same directory, so check `.next/dev` before allocating a port.
 
-**Open decisions:** `clients.payment_terms_days` now has two readers (removals + storage).
-**Blockers:** the staging Zoho token. **Next:** re-mint, merge PR #161 alone and wait for its
-staging e2e run before anything else, then gate 20 (importers - only import-imve.mjs and
-import-neon-quotes.mjs exist; the four Pitmans CSV importers do not). Gate 15 stays BLOCKED on
-Mark's document; gate 22 is the designated drop. Gate 16's RENDERED-page leak check (the Playwright
-half) is still outstanding and the scan's own header says so. Import CSV
-`jobs-imve-2026-08-13.csv` stays untracked (PII).
+**Open decisions:** none new. **Blockers:** the staging Zoho refresh token is STILL dead
+(`invalid_code` = revoked, not the daily rate limit - a new day does not fix it); re-mint per
+`scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk, org 20117092566. `.env.local` is the
+LIVE org - do not touch it. **Next:** open the gate-20 PR, and note gate 16's RENDERED-page leak
+check (the Playwright half) is still outstanding - the scan's success line now says so outright
+rather than implying it shipped. Gate 15 stays BLOCKED on Mark's terms document; gate 22 is the
+designated drop. That leaves gate 20 as the last buildable gate.
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._

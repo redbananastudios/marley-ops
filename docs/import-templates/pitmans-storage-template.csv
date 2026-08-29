@@ -1,0 +1,4 @@
+site_name,site_address,unit_code,unit_name,unit_type,size_cuft,customer_name,email,phone,is_company,payment_terms_days,start_date,end_date,rate,rate_period,billing_model,min_days,min_amount,billing_paused,notes
+Blandford,"Uplands Business Park, Blandford Heights, DT11 7UZ",C-14,Container 14,container_20ft,1150,Helen Prowse,helen.prowse@example.com,07700900801,n,,2026-03-02,,22.50,week,period,,,y,Whole-house store while building work finishes
+Blandford,"Uplands Business Park, Blandford Heights, DT11 7UZ",C-15,Container 15,container_20ft,1150,Bridport Interiors Ltd,accounts@bridportinteriors.example,01308900802,y,30,2025-11-17,,95.00,month,period,,,y,Stock overflow - invoiced monthly on account
+Blandford,"Uplands Business Park, Blandford Heights, DT11 7UZ",CR-08,Crate bay 8,crate_250,250,Alan Wickens,,07700900803,n,,2026-06-09,2026-08-15,3.20,day,crate_daily,14,44.80,y,Closed - kept for the billing history

@@ -5,6 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { fetchWebsiteFunnel } from "@/lib/posthog";
 import { fetchAdSpend } from "@/lib/google-ads";
+import { IMPORTED_SOURCES_SQL } from "@/lib/legacy";
 import {
   buildBrandKpiSplits,
   buildPeriodStats,
@@ -162,7 +163,7 @@ async function DashboardContent({
         .from("quotes")
         .select("id")
         .eq("status", "accepted")
-        .neq("source", "imve")
+        .not("source", "in", IMPORTED_SOURCES_SQL)
         .is("booking_cancelled_at", null),
       supabase.from("signatures").select("quote_id").eq("kind", "contract"),
     ]),

@@ -3131,6 +3131,7 @@ export type Database = {
           imve_ref: string | null
           imve_zoho_invoice_number: string | null
           lead_id: string | null
+          legacy_ref: string | null
           moving_date: string | null
           moving_date_estimated: boolean
           packing: string | null
@@ -3213,6 +3214,7 @@ export type Database = {
           imve_ref?: string | null
           imve_zoho_invoice_number?: string | null
           lead_id?: string | null
+          legacy_ref?: string | null
           moving_date?: string | null
           moving_date_estimated?: boolean
           packing?: string | null
@@ -3295,6 +3297,7 @@ export type Database = {
           imve_ref?: string | null
           imve_zoho_invoice_number?: string | null
           lead_id?: string | null
+          legacy_ref?: string | null
           moving_date?: string | null
           moving_date_estimated?: boolean
           packing?: string | null
@@ -3597,6 +3600,7 @@ export type Database = {
           emergency_contact_phone: string | null
           full_name: string
           id: string
+          import_batch: string | null
           is_active: boolean
           is_driver: boolean
           notes: string | null
@@ -3616,6 +3620,7 @@ export type Database = {
           emergency_contact_phone?: string | null
           full_name: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           is_driver?: boolean
           notes?: string | null
@@ -3635,6 +3640,7 @@ export type Database = {
           emergency_contact_phone?: string | null
           full_name?: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           is_driver?: boolean
           notes?: string | null
@@ -4167,6 +4173,7 @@ export type Database = {
           created_at: string
           end_date: string | null
           id: string
+          import_batch: string | null
           lead_id: string | null
           min_amount: number | null
           min_days: number | null
@@ -4186,6 +4193,7 @@ export type Database = {
           created_at?: string
           end_date?: string | null
           id?: string
+          import_batch?: string | null
           lead_id?: string | null
           min_amount?: number | null
           min_days?: number | null
@@ -4205,6 +4213,7 @@ export type Database = {
           created_at?: string
           end_date?: string | null
           id?: string
+          import_batch?: string | null
           lead_id?: string | null
           min_amount?: number | null
           min_days?: number | null
@@ -4253,6 +4262,7 @@ export type Database = {
           brand: string
           created_at: string
           id: string
+          import_batch: string | null
           is_active: boolean
           name: string
           notes: string | null
@@ -4263,6 +4273,7 @@ export type Database = {
           brand?: string
           created_at?: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           name: string
           notes?: string | null
@@ -4273,6 +4284,7 @@ export type Database = {
           brand?: string
           created_at?: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           name?: string
           notes?: string | null
@@ -4311,6 +4323,7 @@ export type Database = {
           code: string
           created_at: string
           id: string
+          import_batch: string | null
           is_active: boolean
           name: string
           notes: string | null
@@ -4323,6 +4336,7 @@ export type Database = {
           code?: string
           created_at?: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           name?: string
           notes?: string | null
@@ -4335,6 +4349,7 @@ export type Database = {
           code?: string
           created_at?: string
           id?: string
+          import_batch?: string | null
           is_active?: boolean
           name?: string
           notes?: string | null
@@ -4546,6 +4561,7 @@ export type Database = {
           created_at: string
           end_of_term: string | null
           id: string
+          import_batch: string | null
           insurance_renewal: string | null
           is_active: boolean
           last_service: string | null
@@ -4565,6 +4581,7 @@ export type Database = {
           created_at?: string
           end_of_term?: string | null
           id?: string
+          import_batch?: string | null
           insurance_renewal?: string | null
           is_active?: boolean
           last_service?: string | null
@@ -4584,6 +4601,7 @@ export type Database = {
           created_at?: string
           end_of_term?: string | null
           id?: string
+          import_batch?: string | null
           insurance_renewal?: string | null
           is_active?: boolean
           last_service?: string | null

@@ -1,0 +1,5 @@
+full_name,staff_role,is_driver,phone,email,day_rate,working_days,date_of_birth,address,emergency_contact_name,emergency_contact_phone,is_active,notes
+Mark Pitman,admin,n,01258858564,mark@pitmansremovals.example,,12345,,"Uplands Business Park, Blandford Forum",,,y,Owner - office
+Trevor Gillard,driver,y,07700900701,,145.00,12345,1979-04-11,"Blandford Forum",Susan Gillard,07700900702,y,HGV licence
+Ryan Beale,crew,n,07700900703,,120.00,12345,1998-09-02,"Shaftesbury",Marie Beale,07700900704,y,
+Kelly Marsh,crew,n,07700900705,kelly.marsh@example.com,120.00,1234,,,,,y,Part-time - Mon to Thu
