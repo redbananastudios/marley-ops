@@ -65,6 +65,20 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
+import {
+  fetchAllRows,
+  headerReader,
+  isoDate,
+  money,
+  normEmail,
+  normMethod,
+  parseCsv,
+  phoneDigits,
+  TARGET_LABEL,
+  targetKind,
+  ukTime,
+  yes,
+} from "./lib/import-csv.mjs";
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -94,16 +108,12 @@ const csvPath = args.find((a) => !a.startsWith("--") && a !== rollbackBatch && a
 // requires --prod to write to a dev database, which makes the one flag that
 // guards production a thing you type routinely. A guard used every day stops
 // being read.
-const target = new URL(url);
-const looksHosted = /\.supabase\.co$/i.test(target.hostname);
-const looksLocal =
-  target.port === "54321" || ["localhost", "127.0.0.1", "::1"].includes(target.hostname);
-if (commit && !looksHosted && !looksLocal && !prodOk) {
+const kindOfTarget = targetKind(url);
+if (commit && kindOfTarget === "prod" && !prodOk) {
   console.error(`Target ${url} is NOT the hosted staging project or a local Supabase — pass --prod if you really mean production.`);
   process.exit(1);
 }
-const where = looksHosted ? "staging/hosted" : looksLocal ? "LOCAL dev" : "SELF-HOSTED — prod?";
-console.log(`target: ${url}  (${where})  mode: ${commit ? "COMMIT" : "dry-run"}`);
+console.log(`target: ${url}  (${TARGET_LABEL[kindOfTarget]})  mode: ${commit ? "COMMIT" : "dry-run"}`);
 
 const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
 const die = (msg) => {
@@ -113,62 +123,6 @@ const die = (msg) => {
 
 /* ------------------------------------------------------------------ helpers */
 
-function parseCsv(text) {
-  const rows = [];
-  let row = [], field = "", inQ = false;
-  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text; // strip UTF-8 BOM (Excel exports)
-  for (let i = 0; i < src.length; i++) {
-    const c = src[i];
-    if (inQ) {
-      if (c === '"') {
-        if (src[i + 1] === '"') { field += '"'; i++; }
-        else inQ = false;
-      } else field += c;
-    } else if (c === '"') inQ = true;
-    else if (c === ",") { row.push(field); field = ""; }
-    else if (c === "\n" || c === "\r") {
-      if (c === "\r" && src[i + 1] === "\n") i++;
-      row.push(field); field = "";
-      if (row.some((f) => f.trim() !== "")) rows.push(row);
-      row = [];
-    } else field += c;
-  }
-  if (field !== "" || row.length) { row.push(field); if (row.some((f) => f.trim() !== "")) rows.push(row); }
-  return rows;
-}
-
-const yes = (v) => /^(y|yes|true|1|paid)$/i.test(String(v ?? "").trim());
-const money = (v) => {
-  const n = Number(String(v ?? "").replace(/[£,\s]/g, ""));
-  return Number.isFinite(n) ? Math.round(n * 100) / 100 : null;
-};
-function isoDate(v) {
-  const s = String(v ?? "").trim();
-  if (!s) return null;
-  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // UK d/m/Y
-  if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
-  return null;
-}
-/** ISO timestamp for HH:00 UK-local on a date (handles GMT/BST). */
-function ukTime(dateStr, hour) {
-  const guess = new Date(`${dateStr}T${String(hour).padStart(2, "0")}:00:00Z`);
-  const ukHour = Number(
-    new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }).format(guess),
-  );
-  return new Date(guess.getTime() - (ukHour - hour) * 3600_000).toISOString();
-}
-const normEmail = (v) => String(v ?? "").trim().toLowerCase() || null;
-const phoneDigits = (v) => String(v ?? "").replace(/\D/g, "").replace(/^44/, "0");
-function normMethod(v) {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (!s) return null;
-  if (/bank|bacs|transfer/.test(s)) return "bank_transfer";
-  if (/card/.test(s)) return "card";
-  if (/cash/.test(s)) return "cash";
-  return null;
-}
 const VEHICLES = new Set(["transit", "1luton", "2luton", "3luton", "4luton", "5luton"]);
 const TERMS_DAYS = new Set([30, 60]);
 
@@ -268,11 +222,7 @@ if (!brandRow.active) {
 
 const rows = parseCsv(readFileSync(csvPath, "utf8"));
 if (rows.length < 2) die("CSV needs a header row + at least one data row.");
-const header = rows[0].map((h) => h.trim().toLowerCase().replace(/\s+/g, "_"));
-const col = (row, name) => {
-  const i = header.indexOf(name);
-  return i >= 0 ? String(row[i] ?? "").trim() : "";
-};
+const { col } = headerReader(rows[0]);
 
 const errors = [];
 const jobs = rows.slice(1).map((r, idx) => {
@@ -351,17 +301,9 @@ if (errors.length) die(`CSV problems — nothing imported:\n  - ${errors.join("\
 // Existing state: prior pitmans imports for idempotent re-runs, clients for
 // matching. PostgREST caps a plain select at 1,000 rows (PGRST_DB_MAX_ROWS) —
 // page everything, or a re-run against a grown table would duplicate clients.
-async function fetchAll(build) {
-  const out = [];
-  for (let from = 0; ; from += 1000) {
-    const { data, error } = await build().range(from, from + 999);
-    if (error) die(error.message);
-    out.push(...(data ?? []));
-    if (!data || data.length < 1000) return out;
-  }
-}
-const existingQuotes = await fetchAll(() =>
-  sb.from("quotes").select("quote_ref, legacy_ref, source").order("id"),
+const existingQuotes = await fetchAllRows(
+  () => sb.from("quotes").select("quote_ref, legacy_ref, source").order("id"),
+  die,
 );
 // Idempotency is per-ref OCCURRENCE, deliberately ignoring dates: a reschedule
 // moves quotes.moving_date, so a date-keyed re-run would re-import the same job
@@ -372,8 +314,9 @@ for (const q of existingQuotes) {
   if (q.source === BRAND && q.legacy_ref)
     importedCountByRef.set(q.legacy_ref, (importedCountByRef.get(q.legacy_ref) ?? 0) + 1);
 }
-const clients = await fetchAll(() =>
-  sb.from("clients").select("id, display_name, email, phone_raw, phone_e164, is_company").order("id"),
+const clients = await fetchAllRows(
+  () => sb.from("clients").select("id, display_name, email, phone_raw, phone_e164, is_company").order("id"),
+  die,
 );
 
 const findClient = (job) => {
