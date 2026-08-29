@@ -347,6 +347,26 @@ export const MANIFEST = [
   // "I could not check" must never render as "nothing to report"). Whoever
   // de-brands those surfaces adds the entries in the SAME change and deletes
   // this block — do not add them earlier to make the manifest look complete.
+
+  // Gate 16: the customer accept page. Identity now comes entirely from
+  // `pageTheme` — logo, name, phone, terms link, legal line, the accent (one
+  // CSS-variable override on the shell, so the mm-red utility CLASSES below
+  // are re-pointed rather than replaced) and whether card is mentioned at all.
+  //
+  // The mm-red allow is therefore not chrome in the §2 sense: these are record
+  // surfaces whose token is re-pointed per brand at runtime, which a source
+  // grep cannot see. That is exactly the gap the RENDERED half of this scan
+  // exists to close, and it is why the class names stay — replacing them with
+  // inline styles would lose every `hover:`/`focus:` accent variant.
+  //
+  // Domains, phone numbers, mailboxes and Connor stay forbidden here, and the
+  // page carries none of them any more.
+  {
+    pattern: "app/q/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the shell (gate 16); no hardcoded name, phone, domain or named individual remains",
+  },
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);

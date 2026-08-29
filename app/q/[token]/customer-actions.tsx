@@ -22,7 +22,7 @@ const REASONS = [
   { value: "other", label: "Something else" },
 ];
 
-export function DeclineOption({ token }: { token: string }) {
+export function DeclineOption({ token, phone }: { token: string; phone: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -39,7 +39,7 @@ export function DeclineOption({ token }: { token: string }) {
     }
     startTransition(async () => {
       const res = await declineQuoteAction(token, reason, note.trim() || undefined);
-      if (!res.ok) setError(res.error ?? "Something went wrong — please call 01747 637070.");
+      if (!res.ok) setError(res.error ?? `Something went wrong — please call ${phone}.`);
       else router.refresh(); // server re-renders into the "thanks for telling us" view
     });
   }
@@ -113,7 +113,7 @@ export function DeclineOption({ token }: { token: string }) {
   );
 }
 
-export function DepositSentButton({ token }: { token: string }) {
+export function DepositSentButton({ token, phone }: { token: string; phone: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -122,7 +122,7 @@ export function DepositSentButton({ token }: { token: string }) {
     setError(null);
     startTransition(async () => {
       const res = await reportDepositSentAction(token);
-      if (!res.ok) setError(res.error ?? "Something went wrong — please call 01747 637070.");
+      if (!res.ok) setError(res.error ?? `Something went wrong — please call ${phone}.`);
       else router.refresh();
     });
   }
