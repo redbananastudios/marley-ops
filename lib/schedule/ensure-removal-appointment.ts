@@ -22,6 +22,7 @@ import type { Database } from "@/lib/supabase/database.types";
 import { DEFAULT_BRAND } from "@/lib/brand";
 import { ukInstant } from "@/lib/uk-time";
 import { log } from "@/lib/log";
+import { importedBooking } from "@/lib/legacy";
 
 type Sb = SupabaseClient<Database>;
 
@@ -54,7 +55,7 @@ export async function ensureRemovalAppointment(
 ): Promise<EnsureRemovalResult> {
   try {
     if (!quote.lead_id) return { created: false, reason: "no_lead" };
-    if (quote.source === "imve") return { created: false, reason: "legacy" };
+    if (importedBooking(quote.source ?? null)) return { created: false, reason: "legacy" };
 
     const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(quote.moving_date ?? "");
     if (!day) return { created: false, reason: "no_date" };

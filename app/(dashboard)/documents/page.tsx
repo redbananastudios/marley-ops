@@ -4,6 +4,7 @@ import { FileDown, FileText, PenLine, ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { JOB_DOCS_BUCKET, signatureActionLabel } from "@/lib/signatures";
+import { IMPORTED_SOURCES_SQL } from "@/lib/legacy";
 import {
   DocumentKindPill,
   toDocumentKind,
@@ -154,7 +155,7 @@ export default async function DocumentsPage({
         .from("quotes")
         .select("id, quote_ref, customer_name, lead_id, client_id, moving_date, deposit_paid_at, status")
         .eq("status", "accepted")
-        .neq("source", "imve")
+        .not("source", "in", IMPORTED_SOURCES_SQL)
         .is("booking_cancelled_at", null),
       brandFilter,
     )

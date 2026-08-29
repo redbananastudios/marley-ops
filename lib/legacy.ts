@@ -38,6 +38,15 @@ export interface LegacyLockFields {
 export const IMPORTED_SOURCES = ["imve", "pitmans"] as const;
 
 /**
+ * The same list as a PostgREST `in` value, for the two queries that must
+ * exclude imported bookings in the DATABASE rather than after the read:
+ * `.not("source", "in", IMPORTED_SOURCES_SQL)`. Derived from the array above
+ * so the two can never drift - which matters, because a stale literal here
+ * fails open, telling the crew to collect a contract that does not exist.
+ */
+export const IMPORTED_SOURCES_SQL = `(${IMPORTED_SOURCES.join(",")})`;
+
+/**
  * True when a booking came from another system's books at all.
  *
  * Unlike legacyLocked this is NEVER lifted: standard_comms_at says a human has

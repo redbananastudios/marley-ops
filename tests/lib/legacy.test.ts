@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { IMPORTED_SOURCES, importedBooking, legacyLocked } from "@/lib/legacy";
+import { IMPORTED_SOURCES, IMPORTED_SOURCES_SQL, importedBooking, legacyLocked } from "@/lib/legacy";
 
 describe("legacyLocked", () => {
   it("locks an imve quote with no standard-comms stamp", () => {
@@ -60,5 +60,25 @@ describe("importedBooking", () => {
     const stamped = { source: "pitmans", standard_comms_at: "2026-09-22T09:00:00Z" };
     expect(legacyLocked(stamped)).toBe(false);
     expect(importedBooking(stamped.source)).toBe(true);
+  });
+});
+
+describe("IMPORTED_SOURCES_SQL", () => {
+  it("is a PostgREST in-list of exactly the imported sources", () => {
+    expect(IMPORTED_SOURCES_SQL).toBe("(imve,pitmans)");
+  });
+
+  // The two DB-side exclusions (the documents Unsigned tab, the dashboard
+  // unsigned-contracts tile) filter with this string rather than the predicate,
+  // because they must exclude in the query rather than after a capped read. A
+  // literal that drifted from the array would fail OPEN - telling the crew to
+  // collect a contract that does not exist - so it is derived, and this asserts
+  // the derivation rather than the current value alone.
+  it("names every imported source, so it cannot drift from the predicate", () => {
+    for (const source of IMPORTED_SOURCES) {
+      expect(IMPORTED_SOURCES_SQL).toContain(source);
+      expect(importedBooking(source)).toBe(true);
+    }
+    expect(IMPORTED_SOURCES_SQL.split(",").length).toBe(IMPORTED_SOURCES.length);
   });
 });

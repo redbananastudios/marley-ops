@@ -10,6 +10,7 @@ import { listActiveBrands } from "@/lib/brand";
 import { parseBrandParam } from "@/lib/brand-filter";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
+import { importedBooking } from "@/lib/legacy";
 import {
   ScheduleAllocationView,
   type AvailAppt,
@@ -192,9 +193,12 @@ export default async function SchedulePage({
   const sigNeededByLead = new Map<string, boolean>();
   for (const q of quotes) {
     if (!q.lead_id || sigNeededByLead.has(q.lead_id)) continue;
-    // Legacy iMVE jobs signed the old system's paperwork — never nag the crew
+    // Imported jobs signed the other system's paperwork — never nag the crew
     // to collect a Marley contract that was never part of their deal.
-    sigNeededByLead.set(q.lead_id, q.source === "imve" ? false : !signedQuoteIds.has(q.id));
+    sigNeededByLead.set(
+      q.lead_id,
+      importedBooking(q.source ?? null) ? false : !signedQuoteIds.has(q.id),
+    );
   }
 
   // Crew assigned per appointment — a pack day's demand follows its allocation
