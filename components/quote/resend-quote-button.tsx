@@ -30,6 +30,7 @@ export function ResendQuoteButton({
   depositAmount,
   acceptUrl,
   brand,
+  paymentPolicy,
   open: openProp,
   onOpenChange,
 }: {
@@ -50,6 +51,10 @@ export function ResendQuoteButton({
    *  can both compose the branded email and derive the slim DocBrand its
    *  doc-def needs (docBrandFrom returns null for the default brand). */
   brand?: Brand | null;
+  /** Which ladder this quote runs (PRD §3.10). A RE-SEND is the likeliest place
+   *  for this to be forgotten — the customer asked for the quote again, and the
+   *  second copy must say what the first one did. Absent means residential. */
+  paymentPolicy?: "residential" | "commercial";
   /** Controlled mode: when `open`/`onOpenChange` are supplied the built-in
    *  trigger is suppressed and the dialog is driven from outside (the quote
    *  header opens it from its "⋯ More" overflow menu). */
@@ -90,6 +95,7 @@ export function ResendQuoteButton({
         vatNumber={vatNumber}
         depositAmount={depositAmount}
         acceptUrl={acceptUrl}
+        paymentPolicy={paymentPolicy}
         resend
         onSent={() => router.refresh()}
       />

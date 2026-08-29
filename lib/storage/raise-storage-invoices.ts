@@ -17,6 +17,7 @@ import {
   type StorageInvoiceEmailInput,
 } from "@/lib/comms/storage-invoice-email";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
+import { paymentTermsDays, paymentTermsDueDate, resolvePaymentPolicy } from "@/lib/payments-policy";
 import { UNIT_TYPES } from "@/lib/storage-units";
 
 /**
@@ -301,11 +302,23 @@ export async function raiseDueStorageInvoices(
     if (unitsRes.error) throw new Error(`storage_units read failed: ${unitsRes.error.message}`);
     if (sitesRes.error) throw new Error(`storage_sites read failed: ${sitesRes.error.message}`);
     // Clients in chunks of 100 ids — same URL-length ceiling as above.
-    const clients: { id: string; display_name: string | null; email: string | null; phone_e164: string | null; phone_raw: string | null }[] = [];
+    const clients: {
+      id: string;
+      display_name: string | null;
+      email: string | null;
+      phone_e164: string | null;
+      phone_raw: string | null;
+      is_company: boolean | null;
+      payment_terms_days: number | null;
+    }[] = [];
     for (let i = 0; i < clientIds.length; i += 100) {
       const { data, error } = await admin
         .from("clients")
-        .select("id, display_name, email, phone_e164, phone_raw")
+        // is_company + payment_terms_days: a COMPANY storage client is billed on
+        // their agreed terms exactly like their removals are (PRD §3.10 — the
+        // terms "apply to removals and storage invoices alike"). Reading them
+        // here costs nothing: this select already runs once per billing pass.
+        .select("id, display_name, email, phone_e164, phone_raw, is_company, payment_terms_days")
         .in("id", clientIds.slice(i, i + 100));
       if (error) throw new Error(`clients read failed: ${error.message}`);
       clients.push(...(data ?? []));
@@ -421,6 +434,20 @@ export async function raiseDueStorageInvoices(
             // KEY is always sound, which is exactly the point of keying on an id.
             party: { kind: "client", id: let_.client_id },
           });
+          // A COMPANY storage client is billed on the terms they agreed, the
+          // same as their removals (PRD §3.10). A residential let passes
+          // nothing and keeps the provider's default — storage billing is
+          // otherwise untouched, cycle included.
+          //
+          // Resolved through the SAME helpers the removals ladder uses, so the
+          // two cannot answer "what are this client's terms" differently:
+          // `resolvePaymentPolicy` decides commercial-ness, `paymentTermsDays`
+          // coerces a legacy null onto the allowed set, and
+          // `paymentTermsDueDate` does the UK-day arithmetic.
+          const storageDueDate =
+            resolvePaymentPolicy(client) === "commercial"
+              ? paymentTermsDueDate(new Date(), paymentTermsDays(client?.payment_terms_days))
+              : null;
           ref = await createInvoice({
             customerId: contactId,
             reference,
@@ -429,6 +456,7 @@ export async function raiseDueStorageInvoices(
             notes: NOTES[inv.kind],
             disableOnlinePayments: true, // card policy: deposit only
             itemName: "Storage", // income separation (accountant maps by item)
+            ...(storageDueDate ? { dueDate: storageDueDate } : {}),
           });
         }
         // The write-back is VERIFIED. On failure the Zoho invoice EXISTS, so

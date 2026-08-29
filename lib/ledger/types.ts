@@ -22,7 +22,9 @@
  * two documented gaps, handled in the Xero adapter rather than faked here:
  *  - `viewed` is unreachable under Xero (it has only a SentToContact boolean,
  *    which means something else). The /finance "Viewed" pill simply never shows.
- *  - `overdue` is derived from DueDate, which `createInvoice` does not yet set.
+ *  - `overdue` is derived from DueDate, which `createInvoice` sets only when a
+ *    caller passes one (gate 10b — the commercial ladder does; residential
+ *    leaves the provider default, exactly as before).
  */
 export type LedgerInvoiceStatusValue =
   | "draft"
@@ -146,6 +148,20 @@ export interface CreateInvoiceInput {
    *  invoices pass "Storage" so storage income never mixes with Removals
    *  Income (standing policy 2026-07-22). */
   itemName?: string;
+  /**
+   * When the invoice falls due, `YYYY-MM-DD` (UK calendar day). Omitted leaves
+   * the provider's own default, which is what every invoice raised before gate
+   * 10b carried — so residential is untouched.
+   *
+   * This exists for the COMMERCIAL ladder (PRD §3.10), where the due date is
+   * the whole substance of "on the client's agreed terms". Without it that date
+   * lived only in `quotes.commercial_due_date`, driving our own /bookings
+   * overdue state, while the document actually sent to the client's accounts
+   * department carried no due date at all — so the one party who has to act on
+   * the terms could not see them, and the provider's own `overdue` status could
+   * never fire either (see LedgerInvoiceStatusValue above).
+   */
+  dueDate?: string;
 }
 
 export interface CreateCreditNoteInput {

@@ -7,6 +7,7 @@ import {
   ensureDepositInvoice,
   fetchQuoteByToken,
   isRealZohoId,
+  snapshotPaymentPolicy,
   syncZohoPayments,
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
@@ -16,31 +17,56 @@ import { payInFullAvailable } from "@/lib/payments/pay-in-full";
 import { getBusinessSettings } from "@/lib/settings";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
+import { getBrandOrDefault } from "@/lib/brand";
+import { pageTheme, pageTitle, type PageTheme } from "@/lib/brand-page-theme";
 import { DateConfirmCard } from "@/components/quote/date-confirm-card";
 import { CommitmentChoice } from "@/components/quote/commitment-choice";
 import { AcceptForm } from "./accept-form";
 import { DeclineOption, DepositSentButton } from "./customer-actions";
 import { PayCardButton } from "./pay-card-button";
 
-const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
-
 /**
  * PUBLIC customer page — linked from the quote email CTA, the PDF QR codes and
  * SMS. One URL for the whole journey: accept → pay deposit → confirmed.
  * The unguessable token is the credential; anything else 404-shapes to the
  * friendly not-found card. Never indexed.
+ *
+ * Brand (multi-brand PRD §4, gate 16): every piece of identity on this page —
+ * logo, name, phone, terms link, accent, and whether the word "card" appears at
+ * all — comes from `pageTheme`, resolved ONCE from the quote's own brand before
+ * any branch renders. It used to be hardcoded, and at some volume: the default
+ * brand's phone number alone appeared twelve times, across the not-found, declined,
+ * cancelled, expired, failed-card, error-card, balance and footer states. A
+ * per-state literal is a per-state chance to miss one, and the state a customer
+ * lands in is not the state anyone tests first.
  */
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Your quote — Marley Moves",
-  robots: { index: false, follow: false },
-};
-
-// Local asset — these pages used to pull the logo from the separate quotes-app
-// domain; serve it from this app so the customer surface has no cross-app dep.
-const LOGO_URL = "/logo.png";
+/**
+ * The tab title is identity too. A customer of one brand whose browser tab
+ * names a different one has been told something wrong before the page even
+ * paints, and
+ * it is the one string that survives into a shared link preview.
+ *
+ * Its own read: metadata is resolved separately from the page body by Next, so
+ * there is no resolved theme to borrow here. One small extra read on a public
+ * page that is already `force-dynamic`.
+ */
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ token: string }>;
+}): Promise<Metadata> {
+  const { token } = await params;
+  const sb = createAdminClient();
+  const quote = await fetchQuoteByToken(sb, token);
+  const theme = pageTheme(quote ? await getBrandOrDefault(sb, quote.brand) : null);
+  return {
+    title: pageTitle(theme, "Your quote"),
+    robots: { index: false, follow: false },
+  };
+}
 
 const gbp = (n: number): string =>
   "£" +
@@ -54,21 +80,49 @@ function firstLine(addr: string | null): string {
   return addr.split(",")[0].trim() || "—";
 }
 
-function Shell({ children }: { children: React.ReactNode }) {
+function Shell({ theme, children }: { theme: PageTheme; children: React.ReactNode }) {
+  // One override, whole subtree. Tailwind v4 compiles the mm-red utilities to
+  // `var(--color-mm-red)`, so re-pointing the token on this element recolours
+  // every descendant that uses it — including the hover and focus variants
+  // inside the child components, which an inline style cannot reach at all.
+  // Undefined for the default brand: no style attribute, and every class below
+  // stays exactly as it was.
   return (
-    <main className="min-h-dvh bg-mist-50 px-4 py-8 sm:py-14">
+    <main
+      className="min-h-dvh bg-mist-50 px-4 py-8 sm:py-14"
+      style={theme.rootStyle as React.CSSProperties | undefined}
+    >
       <div className="mx-auto w-full max-w-xl">
         <div className="mb-6 text-center">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={LOGO_URL} alt="Marley Moves" width={170} className="mx-auto h-auto" />
+          {theme.logoUrl ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={theme.logoUrl} alt={theme.name} width={170} className="mx-auto h-auto" />
+          ) : (
+            /* A brand whose logo asset has not landed yet renders its NAME.
+               Falling back to the default brand's /logo.png would put the wrong
+               logo on another brand's page — the one answer worse than none. */
+            <span
+              className="font-brand text-2xl font-bold tracking-tight"
+              style={{ color: theme.wordmarkColour }}
+            >
+              {theme.name}
+            </span>
+          )}
+          {/* PRD §2: the group mark appears wherever a non-default brand's logo
+              does, so a customer is not surprised by the operating company's
+              bank account, or by a vehicle in another livery on the day. Empty
+              for the default brand, which IS the group. */}
+          {theme.groupLine ? (
+            <p className="mt-2 text-xs font-medium text-mist-400">{theme.groupLine}</p>
+          ) : null}
         </div>
         {children}
         <p className="mt-6 text-center text-xs leading-relaxed text-mist-400">
-          Marley Moves Ltd · Company No. 15914266 · Shaftesbury, SP7
+          {theme.legalLine}
           <br />
           Questions? Call{" "}
-          <a href="tel:01747637070" className="font-semibold text-ink">
-            01747 637070
+          <a href={theme.telHref} className="font-semibold text-ink">
+            {theme.phone}
           </a>
         </p>
       </div>
@@ -84,9 +138,11 @@ function Card({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NotFoundCard() {
+/** No quote resolved, so there is no brand to read — the default theme is the
+ *  honest answer, and the only one available. */
+function NotFoundCard({ theme }: { theme: PageTheme }) {
   return (
-    <Shell>
+    <Shell theme={theme}>
       <Card>
         <div className="p-6 text-center sm:p-8">
           <h1 className="font-brand text-3xl font-semibold text-ink">
@@ -94,7 +150,7 @@ function NotFoundCard() {
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-mist-500">
             This link is no longer valid. If you were expecting to see your removal quote, call us
-            on <strong className="text-ink">01747 637070</strong> and we&apos;ll sort it straight
+            on <strong className="text-ink">{theme.phone}</strong> and we&apos;ll sort it straight
             away.
           </p>
         </div>
@@ -125,7 +181,7 @@ function SummaryRows({ quote }: { quote: AcceptQuoteRow }) {
   );
 }
 
-function BankPanel({ reference }: { reference: string }) {
+function BankPanel({ reference, theme }: { reference: string; theme: PageTheme }) {
   const row = (l: string, v: string, red = false) => (
     <div className="flex items-baseline justify-between gap-4 py-2">
       <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-mist-400">
@@ -145,6 +201,20 @@ function BankPanel({ reference }: { reference: string }) {
         {row("Account number", BANK_DETAILS.account)}
         {row("Reference", reference, true)}
       </div>
+      {/* PRD §3.5 disclosure, placed HERE rather than in a footer: the account
+          name says MARLEYMOVES LTD, and the surprise happens at the moment the
+          customer reads it. One shared bank account for both brands is the
+          deliberate design (§2) — this is the sentence that makes it make
+          sense. The default brand renders nothing extra; it IS the operating
+          company. */}
+      {theme.groupLine ? (
+        <p className="mt-2 text-xs leading-relaxed text-mist-500">
+          {theme.name} is part of {theme.legalEntity}, so your payment goes to the{" "}
+          <strong className="text-ink">{BANK_DETAILS.name}</strong> account above. Please use
+          reference <strong className="text-ink">{reference}</strong> so we can match it to your
+          booking.
+        </p>
+      ) : null}
       <p className="mt-2 text-xs leading-relaxed text-mist-400">
         Please use the reference exactly as shown so we can match your payment. We&apos;ll email
         your confirmation as soon as it lands.
@@ -165,16 +235,25 @@ export default async function AcceptPage({
   const sb = createAdminClient();
   let quote = await fetchQuoteByToken(sb, token);
 
+  // Resolved ONCE, before any branch renders, from the quote's own brand. Every
+  // state below — declined, cancelled, expired, card-failed, the accept screen
+  // itself — speaks as the same brand because they all read this one value. The
+  // alternative, resolving per branch, is how one state keeps the old literal.
+  //
+  // No quote means no brand to read: the default theme is the only answer
+  // available and the honest one.
+  const theme = pageTheme(quote ? await getBrandOrDefault(sb, quote.brand) : null);
+
   // Customer declined from this page — acknowledge, don't 404 them.
   if (quote?.status === "rejected" && quote.declined_at) {
     return (
-      <Shell>
+      <Shell theme={theme}>
         <Card>
           <div className="p-6 text-center sm:p-8">
             <h1 className="font-brand text-3xl font-semibold text-ink">Thanks for letting us know</h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">
               We&apos;ve closed the quote and you won&apos;t get any more reminders from us. If
-              anything changes, call <strong className="text-ink">01747 637070</strong> and
+              anything changes, call <strong className="text-ink">{theme.phone}</strong> and
               we&apos;ll pick it straight back up. All the best with the move.
             </p>
           </div>
@@ -184,14 +263,27 @@ export default async function AcceptPage({
   }
 
   // Only quotes the customer was actually sent (or has accepted) resolve here.
-  if (!quote || (quote.status !== "sent" && quote.status !== "accepted")) return <NotFoundCard />;
+  if (!quote || (quote.status !== "sent" && quote.status !== "accepted")) return <NotFoundCard theme={theme} />;
+
+  // Card via takepayments — env creds, the global kill switch, AND this quote's
+  // brand switch, all three (PRD §11.10). The brand clause was missing until
+  // 2026-08-27: a brand with card deliberately off still got the button here
+  // while every one of its emails said bank transfer was the only route
+  // (QA-20260826-07). That is exactly the combination a bank-transfer-only
+  // brand launches in.
+  //
+  // Hoisted above the branches so the settled-balance copy can read it too:
+  // that copy sits in an earlier branch than the old declaration, and gating
+  // it on the BRAND flag alone would have offered card while the global kill
+  // switch was down — the one combination PRD §11.10 forbids.
+  const cardOk = await cardPaymentsAvailable(sb, quote.brand).catch(() => false);
 
   // A cancelled booking's emailed link must never solicit payment (its unpaid
   // invoices were voided) or offer date confirmation — booking_cancelled_at is
-  // stamped by the Marley-cancel and mark-lost unwinds and cleared on reopen.
+  // stamped by the cancel and mark-lost unwinds and cleared on reopen.
   if (quote.status === "accepted" && quote.booking_cancelled_at) {
     return (
-      <Shell>
+      <Shell theme={theme}>
         <Card>
           <div className="p-6 text-center sm:p-8">
             <h1 className="font-brand text-3xl font-semibold text-ink">
@@ -201,7 +293,7 @@ export default async function AcceptPage({
               There&apos;s nothing to pay on this page. If anything you&apos;ve paid is due back
               to you, it&apos;s being processed and we&apos;ll confirm by email. Any questions —
               or if you&apos;d like to rebook — call{" "}
-              <strong className="text-ink">01747 637070</strong>.
+              <strong className="text-ink">{theme.phone}</strong>.
             </p>
           </div>
         </Card>
@@ -211,13 +303,13 @@ export default async function AcceptPage({
 
   if (quote.status === "sent" && isAcceptExpired(quote.email_sent_at, quote.created_at)) {
     return (
-      <Shell>
+      <Shell theme={theme}>
         <Card>
           <div className="p-6 text-center sm:p-8">
             <h1 className="font-brand text-3xl font-semibold text-ink">This quote has expired</h1>
             <p className="mt-3 text-sm leading-relaxed text-mist-500">
               Quotes are valid for 30 days. Prices may have changed, so give us a quick call on{" "}
-              <strong className="text-ink">01747 637070</strong> and we&apos;ll refresh it for you.
+              <strong className="text-ink">{theme.phone}</strong> and we&apos;ll refresh it for you.
             </p>
           </div>
         </Card>
@@ -242,10 +334,71 @@ export default async function AcceptPage({
       ? requestedDeposit(total, baseDeposit, quote.moving_date, settings.smallJobThreshold)
       : baseDeposit;
 
+  /* ------------------------------------------------- commercial → review */
+  // Resolved LIVE from the client, not read off the quote: `payment_policy`
+  // is only snapshotted at acceptance, so on a `sent` quote it is null for
+  // every booking, commercial ones included. Reading the column here would
+  // make this branch unreachable exactly when it is needed. Same lookup the
+  // server refusal uses, so the page and the write can never disagree about
+  // which ladder a quote is on.
+  //
+  // QA-20260828-03: gate 10b closed the WRITE path — a commercial customer
+  // who clicked Accept got a correct refusal and no side effect — but this
+  // page still rendered the whole residential screen at them: a headline
+  // deposit figure they do not owe, copy promising card or bank transfer on
+  // the next screen, and an enabled Accept button. Safe, and still wrong to
+  // put in front of a client who has been told they are on account terms.
+  if (quote.status === "sent" && (await snapshotPaymentPolicy(sb, quote)) === "commercial") {
+    return (
+      <Shell theme={theme}>
+        <Card>
+          <div className="border-b border-mist-150 bg-charcoal px-6 py-5 sm:px-8">
+            <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-mist-300">
+              Your removal quote
+            </p>
+            <p className="mt-1 font-display text-3xl font-bold tracking-tight text-white">
+              {gbp(total)}
+              <span className="ml-2 text-sm font-normal text-mist-300">
+                {quote.vat_enabled ? "including VAT" : "total"}
+              </span>
+            </p>
+          </div>
+          <div className="space-y-5 p-6 sm:p-8">
+            <h1 className="font-brand text-2xl font-semibold text-ink">
+              {quote.customer_name
+                ? `Here is your quote, ${quote.customer_name.split(/\s+/)[0]}.`
+                : "Here is your quote."}
+            </h1>
+            <SummaryRows quote={quote} />
+            <div className="flex items-start gap-3 rounded-md border border-mist-200 bg-mist-50 p-4">
+              <ShieldCheck className="mt-0.5 size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
+              <p className="text-sm leading-relaxed text-mist-500">
+                Nothing to pay now. We&apos;ll confirm this booking with you and invoice your
+                account once the job is done, payable on your agreed terms. Read our{" "}
+                <a
+                  href={theme.termsUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-ink underline underline-offset-2"
+                >
+                  terms &amp; conditions
+                </a>
+                .
+              </p>
+            </div>
+            {/* Declining stays: it creates no money state, and telling us no is
+                information we want. Only the ACCEPT action is the office's. */}
+            <DeclineOption token={token} phone={theme.phone} />
+          </div>
+        </Card>
+      </Shell>
+    );
+  }
+
   /* ---------------------------------------------------------- sent → accept */
   if (quote.status === "sent") {
     return (
-      <Shell>
+      <Shell theme={theme}>
         <Card>
           <div className="border-b border-mist-150 bg-charcoal px-6 py-5 sm:px-8">
             <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-mist-300">
@@ -271,7 +424,7 @@ export default async function AcceptPage({
                 pay by card or bank transfer on the next screen. The balance is due before move
                 day. Read our{" "}
                 <a
-                  href={TERMS_URL}
+                  href={theme.termsUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="font-semibold text-ink underline underline-offset-2"
@@ -281,8 +434,8 @@ export default async function AcceptPage({
                 .
               </p>
             </div>
-            <AcceptForm token={token} depositLabel={gbp(deposit)} />
-            <DeclineOption token={token} />
+            <AcceptForm token={token} depositLabel={gbp(deposit)} termsUrl={theme.termsUrl} />
+            <DeclineOption token={token} phone={theme.phone} />
           </div>
         </Card>
       </Shell>
@@ -356,7 +509,7 @@ export default async function AcceptPage({
     const balanceRemaining = canPayInFull ? (await computeBalanceCredits(sb, quote)).amount : 0;
 
     return (
-      <Shell>
+      <Shell theme={theme}>
         <Card>
           <div className="p-6 text-center sm:p-8">
             <CheckCircle2 className="mx-auto size-12 text-success" strokeWidth={1.5} />
@@ -452,7 +605,7 @@ export default async function AcceptPage({
                         }}
                       />
                     ) : (
-                      <BankPanel reference={quote.quote_ref} />
+                      <BankPanel theme={theme} reference={quote.quote_ref} />
                     )}
                     {quote.zoho_commitment_invoice_number && quote.zoho_commitment_invoice_url ? (
                       <p className="text-center text-xs text-mist-400">
@@ -539,14 +692,21 @@ export default async function AcceptPage({
                         for.
                       </p>
                     </div>
-                    <BankPanel reference={quote.quote_ref} />
+                    <BankPanel theme={theme} reference={quote.quote_ref} />
+                    {/* "card" appears only where the brand can actually take
+                        one (PRD §11.10). Offering a customer a rail their brand
+                        does not have is worse than saying nothing: they would
+                        ring up to use it. */}
                     <p className="text-sm leading-relaxed text-mist-500">
-                      Prefer to pay by card or cash? Call Connor on{" "}
+                      {cardOk
+                        ? "Prefer to pay by card or cash? "
+                        : "Prefer to pay by cash, or have a question? "}
+                      {theme.callLead}{" "}
                       <a
-                        href="tel:01747637070"
+                        href={theme.telHref}
                         className="font-semibold text-mm-red underline underline-offset-2"
                       >
-                        01747 637070
+                        {theme.phone}
                       </a>
                       .
                     </p>
@@ -572,12 +732,6 @@ export default async function AcceptPage({
     );
   }
 
-  // Card via takepayments — env creds, the global kill switch, AND this quote's
-  // brand switch, all three (PRD §11.10). The brand clause was missing until
-  // 2026-08-27: a brand with card deliberately off still got the button here
-  // while every one of its emails said bank transfer was the only route
-  // (QA-20260826-07). That is exactly the combination Pitmans launches in.
-  const cardOk = await cardPaymentsAvailable(sb, quote.brand).catch(() => false);
 
   // A move inside T-7 has its final balance raised at acceptance rather than
   // by the T-7 cron the next morning (PRD §3.10 Addition 2), so this state —
@@ -591,7 +745,7 @@ export default async function AcceptPage({
     : 0;
 
   return (
-    <Shell>
+    <Shell theme={theme}>
       <Card>
         <div className="border-b border-mist-150 bg-charcoal px-6 py-5 sm:px-8">
           <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-mist-300">
@@ -610,7 +764,7 @@ export default async function AcceptPage({
               </p>
               <p className="mt-1 text-sm leading-relaxed text-mist-500">
                 {cardOk ? "You can try again below, or pay by bank transfer instead." : "Please pay by bank transfer below."}{" "}
-                If it keeps happening, call us on <strong className="text-ink">01747 637070</strong>{" "}
+                If it keeps happening, call us on <strong className="text-ink">{theme.phone}</strong>{" "}
                 and we&apos;ll sort it together.
               </p>
             </div>
@@ -620,7 +774,7 @@ export default async function AcceptPage({
                 We couldn&apos;t confirm your card payment.
               </p>
               <p className="mt-1 text-sm leading-relaxed text-mist-500">
-                Please call us on <strong className="text-ink">01747 637070</strong> before trying
+                Please call us on <strong className="text-ink">{theme.phone}</strong> before trying
                 again so we can check whether anything was taken — or pay by bank transfer below.
               </p>
             </div>
@@ -674,7 +828,7 @@ export default async function AcceptPage({
             </>
           ) : null}
 
-          <BankPanel reference={quote.quote_ref} />
+          <BankPanel theme={theme} reference={quote.quote_ref} />
 
           {quote.deposit_selfreport_at ? (
             <div className="flex items-start gap-2.5 rounded-md border border-mist-200 bg-mist-50 p-4">
@@ -685,7 +839,7 @@ export default async function AcceptPage({
               </p>
             </div>
           ) : (
-            <DepositSentButton token={token} />
+            <DepositSentButton token={token} phone={theme.phone} />
           )}
 
           {quote.zoho_deposit_invoice_number && quote.zoho_deposit_invoice_url ? (
@@ -704,8 +858,8 @@ export default async function AcceptPage({
           <div className="flex items-center justify-center gap-2 border-t border-mist-150 pt-4 text-sm text-mist-500">
             <PhoneCall className="size-4 text-mm-red" strokeWidth={1.75} />
             Prefer to sort it by phone? Call{" "}
-            <a href="tel:01747637070" className="font-semibold text-ink">
-              01747 637070
+            <a href={theme.telHref} className="font-semibold text-ink">
+              {theme.phone}
             </a>
           </div>
         </div>

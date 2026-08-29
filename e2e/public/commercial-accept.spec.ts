@@ -84,11 +84,20 @@ test.describe("Customer — /q commercial quote (QA-20260828-03)", () => {
     if (quoteErr || !quote) throw new Error(`Seeding commercial quote failed: ${quoteErr?.message}`);
 
     try {
-      test.skip(true, "QA-20260828-03: /q never gates the accept button on commercial policy — fails until the repair PR lands.");
-
+      // Un-skipped by the repair PR: /q now resolves the policy LIVE (the
+      // column is null on every sent quote) and renders a review-only screen.
       await page.goto(`/q/${acceptToken}`);
+
+      // Nothing that asks for money or offers to take it.
       await expect(page.getByRole("button", { name: /Accept quote & pay/i })).not.toBeVisible();
       await expect(page.getByText(/deposit secures the booking/i)).not.toBeVisible();
+
+      // And the positive half — without it this passes just as well against a
+      // page that failed to render at all, which is how a "no accept button"
+      // assertion quietly becomes worthless.
+      await expect(page.getByText(/Nothing to pay now/i)).toBeVisible();
+      await expect(page.getByText(/payable on your agreed terms/i)).toBeVisible();
+      await expect(page.getByText("£4,500")).toBeVisible();
     } finally {
       await sb.from("quotes").delete().eq("id", quote.id);
       await sb.from("leads").delete().eq("id", lead.id);

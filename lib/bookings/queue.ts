@@ -34,6 +34,11 @@ export type BookingBucket =
   /** Commercial: past the client's terms. Raises an INTERNAL alert only —
    *  a commercial customer is never chased by email (PRD §3.10). */
   | "commercial_overdue"
+  /** Commercial: invoiced, but the row carries NO terms date, so whether it is
+   *  late is unknown rather than answered. Its own bucket precisely because
+   *  "in terms" and "we cannot tell" are different answers and must not share
+   *  a rendering. */
+  | "commercial_terms_unknown"
   | "all_set";
 
 export interface QueueSignals {
@@ -116,6 +121,15 @@ export interface OwedNow {
   total: number;
   /** The portion of `total` already past its date — chase first. */
   overdue: number;
+  /** The 25% half of `overdue`, and the balance half. Split because the two
+   *  are chased in DIFFERENT sections: a combined figure can be shown in a
+   *  headline but cannot say which list holds it, and a headline whose money
+   *  is in no list is the defect this seam exists to stop. Each is all-or-
+   *  nothing — an obligation is past its date or it is not — so
+   *  `commitmentOverdue` is either 0 or `commitment`, and likewise for the
+   *  balance. `overdue` stays their sum. */
+  commitmentOverdue: number;
+  balanceOverdue: number;
 }
 
 /**
@@ -135,8 +149,15 @@ function classifyCommercial(s: QueueSignals, todayUk: string): BookingBucket {
   // the office needs to see that just as plainly - so both states share the
   // awaiting bucket rather than one of them vanishing into all_set.
   if (!s.balanceInvoiceNumber) return "commercial_awaiting_completion";
-  const pastTerms = !!s.commercialDueDate && s.commercialDueDate < todayUk;
-  return pastTerms ? "commercial_overdue" : "commercial_invoiced";
+  // An invoice with no terms date cannot be called either. `!!date && date <
+  // today` reads a missing date as false, which renders as "in terms" - the
+  // reassuring answer, produced by having no information at all. That is the
+  // shape this codebase has been bitten by four times: the surface that would
+  // have shown the gap is the one the guess just cleared. So it gets its own
+  // bucket and its own section, where the office can see that the terms are
+  // missing rather than be told the invoice is fine.
+  if (!s.commercialDueDate) return "commercial_terms_unknown";
+  return s.commercialDueDate < todayUk ? "commercial_overdue" : "commercial_invoiced";
 }
 
 export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
@@ -148,12 +169,20 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
   if (s.paymentPolicy === "commercial") {
     const amount = Number(s.balanceAmount ?? 0);
     const owed = !s.balancePaidAt && amount > 0 && !!s.balanceInvoiceNumber ? amount : 0;
+    // Deliberately NOT the same treatment `classifyBooking` gives a missing
+    // terms date. `overdue` is a claim of fact about a date, and with no date
+    // there is no fact to state — so it stays out of the overdue figure while
+    // the full invoice still counts in `total`. The money is never hidden; only
+    // the lateness assertion is withheld, and the row's own bucket
+    // (commercial_terms_unknown) is what puts the gap in front of the office.
     const pastTerms = owed > 0 && !!s.commercialDueDate && s.commercialDueDate < todayUk;
     return {
       commitment: 0,
       balance: owed,
       total: owed,
       overdue: pastTerms ? owed : 0,
+      commitmentOverdue: 0,
+      balanceOverdue: pastTerms ? owed : 0,
     };
   }
 
@@ -188,6 +217,8 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
     balance: balanceOwed,
     total: commitmentOwed + balanceOwed,
     overdue: (commitmentPastDue ? commitmentOwed : 0) + (balancePastDue ? balanceOwed : 0),
+    commitmentOverdue: commitmentPastDue ? commitmentOwed : 0,
+    balanceOverdue: balancePastDue ? balanceOwed : 0,
   };
 }
 
@@ -195,18 +226,25 @@ export function owedNow(s: OwedSignals, todayUk: string): OwedNow {
  *  ledger so tile and queue can never disagree (QA-20260820-02: the tile
  *  counted leads.status='provisional', which diverges the moment a lead is
  *  hand-confirmed with the deposit unpaid). balanceDue is money owed NOW —
- *  a far-future all_set booking owes nothing yet. */
-export function moneyTileCounts(rows: ReadonlyArray<{ bucket: BookingBucket }>): {
+ *  a far-future all_set booking owes nothing yet.
+ *
+ *  It counts OBLIGATIONS, via `queueMoney`, rather than the two balance
+ *  BUCKETS it used to test. The bucket ladder only reaches `balance_*` once
+ *  the deposit is paid and a removal appointment exists, so a gate 9b late
+ *  booking — balance invoice raised at acceptance, deposit unpaid, slot not
+ *  yet allocated — bucketed as `deposit_outstanding` and the card read "No
+ *  balances outstanding" against a live unpaid invoice. Commercial rows were
+ *  counted by neither branch: their completion invoice is never a `balance_*`
+ *  bucket at all. Delegating means the card, the /bookings tile and the
+ *  /payments headline can only ever be three renderings of one sum. */
+export function moneyTileCounts(
+  rows: ReadonlyArray<{ bucket: BookingBucket; deposit: number; owed: OwedNow }>,
+): {
   awaitingDeposit: number;
   balanceDue: number;
 } {
-  let awaitingDeposit = 0;
-  let balanceDue = 0;
-  for (const r of rows) {
-    if (r.bucket === "deposit_outstanding") awaitingDeposit++;
-    else if (r.bucket === "balance_due" || r.bucket === "balance_overdue") balanceDue++;
-  }
-  return { awaitingDeposit, balanceDue };
+  const m = queueMoney(rows);
+  return { awaitingDeposit: m.depositJobs, balanceDue: m.balanceJobs };
 }
 
 /** Every money headline on /bookings and /payments Due, from ONE ledger and
@@ -234,10 +272,17 @@ export interface QueueMoney {
   /** Rows carrying an unpaid 25%, however they are bucketed. */
   commitmentJobs: number;
   balance: number;
+  /** Rows carrying an unpaid balance, however they are bucketed — includes a
+   *  commercial completion invoice, which reaches no `balance_*` bucket. */
+  balanceJobs: number;
   /** commitment + balance — /payments "Owed right now". */
   owedNow: number;
   /** The portion of owedNow already past its date. */
   overdue: number;
+  /** `overdue` split the way the SECTIONS below the tile are split, so each
+   *  tile can name the lists that add up to it. */
+  commitmentOverdue: number;
+  balanceOverdue: number;
 }
 
 export function queueMoney(
@@ -248,16 +293,20 @@ export function queueMoney(
   let commitment = 0;
   let commitmentJobs = 0;
   let balance = 0;
-  let overdue = 0;
+  let balanceJobs = 0;
+  let commitmentOverdue = 0;
+  let balanceOverdue = 0;
   for (const r of rows) {
     if (r.bucket === "deposit_outstanding") {
       depositsOutstanding += r.deposit;
       depositJobs++;
     }
     if (r.owed.commitment > 0) commitmentJobs++;
+    if (r.owed.balance > 0) balanceJobs++;
     commitment += r.owed.commitment;
     balance += r.owed.balance;
-    overdue += r.owed.overdue;
+    commitmentOverdue += r.owed.commitmentOverdue;
+    balanceOverdue += r.owed.balanceOverdue;
   }
   return {
     depositsOutstanding,
@@ -265,8 +314,11 @@ export function queueMoney(
     commitment,
     commitmentJobs,
     balance,
+    balanceJobs,
     owedNow: commitment + balance,
-    overdue,
+    overdue: commitmentOverdue + balanceOverdue,
+    commitmentOverdue,
+    balanceOverdue,
   };
 }
 

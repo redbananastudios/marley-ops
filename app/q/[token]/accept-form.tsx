@@ -14,7 +14,18 @@ import { CONTRACT_ACKS, type ContractAckKey } from "@/lib/signatures";
 import { ScriptSignature, renderNameToPng } from "@/lib/signature-script";
 import { acceptQuoteAction } from "./actions";
 
-export function AcceptForm({ token, depositLabel }: { token: string; depositLabel: string }) {
+export function AcceptForm({
+  token,
+  depositLabel,
+  termsUrl,
+}: {
+  token: string;
+  depositLabel: string;
+  /** The brand's OWN terms (gate 16). This link is the document the customer
+   *  is signing, so a hardcoded one had a second brand's customer agreeing to
+   *  the default brand's terms — on the default brand's domain. */
+  termsUrl: string;
+}) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [acks, setAcks] = useState<Record<ContractAckKey, boolean>>({
@@ -95,7 +106,7 @@ export function AcceptForm({ token, depositLabel }: { token: string; depositLabe
         <p className="mt-2 text-xs text-mist-400">
           Typing your name acts as your signature accepting this quote and our{" "}
           <a
-            href="https://marleymoves.co.uk/terms-conditions/"
+            href={termsUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="font-semibold text-mist-500 underline underline-offset-2"

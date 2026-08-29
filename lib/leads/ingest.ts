@@ -99,15 +99,15 @@ function configuredIngestSecrets(env: Record<string, string | undefined>): Brand
 }
 
 /**
- * Drop EVERY entry whose secret value is shared with another brand's.
+ * Drop EVERY entry whose secret value is shared with ANOTHER BRAND's.
  *
- * A duplicate is not a tie to break, it is a question with no answer. Two
- * brands presenting the same token are indistinguishable, so first-match-wins
- * does not resolve the ambiguity, it hides it — and the first candidate is
- * always the default brand, so the quiet outcome is the OTHER brand's customer
- * filed under the default one, carrying its quote-ref prefix, its legal line
- * and its sending address on a document that reaches a real person. Nothing
- * errors, so nothing says so.
+ * A cross-brand duplicate is not a tie to break, it is a question with no
+ * answer. Two brands presenting the same token are indistinguishable, so
+ * first-match-wins does not resolve the ambiguity, it hides it — and the first
+ * candidate is always the default brand, so the quiet outcome is the OTHER
+ * brand's customer filed under the default one, carrying its quote-ref prefix,
+ * its legal line and its sending address on a document that reaches a real
+ * person. Nothing errors, so nothing says so.
  *
  * Refusing costs the shared token every brand that presents it, the default one
  * included. That is the intended trade: a 401 fires the caller's own documented
@@ -115,19 +115,33 @@ function configuredIngestSecrets(env: Record<string, string | undefined>): Brand
  * misfiled lead reaches the wrong customer under the wrong company's name.
  * Ambiguity yields nothing, never a best guess.
  *
+ * Counting VALUES rather than the brands behind them was a way to turn the live
+ * site off. `configuredIngestSecrets` seeds Marley's entry from
+ * LEAD_INGEST_SECRET and then scans the LEAD_INGEST_SECRET_ prefix, so setting
+ * the documented-looking alias LEAD_INGEST_SECRET_MARLEY to the same value
+ * produces two entries — both named `marley`, both carrying the one real
+ * credential. That is not an ambiguity: whichever matched, the answer is
+ * `marley`. Counted by value it looked exactly like a collision, so both were
+ * nulled and every genuine enquiry from the default brand's site 401'd. The
+ * refusal therefore keys on how many DISTINCT BRANDS claim a value.
+ *
  * Values below MIN_INGEST_SECRET_LENGTH are ignored: they authenticate nothing
  * already, and counting them would let two blank placeholders collide and
  * disable a brand that was never configured in the first place.
  */
 function withoutSharedSecrets(secrets: readonly BrandIngestSecret[]): BrandIngestSecret[] {
-  const seen = new Map<string, number>();
-  for (const { secret } of secrets) {
+  const claimants = new Map<string, Set<string>>();
+  for (const { brand, secret } of secrets) {
     const value = (secret ?? "").trim();
     if (value.length < MIN_INGEST_SECRET_LENGTH) continue;
-    seen.set(value, (seen.get(value) ?? 0) + 1);
+    const brands = claimants.get(value) ?? new Set<string>();
+    brands.add(brand);
+    claimants.set(value, brands);
   }
   return secrets.map((entry) =>
-    (seen.get((entry.secret ?? "").trim()) ?? 0) > 1 ? { brand: entry.brand, secret: null } : entry,
+    (claimants.get((entry.secret ?? "").trim())?.size ?? 0) > 1
+      ? { brand: entry.brand, secret: null }
+      : entry,
   );
 }
 
@@ -139,13 +153,19 @@ function withoutSharedSecrets(secrets: readonly BrandIngestSecret[]): BrandInges
  * Failing closed without saying so would only move the silence: an operator who
  * pasted one secret into two variables would see 401s and conclude the secret
  * was wrong, not that it was duplicated.
+ *
+ * Each brand is named once. A brand can hold more than one refused entry (its
+ * canonical variable plus an alias), and repeating its slug in the log tells an
+ * operator nothing extra about which variables to look at.
  */
 export function sharedIngestSecretBrands(
   env: Record<string, string | undefined> = process.env,
 ): string[] {
   const raw = configuredIngestSecrets(env);
   const usable = withoutSharedSecrets(raw);
-  return raw.filter((entry, i) => entry.secret && !usable[i].secret).map((e) => e.brand);
+  return [
+    ...new Set(raw.filter((entry, i) => entry.secret && !usable[i].secret).map((e) => e.brand)),
+  ];
 }
 
 /**

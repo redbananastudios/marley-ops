@@ -198,6 +198,18 @@ interface PdfMeta {
   depositAmount?: number;
   /** Public accept-page URL — renders the QR slots + "Accept online" line when set. */
   acceptUrl?: string;
+  /**
+   * Which ladder this quote runs (PRD §3.10). Absent means residential, so
+   * every existing call site keeps today's document byte-for-byte.
+   *
+   * A commercial quote takes NO deposit and cannot be accepted online — the
+   * server refuses the click (gate 10b) — so this document must not ask for one
+   * or point a QR code at a page that will turn the customer away. It is the
+   * same defect QA-20260828-03 recorded against `/q`, except a PDF is ATTACHED
+   * TO THE QUOTE EMAIL: it reaches the customer whether or not they ever open
+   * the link, and it is the artefact they keep.
+   */
+  paymentPolicy?: "residential" | "commercial";
   /** Non-default brand for this quote (PRD §3.6). Absent/null → today's Marley
    *  document, byte-identical. Resolved at the call site from quotes.brand via
    *  docBrandFrom (which returns null for the default brand). */
@@ -270,6 +282,34 @@ const TERMS: { icon: string; title: string; body: (deposit: string) => string }[
   },
 ];
 
+/**
+ * The one clause that differs by policy — swapped in place rather than dropped.
+ *
+ * Dropping it would leave a commercial quote's terms silent on payment
+ * altogether, which is worse than the wrong clause: the customer would have no
+ * written statement of when the invoice comes or what terms it runs on. Swapped
+ * in place, the clause keeps its position in the list and its icon, so only the
+ * words a commercial customer would have found untrue actually change.
+ */
+const COMMERCIAL_PAYMENT_TERM = {
+  icon: "pound",
+  title: "Payment",
+  // Deliberately says "nothing is payable up front" rather than "no deposit is
+  // required": it states the same fact without printing the word, which lets
+  // the test scan the WHOLE document for that word and fail on any future copy
+  // that reintroduces an ask. A clause that has to name the thing it denies
+  // would have forced a narrower assertion, and narrow is how the ask crept
+  // into three separate places here to begin with.
+  body: () =>
+    "Nothing is payable up front. We invoice your account once the removal is complete, payable on the terms agreed with your account.",
+};
+
+/** The terms list this quote prints. Residential is the array above, untouched. */
+function termsFor(commercial: boolean): typeof TERMS {
+  if (!commercial) return TERMS;
+  return TERMS.map((t) => (t.icon === "pound" ? COMMERCIAL_PAYMENT_TERM : t));
+}
+
 /** Build the pdfmake document definition. Pure — the tests walk this directly. */
 export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, meta: PdfMeta): any {
   const quoteRef = meta.quoteRef;
@@ -289,8 +329,18 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   // brand's logo_url is remote (and a Phase-0 stub anyway), so those documents
   // render a text wordmark in the brand colour instead — never Marley's logo.
   const logoDataUri = brand ? "" : meta.logoDataUri || "";
+  const commercial = meta.paymentPolicy === "commercial";
   const deposit = fmtGBPWhole(meta.depositAmount != null && meta.depositAmount > 0 ? meta.depositAmount : 100);
-  const acceptUrl = (meta.acceptUrl || "").trim();
+  // Commercial is never accepted online, so the accept URL is dropped HERE, at
+  // the single point every downstream reader takes it from — the strip's link,
+  // its QR, and the acceptance box's QR all key off this one binding. Blanking
+  // it at each render site instead would leave three places to forget, and the
+  // one forgotten would put a live QR on the page that refuses it.
+  //
+  // The `£100` fallback on the line above is deliberately left alone: a
+  // commercial quote's deposit_amount is 0, which would fall through to £100,
+  // and `deposit` is now read only by copy this flag turns off.
+  const acceptUrl = commercial ? "" : (meta.acceptUrl || "").trim();
 
   const custName = (values.customer.name || "").trim();
   const custPhone = (values.customer.phone || "").trim();
@@ -636,9 +686,11 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   });
 
   // ═══ ACCEPTANCE STRIP (QR + accept-URL slots) ════════════════════════
-  const stripText = acceptUrl
-    ? `To accept this quote and pay your ${deposit} deposit, scan the QR code or use the link below.`
-    : `To accept this quote, reply in writing and pay the ${deposit} deposit.`;
+  const stripText = commercial
+    ? "Nothing to pay now. We will confirm this booking with you and invoice your account once the move is complete, payable on your agreed terms."
+    : acceptUrl
+      ? `To accept this quote and pay your ${deposit} deposit, scan the QR code or use the link below.`
+      : `To accept this quote, reply in writing and pay the ${deposit} deposit.`;
   const stripLeft: any = {
     width: "*",
     stack: [
@@ -705,7 +757,7 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   content.push({
     table: {
       widths: [40, "*"],
-      body: TERMS.map((t) => [
+      body: termsFor(commercial).map((t) => [
         { svg: outlineBadge(t.icon, 26, 13, accent), border: [false, false, false, false], margin: [2, 6, 0, 6] },
         {
           stack: [
@@ -764,9 +816,18 @@ export function buildQuoteDocDef(values: QuoteFormValues, b: QuoteBreakdown, met
   const acceptanceInner: any[] = [
     { text: "CUSTOMER ACCEPTANCE", bold: true, fontSize: 8, color: accent, characterSpacing: 0.3, margin: [0, 0, 0, 5] },
     {
-      text: acceptUrl
-        ? "By paying the deposit or accepting online, I accept this quote and agree to the terms and conditions outlined above."
-        : "By paying the deposit or confirming in writing, I accept this quote and agree to the terms and conditions outlined above.",
+      // The signature block STAYS for commercial. PRD §3.10 takes no signature
+      // in the system — the office confirms — and records the missing
+      // customer-side artefact as an accepted risk; a signed returned PDF is
+      // the one artefact that answers it, so removing the block would make that
+      // risk worse rather than better. Only the obligation it recites changes:
+      // a commercial customer pays no deposit, so naming one asked them to
+      // agree to something we will never invoice.
+      text: commercial
+        ? "By confirming in writing, I accept this quote and agree to the terms and conditions outlined above."
+        : acceptUrl
+          ? "By paying the deposit or accepting online, I accept this quote and agree to the terms and conditions outlined above."
+          : "By paying the deposit or confirming in writing, I accept this quote and agree to the terms and conditions outlined above.",
       fontSize: 6.9,
       lineHeight: 1.28,
       color: C.ink,

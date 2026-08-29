@@ -14,6 +14,7 @@ import {
   type ResendRail,
 } from "@/lib/quote/accept-flow";
 import { moveDateLabel } from "@/lib/quote/payments";
+import { depositOfQuote } from "@/lib/payments-policy";
 
 /**
  * Final (balance) invoice actions — the manual pre-move trigger. Peter's hard
@@ -58,7 +59,11 @@ export async function getBalanceInvoiceInfo(leadId: string): Promise<BalanceInvo
   const quote = await fetchQuoteById(sb, q.id);
   if (!quote) return { ok: false, error: "Quote not found" };
   const settings = await getBusinessSettings(sb);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  // Policy-aware, matching computeBalanceCredits below. The office dialog
+  // prints "agreed £X less £Y", and Y must be the figure the invoice actually
+  // credits — a raw `?? defaultDeposit` turns a commercial quote's null column
+  // into £100 and shows the office a short figure the invoice will not use.
+  const deposit = depositOfQuote(quote, settings.defaultDeposit);
   // Same computation the flow uses — the figure the office approves in the
   // dialog must be the figure that lands in Zoho (deposit + raised commitment
   // carved out, retained rebook forfeits added back).

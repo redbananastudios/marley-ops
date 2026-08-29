@@ -476,13 +476,15 @@ add_action('wpcf7_before_send_mail', 'plb_on_submission');
 /**
  * The signed READ endpoint — the disjoint channel Ops polls.
  *
- *   GET /wp-json/pitmans-lead-bridge/v1/submissions?limit=<n>&ts=<unix>&sig=<hex>
+ *   GET /wp-json/pitmans-lead-bridge/v1/submissions?limit=<n>&since_id=<n>&ts=<unix>&sig=<hex>
  *
- * sig = HMAC-SHA256 over the exact string "limit=<n>&ts=<unix>" (integers,
- * no padding, that parameter order) with the pull secret. ts must be within
- * ±300 seconds of server time — a bounded replay window on a read-only
- * endpoint. The Ops side of this contract is marley-ops
- * lib/sync/wp-leads.ts:signPullQuery — change both together or not at all.
+ * sig = HMAC-SHA256 over the exact string "limit=<n>&since_id=<n>&ts=<unix>"
+ * (integers, no padding, that parameter order) with the pull secret. ts must be
+ * within ±300 seconds of server time — a bounded replay window on a read-only
+ * endpoint. since_id is signed and required, so an on-path observer cannot
+ * advance the reader's window and hide a row from it. The Ops side of this
+ * contract is marley-ops lib/sync/wp-leads.ts:signPullQuery — change both
+ * together or not at all.
  */
 add_action('rest_api_init', function () {
     register_rest_route('pitmans-lead-bridge/v1', '/submissions', array(
@@ -583,10 +585,22 @@ function plb_rest_submissions($request) {
         "SELECT COUNT(*) FROM {$table} WHERE id > %d", $last_id
     ));
 
+    // Where this table's ids START. The reader anchors its cursor to the
+    // highest id below which everything has landed, and it derives that by
+    // walking up from the floor - so it needs the real floor from us. Assuming
+    // 1 was a way to jam the rail shut: a table with no row 1 (a GDPR erasure,
+    // install-test rows cleared out, an AUTO_INCREMENT reseeded by a host move
+    // or a dump/restore) never satisfies the walk, so the cursor sits at 0 for
+    // good and the reader re-reads this same oldest page forever while later
+    // rows are offered to nobody. NULL only when the table is empty. Do not
+    // remove it - see README.md "The signed read endpoint".
+    $min_id = $wpdb->get_var("SELECT MIN(id) FROM {$table}");
+
     return rest_ensure_response(array(
         'ok'          => true,
         'count'       => count($out),
         'total'       => $total,
+        'min_id'      => $min_id === null ? null : (int) $min_id,
         'since_id'    => $since_id,
         'remaining'   => $remaining,
         'now'         => gmdate('Y-m-d\TH:i:s\Z'),

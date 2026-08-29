@@ -5,3 +5,11 @@
 # Verified A/B/A on i9 2026-08-25: CRLF fails, LF passes, byte-identical
 # otherwise. CI (Linux) always saw LF, so only local Windows runs broke.
 *.mjs text eol=lf
+
+# Vitest writes snapshot files with LF whatever the platform, so on a CRLF
+# checkout (core.autocrlf=true on Windows) the FIRST test run rewrites every
+# line and the file shows as modified with a zero-content diff. Three
+# separate agents hit this in fresh worktrees on 2026-08-28 and each had to
+# work out it was a line-ending artefact before they could trust their own
+# `git status`. Pinning it removes the question.
+*.snap text eol=lf

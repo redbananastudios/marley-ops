@@ -8,7 +8,7 @@ import { normalizeQuoteValues } from "@/lib/quote/form-types";
 import { getPricingConfig } from "@/lib/quote/pricing-config";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
-import { ensureAcceptToken, acceptUrlFor } from "@/lib/quote/accept-flow";
+import { ensureAcceptToken, acceptUrlFor, snapshotPaymentPolicy } from "@/lib/quote/accept-flow";
 import { QuoteBuilder } from "@/components/quote/quote-builder";
 import type { CubicQuoteHint } from "@/components/quote/wizard-steps";
 import { computeCubicTotals, recommendVans, sanitizeCubicLines, vehicleShortLabel } from "@/lib/cubic-survey";
@@ -27,7 +27,7 @@ import { JOB_DOCS_BUCKET } from "@/lib/signatures";
 import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
-import { requestedDeposit } from "@/lib/payments-policy";
+import { policyOfQuote, requestedDeposit, type PaymentPolicy } from "@/lib/payments-policy";
 import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 
@@ -61,12 +61,31 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand",
+      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand, payment_policy",
     )
     .eq("id", id)
     .maybeSingle();
 
   if (!quote) notFound();
+
+  /**
+   * Which ladder this quote runs — the customer-facing quote PDF and email are
+   * composed from this page's props, so it decides what the customer is asked
+   * for (PRD §3.10).
+   *
+   * The column WINS once it is set: it is the snapshot taken at acceptance, and
+   * re-typing a client afterwards must never re-write the documents of a
+   * booking already in flight. But it is null on every draft and sent quote —
+   * which is precisely the window in which the quote is in front of the
+   * customer — so a page that only read the column would resolve every live
+   * commercial quote to residential and print a deposit demand. That is the
+   * defect QA-20260828-03 recorded against /q; the fix there was to resolve
+   * live, and it has to be the same rule here or the page and its own PDF
+   * would disagree.
+   */
+  const paymentPolicy: PaymentPolicy = quote.payment_policy
+    ? policyOfQuote(quote)
+    : await snapshotPaymentPolicy(sb, quote);
 
   // Estimator name for the PDF "Prepared by" line.
   const {
@@ -272,8 +291,14 @@ export default async function QuoteDetailPage({
       {statusStr === "accepted" && quote.agreed_price != null ? (
         <QuoteMetaChip>Agreed {gbp(quote.agreed_price)}</QuoteMetaChip>
       ) : null}
+      {/* Commercial has no deposit rung, so neither chip is true of it: it is
+          not "awaiting" money nobody asked for, and it has not "paid" either.
+          Before this it rendered "Awaiting £0 deposit" — a warning tone against
+          a figure that only looks like a problem. */}
       {statusStr === "accepted" ? (
-        quote.deposit_paid_at ? (
+        paymentPolicy === "commercial" ? (
+          <QuoteMetaChip>Business terms — invoiced on completion</QuoteMetaChip>
+        ) : quote.deposit_paid_at ? (
           <QuoteMetaChip icon={CheckCircle2} tone="success">
             Deposit paid
           </QuoteMetaChip>
@@ -301,12 +326,21 @@ export default async function QuoteDetailPage({
           brand={quoteBrand}
           status={statusStr}
           grandTotal={Number(quote.grand_total ?? 0)}
-          depositAmount={requestedDeposit(
-            Number(quote.agreed_price ?? quote.grand_total ?? 0),
-            quote.deposit_amount ?? settings.defaultDeposit,
-            quote.moving_date,
-            settings.smallJobThreshold,
-          )}
+          // `requestedDeposit` is the RESIDENTIAL rule — the small-job and
+          // late-booking collapses included — so running it on a commercial
+          // quote produced a figure with no meaning (25% of gross inside T-7,
+          // or the whole job under the small-job threshold) and offered it to
+          // the office as the deposit to request. Commercial has no rung: 0.
+          depositAmount={
+            paymentPolicy === "commercial"
+              ? 0
+              : requestedDeposit(
+                  Number(quote.agreed_price ?? quote.grand_total ?? 0),
+                  quote.deposit_amount ?? settings.defaultDeposit,
+                  quote.moving_date,
+                  settings.smallJobThreshold,
+                )
+          }
           readOnly={!editing}
           editHref={`/quotes/${quote.id}?edit=1`}
           leadId={quote.lead_id}
@@ -319,6 +353,7 @@ export default async function QuoteDetailPage({
           estimatorName={estimatorName}
           vatNumber={settings.vatNumber || undefined}
           acceptUrl={acceptUrl}
+          paymentPolicy={paymentPolicy}
         />
       </PageHeader>
 
@@ -352,6 +387,7 @@ export default async function QuoteDetailPage({
           settings={settings}
           acceptUrl={acceptUrl}
           cubicHint={cubicHint}
+          paymentPolicy={paymentPolicy}
         />
       ) : (
         <>
@@ -370,6 +406,7 @@ export default async function QuoteDetailPage({
               deposit_amount: quote.deposit_amount ?? settings.defaultDeposit,
               deposit_paid_at: quote.deposit_paid_at,
               moving_date: quote.moving_date,
+              payment_policy: paymentPolicy,
             }}
           />
           <div className="mt-4 space-y-4">

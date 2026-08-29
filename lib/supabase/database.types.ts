@@ -3098,6 +3098,7 @@ export type Database = {
           breakdown: Json
           client_id: string | null
           collect_addr: string | null
+          commercial_due_date: string | null
           commitment_chase_t10_at: string | null
           standard_comms_at: string | null
           date_confirm_nudge_at: string | null
@@ -3135,6 +3136,7 @@ export type Database = {
           packing: string | null
           payment_policy: string | null
           pdf_path: string | null
+          po_number: string | null
           quote_ref: string
           sms_send_count: number
           source: string
@@ -3178,6 +3180,7 @@ export type Database = {
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
+          commercial_due_date?: string | null
           commitment_chase_t10_at?: string | null
           standard_comms_at?: string | null
           date_confirm_nudge_at?: string | null
@@ -3215,6 +3218,7 @@ export type Database = {
           packing?: string | null
           payment_policy?: string | null
           pdf_path?: string | null
+          po_number?: string | null
           quote_ref: string
           sms_send_count?: number
           source?: string
@@ -3258,6 +3262,7 @@ export type Database = {
           breakdown?: Json
           client_id?: string | null
           collect_addr?: string | null
+          commercial_due_date?: string | null
           commitment_chase_t10_at?: string | null
           standard_comms_at?: string | null
           date_confirm_nudge_at?: string | null
@@ -3295,6 +3300,7 @@ export type Database = {
           packing?: string | null
           payment_policy?: string | null
           pdf_path?: string | null
+          po_number?: string | null
           quote_ref?: string
           sms_send_count?: number
           source?: string

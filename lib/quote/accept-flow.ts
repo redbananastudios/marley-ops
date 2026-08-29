@@ -65,6 +65,11 @@ import {
 import {
   commitmentAmount,
   commitmentDueDate,
+  DEFAULT_PAYMENT_TERMS_DAYS,
+  depositOfQuote,
+  paymentTermsDays,
+  paymentTermsDueDate,
+  policyOfQuote,
   requestedDeposit,
   resolvePaymentPolicy,
   type PaymentPolicy,
@@ -116,6 +121,7 @@ import {
 // rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
 import { isLedgerAccessDenied } from "@/lib/ledger/access";
 import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
+import { reportInvoiceRaiseFailed, resolveInvoiceRaiseFailed } from "@/lib/ops/invoice-raise";
 
 type Sb = SupabaseClient<Database>;
 
@@ -135,7 +141,7 @@ type Sb = SupabaseClient<Database>;
  * residential" and "I could not find out what the client is" must not share a
  * silent rendering, and this is a money decision.
  */
-async function snapshotPaymentPolicy(
+export async function snapshotPaymentPolicy(
   sb: Sb,
   quote: { id: string; client_id: string | null; lead_id: string | null },
 ): Promise<PaymentPolicy> {
@@ -166,10 +172,41 @@ async function snapshotPaymentPolicy(
   return resolvePaymentPolicy(data);
 }
 
+/**
+ * The client's agreed payment terms in days, for dating a commercial invoice.
+ *
+ * Resolves the client the SAME way `snapshotPaymentPolicy` does — the quote's
+ * own client first, the lead's only as a fallback — so the terms and the policy
+ * can never be read off two different clients and produce an invoice dated on
+ * somebody else's account.
+ *
+ * An unreadable client falls back to the 30-day default rather than blocking
+ * the raise: refusing to invoice a completed job because a client row would not
+ * load is the worse failure, and 30 is the SHORTER of the two allowed terms, so
+ * the fallback can never extend credit nobody agreed to.
+ */
+async function clientPaymentTermsDays(
+  sb: Sb,
+  quote: { client_id: string | null; lead_id: string | null },
+): Promise<number> {
+  let clientId = quote.client_id;
+  if (!clientId && quote.lead_id) {
+    const { data: lead } = await sb.from("leads").select("client_id").eq("id", quote.lead_id).maybeSingle();
+    clientId = lead?.client_id ?? null;
+  }
+  if (!clientId) return DEFAULT_PAYMENT_TERMS_DAYS;
+  const { data } = await sb
+    .from("clients")
+    .select("payment_terms_days")
+    .eq("id", clientId)
+    .maybeSingle();
+  return paymentTermsDays(data?.payment_terms_days);
+}
+
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at";
+  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at, po_number";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -239,6 +276,9 @@ export type AcceptQuoteRow = {
    *  cancel / mark-lost). Money surfaces must go quiet: no payment panels on
    *  /q, no date confirmation, no commitment invoice, no chases. */
   booking_cancelled_at: string | null;
+  /** Commercial only: the client's own purchase-order reference, printed on
+   *  the completion invoice when present (PRD §3.10). Never required. */
+  po_number?: string | null;
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
@@ -877,7 +917,11 @@ export async function acceptQuoteByStaff(
       ok: true,
       alreadyAccepted: true,
       agreed: quote.agreed_price ?? Number(quote.grand_total ?? 0),
-      deposit: quote.deposit_amount ?? settings.defaultDeposit, // the frozen truth
+      // The frozen truth, read through the policy so a commercial booking
+      // reports the £0 it was actually asked for — including one accepted
+      // before the branch below existed, whose row still carries a residential
+      // figure it was never asked to pay.
+      deposit: depositOfQuote(quote, settings.defaultDeposit),
       emailed: false,
     };
   }
@@ -889,16 +933,37 @@ export async function acceptQuoteByStaff(
     typeof agreedPrice === "number" && Number.isFinite(agreedPrice) && agreedPrice > 0
       ? round2(agreedPrice)
       : (quote.agreed_price ?? Number(quote.grand_total ?? 0));
+  // Which LADDER this booking runs, resolved BEFORE the ask is computed —
+  // because on the commercial one there is no ask. Gate 10b closed the online
+  // path to commercial quotes, so this function is the ONLY way one is ever
+  // accepted, and everything below it here is residential machinery.
+  const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
+  const commercial = paymentPolicy === "commercial";
+  // Commercial takes NO deposit (PRD §3.10): one invoice raised on completion,
+  // due on the client's own terms. `requestedDeposit` is the residential rule
+  // and knows nothing of that, so running it here wrote a deposit the customer
+  // was never asked for — and its own two collapses made the damage variable
+  // rather than a flat £100. A £2,400 job reported £2,300; the same job four
+  // days out reported £1,800 (the ask collapses to 25%); and at or under the
+  // small-job threshold the ask IS the gross, so deposit_amount == agreed left
+  // the only commercial money figure at exactly £0 — "£0 due" printed against a
+  // live job nobody had paid a penny towards.
+  //
+  // Written as 0 rather than left null on purpose: every downstream read of this
+  // column falls back to the Settings default when it is null, so null would
+  // quietly restore the £100 at the first read (see `depositOfQuote`).
+  //
   // Late-booking collapse (applies over an office-typed override too — the
   // returned/toasted deposit shows the real ask): a move inside 7 days takes
   // the full 25% up-front, so no commitment invoice ever raises for it.
-  const deposit = requestedDeposit(agreed, baseDeposit, quote.moving_date, settings.smallJobThreshold);
+  const deposit = commercial
+    ? 0
+    : requestedDeposit(agreed, baseDeposit, quote.moving_date, settings.smallJobThreshold);
 
   // The payment link (accept page in its post-accept state) + reply routing
   // both hang off the token — make sure it exists before anything sends.
   const token = quote.accept_token ?? (await ensureAcceptToken(sb, quote.id));
 
-  const paymentPolicy = await snapshotPaymentPolicy(sb, quote);
   const { data: won } = await sb
     .from("quotes")
     .update({
@@ -927,8 +992,13 @@ export async function acceptQuoteByStaff(
       .select("status, first_contacted_at, client_id")
       .eq("id", quote.lead_id)
       .single();
-    const patch: Record<string, unknown> = carriedDeposit
-      ? {} // deposit already paid on the superseded quote — no new request, no chase
+    // Nothing was requested in either of these cases: the deposit came across
+    // already paid on the superseded quote, or this is commercial and there is
+    // no deposit rung to request. Stamping deposit_requested_at on a commercial
+    // booking would date an ask that never happened, and arming the chase
+    // counters would leave it primed for a queue it is excluded from.
+    const patch: Record<string, unknown> = carriedDeposit || commercial
+      ? {}
       : {
           deposit_amount: deposit,
           deposit_requested_at: new Date().toISOString(),
@@ -942,7 +1012,10 @@ export async function acceptQuoteByStaff(
     await closeOpenQuoteFollowUps(sb, quote.lead_id);
 
     // One open deposit CALL task max — day 5, after the day-1/3 auto reminders.
-    if (!carriedDeposit) {
+    // Never for commercial: it would put "deposit still unpaid — give them a
+    // call" in the follow-ups queue for a deposit that was never asked for, and
+    // name the two automatic reminders commercial is excluded from.
+    if (!carriedDeposit && !commercial) {
       const { data: open } = await sb
         .from("follow_ups")
         .select("id")
@@ -972,7 +1045,13 @@ export async function acceptQuoteByStaff(
       client_id: lead?.client_id ?? quote.client_id,
       actor_id: actorId,
       type: "status_change",
-      summary: `Quote ${quote.quote_ref} accepted — agreed £${agreed.toFixed(0)}, ${carriedDeposit ? "deposit already paid (carried over)" : `£${deposit.toFixed(0)} deposit requested`}`,
+      summary: `Quote ${quote.quote_ref} accepted — agreed £${agreed.toFixed(0)}, ${
+        commercial
+          ? "business terms — no deposit, invoiced on completion"
+          : carriedDeposit
+            ? "deposit already paid (carried over)"
+            : `£${deposit.toFixed(0)} deposit requested`
+      }`,
       meta: { quote_id: quote.id, agreed_price: agreed, via: "staff_accept" },
     });
   }
@@ -996,8 +1075,15 @@ export async function acceptQuoteByStaff(
   // Payment instructions to the customer, right now (dup-guarded). Reuses the
   // day-1 reminder copy — sending it here advances the chase to step 1 so the
   // engine's next touch is day 3.
+  //
+  // Never for commercial. This is the day-1 DEPOSIT CHASE email, and it names
+  // the figure: before the fix above it asked a business client for the £100
+  // (or 25%) they were never quoted, and after it the same email would ask them
+  // for £0. Both are wrong, and both land in a real customer's inbox. A
+  // commercial booking is confirmed by the office and hears from us next when
+  // the completion invoice is raised.
   let emailed = false;
-  if (quote.customer_email && token) {
+  if (!commercial && quote.customer_email && token) {
     emailed = await sendDepositRequestEmail(sb, actorId, quote, deposit, token);
     if (emailed && quote.lead_id) await stampDepositChaseStarted(sb, quote.lead_id);
   }
@@ -1299,6 +1385,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       } as never)
       .eq("id", quoteId);
     await resolveZohoAccessDenied(sb);
+    await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho deposit invoice failed";
@@ -1311,11 +1398,15 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     // A lock-out is not this quote's problem — it is every quote's. Collapse it
     // into the one integration-level alert that names the actual remedy.
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "deposit invoice" });
-    else
+    else {
+      // The email alone left no trace anywhere a human looks: the ops board and
+      // the daily digest read clean while the customer went unbilled.
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "deposit", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho deposit invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${deposit.toFixed(2)} deposit invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
         `The acceptance itself is recorded; the invoice will retry automatically, or raise it manually in Zoho.`,
       ], "system");
+    }
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -1821,6 +1912,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
         commitment_due_date: dueDate,
       } as never)
       .eq("id", quoteId);
+    await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Zoho commitment invoice failed";
@@ -1831,11 +1923,13 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "commitment invoice" });
-    else
+    else {
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "commitment", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${amount.toFixed(2)} commitment invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
         `The date confirmation itself is recorded; the invoice will retry automatically, or raise it manually in Zoho (reference ${ref}).`,
       ], "system");
+    }
     return await fetchQuoteById(sb, quoteId);
   }
 }
@@ -2500,7 +2594,13 @@ export interface BalanceCredits {
 export async function computeBalanceCredits(sb: Sb, quote: AcceptQuoteRow): Promise<BalanceCredits> {
   const settings = await getBusinessSettings(sb);
   const agreed = quote.agreed_price ?? Number(quote.grand_total ?? 0);
-  const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  // Policy-aware: a COMMERCIAL job has no deposit rung, so nothing is carved
+  // out and its completion invoice is the whole agreed price. This is the half
+  // of the deposit bug that reaches the CUSTOMER rather than a screen — the
+  // partition doctrine above assumes a -DEP invoice exists demanding the
+  // carve-out, and on a commercial booking none ever does, so every penny
+  // deducted here is simply never billed to anyone.
+  const deposit = depositOfQuote(quote, settings.defaultDeposit);
   let depositCredit = deposit;
   let commitmentCredit = isRealZohoId(quote.zoho_commitment_invoice_id)
     ? Number(quote.commitment_invoice_amount ?? 0)
@@ -2768,6 +2868,23 @@ export async function createBalanceInvoiceFlow(
   }
 
   const ref = balanceReference(quote.quote_ref);
+  // COMMERCIAL: this raise IS the completion invoice (Peter, 2026-08-28 —
+  // commercial invoices are raised BY HAND on completion, so this office
+  // action is the moment, and there is no automation to add). It falls due on
+  // the client's own terms rather than before move day, and that date is what
+  // `commercial_due_date` carries.
+  //
+  // Written HERE, in the same update as the invoice number, because the three
+  // readers of the column (classifyBooking, owedNow, /bookings) all key off
+  // that number: stamping it in a second write would open a window where the
+  // invoice is readable and its terms are not. Nothing wrote this column at
+  // all until now, which made `pastTerms` false on every row forever — the
+  // overdue state and its internal alert were unreachable code, and a
+  // commercial invoice could age indefinitely while the board said "in terms".
+  const commercialDueDate =
+    policyOfQuote(quote) === "commercial"
+      ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
+      : null;
   try {
     let inv = await findInvoiceByReference(ref); // crash-recovery orphan adoption
     if (inv && !adoptedInvoiceMatches(inv.total, amount)) {
@@ -2815,21 +2932,49 @@ export async function createBalanceInvoiceFlow(
       // Same rule as the commitment invoice: card follows the brand's switch,
       // the disclosure follows the brand's identity.
       const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      // COMMERCIAL falls due on the client's agreed terms, not before move day
+      // — this raise happens AFTER the move. The residential lead sentence told
+      // a business client their invoice was already overdue on the day they
+      // received it, which is both wrong and the kind of wrong that gets
+      // forwarded to an accounts department.
+      const commercialInvoice = policyOfQuote(quote) === "commercial";
       const payClause = invoicePayClause(
         notesBrand,
         quote.quote_ref,
-        "Payment in full is due before move day, by",
+        commercialInvoice ? "Payable on your agreed terms, by" : "Payment in full is due before move day, by",
       );
+      // The client's own PO, when they issued one. Printed on the invoice
+      // because that is the reference their accounts payable matches against —
+      // an invoice without it can sit unpaid without anyone treating it as
+      // overdue, which is exactly the failure the terms date is meant to catch.
+      const po = commercialInvoice ? (quote.po_number ?? "").trim() : "";
+      const poClause = po ? ` Your purchase order: ${po}.` : "";
       inv = await createInvoice({
         customerId: contactId!,
         reference: ref,
-        description: `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
+        description: commercialInvoice
+          ? `Removal services — quote ${quote.quote_ref}${po ? ` (PO ${po})` : ""}`
+          : `Removal services — quote ${quote.quote_ref}${credits.length ? ` (balance after ${credits.join(" and ")})` : ""}`,
         amount,
-        notes: `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
+        notes: commercialInvoice
+          ? `Removal completed, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}.${poClause} ${payClause}`
+          : `Balance for your move, quote ${quote.quote_ref}. Agreed price £${agreed.toFixed(2)}${creditsClause}. ${payClause}`,
+        // The terms date on the DOCUMENT, not only in our own column. Without
+        // it the client's accounts department — the one party who has to act on
+        // the terms — receives an invoice with no due date at all, while
+        // /bookings quietly counts the days. Residential passes nothing and
+        // keeps the provider's default.
+        ...(commercialDueDate ? { dueDate: commercialDueDate } : {}),
         disableOnlinePayments: true, // balance is BACS/cash only — never card
       });
     }
-    const dueDate = balanceDueDate(quote.moving_date);
+    // The date everything DOWNSTREAM of this raise is dated by — the lead's
+    // balance_due_date and the balance follow-up's due_at. `balanceDueDate`
+    // works back from the MOVE, which on a commercial job has already
+    // happened: it dated the completion invoice in the past and dropped the
+    // follow-up straight into the overdue section of the queue, on the day
+    // the invoice was raised and inside the client's terms.
+    const dueDate = commercialDueDate ?? balanceDueDate(quote.moving_date);
     await sb
       .from("quotes")
       .update({
@@ -2841,6 +2986,8 @@ export async function createBalanceInvoiceFlow(
         zoho_balance_invoice_url: inv.invoiceUrl,
         balance_invoice_amount: amount,
         balance_invoice_created_at: new Date().toISOString(),
+        // Conditional so a RESIDENTIAL raise writes byte-identically to before.
+        ...(commercialDueDate ? { commercial_due_date: commercialDueDate } : {}),
       } as never)
       .eq("id", quoteId);
 
@@ -2900,10 +3047,12 @@ export async function createBalanceInvoiceFlow(
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "balance invoice" });
-    else
+    else {
+      await reportInvoiceRaiseFailed(sb, { message: msg, kind: "balance", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
         `Creating the £${amount.toFixed(2)} balance invoice for <strong>${quote.quote_ref}</strong> failed: ${msg}`,
       ], "system");
+    }
     return { ok: false, error: msg };
   }
 }

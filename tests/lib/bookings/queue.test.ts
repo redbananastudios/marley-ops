@@ -223,19 +223,34 @@ describe("owedNow", () => {
 const money = (
   bucket: string,
   deposit: number,
-  owed: { commitment: number; balance: number; overdue: number },
-) => ({
-  bucket: bucket as never,
-  deposit,
-  owed: { ...owed, total: owed.commitment + owed.balance },
-});
+  owed: { commitment: number; balance: number; commitmentOverdue?: number; balanceOverdue?: number },
+) => {
+  // Overdue is stated per obligation, never as one lump: the 25% and the
+  // balance are chased in different sections, so a combined figure cannot say
+  // which list holds it. `overdue` is derived here rather than passed, so a
+  // fixture can never claim a total its two halves do not add up to.
+  const commitmentOverdue = owed.commitmentOverdue ?? 0;
+  const balanceOverdue = owed.balanceOverdue ?? 0;
+  return {
+    bucket: bucket as never,
+    deposit,
+    owed: {
+      commitment: owed.commitment,
+      balance: owed.balance,
+      total: owed.commitment + owed.balance,
+      commitmentOverdue,
+      balanceOverdue,
+      overdue: commitmentOverdue + balanceOverdue,
+    },
+  };
+};
 
 describe("queueMoney", () => {
   it("counts an invoiced 25% the bucket ladder cannot reach", () => {
     // Date confirmed and the 25% raised, but the office has not booked the
     // slot - so classifyBooking says no_date and no commitment_* bucket holds
     // it. The tile must still show the money.
-    const m = queueMoney([money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 })]);
+    const m = queueMoney([money("no_date", 0, { commitment: 450, balance: 0 })]);
     expect(m.commitment).toBe(450);
     expect(m.commitmentJobs).toBe(1);
     expect(m.owedNow).toBe(450);
@@ -244,54 +259,110 @@ describe("queueMoney", () => {
   it("counts an invoiced 25% behind an unpaid deposit too", () => {
     // ensureCommitmentInvoice requires a confirmed date and the customer's
     // signature - NOT a paid deposit - so this combination is reachable.
-    const m = queueMoney([money("deposit_outstanding", 100, { commitment: 450, balance: 0, overdue: 450 })]);
+    const m = queueMoney([money("deposit_outstanding", 100, { commitment: 450, balance: 0, commitmentOverdue: 450 })]);
     expect(m.commitment).toBe(450);
     expect(m.overdue).toBe(450);
+    // Split the way the sections are split, so the tile can name the list.
+    expect(m.commitmentOverdue).toBe(450);
+    expect(m.balanceOverdue).toBe(0);
     // The deposit is reported separately and never joins owedNow.
     expect(m.depositsOutstanding).toBe(100);
     expect(m.depositJobs).toBe(1);
     expect(m.owedNow).toBe(450);
   });
 
-  it("the two /bookings money tiles sum to the /payments headline, on any mix", () => {
+  it("totals a mix the bucket ladder gets wrong", () => {
     // The invariant that replaces the QA ledger's false one (Balance
     // outstanding matches Due exactly), which only ever held on a day with no
-    // unpaid 25%. Neither tile alone equals the headline.
+    // unpaid 25%. /bookings shows m.commitment and m.balance as two tiles and
+    // /payments shows m.owedNow, and neither tile alone equals the headline.
+    //
+    // That the two tiles SUM to the headline is not asserted here: owedNow is
+    // defined as commitment + balance a few lines up in queue.ts, so the
+    // assertion would hold for every input, including one produced by the
+    // bucket-based tile this whole block exists to forbid. The half of that
+    // identity worth pinning is the arithmetic below; the half about which
+    // figure each PAGE renders is pinned against the pages themselves in
+    // tests/lib/bookings/bucket-coverage.test.ts.
     const rows = [
-      money("no_date", 0, { commitment: 450, balance: 0, overdue: 0 }),
-      money("deposit_outstanding", 100, { commitment: 300, balance: 0, overdue: 300 }),
-      money("commitment_due", 0, { commitment: 500, balance: 0, overdue: 0 }),
-      money("balance_due", 0, { commitment: 0, balance: 1700, overdue: 0 }),
-      money("balance_overdue", 0, { commitment: 0, balance: 900, overdue: 900 }),
-      money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 }),
+      money("no_date", 0, { commitment: 450, balance: 0 }),
+      money("deposit_outstanding", 100, { commitment: 300, balance: 0, commitmentOverdue: 300 }),
+      money("commitment_due", 0, { commitment: 500, balance: 0 }),
+      money("balance_due", 0, { commitment: 0, balance: 1700 }),
+      money("balance_overdue", 0, { commitment: 0, balance: 900, balanceOverdue: 900 }),
+      money("all_set", 0, { commitment: 0, balance: 0 }),
     ];
     const m = queueMoney(rows);
     expect(m.commitment).toBe(1250);
     expect(m.balance).toBe(2600);
-    expect(m.commitment + m.balance).toBe(m.owedNow);
     expect(m.owedNow).toBe(3850);
     expect(m.overdue).toBe(1200);
+    // And the overdue half splits the same way the danger sections do.
+    expect(m.commitmentOverdue).toBe(300);
+    expect(m.balanceOverdue).toBe(900);
+    expect(m.commitmentOverdue + m.balanceOverdue).toBe(m.overdue);
     // Deposits are disjoint from every owed figure.
     expect(m.depositsOutstanding).toBe(100);
+
+    // ...and the mix has to STAY one a bucket-based tile gets wrong, or £1,250
+    // above could be satisfied by the very implementation this block forbids.
+    // Two of the three unpaid 25%s sit in buckets no commitment_* filter
+    // reaches, which is QA-20260826-01 exactly.
+    const bucketBased = rows
+      .filter((r) => (r.bucket as string).startsWith("commitment_"))
+      .reduce((s, r) => s + r.owed.commitment, 0);
+    expect(
+      bucketBased,
+      "the fixture stopped discriminating: every unpaid 25% now sits in a commitment_* bucket, " +
+        "so a tile that summed those buckets would pass this test",
+    ).toBeLessThan(m.commitment);
+  });
+
+  it("reads money per obligation, so re-bucketing a row cannot move it", () => {
+    // The regression the fixture above is chosen to catch, stated directly:
+    // any bucket-conditional money read. Same obligations, different rung —
+    // every owed figure must be identical. Only the deposit figures are
+    // bucket-keyed, deliberately (the deposits queue IS a bucket), and neither
+    // row here is in it.
+    const owed = { commitment: 450, balance: 1700, overdue: 450 };
+    const parked = queueMoney([money("no_date", 0, owed)]);
+    const booked = queueMoney([money("commitment_due", 0, owed)]);
+    expect(parked).toEqual(booked);
+    expect(parked.commitment).toBe(450);
+    expect(parked.balance).toBe(1700);
+    expect(parked.commitmentJobs).toBe(1);
   });
 
   it("a row owing the 25% AND an early balance counts in both tiles at once", () => {
     // Gate 9c: settling in full raises the balance alongside the unpaid 25%.
     // The bucket carries only half the story, which is why money is never
     // read off the bucket.
-    const m = queueMoney([money("commitment_due", 0, { commitment: 400, balance: 1500, overdue: 0 })]);
+    const m = queueMoney([money("commitment_due", 0, { commitment: 400, balance: 1500 })]);
     expect(m.commitment).toBe(400);
     expect(m.balance).toBe(1500);
     expect(m.owedNow).toBe(1900);
     expect(m.commitmentJobs).toBe(1);
+    // One row, both job counters — it is on two chase lists, not one.
+    expect(m.balanceJobs).toBe(1);
   });
 
   it("a small job (gate 9a) contributes nothing to owed money", () => {
     // The full price was asked once at acceptance, so there is no 25% and no
     // balance for the rest of its life.
-    const m = queueMoney([money("all_set", 0, { commitment: 0, balance: 0, overdue: 0 })]);
+    const m = queueMoney([money("all_set", 0, { commitment: 0, balance: 0 })]);
     expect(m.owedNow).toBe(0);
     expect(m.commitmentJobs).toBe(0);
+    expect(m.balanceJobs).toBe(0);
+  });
+
+  it("counts a commercial completion invoice, which reaches no balance_* bucket", () => {
+    // The dashboard card read "No balances outstanding" against a live unpaid
+    // commercial invoice, because it tested the two balance BUCKETS and the
+    // commercial ladder never enters either of them.
+    const m = queueMoney([money("commercial_invoiced", 0, { commitment: 0, balance: 2400 })]);
+    expect(m.balance).toBe(2400);
+    expect(m.balanceJobs).toBe(1);
+    expect(m.owedNow).toBe(2400);
   });
 
   it("is empty for no rows", () => {
@@ -301,8 +372,11 @@ describe("queueMoney", () => {
       commitment: 0,
       commitmentJobs: 0,
       balance: 0,
+      balanceJobs: 0,
       owedNow: 0,
       overdue: 0,
+      commitmentOverdue: 0,
+      balanceOverdue: 0,
     });
   });
 });
@@ -363,6 +437,38 @@ describe("classifyBooking — commercial", () => {
     expect(classifyBooking({ ...invoiced, commercialDueDate: TODAY }, TODAY)).toBe(
       "commercial_invoiced",
     );
+  });
+
+  it("an invoiced job with NO terms date is not reported as in terms", () => {
+    // `!!date && date < today` reads a MISSING date as "not past" — the
+    // reassuring answer, produced by having no information at all. Nothing
+    // wrote commercial_due_date until the completion invoice started stamping
+    // it, so every commercial invoice read as comfortably in terms forever and
+    // the overdue state was unreachable code.
+    //
+    // "In terms" and "we cannot tell" are different answers and must not share
+    // a rendering, so the undated invoice gets its own bucket and its own
+    // section rather than being quietly filed with the healthy rows.
+    const invoiced = {
+      ...commercial,
+      hasRemovalAppt: true,
+      apptDayUk: "2026-07-01",
+      jobCompleted: true,
+      balanceInvoiceNumber: "INV-000401",
+    };
+    expect(classifyBooking({ ...invoiced, commercialDueDate: null }, TODAY)).toBe(
+      "commercial_terms_unknown",
+    );
+    expect(classifyBooking(invoiced, TODAY)).toBe("commercial_terms_unknown");
+  });
+
+  it("an undated job that is not invoiced yet still reads as awaiting completion", () => {
+    // The ordinary pre-invoice state. A terms date cannot exist before the
+    // invoice it dates, so its absence there is expected and says nothing —
+    // only an invoice with no date is a gap.
+    expect(
+      classifyBooking({ ...commercial, jobCompleted: true, commercialDueDate: null }, TODAY),
+    ).toBe("commercial_awaiting_completion");
   });
 
   it("settles to all_set once paid", () => {
@@ -444,6 +550,20 @@ describe("owedNow — commercial", () => {
     // point of commercial terms.
     expect(inTerms.overdue).toBe(0);
     expect(inTerms.total).toBe(2400);
+  });
+
+  it("an undated invoice counts in the total but is never ASSERTED overdue", () => {
+    // Deliberately not the same treatment classifyBooking gives it, and the
+    // difference is the point: `overdue` is a claim of fact about a date, and
+    // with no date there is no fact to state. So the money is still counted —
+    // never hidden from the headline — while the lateness claim is withheld,
+    // and the row's own bucket is what puts the gap in front of the office.
+    const v = owedNow(
+      { ...commercialOwed, balanceInvoiceNumber: "INV-000401", commercialDueDate: null },
+      TODAY,
+    );
+    expect(v.total).toBe(2400);
+    expect(v.overdue).toBe(0);
   });
 
   it("a commercial job with no diary entry still owes its raised invoice", () => {

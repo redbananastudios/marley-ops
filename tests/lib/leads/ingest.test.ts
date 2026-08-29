@@ -317,6 +317,43 @@ describe("brandIngestSecrets — an ambiguous credential authenticates nobody", 
     expect(blanks.length).toBe(2);
   });
 
+  it("the same brand twice is not an ambiguity — the default brand's own alias must not disable it", () => {
+    // `configuredIngestSecrets` seeds marley from LEAD_INGEST_SECRET and THEN
+    // scans the LEAD_INGEST_SECRET_ prefix, so the documented per-brand form of
+    // the default brand's own name produces a second `marley` entry carrying the
+    // one real credential. Counted by VALUE that read as a collision, so both
+    // were nulled and every genuine enquiry from the live marleymoves.co.uk site
+    // 401'd. There is nothing to disambiguate: whichever entry matched, the
+    // answer is `marley`.
+    const env = { LEAD_INGEST_SECRET: MARLEY, LEAD_INGEST_SECRET_MARLEY: MARLEY };
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, brandIngestSecrets(env))).toBe("marley");
+    expect(sharedIngestSecretBrands(env)).toEqual([]);
+  });
+
+  it("but a THIRD variable pulling a second brand onto that value still refuses everyone", () => {
+    // The alias is only safe while one brand claims the value. The moment
+    // another brand does, the credential is ambiguous again and yields nothing.
+    const env = {
+      LEAD_INGEST_SECRET: MARLEY,
+      LEAD_INGEST_SECRET_MARLEY: MARLEY,
+      LEAD_INGEST_SECRET_PITMANS: MARLEY,
+    };
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, brandIngestSecrets(env))).toBe(null);
+    // Each refused brand named once — repeating `marley` for its two variables
+    // tells an operator nothing extra.
+    expect(sharedIngestSecretBrands(env).sort()).toEqual(["marley", "pitmans"]);
+  });
+
+  it("an alias holding a DIFFERENT value gives the brand two working credentials", () => {
+    // Neither value is claimed by a second brand, so neither is ambiguous —
+    // which is what makes a rotation possible without an outage.
+    const env = { LEAD_INGEST_SECRET: MARLEY, LEAD_INGEST_SECRET_MARLEY: OTHER };
+    const secrets = brandIngestSecrets(env);
+    expect(resolveIngestBrand(`Bearer ${MARLEY}`, secrets)).toBe("marley");
+    expect(resolveIngestBrand(`Bearer ${OTHER}`, secrets)).toBe("marley");
+    expect(sharedIngestSecretBrands(env)).toEqual([]);
+  });
+
   it("sharedIngestSecretBrands names every brand whose secret was refused", () => {
     expect(
       sharedIngestSecretBrands({

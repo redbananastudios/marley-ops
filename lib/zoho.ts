@@ -279,6 +279,9 @@ export async function createInvoice(input: {
    *  has no chart of accounts). Storage invoices pass "Storage" so storage
    *  income never mixes with Removals Income (standing policy 2026-07-22). */
   itemName?: string;
+  /** `YYYY-MM-DD` — the commercial ladder's agreed terms (PRD §3.10). Omitted
+   *  leaves Zoho's own default, which is what every invoice carried before. */
+  dueDate?: string;
 }): Promise<ZohoInvoiceRef> {
   const taxId = await getVatTaxId();
   const line: Record<string, unknown> = {
@@ -294,6 +297,7 @@ export async function createInvoice(input: {
     reference_number: input.reference,
     ...(taxId ? { is_inclusive_tax: true } : {}),
     ...(input.disableOnlinePayments ? { payment_options: { payment_gateways: [] } } : {}),
+    ...(input.dueDate ? { due_date: input.dueDate } : {}),
     line_items: [line],
     notes: input.notes,
   });

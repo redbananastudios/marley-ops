@@ -78,6 +78,11 @@ describe("provider delivery safety", () => {
     // The message names the column to set, not an env var that is already fine.
     expect(res.error).toContain("pitmans");
     expect(res.error).toContain("brands.sms_sender");
+    // And the remedy it names must actually release THIS row. The comms-retry
+    // worker re-reads brands.sms_sender before re-driving an SMS, so setting the
+    // column sends the held message; without that re-read the retry would replay
+    // the frozen snapshot and this sentence would be a lie.
+    expect(res.error).toContain("next retry");
     // Nothing left the process, and the outcome is DEFINITE - a failed row that
     // will not be re-driven as outcome-unknown.
     expect(fetchMock).not.toHaveBeenCalled();

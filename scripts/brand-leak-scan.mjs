@@ -347,6 +347,57 @@ export const MANIFEST = [
   // "I could not check" must never render as "nothing to report"). Whoever
   // de-brands those surfaces adds the entries in the SAME change and deletes
   // this block — do not add them earlier to make the manifest look complete.
+
+  // Gate 16: the customer accept page. Identity now comes entirely from
+  // `pageTheme` — logo, name, phone, terms link, legal line, the accent (one
+  // CSS-variable override on the shell, so the mm-red utility CLASSES below
+  // are re-pointed rather than replaced) and whether card is mentioned at all.
+  //
+  // The mm-red allow is therefore not chrome in the §2 sense: these are record
+  // surfaces whose token is re-pointed per brand at runtime, which a source
+  // grep cannot see. That is exactly the gap the RENDERED half of this scan
+  // exists to close, and it is why the class names stay — replacing them with
+  // inline styles would lose every `hover:`/`focus:` accent variant.
+  //
+  // Domains, phone numbers, mailboxes and Connor stay forbidden here, and the
+  // page carries none of them any more.
+  {
+    pattern: "app/q/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the shell (gate 16); no hardcoded name, phone, domain or named individual remains",
+  },
+  // Gate 16, the remaining token pages. Same mechanism throughout: identity
+  // from `pageTheme`, accent from one CSS-variable override on the page root.
+  //
+  // /s and /cv are RECORD surfaces — they take the brand of the let and the
+  // lead respectively. /sheet and /join are GROUP surfaces (PRD §4): one
+  // shared crew across every brand, so they take `GROUP_PAGE_THEME`, whose
+  // accent is neutral charcoal rather than either brand's colour.
+  {
+    pattern: "app/s/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the page root (gate 16); the storage-agreement identity, terms link and phone are all theme-resolved",
+  },
+  {
+    pattern: "app/cv/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the page root (gate 16); CubicBuilder is shared with the office builder, which renders outside this element and is unaffected",
+  },
+  {
+    pattern: "app/sheet/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "group surface (PRD §4): the mm-red utilities are re-pointed to neutral charcoal by GROUP_PAGE_THEME, so a mixed-brand crew day is coloured as neither brand",
+  },
+  {
+    pattern: "app/join/[token]/*.tsx",
+    allow: ["mm-red"],
+    reason:
+      "group surface (PRD §4): one shared crew, so the copy names no brand and the accent is neutralised by GROUP_PAGE_THEME",
+  },
 ];
 
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next"]);
@@ -543,6 +594,6 @@ if (isMain) {
     process.exit(1);
   }
   console.log(
-    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Source half only; the rendered-page half lands with gate 16.)`,
+    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Source half only. The rendered-page half of PRD 6.4 is NOT implemented - gate 16 shipped the source conversion without it, so a clean run here does not mean the rendered pages were checked.)`,
   );
 }

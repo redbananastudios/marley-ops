@@ -112,17 +112,31 @@ sig = HMAC-SHA256("limit=<n>&since_id=<n>&ts=<unix-seconds>", pull_secret)
   `push_attempts`, `last_error`, and the stored `payload` (`ingest` = the mapped
   lead fields sans `leadId`; `raw` = the sanitised form fields, kept for
   debugging).
-- Also returns `total` (rows in the whole table), `since_id` (echoed) and
-  `remaining` (rows beyond this page). **`total` is what lets the reader PROVE
-  nothing is missing** rather than infer it from a window that by construction
-  cannot show what it excluded. It used to answer the newest `limit` rows with
-  no cursor and no total, so anything that fell behind that window was offered
-  by no poll ever again — and because the reader's failure count then read zero,
-  its standing reconcile alarm resolved itself. Do not remove `total`: Ops
-  treats its absence as UNKNOWN and holds the alarm open, which is correct but
-  noisy.
+- Also returns `total` (rows in the whole table), `min_id` (the lowest row id,
+  or `null` when the table is empty), `since_id` (echoed) and `remaining` (rows
+  beyond this page). **`total` is what lets the reader PROVE nothing is missing**
+  rather than infer it from a window that by construction cannot show what it
+  excluded. It used to answer the newest `limit` rows with no cursor and no
+  total, so anything that fell behind that window was offered by no poll ever
+  again — and because the reader's failure count then read zero, its standing
+  reconcile alarm resolved itself. Do not remove `total`: Ops treats its absence
+  as UNKNOWN and holds the alarm open, which is correct but noisy.
+- **`min_id` is what lets the reader anchor its cursor to where this table's ids
+  actually start.** Ops derives its cursor by walking up from the floor over the
+  rows it holds, so a floor of 1 on a table with no row 1 — a GDPR erasure, the
+  install-test rows cleared out, an AUTO_INCREMENT reseeded by a host move or a
+  dump/restore — never satisfies the walk. The cursor then sits at 0 on every
+  poll, Ops re-reads this same oldest page forever, and rows past it are offered
+  to nobody. Do not remove `min_id`: without it Ops falls back to a floor of 1,
+  which is safe (it can only cost re-reads) but re-opens exactly that trap. A
+  poll whose cursor the floor lifts is repeated once from the corrected anchor,
+  so a re-anchoring rail makes two requests per run rather than one.
 - Row ids are the cursor, so **never reset AUTO_INCREMENT** on the submissions
-  table.
+  table. Deleting the oldest rows is free: `min_id` moves up with them and Ops
+  re-anchors on the next poll. Deleting one from the middle leaves a hole the
+  cursor stops beneath, which is deliberate — a row Ops has not landed must keep
+  being offered — and it costs nothing until more than `limit` rows sit above
+  the hole, at which point Ops's reconcile alarm says so.
 - Unauthenticated/badly-signed requests get an undifferentiated 403; an
   unconfigured pull secret returns 503 (fail closed, never open).
 

@@ -17,6 +17,7 @@ import { join } from "node:path";
  */
 
 const SRC = readFileSync(join(process.cwd(), "lib/quote/accept-flow.ts"), "utf8");
+const QPAGE = readFileSync(join(process.cwd(), "app/q/[token]/page.tsx"), "utf8");
 
 describe("a commercial quote cannot be self-accepted on /q", () => {
   it("acceptQuoteOnline refuses commercial on the SERVER, not just on the page", () => {
@@ -88,5 +89,262 @@ describe("the deposit rung refuses a commercial quote", () => {
     // field the query does not fetch is `undefined === "commercial"` — always
     // false, silently, on every row.
     expect(SRC).toContain("payment_policy, standard_comms_at");
+  });
+});
+
+/**
+ * The staff path is the ONLY way a commercial quote is accepted (the online one
+ * is refused above), and it was residential machinery end to end: it computed a
+ * deposit with `requestedDeposit`, wrote it to the row, armed the chase
+ * counters, opened a day-5 "deposit still unpaid" call task and emailed the
+ * customer the day-1 deposit chase — for a booking with no deposit rung.
+ *
+ * Source guards for the same reason the two above are: this function is deep IO
+ * (Supabase, the ledger, comms dispatch), and what matters is the presence and
+ * ORDER of the policy branch, not arithmetic that is unit-tested in
+ * tests/lib/payments-policy.test.ts and tests/lib/bookings/commercial-money.test.ts.
+ */
+describe("the staff accept path takes no deposit on a commercial booking", () => {
+  const staffBody = () => {
+    const at = SRC.indexOf("export async function acceptQuoteByStaff(");
+    expect(at, "acceptQuoteByStaff not found — rename it here too").toBeGreaterThan(-1);
+    return SRC.slice(at, SRC.indexOf("/* ---------------", at));
+  };
+
+  it("branches the ask on the policy instead of always running requestedDeposit", () => {
+    // Unbranched, the residential rule wrote three different wrong figures: the
+    // flat default, the inside-T-7 collapse to 25%, and — at or under the
+    // small-job threshold — the whole agreed price, which left the only
+    // commercial money figure at exactly £0.
+    expect(staffBody()).toContain("const deposit = commercial");
+  });
+
+  it("resolves the policy BEFORE it computes the ask", () => {
+    // Order is the property. The snapshot used to be taken after the deposit
+    // was already computed, purely to fill its own column — so nothing the
+    // policy knew could reach the figure written beside it.
+    const body = staffBody();
+    const policy = body.indexOf("const paymentPolicy = await snapshotPaymentPolicy(sb, quote);");
+    const ask = body.indexOf("const deposit = commercial");
+    expect(policy).toBeGreaterThan(-1);
+    expect(ask).toBeGreaterThan(-1);
+    expect(policy).toBeLessThan(ask);
+  });
+
+  it("never sends the deposit-chase email to a commercial customer", () => {
+    // This is the day-1 DEPOSIT CHASE, and it names the figure. Before the fix
+    // it asked a business client for money they were never quoted; after it,
+    // the same email would ask them for £0. Both reach a real inbox.
+    expect(staffBody()).toContain("if (!commercial && quote.customer_email && token)");
+  });
+
+  it("never opens a day-5 'deposit still unpaid' call task for one", () => {
+    expect(staffBody()).toContain("if (!carriedDeposit && !commercial)");
+  });
+
+  it("never arms the deposit chase counters on the lead", () => {
+    // deposit_requested_at would date an ask that never happened, and the
+    // counters would leave the booking primed for a queue it is excluded from.
+    expect(staffBody()).toContain("carriedDeposit || commercial");
+  });
+});
+
+/**
+ * `quotes.commercial_due_date` is read in three places — classifyBooking,
+ * owedNow and the /bookings commercial section — and was written by NOTHING.
+ * A repo-wide grep returned the migration, the select, the mapping and the two
+ * reads. So `pastTerms` was false on every row forever: the overdue state was
+ * unreachable, and the internal ops alert the PRD promises could never fire.
+ *
+ * Peter decided (2026-08-28) that commercial invoices are raised BY HAND on
+ * completion, so no automation will ever write it. The office's existing raise
+ * IS that moment, which is why it stamps the date rather than a new action
+ * doing it — a second step is a second step to forget, and a date recorded
+ * apart from the invoice it dates can disagree with it.
+ */
+describe("the completion invoice dates itself on the client's terms", () => {
+  const flowBody = () => {
+    const at = SRC.indexOf("export async function createBalanceInvoiceFlow(");
+    expect(at, "createBalanceInvoiceFlow not found — rename it here too").toBeGreaterThan(-1);
+    return SRC.slice(at, SRC.indexOf("\n/**", at));
+  };
+
+  it("stamps commercial_due_date, so something writes the column three call sites trust", () => {
+    const body = flowBody();
+    expect(body).toContain("commercial_due_date: commercialDueDate");
+    expect(body).toContain("paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))");
+  });
+
+  it("computes the date from the policy snapshot, never from the client's type today", () => {
+    // Same reason the policy itself is snapshotted: re-deriving it would let a
+    // client edited after the fact re-date an invoice already in their hands.
+    expect(flowBody()).toContain('policyOfQuote(quote) === "commercial"');
+  });
+
+  it("writes it in the SAME update as the invoice number that makes it readable", () => {
+    // All three readers key off zoho_balance_invoice_number. A second write
+    // would open a window where the invoice is readable and its terms are not —
+    // which is precisely the undated state the classifier now has to alarm on.
+    const body = flowBody();
+    const number = body.indexOf("zoho_balance_invoice_number: inv.invoiceNumber");
+    const due = body.indexOf("commercial_due_date: commercialDueDate");
+    expect(number).toBeGreaterThan(-1);
+    expect(due).toBeGreaterThan(-1);
+    // Same object literal: no `.update(` may open between the two.
+    expect(body.slice(number, due)).not.toContain(".update(");
+  });
+
+  it("leaves a RESIDENTIAL raise byte-identical", () => {
+    // The conditional spread is what guarantees it: residential resolves the
+    // date to null and writes no extra key at all.
+    expect(flowBody()).toContain("...(commercialDueDate ? { commercial_due_date: commercialDueDate } : {})");
+  });
+});
+
+describe("/q renders a commercial quote for review, with no accept action", () => {
+  // QA-20260828-03. Gate 10b closed the WRITE path and its commit message said
+  // "the button was already hidden" — it was not hidden on this page. A
+  // commercial client saw the whole residential screen: a deposit figure they
+  // do not owe, copy promising card or bank transfer, and an enabled Accept
+  // button. The server refused the click correctly, so no money moved; what
+  // reached the customer was still wrong.
+  //
+  // The lines before the residential `sent` branch are the whole subject, so
+  // the guards are anchored to ORDER, not just presence.
+  /** Anchor offsets, but FAILING when an anchor is missing rather than
+   *  returning -1. A bare indexOf makes every later assertion vacuous the
+   *  moment the branch it looks for is deleted: `-1 < sentAt` is true, and
+   *  `slice(-1, sentAt)` is the empty string, which contains no accept form
+   *  and no deposit copy. Verified by mutation — with the branch removed and
+   *  a bare indexOf, only one of the three tests below failed. */
+  const at = (needle: string, what: string): number => {
+    const i = QPAGE.indexOf(needle);
+    expect(i, `/q no longer contains ${what}`).toBeGreaterThan(-1);
+    return i;
+  };
+  const commercialAt = () =>
+    at('snapshotPaymentPolicy(sb, quote)) === "commercial"', "a live payment-policy check");
+  const sentAt = () =>
+    at("/* ---------------------------------------------------------- sent → accept */", "the residential accept branch");
+
+  it("decides on the live client, never on the quote's snapshot column", () => {
+    // `payment_policy` is only written AT acceptance, so on a `sent` quote it
+    // is null for every booking — commercial included. A branch reading the
+    // column here would be unreachable in exactly the case it exists for,
+    // and would look correct in review.
+    commercialAt();
+    expect(
+      QPAGE,
+      "/q decides the commercial branch from the quote's own payment_policy, which is null before acceptance",
+    ).not.toMatch(/quote\.payment_policy === "commercial"/);
+  });
+
+  it("returns the review-only card BEFORE the residential accept screen", () => {
+    expect(
+      commercialAt(),
+      "the commercial check no longer runs before the residential accept screen, so the accept screen wins",
+    ).toBeLessThan(sentAt());
+  });
+
+  it("offers no accept form and no deposit copy on that branch", () => {
+    const review = QPAGE.slice(commercialAt(), sentAt());
+    expect(review, "the commercial review branch still renders the accept form").not.toContain("<AcceptForm");
+    expect(review, "the commercial review branch still promises a deposit").not.toMatch(/deposit/i);
+    // The residential branch must be untouched — this is the control, and it
+    // is the assertion that fails if the fix is applied too broadly.
+    const residential = QPAGE.slice(sentAt());
+    expect(residential).toContain("<AcceptForm token={token}");
+    expect(residential).toMatch(/deposit<\/strong> secures the booking/);
+  });
+});
+
+/* ------------------------------------------------------------------ gate 10b
+ * The completion invoice: the PO the client matches it against, and the date it
+ * actually falls due.
+ *
+ * `quotes.po_number` and `quotes.commercial_due_date` both arrived in migration
+ * 0113. The due date was READ by three sites and written by none until gate
+ * 10b; the PO was written by nobody and read by nobody at all — a column with a
+ * length constraint, a comment explaining its purpose, and no code anywhere. A
+ * column nothing reads is indistinguishable from a feature nobody built.
+ */
+describe("the completion invoice carries the client's reference and its real due date", () => {
+  const flowBody = () => {
+    const at = SRC.indexOf("export async function createBalanceInvoiceFlow(");
+    expect(at, "createBalanceInvoiceFlow not found — rename it here too").toBeGreaterThan(-1);
+    const end = SRC.indexOf("\n/**", at);
+    expect(end, "the invoice flow has no end").toBeGreaterThan(at);
+    return SRC.slice(at, end);
+  };
+
+  it("prints the PO on the invoice when the client issued one", () => {
+    const body = flowBody();
+    // On the document itself, not merely fetched: accounts payable matches on
+    // this reference, and an invoice they cannot match sits unpaid without
+    // anyone treating it as late.
+    expect(body).toContain("Your purchase order:");
+    expect(body).toContain("(PO ${po})");
+  });
+
+  it("never prints a PO on a residential invoice", () => {
+    // Reading it unconditionally would put an empty clause on every
+    // residential invoice, or a stale value on a re-typed client's quote.
+    expect(flowBody()).toContain('const po = commercialInvoice ? (quote.po_number ?? "").trim() : "";');
+  });
+
+  it("SELECTS the column, or every read of it is undefined", () => {
+    // The guard that matters most and looks least like one: the flow reads
+    // quote.po_number off a row fetched by QUOTE_COLS. Omit it there and every
+    // assertion above still passes while the PO silently never prints.
+    const cols = SRC.indexOf("const QUOTE_COLS");
+    const rowType = SRC.indexOf("export type AcceptQuoteRow");
+    expect(cols, "QUOTE_COLS not found").toBeGreaterThan(-1);
+    expect(rowType).toBeGreaterThan(cols);
+    expect(SRC.slice(cols, rowType)).toContain("po_number");
+  });
+
+  it("tells a commercial client their terms, not that it was due before the move", () => {
+    const body = flowBody();
+    expect(body).toContain('commercialInvoice ? "Payable on your agreed terms, by"');
+    // The residential sentence must survive as the other branch — the control
+    // that fails if the change was applied too broadly.
+    expect(body).toContain('"Payment in full is due before move day, by"');
+  });
+
+  it("dates the lead and the follow-up by the terms date", () => {
+    const body = flowBody();
+    // balanceDueDate() works back from the MOVE, which on a commercial job has
+    // already happened by the time this raise runs — so it dated the invoice in
+    // the past and filed the balance follow-up straight into the overdue
+    // section, on the day it was raised and well inside the client's terms.
+    const due = body.indexOf("const dueDate = commercialDueDate ?? balanceDueDate(quote.moving_date);");
+    expect(due, "dueDate no longer prefers the commercial terms date").toBeGreaterThan(-1);
+    // commercialDueDate must be computed BEFORE dueDate reads it, or this is a
+    // temporal-dead-zone crash rather than a wrong date.
+    const computed = body.indexOf("const commercialDueDate =");
+    expect(computed, "commercialDueDate is no longer computed in this flow").toBeGreaterThan(-1);
+    expect(computed).toBeLessThan(due);
+  });
+});
+
+describe("the PO reaches the database at all", () => {
+  const ACTIONS = readFileSync(join(process.cwd(), "app/(dashboard)/quotes/actions.ts"), "utf8");
+  const FORM = readFileSync(join(process.cwd(), "lib/quote/form-types.ts"), "utf8");
+
+  it("is persisted by the quote save, not just held in the wizard", () => {
+    expect(ACTIONS).toContain("po_number: values.review.poNumber?.trim().slice(0, 64) || null,");
+  });
+
+  it("is truncated to the length the database will accept", () => {
+    // `quotes_po_number_len` (migration 0113) rejects over 64, and it rejects
+    // the whole UPDATE — so an over-long PO arriving by paste or from an older
+    // state_blob would fail the entire quote save with a database error the
+    // office cannot act on.
+    expect(ACTIONS).toContain(".slice(0, 64)");
+  });
+
+  it("has a default, so an older quote hydrates without an undefined field", () => {
+    expect(FORM).toContain("poNumber: string;");
+    expect(FORM).toContain('poNumber: "",');
   });
 });

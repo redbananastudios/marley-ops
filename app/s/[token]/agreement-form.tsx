@@ -14,9 +14,14 @@ import { signStorageAgreementRemoteAction } from "./actions";
 export function StorageAgreementForm({
   token,
   ackList,
+  phone,
 }: {
   token: string;
   ackList: { key: string; label: string }[];
+  /** The brand's own number. This copy is what a customer reads at the moment
+   *  their signature has just failed — a poor moment to hand them another
+   *  company's office. */
+  phone: string;
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -32,7 +37,7 @@ export function StorageAgreementForm({
     start(async () => {
       const sigImage = await renderNameToPng(name);
       const res = await signStorageAgreementRemoteAction(token, name.trim(), acks, sigImage);
-      if (!res.ok) setError(res.error ?? "Something went wrong — call 01747 637070.");
+      if (!res.ok) setError(res.error ?? `Something went wrong — call ${phone}.`);
       else router.refresh();
     });
   }

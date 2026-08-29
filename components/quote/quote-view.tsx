@@ -51,6 +51,9 @@ export interface QuoteViewMoney {
   deposit_amount: number | null;
   deposit_paid_at: string | null;
   moving_date: string | null;
+  /** Which ladder this booking runs (PRD §3.10). Absent means residential —
+   *  today's card, unchanged. */
+  payment_policy?: "residential" | "commercial";
 }
 
 export function QuoteView({ values, money }: { values: QuoteFormValues; money: QuoteViewMoney }) {
@@ -169,12 +172,25 @@ export function QuoteView({ values, money }: { values: QuoteFormValues; money: Q
               {money.agreed_price != null && Number(money.agreed_price) !== Number(money.grand_total)
                 ? row("Agreed price", gbp(money.agreed_price), true)
                 : null}
-              {row(
-                "Deposit",
-                money.deposit_paid_at
-                  ? `${gbp(money.deposit_amount)} paid`
-                  : `${gbp(money.deposit_amount)} awaiting`,
-              )}
+              {/* Commercial takes no deposit, so a Deposit row can only be
+                  wrong here: it read "£0 awaiting" once gate 10b started
+                  writing the column honestly, and "£100 awaiting" — money
+                  nobody had asked for — on any row written before that. What
+                  the office needs on this card instead is when it gets billed. */}
+              {money.payment_policy === "commercial"
+                ? row("Payment", "Invoiced on completion, on the client's terms")
+                : row(
+                    "Deposit",
+                    money.deposit_paid_at
+                      ? `${gbp(money.deposit_amount)} paid`
+                      : `${gbp(money.deposit_amount)} awaiting`,
+                  )}
+              {/* Shown only when the client actually issued one — an "PO: —"
+                  row would read as a gap to chase on the jobs that never had
+                  one, which is most of them. */}
+              {money.payment_policy === "commercial" && values.review.poNumber?.trim()
+                ? row("PO number", values.review.poNumber.trim())
+                : null}
             </>
           ) : null}
         </Card>

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHmac } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
  * The Pitmans WordPress pull rail (lib/sync/wp-leads.ts) — the half of gate
@@ -105,6 +108,54 @@ function fetchReturning(body: unknown, status = 200): typeof fetch {
   })) as unknown as typeof fetch;
 }
 
+/**
+ * A fake of the plugin's read endpoint over a given set of row ids: it answers
+ * `id > since_id ORDER BY id ASC LIMIT limit` and reports `total`/`min_id` the
+ * way plb_rest_submissions does.
+ *
+ * Modelled rather than a fixed body because what these tests pin is which rows
+ * a cursor can REACH, and a stub that ignores `since_id` cannot express that —
+ * it would answer the same page however wrong the cursor was, which is exactly
+ * the bug.
+ */
+function fakePlugin(
+  ids: readonly number[],
+  opts: { reportMinId?: boolean; unlandable?: readonly number[] } = {},
+) {
+  const sorted = [...ids].sort((a, b) => a - b);
+  const unlandable = new Set(opts.unlandable ?? []);
+  /** The since_id of every poll, in order — one entry per HTTP request. */
+  const polledFrom: number[] = [];
+  const fetchImpl = (async (u: string) => {
+    const url = new URL(String(u));
+    const sinceId = Number(url.searchParams.get("since_id"));
+    const limit = Number(url.searchParams.get("limit"));
+    polledFrom.push(sinceId);
+    const page = sorted.filter((id) => id > sinceId).slice(0, limit);
+    const body = {
+      ok: true,
+      total: sorted.length,
+      ...(opts.reportMinId === false ? {} : { min_id: sorted.length ? sorted[0] : null }),
+      since_id: sinceId,
+      submissions: page.map((id) =>
+        submission(
+          id,
+          // An unlandable row is the real shape: no phone AND no email, which
+          // the shared ingest contract refuses on both rails.
+          unlandable.has(id) ? { name: `Customer ${id}` } : { name: `Customer ${id}`, phone: "07572000000" },
+        ),
+      ),
+    };
+    return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
+  }) as unknown as typeof fetch;
+  return { fetchImpl, polledFrom };
+}
+
+/** Our side already holds these plugin row ids. */
+function held(ids: readonly number[]) {
+  return new Set(ids.map((n) => wpExternalLeadId(n)));
+}
+
 beforeEach(() => {
   landCalls.length = 0;
   issueCalls.length = 0;
@@ -165,14 +216,80 @@ describe("signPullQuery — the HMAC contract shared with the plugin", () => {
   });
 });
 
+/**
+ * The signing contract lives in three files that each claim to BE the spec and
+ * each say "change both together or not at all" — this rail, the plugin, and
+ * the plugin's README. They cannot be diffed by the type system, and the two
+ * implementations stayed byte-matched through the since_id change while both
+ * PROSE halves went on documenting the older `limit=<n>&ts=<unix>` string. A
+ * spec that describes a string the code does not sign is worse than no spec:
+ * the next person to touch either half implements the wrong one and the
+ * signature silently stops verifying.
+ */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const readRepo = (rel: string) => readFileSync(path.join(REPO_ROOT, rel), "utf8");
+
+describe("the signing contract is described identically wherever it is described", () => {
+  const SOURCES: [string, string][] = [
+    ["the rail", "lib/sync/wp-leads.ts"],
+    ["the plugin", "wordpress/pitmans-lead-bridge/pitmans-lead-bridge.php"],
+    ["the plugin README", "wordpress/pitmans-lead-bridge/README.md"],
+  ];
+
+  it("the plugin builds the same canonical string this rail signs", () => {
+    // The PHP half, verbatim. Both sides concatenate plain integers in this
+    // order; signPullQuery's own test above pins the value it produces.
+    expect(readRepo(SOURCES[1][1])).toContain(
+      "$canonical = 'limit=' . $limit . '&since_id=' . $since_id . '&ts=' . $ts;",
+    );
+  });
+
+  it("no half still documents the pre-since_id canonical string", () => {
+    for (const [label, rel] of SOURCES) {
+      const src = readRepo(rel);
+      expect(src, `${label} documents the current canonical string`).toContain(
+        "limit=<n>&since_id=<n>&ts=<unix",
+      );
+      expect(src, `${label} still documents the stale canonical string`).not.toMatch(
+        /limit=<n>&ts=/,
+      );
+    }
+  });
+});
+
 describe("contiguousReconciledUpTo", () => {
   it("stops at the first gap, so an unlanded row keeps coming back", () => {
     expect(contiguousReconciledUpTo(new Set())).toBe(0);
     expect(contiguousReconciledUpTo(new Set([1, 2, 3]))).toBe(3);
     // 4 is missing, so the window must reopen at 4 however many rows follow.
     expect(contiguousReconciledUpTo(new Set([1, 2, 3, 5, 6]))).toBe(3);
-    // A set that never starts at 1 has reconciled nothing contiguously.
+    // Without a floor to say otherwise, a set that does not start at 1 has
+    // reconciled nothing contiguously — id 1 might exist and be unlanded.
     expect(contiguousReconciledUpTo(new Set([2, 3]))).toBe(0);
+  });
+
+  it("anchors to the table's real floor, so ids that never started at 1 still advance", () => {
+    // The regression this pins: with the floor hardcoded to 1, a table numbered
+    // from 5 returned 0 on every poll, so the rail asked for `id > 0` forever
+    // and rows past the first page were offered by no poll ever again.
+    expect(contiguousReconciledUpTo(new Set([5, 6, 7]), 5)).toBe(7);
+    const held = new Set(Array.from({ length: 200 }, (_, i) => i + 5)); // 5..204
+    expect(contiguousReconciledUpTo(held, 5)).toBe(204);
+    // Unlike a genuine gap, this one is unclearable: no human action can land a
+    // row that does not exist, so anchoring to 1 is a permanent pin.
+    expect(contiguousReconciledUpTo(held)).toBe(0);
+  });
+
+  it("a gap ABOVE the floor still pins the window — an unlanded row must keep coming back", () => {
+    // 8 is missing, so the rail must keep re-offering it rather than moving on.
+    expect(contiguousReconciledUpTo(new Set([5, 6, 7, 9, 10]), 5)).toBe(7);
+  });
+
+  it("a floor above what we hold cannot skip a row — it costs re-reads, never a loss", () => {
+    // The floor arrives from the endpoint. A wrong (or hostile) one must not be
+    // able to advance the cursor past rows the rail has never landed.
+    expect(contiguousReconciledUpTo(new Set(), 5000)).toBe(0);
+    expect(contiguousReconciledUpTo(new Set([5, 6, 7]), 5000)).toBe(7);
   });
 });
 
@@ -400,6 +517,71 @@ describe("syncWpLeads — the loss cannot scroll out of the window", () => {
     expect(summary.unaccounted).toBe(0);
     expect(summary.failures).toBe(0);
     expect(resolveCalls).toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("a table whose ids do not start at 1 still reaches the rows past the first page", async () => {
+    // The regression: the cursor walked up from a hardcoded 1, so a plugin table
+    // with no row 1 — a GDPR erasure, install-test rows cleared, an
+    // AUTO_INCREMENT reseeded by a host move — pinned it at 0 on EVERY poll. The
+    // rail then re-read the same oldest 200 rows and rows 205..254 were offered
+    // by no poll, ever, with no human action able to clear it.
+    const ids = Array.from({ length: 250 }, (_, i) => i + 5); // 5..254
+    existingExternalIds = held(ids.slice(0, 200)); // 5..204 already landed
+    const plugin = fakePlugin(ids);
+
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+
+    // Anchored to the table's real floor, then re-polled from the corrected
+    // cursor: the second window starts after the last row that landed.
+    expect(plugin.polledFrom).toEqual([0, 204]);
+    expect(summary.minId).toBe(5);
+    expect(summary.sinceId).toBe(204);
+    // The 50 rows the old window could never see are recovered.
+    expect(summary.inserted).toBe(50);
+    expect(landCalls.map((c) => c.input.externalLeadId)).toContain(wpExternalLeadId(254));
+    // And with nothing left over, the standing issue is allowed to clear.
+    expect(summary.unaccounted).toBe(0);
+    expect(resolveCalls).toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("a row that can never land keeps being re-offered — the cursor stops beneath it", async () => {
+    // The floor must not become a licence to skip. 8 exists and cannot land, so
+    // the window has to reopen at 8 on every poll rather than moving past it.
+    const ids = [5, 6, 7, 8, 9, 10, 11, 12];
+    existingExternalIds = held([5, 6, 7, 9, 10, 11, 12]);
+    const plugin = fakePlugin(ids, { unlandable: [8] });
+
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+
+    expect(plugin.polledFrom).toEqual([0, 7]);
+    expect(summary.sinceId).toBe(7);
+    // Re-offered, refused again, and still a standing visible fact.
+    expect(landCalls.map((c) => c.input.externalLeadId)).not.toContain(wpExternalLeadId(8));
+    expect(summary.failures).toBe(1);
+    expect(summary.firstError).toContain(wpExternalLeadId(8));
+    expect(issueCalls.map((i) => i.key)).toContain(WP_RECONCILE_ISSUE_KEY);
+    expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("a healthy rail costs ONE request — the re-anchor fires only when the floor lifts the cursor", async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => i + 1); // 1..10
+    existingExternalIds = held(ids);
+    const plugin = fakePlugin(ids);
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+    expect(plugin.polledFrom).toEqual([10]);
+    expect(summary.minId).toBe(1);
+  });
+
+  it("an endpoint that reports no floor keeps the SAFE floor of 1, never one guessed from what we hold", async () => {
+    // Absent means unknown. Inferring the floor from our own lowest held id
+    // would advance the cursor past ids that may exist and have never landed.
+    const ids = [5, 6, 7];
+    existingExternalIds = held(ids);
+    const plugin = fakePlugin(ids, { reportMinId: false });
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+    expect(plugin.polledFrom).toEqual([0]);
+    expect(summary.sinceId).toBe(0);
+    expect(summary.minId).toBeNull();
   });
 
   it("an unreadable leads table is a FAILED run, never a poll from zero", async () => {

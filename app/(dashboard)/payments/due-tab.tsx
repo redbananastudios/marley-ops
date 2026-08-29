@@ -2,7 +2,13 @@ import Link from "next/link";
 import { AlertTriangle } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { loadBookingRows, ukDayOfInstant, type BookingRow } from "@/lib/bookings/load-signals";
-import { daysBetweenUk, queueMoney, type BookingBucket } from "@/lib/bookings/queue";
+import { daysBetweenUk, queueMoney } from "@/lib/bookings/queue";
+import {
+  groupMoneySections,
+  sectionAmount,
+  sectionTotal,
+  type MoneySectionId,
+} from "@/lib/bookings/sections";
 import { applyBrandFilter } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { poundsMoney, shortDate } from "./format";
@@ -10,10 +16,19 @@ import { poundsMoney, shortDate } from "./format";
 /**
  * Due — what customers owe RIGHT NOW, with real £ totals per lifecycle stage.
  * Same rows, same classifier and the same per-obligation money seam as
- * /bookings (queueMoney) — this one is the admin money read, Bookings stays
- * the office action queue.
+ * /bookings (queueMoney + lib/bookings/sections) — this one is the admin money
+ * read, Bookings stays the office action queue.
  *
- * What that shared seam does and does not promise: both pages compute every
+ * Every section here prints its own total, which invites the reader to add
+ * them up, so they MUST reach the headline above. They do, by construction:
+ * membership is per obligation (lib/bookings/sections.ts), so the six owed
+ * sections partition `owedNow` exactly and the three danger sections partition
+ * `overdue`. They previously partitioned neither — sections were filtered by
+ * BUCKET while the headline counted every obligation, so a gate 9b late
+ * booking (balance invoiced at acceptance, deposit unpaid, slot not yet in the
+ * diary) put £1,700 in "Owed right now" and in no list on the page.
+ *
+ * What the shared seam does and does not promise: both pages compute every
  * figure from the SAME rows and the SAME obligations, so no figure here can
  * contradict one there. It does NOT mean any single headline equals any
  * single tile — this page's "Owed right now" is 25% + balance together,
@@ -41,19 +56,22 @@ function Section({
   title,
   hint,
   rows,
-  total,
+  section,
   tone,
   detail,
 }: {
   title: string;
   hint: string;
   rows: BookingRow[];
-  total: number;
+  /** Which obligation this list is about — it decides the £ on every row. */
+  section: MoneySectionId;
   tone?: "danger";
   detail: (r: BookingRow) => string;
 }) {
   // An empty routine section is a one-line all-clear; an empty DANGER section
   // disappears (a red header with "all clear" cries wolf) — /bookings rule.
+  // Safe only because the danger sections between them hold every penny of
+  // the Overdue tile: a red headline can no longer point at nothing.
   if (rows.length === 0 && tone === "danger") return null;
   return (
     <Card className="p-0">
@@ -65,7 +83,7 @@ function Section({
           {rows.length}
         </span>
         <span className="ml-auto hidden text-xs text-mist-400 sm:block">{hint}</span>
-        <span className="tabular text-sm font-bold text-foreground">{poundsMoney(total)}</span>
+        <span className="tabular text-sm font-bold text-foreground">{poundsMoney(sectionTotal(rows, section))}</span>
       </div>
       {rows.length === 0 ? (
         <p className="px-5 py-4 text-sm text-mist-400">Nothing here — all clear.</p>
@@ -93,7 +111,7 @@ function Section({
                 </span>
               ) : null}
               <span className="tabular text-sm font-semibold text-foreground">
-                {poundsMoney(sectionAmount(r))}
+                {poundsMoney(sectionAmount(r, section))}
               </span>
             </div>
           ))}
@@ -101,14 +119,6 @@ function Section({
       )}
     </Card>
   );
-}
-
-/** The £ a row owes in ITS section — deposit for the deposit queue, the 25%
- *  for commitment queues, the balance for balance queues. */
-function sectionAmount(r: BookingRow): number {
-  if (r.bucket === "deposit_outstanding") return r.deposit;
-  if (r.bucket === "commitment_due" || r.bucket === "commitment_overdue") return r.commitmentInvoiceAmount;
-  return r.balanceAmount;
 }
 
 export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) {
@@ -138,15 +148,19 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
     rows = allRows.filter((r) => brandLeads.has(r.leadId));
   }
 
-  const by = (b: BookingBucket) => rows.filter((r) => r.bucket === b);
-  const sum = (rs: BookingRow[]) => rs.reduce((s, r) => s + sectionAmount(r), 0);
-
-  const deposits = by("deposit_outstanding").sort((a, b) => (a.acceptedAt ?? "").localeCompare(b.acceptedAt ?? ""));
+  // Lists and headline come off ONE seam: `groupMoneySections` places a row in
+  // every section it owes money in, `queueMoney` totals the same obligations.
+  // Neither can move without the other.
   const byMoveDay = (a: BookingRow, b: BookingRow) => (a.apptStartsAt ?? "").localeCompare(b.apptStartsAt ?? "");
-  const commitmentOverdue = by("commitment_overdue").sort(byMoveDay);
-  const commitmentDue = by("commitment_due").sort(byMoveDay);
-  const balanceOverdue = by("balance_overdue").sort(byMoveDay);
-  const balanceDueRows = by("balance_due").sort(byMoveDay);
+  const s = groupMoneySections(rows);
+  const deposits = s.deposits_outstanding.sort((a, b) => (a.acceptedAt ?? "").localeCompare(b.acceptedAt ?? ""));
+  const commitmentOverdue = s.commitment_overdue.sort(byMoveDay);
+  const commitmentDue = s.commitment_due.sort(byMoveDay);
+  const balanceOverdue = s.balance_overdue.sort(byMoveDay);
+  const balanceDueRows = s.balance_due.sort(byMoveDay);
+  const commercialOverdue = s.commercial_overdue.sort(byMoveDay);
+  const commercialDue = s.commercial_due.sort(byMoveDay);
+  const commercialUndated = s.commercial_terms_unknown.sort(byMoveDay);
 
   // Headline money is computed per OBLIGATION, not per bucket, so a job whose
   // deposit is unpaid can still show the balance it owes this week — and the
@@ -167,13 +181,23 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
     const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
     return d <= 0 ? "today" : d === 1 ? "yesterday" : `${d}d ago`;
   };
+  // A balance can now be listed before the slot is allocated (gates 9b/9c
+  // raise it at acceptance), so the move-day clause has to survive there
+  // rather than printing "moving —".
+  const movingLine = (r: BookingRow, verb: string): string =>
+    r.apptStartsAt ? `${verb} ${shortDate(ukDayOfInstant(r.apptStartsAt))}${moveIn(r)}` : "no move date yet";
 
   return (
     <>
       <div className="grid gap-3 sm:grid-cols-3">
+        {/* money.owedNow, not overdueTotal + dueTotal: identical arithmetic,
+            but this headline IS the seam's owedNow, and saying so is what lets
+            a guard pin it to /bookings' two tiles (bucket-coverage.test.ts).
+            Recomposing it from a split of itself also lost the last bit to
+            floating point on some mixes. */}
         <Stat
           label="Owed right now"
-          value={poundsMoney(overdueTotal + dueTotal)}
+          value={poundsMoney(money.owedNow)}
           sub="invoiced 25% + balances due (deposits excluded)"
         />
         <Stat
@@ -189,47 +213,97 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="Balance overdue"
         hint="moved with money outstanding"
         rows={balanceOverdue}
-        total={sum(balanceOverdue)}
+        section="balance_overdue"
         tone="danger"
         detail={(r) =>
-          `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · moved ${r.apptStartsAt ? shortDate(ukDayOfInstant(r.apptStartsAt)) : "—"}${moveIn(r)}`
+          `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · ${movingLine(r, "moved")}`
         }
       />
       <Section
         title="25% overdue"
         hint="past due or date at risk"
         rows={commitmentOverdue}
-        total={sum(commitmentOverdue)}
+        section="commitment_overdue"
         tone="danger"
         detail={(r) => `${r.quoteRef} · due ${r.commitmentDueDate ? shortDate(r.commitmentDueDate) : "—"}`}
+      />
+      {/* Commercial money reached the headline from gate 10 with no list to
+          hold it, so the Overdue tile could go red pointing at nothing. It
+          keeps its own pair of sections rather than joining the residential
+          ones: past its terms this is our own credit control, and a commercial
+          client is never chased by email (PRD §3.10). */}
+      <Section
+        title="Commercial overdue"
+        hint="past the client's terms — our credit control, never an email chase"
+        rows={commercialOverdue}
+        section="commercial_overdue"
+        tone="danger"
+        detail={(r) =>
+          `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · terms ${r.commercialDueDate ? shortDate(r.commercialDueDate) : "—"}`
+        }
       />
       <Section
         title="Deposits outstanding"
         hint="accepted online, deposit unpaid — auto-chased day 1 and 3"
         rows={deposits}
-        total={sum(deposits)}
+        section="deposits_outstanding"
         detail={(r) => `${r.quoteRef} · agreed ${poundsMoney(r.agreed)} · accepted ${daysAgo(r.acceptedAt)}`}
       />
       <Section
         title="25% to collect"
         hint="invoiced at date confirmation — auto-chased at T-10"
         rows={commitmentDue}
-        total={sum(commitmentDue)}
+        section="commitment_due"
         detail={(r) => `${r.quoteRef} · due ${r.commitmentDueDate ? shortDate(r.commitmentDueDate) : "—"}`}
       />
       <Section
         title="Balance to collect"
         hint="payment in full is due before move day"
         rows={balanceDueRows}
-        total={sum(balanceDueRows)}
+        section="balance_due"
         detail={(r) =>
-          `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "invoice before move day"} · moving ${r.apptStartsAt ? shortDate(ukDayOfInstant(r.apptStartsAt)) : "—"}${moveIn(r)}`
+          `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "invoice before move day"} · ${movingLine(r, "moving")}`
         }
       />
+      {/* Hidden when empty, like its danger twin and like /bookings: with no
+          commercial clients this tab reads exactly as it did before gate 10.
+          An absent section still holds £0, so the arithmetic is untouched. */}
+      {/* Invoiced with NO terms date: whether it is late is unknown, not
+          answered. It sits apart from "Commercial invoiced" for the same
+          reason it has its own bucket — reading a missing date as "in terms"
+          is the reassuring answer produced by having no information at all.
+          Not a danger section: overdue is a claim of fact about a date, and
+          there is no date here to make it about. */}
+      {commercialUndated.length ? (
+        <Section
+          title="Commercial — no terms date"
+          hint="invoiced, but nothing says when it falls due — check the invoice"
+          rows={commercialUndated}
+          section="commercial_terms_unknown"
+          detail={(r) => `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · terms date missing`}
+        />
+      ) : null}
+
+      {commercialDue.length ? (
+        <Section
+          title="Commercial invoiced"
+          hint="completion invoice raised, inside the client's terms"
+          rows={commercialDue}
+          section="commercial_due"
+          detail={(r) =>
+            `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · terms ${r.commercialDueDate ? shortDate(r.commercialDueDate) : "—"}`
+          }
+        />
+      ) : null}
 
       <p className="text-xs text-mist-400">
-        Same rows as <Link href="/bookings" className="font-medium text-mm-red hover:underline">Bookings</Link> — that
-        page carries the actions (mark paid, invoice, chase); this one is the money read.
+        Every section above adds up to <span className="font-medium text-foreground">Owed right now</span> — a job
+        owing the 25% and a balance at once appears in both, for its own share of each. Deposits sit outside that
+        total. Same rows as{" "}
+        <Link href="/bookings" className="font-medium text-mm-red hover:underline">
+          Bookings
+        </Link>{" "}
+        — that page carries the actions (mark paid, invoice, chase); this one is the money read.
       </p>
     </>
   );

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { GROUP_PAGE_THEME as theme } from "@/lib/brand-page-theme";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { assembleDaySheets, type CrewDaySheet, type DailyJob } from "@/lib/crew-sheet/daily-data";
@@ -14,7 +15,13 @@ import { UK_TZ } from "@/lib/uk-time";
  */
 
 export const dynamic = "force-dynamic";
-export const metadata: Metadata = { robots: { index: false, follow: false } };
+export const metadata: Metadata = {
+  // GROUP surface (PRD §4): a crew day legitimately spans brands, so the sheet
+  // itself is neutral and each JOB block carries its own brand chip. Naming a
+  // brand in the title would be wrong on any mixed day.
+  title: "Your day sheet",
+  robots: { index: false, follow: false },
+};
 
 // PII on an unauthenticated page: stop serving a token once its work-date is
 // well past, so an old link can't resurrect a customer's address indefinitely.
@@ -156,15 +163,18 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
   const workMs = new Date(`${row.work_date}T00:00:00Z`).getTime();
   if (nowMs() - workMs > STALE_DAYS * 86_400_000) {
     return (
-      <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10">
+      <main
+        className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10"
+        style={theme.rootStyle as React.CSSProperties | undefined}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src="/logo.png" alt="Marley Moves" width={160} className="mx-auto mb-6" />
+        <img src={theme.logoUrl ?? "/logo.png"} alt={theme.name} width={160} className="mx-auto mb-6" />
         <div className="rounded-lg border border-border bg-card p-6 text-center">
           <h1 className="font-brand text-2xl font-semibold text-ink">This job sheet has expired</h1>
           <p className="mt-3 text-sm text-mist-500">
             Links stay live for a few days around the job. For anything you still need, call the office on{" "}
-            <a href="tel:01747637070" className="font-semibold text-mm-red">
-              01747 637070
+            <a href={theme.telHref} className="font-semibold text-mm-red">
+              {theme.phone}
             </a>
             .
           </p>
@@ -195,9 +205,12 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
   );
 
   return (
-    <main className="mx-auto min-h-screen max-w-xl bg-mist-50 px-4 py-8">
+    <main
+      className="mx-auto min-h-screen max-w-xl bg-mist-50 px-4 py-8"
+      style={theme.rootStyle as React.CSSProperties | undefined}
+    >
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/logo.png" alt="Marley Moves" width={150} className="mx-auto mb-5" />
+      <img src={theme.logoUrl ?? "/logo.png"} alt={theme.name} width={150} className="mx-auto mb-5" />
 
       <div className="mb-4 rounded-lg bg-charcoal px-5 py-4 text-white">
         <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-mist-300">Day sheet</p>
@@ -211,8 +224,8 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
       {total === 0 ? (
         <div className="rounded-lg border border-border bg-card p-6 text-center text-sm text-mist-500">
           You have no jobs booked for this day. If that&apos;s a surprise, call the office on{" "}
-          <a href="tel:01747637070" className="font-semibold text-mm-red">
-            01747 637070
+          <a href={theme.telHref} className="font-semibold text-mm-red">
+            {theme.phone}
           </a>
           .
         </div>
@@ -226,8 +239,8 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
 
       <p className="mt-6 text-center text-xs text-mist-400">
         This link opens without signing in. Questions? Call{" "}
-        <a href="tel:01747637070" className="font-semibold">
-          01747 637070
+        <a href={theme.telHref} className="font-semibold">
+          {theme.phone}
         </a>
       </p>
     </main>
