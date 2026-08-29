@@ -594,6 +594,6 @@ if (isMain) {
     process.exit(1);
   }
   console.log(
-    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Source half only; the rendered-page half lands with gate 16.)`,
+    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Source half only. The rendered-page half of PRD 6.4 is NOT implemented - gate 16 shipped the source conversion without it, so a clean run here does not mean the rendered pages were checked.)`,
   );
 }
