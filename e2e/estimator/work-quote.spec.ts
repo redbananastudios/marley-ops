@@ -254,29 +254,33 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
       await page.goto("/schedule/surveys", { waitUntil: "networkidle" });
       const event = page.locator(".fc-event").filter({ hasText: marker });
       await expect(event.first()).toBeVisible({ timeout: 15000 });
-      // force: because FullCalendar insets OVERLAPPING events into a shared
-      // harness, so on a crowded test diary a sibling event's harness sits over
-      // ours and Playwright's actionability check never clears - the element is
-      // visible, enabled and stable, and still refuses for 15s (run
-      // 33190859320). The overlap is an artefact of the seeded diary, not
-      // something a real estimator hits, and forcing still runs the real
-      // handler.
+      // dispatchEvent, not click({ force: true }). force skips the actionability
+      // CHECKS but still clicks a COORDINATE, so when FullCalendar insets
+      // overlapping events into a shared harness, the sibling sitting over our
+      // centre point receives the click and ITS dialog opens. That is not
+      // hypothetical - it is exactly how this spec failed on staging (run
+      // 33243645783): the URL matched /quotes/{uuid} because a draft really was
+      // created, just against whichever lead the sibling belonged to, leaving
+      // zero rows for ours.
       //
-      // Forcing a click can silently hit the WRONG element. Identity is proved
-      // in the LAST step rather than here: it reads back quotes for THIS leadId
-      // and asserts the URL is that row, so a mis-click creates a draft against
-      // another lead, finds zero rows for ours, and fails.
-      //
-      // An earlier attempt asserted the dialog carried the marker text. It does
-      // not: DialogTitle renders the APPOINTMENT title, while the lead name
-      // arrives later inside LeadContextPanels. The assertion was guessing at
-      // the DOM, and a guard that fails on a correct product is worse than no
-      // guard - it trains the next reader to force-merge past it.
-      await event.first().click({ force: true });
+      // dispatchEvent fires the event ON the node itself, so no overlapping
+      // element can intercept it. FullCalendar's interaction plugin listens by
+      // delegation - a 'click' listener on the calendar root that resolves
+      // closest('.fc-event') from the target - so a dispatched click bubbles up
+      // and runs the real eventClick handler for OUR event.
+      await event.first().scrollIntoViewIfNeeded();
+      await event.first().dispatchEvent("click");
       const dialog = page.getByRole("dialog");
       await expect(dialog).toBeVisible();
+      // Prove WHOSE dialog this is BEFORE doing anything irreversible. Titles
+      // are system-generated "Survey - <lead name>" and DialogTitle renders that
+      // title, so the marker is in it. An earlier attempt at this assertion was
+      // abandoned as "guessing at the DOM"; it was sound, and without it a
+      // mis-click was caught only at the END - after it had already created a
+      // stray draft quote against a stranger's lead.
+      await expect(dialog).toContainText(marker);
       // It is a SURVEY dialog (the one that offers Create Quote), not some
-      // other appointment's - the cheap half of the identity check.
+      // other appointment's.
       await expect(dialog.getByRole("button", { name: "Create Quote", exact: true })).toBeVisible();
     });
 
