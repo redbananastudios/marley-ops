@@ -75,48 +75,46 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-08-29 - gates 10b + 16 MERGED; gate 20 built, the four importers exist)
+## Current State (2026-08-29 - gates 10b, 16 and 20 all MERGED; staging green; only gate 15 left, and it is blocked)
 
-Last touched: 2026-08-29 on i9. Merged the flaky-diary-spec fix (#162) and gates 10b + 16 (#161,
-23 commits) to `staging`, then built gate 20 - the four Pitmans CSV importers - in five tested
-chunks on `gate20/pitmans-importers`. Staging was green end to end (including e2e) between the
-two merges, so #161's own run had a clean baseline.
+Last touched: 2026-08-29 on i9. Four PRs merged to `staging`: #162 (flaky diary spec), #161 (gates
+10b + 16), #163 (gate 20 - the four Pitmans importers), #164 (an ambiguous locator I created in
+10b). Staging is green end to end, e2e included. **Gate 20 was the last buildable gate**: 15 is
+blocked on Mark's terms document and 22 is the designated drop.
 
-- **Staging e2e is green again.** It had been failing on `e2e/estimator/work-quote.spec.ts:252`
-  with "Expected 1, Received 0" quote rows. Cause: `click({ force: true })` skips actionability
-  CHECKS but still clicks a COORDINATE, so an overlapping FullCalendar sibling took the click and
-  a draft was created against SOMEBODY ELSE'S lead. Fixed with `dispatchEvent("click")`, which
-  fires on the node itself. **Measured, not reasoned**: a throwaway probe put six surveys in one
-  identical slot - force opened `slot4` when told `slot3`, dispatch opened `slot3`.
-  A plain local pass proves nothing here; an ordinary local diary is not dense enough to
-  reproduce it, and the old code passed locally too.
-- **Gate 20 is built and locally proven, NOT merged.** `import-pitmans-{bookings,storage,vehicles,staff}.mjs`
-  plus `scripts/lib/import-csv.mjs` (25 unit tests) and four CSV templates + README in
-  `docs/import-templates/`. Every one exercised end to end against LOCAL Supabase: dry run,
-  guards, `--commit`, SQL read-back, re-run idempotency, `--rollback`, and rollback REFUSAL with
-  real records seeded.
-- **The safety seam is `lib/legacy.ts`.** `IMPORTED_SOURCES = ["imve","pitmans"]` now drives
+- **Gate 20 shipped: four importers**, `import-pitmans-{bookings,storage,vehicles,staff}.mjs`, on
+  shared `scripts/lib/import-csv.mjs` (25 unit tests), with CSV templates + README in
+  `docs/import-templates/`. Every one proven end to end against LOCAL Supabase - dry run, guards,
+  `--commit`, SQL read-back, re-run idempotency, `--rollback`, and rollback REFUSAL with real
+  records seeded. Migration 0114 applied to staging + local, runbook appended.
+- **The safety seam is `lib/legacy.ts`.** `IMPORTED_SOURCES = ["imve","pitmans"]` drives
   `legacyLocked()`, so imported bookings are excluded from chases, commitment invoicing and the
-  T-7 final invoice through ONE predicate rather than six rails. A second predicate,
-  `importedBooking()`, covers crew paperwork and is never lifted. Widening `leads/actions.ts` +
-  `leads/[id]/page.tsx` mattered most: without them the Pitmans comms lock had no key.
-- **Two real bugs found by running the importers, not by reading them.** The storage import
-  created THREE sites called Blandford (the write loop trusted what planning captured instead of
-  the map it had just updated); the same bug was latent for CLIENTS in the bookings importer. A
-  dry run cannot show either - it performs no inserts, so every row legitimately says "would
-  create".
-- **Migration 0114 applied to staging AND local**, runbook appended. Widens the
-  `quotes_source_check` to accept 'pitmans', adds `quotes.legacy_ref` (NOT `imve_ref`, which
-  drives the "Legacy (iMVE)" pill), and `import_batch` on the five tables the importers write.
-- **Local e2e is the fast loop, and 3016 was already mine.** Next refuses a second dev server for
-  the same directory, so check `.next/dev` before allocating a port.
+  T-7 final invoice through ONE predicate. `importedBooking()` is the separate, never-lifted rule
+  for crew paperwork. Widening `leads/actions.ts` + `leads/[id]/page.tsx` mattered most: without
+  them the Pitmans comms lock had NO KEY and the T-7 invoice could never fire.
+- **A dry run cannot prove an importer.** The first real `--commit` created THREE sites called
+  Blandford, one per row: the write loop trusted what planning captured instead of the map it had
+  just updated. Same bug was latent for CLIENTS in the bookings importer. No dry run can show it -
+  it performs no inserts, so every row legitimately says "would create".
+- **`click({force:true})` still clicks a COORDINATE.** That is why the diary spec kept opening the
+  wrong FullCalendar event and writing a draft quote against a stranger's lead. `dispatchEvent`
+  fires on the node. Proven with a probe putting six surveys in one identical slot: force opened
+  `slot4` when told `slot3`. An ordinary local diary is NOT dense enough to reproduce it - the old
+  code passed locally too.
+- **I broke staging e2e in 10b and did not notice for two merges.** Added prose naming the "Owed
+  right now" tile, which made a page-wide exact-text locator match two elements; then merged #161
+  without watching its staging run, so #163 inherited a red that was not its own. `grep -rn
+  "<string>" e2e/` before committing is one second and is AGENTS.md's first e2e habit.
+- **Local e2e is the fast loop.** Docker + local Supabase on i9:54321, dev server on 3016 - but
+  Next refuses a second dev server for the same directory, so check whether 3016 is already yours
+  before allocating a port. Source BOTH `.env.local` and `.env.e2e` onto the playwright process.
 
 **Open decisions:** none new. **Blockers:** the staging Zoho refresh token is STILL dead
-(`invalid_code` = revoked, not the daily rate limit - a new day does not fix it); re-mint per
-`scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk, org 20117092566. `.env.local` is the
-LIVE org - do not touch it. **Next:** open the gate-20 PR, and note gate 16's RENDERED-page leak
-check (the Playwright half) is still outstanding - the scan's success line now says so outright
-rather than implying it shipped. Gate 15 stays BLOCKED on Mark's terms document; gate 22 is the
-designated drop. That leaves gate 20 as the last buildable gate.
+(`invalid_code` = revoked, NOT the daily rate limit - a new day does not fix it). Re-mint per
+`scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk, org 20117092566; `.env.local` is the
+LIVE org, do not touch it. Nothing merged this session needed it. **Next:** gate 16's
+RENDERED-page leak check (the Playwright half of PRD 6.4) is still outstanding and the scan's
+success line now says so outright; gate 15 needs Mark's document; then the 18 September prod
+promotion from `docs/pitmans-prod-migration-runbook.md`, which now carries 0104-0114.
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
