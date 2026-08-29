@@ -26,7 +26,16 @@ test.describe("Office — Payments & Finance", () => {
 
   test("Payments — Due tab (admin): £-totalled queues", async ({ page }) => {
     await page.goto("/payments?tab=due");
-    await expect(page.getByText("Owed right now", { exact: true })).toBeVisible();
+    // Scoped to the TILE's own eyebrow, not to the page. Gate 10b added a line
+    // of explanatory copy that names the tile ("Every section above adds up to
+    // Owed right now"), so a page-wide exact-text match now resolves to two
+    // elements and fails on strict mode. Naming the tile in the prose is good
+    // copy; the spec is what has to say which of the two it means.
+    //
+    // .first() would also have gone green here, and would have been the wrong
+    // fix: it asserts that SOMETHING on the page says "Owed right now", which
+    // the prose alone would satisfy even if the tile disappeared entirely.
+    await expect(page.locator("p.eyebrow").filter({ hasText: /^Owed right now$/ })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Deposits outstanding" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "25% to collect" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "Balance to collect" })).toBeVisible();
