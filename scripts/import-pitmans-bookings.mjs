@@ -421,7 +421,11 @@ if (!commit) {
 const now = new Date().toISOString();
 let imported = 0;
 for (const { job, client, kind, policy, depositSettled } of plan) {
-  let clientId = client?.id ?? null;
+  // Re-resolve against the (mutated) clients list rather than trusting what
+  // planning captured: one customer with TWO forward bookings is two rows, and
+  // planning saw "no such client" for both. Without this the second row creates
+  // a duplicate customer, splitting one person's history across two records.
+  let clientId = client?.id ?? findClient(job)?.id ?? null;
   if (!clientId) {
     const { data: created, error: e } = await sb
       .from("clients")
