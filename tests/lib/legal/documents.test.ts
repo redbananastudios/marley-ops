@@ -78,10 +78,15 @@ describe("versionEffectiveOn — mapping a historical signature to its terms", (
     }
   });
 
-  it("switches to v2 on its effective date, not before", () => {
+  it("switches versions on each effective date, not before", () => {
     expect(versionEffectiveOn("customer-terms", "2026-08-10")?.version).toBe(1);
     expect(versionEffectiveOn("customer-terms", "2026-08-11")?.version).toBe(2);
-    expect(versionEffectiveOn("customer-terms", "2027-01-01")?.version).toBe(2);
+    expect(versionEffectiveOn("customer-terms", "2026-08-30")?.version).toBe(2);
+    expect(versionEffectiveOn("customer-terms", "2026-08-31")?.version).toBe(3);
+    expect(versionEffectiveOn("customer-terms", "2027-01-01")?.version).toBe(3);
+
+    expect(versionEffectiveOn("storage-terms", "2026-08-30")?.version).toBe(1);
+    expect(versionEffectiveOn("storage-terms", "2026-08-31")?.version).toBe(2);
   });
 
   it("returns null before anything was published", () => {
@@ -101,28 +106,34 @@ describe("versionById", () => {
 });
 
 describe("the corrected terms actually say what the system enforces", () => {
-  // The reason v2 exists. If someone edits these clauses back out, this fails.
-  const v2 = currentVersion("customer-terms").body.toLowerCase();
+  // The reason the current terms exist. If someone edits these clauses back out, this fails.
+  const terms = currentVersion("customer-terms").body.toLowerCase();
 
   it("states the 25% commitment and the 7-day window", () => {
-    expect(v2).toContain("25%");
-    expect(v2).toContain("7 days before your move");
+    expect(terms).toContain("25%");
+    expect(terms).toContain("7 days before your move");
   });
 
   it("ties retention to the day being re-booked, and never says penalty", () => {
-    expect(v2).toContain("re-book");
+    expect(terms).toContain("re-book");
     // Hard copy rule from the payments policy: held money is never a penalty.
-    expect(v2).not.toContain("penalty");
+    expect(terms).not.toContain("penalty");
   });
 
   it("no longer promises a full refund up to 48 hours before the move", () => {
     // The v1 clause that contradicted the app.
-    expect(v2).not.toContain("48 hours");
+    expect(terms).not.toContain("48 hours");
     expect(currentVersion("customer-terms").body).not.toContain("fully refundable if you cancel");
   });
 
   it("keeps the deposit refundable UNTIL the date is confirmed", () => {
-    expect(v2).toContain("until you confirm your move date, your deposit is fully refundable");
+    expect(terms).toContain("until you confirm your move date, your deposit is fully refundable");
+  });
+
+  it("accepts every payment method while preferring bank transfer", () => {
+    expect(terms).toContain("bank transfer, card or cash for all payments");
+    expect(terms).toContain("bank transfer is preferred");
+    expect(terms).not.toContain("card payments are for deposits only");
   });
 
   it("carries no em-dash, per the house copy rule", () => {
@@ -149,6 +160,12 @@ describe("storage terms", () => {
     // must not imply it.
     expect(storage).toContain("arrange your own insurance");
     expect(storage).toContain("not while they are in storage");
+  });
+
+  it("accepts every payment method and requires settlement before release", () => {
+    expect(storage).toContain("bank transfer, card or cash");
+    expect(storage).toContain("bank transfer is preferred");
+    expect(storage).toContain("settled before your belongings are released");
   });
 });
 

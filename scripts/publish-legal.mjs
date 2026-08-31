@@ -202,8 +202,11 @@ for (const [document, entry] of Object.entries(manifest.documents)) {
  * because a site build that calls an ops API puts a live dependency in the
  * release path — the failure class that took a deploy down this morning.
  */
-const SITE_LIB = resolve(ROOT, "..", "site", "web", "lib", "legal");
-if (existsSync(resolve(ROOT, "..", "site", "web"))) {
+const SITE_ROOT = process.env.MARLEY_SITE_ROOT
+  ? resolve(process.env.MARLEY_SITE_ROOT)
+  : resolve(ROOT, "..", "site");
+const SITE_LIB = resolve(SITE_ROOT, "web", "lib", "legal");
+if (existsSync(resolve(SITE_ROOT, "web"))) {
   const current = Object.entries(manifest.documents).map(([document, entry]) => {
     const v = entry.versions.find((x) => x.id === entry.current);
     const doc = bodies.get(entry.current);
