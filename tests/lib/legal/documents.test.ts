@@ -167,6 +167,14 @@ describe("storage terms", () => {
     expect(storage).toContain("bank transfer is preferred");
     expect(storage).toContain("settled before your belongings are released");
   });
+
+  it("bills crates for one calendar month minimum, then to the exact release date", () => {
+    expect(storage).toContain("minimum period of one calendar month");
+    expect(storage).toContain("final invoice runs only to the date your belongings leave storage");
+    expect(storage).toContain("for containers only");
+    expect(storage).not.toContain("minimum period of 28 days");
+    expect(storage).not.toContain("from day 29");
+  });
 });
 
 describe("publicUrlFor", () => {
