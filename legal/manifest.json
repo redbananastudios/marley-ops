@@ -3,7 +3,7 @@
   "documents": {
     "customer-terms": {
       "title": "Terms & Conditions",
-      "current": "customer-terms-v2-2026-08-11",
+      "current": "customer-terms-v3-2026-08-31",
       "versions": [
         {
           "id": "customer-terms-v1-2026-06-16",
@@ -21,15 +21,25 @@
           "path": "legal/customer-terms/v2-2026-08-11.md",
           "sha256": "16cac389350a13ae977a1211d3b6ee121e6a3929da3a1ccecfe75609fd92ce17",
           "effective_from": "2026-08-11",
-          "effective_to": null,
+          "effective_to": "2026-08-31",
           "summary": "Aligns the published terms with the deposit-commitment ladder the system actually enforces: deposit refundable until you confirm your date, then a 25% commitment due 7 days before the move, and the re-booking rule on cancellation. Adds electronic-signature, VAT, communications and data clauses. Storage moves to its own agreement.",
+          "legal_review": "pending"
+        },
+        {
+          "id": "customer-terms-v3-2026-08-31",
+          "version": 3,
+          "path": "legal/customer-terms/v3-2026-08-31.md",
+          "sha256": "f144d50569d422cb063c6450d4319cd7eade3ef7c5e08018eb5882fc40428ba8",
+          "effective_from": "2026-08-31",
+          "effective_to": null,
+          "summary": "Clarifies that card, bank transfer and cash are accepted for every payment stage, with bank transfer preferred and no card surcharge. The existing deposit, commitment and balance timing is unchanged.",
           "legal_review": "pending"
         }
       ]
     },
     "storage-terms": {
       "title": "Storage Agreement Terms",
-      "current": "storage-terms-v1-2026-08-11",
+      "current": "storage-terms-v2-2026-08-31",
       "versions": [
         {
           "id": "storage-terms-v1-2026-08-11",
@@ -37,8 +47,18 @@
           "path": "legal/storage-terms/v1-2026-08-11.md",
           "sha256": "3daa8ae5cee07702daf0c317fb6b6abde2dbc19f9d89d5fb160ed6828981df40",
           "effective_from": "2026-08-11",
-          "effective_to": null,
+          "effective_to": "2026-08-31",
           "summary": "First published storage terms. Covers container and crate lets, billing, access, price changes, prohibited items, insurance, and the unpaid-charges procedure that the storage acknowledgment refers to.",
+          "legal_review": "pending"
+        },
+        {
+          "id": "storage-terms-v2-2026-08-31",
+          "version": 2,
+          "path": "legal/storage-terms/v2-2026-08-31.md",
+          "sha256": "decddc8920108129c229dd1e38a408ab7f657acfcccfc4b69470b90769fc0c84",
+          "effective_from": "2026-08-31",
+          "effective_to": null,
+          "summary": "Clarifies that storage payments can be made by card, bank transfer or cash, with bank transfer preferred and no card surcharge. All charges still have to be settled before release.",
           "legal_review": "pending"
         }
       ]
