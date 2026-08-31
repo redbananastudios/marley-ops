@@ -55,7 +55,7 @@
           "id": "storage-terms-v2-2026-08-31",
           "version": 2,
           "path": "legal/storage-terms/v2-2026-08-31.md",
-          "sha256": "decddc8920108129c229dd1e38a408ab7f657acfcccfc4b69470b90769fc0c84",
+          "sha256": "2dfc8ea948262b168836d7cec1a284b43eeec6dbf70818c76888579404648731",
           "effective_from": "2026-08-31",
           "effective_to": null,
           "summary": "Clarifies that storage payments can be made by card, bank transfer or cash, with bank transfer preferred and no card surcharge. All charges still have to be settled before release.",
