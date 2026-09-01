@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  contactKey,
+  duplicateKeyErrors,
   headerReader,
   isoDate,
   money,
@@ -175,5 +177,106 @@ describe("targetKind", () => {
   // A lookalike domain must not inherit staging's "no --prod needed" status.
   it("does not mistake a lookalike domain for hosted staging", () => {
     expect(targetKind("https://evil-supabase.co.attacker.test")).toBe("prod");
+  });
+});
+
+describe("contactKey", () => {
+  it("prefers the email, normalised", () => {
+    expect(contactKey("  Jane@Example.COM ", "07700 900111")).toBe("e:jane@example.com");
+  });
+
+  it("falls back to the phone when there is no email", () => {
+    expect(contactKey("", "07700 900111")).toBe("p:07700900111");
+    expect(contactKey(null, "(01258) 858564")).toBe("p:01258858564");
+  });
+
+  // findClient normalises 44- and 0- forms to the same digits, so the plan must
+  // too — otherwise one customer written two ways in the sheet reads as two new
+  // customers in the dry run and as one in the database.
+  it("gives the 44- and 0- forms of one number the same key", () => {
+    expect(contactKey("", "+44 7700 900111")).toBe(contactKey("", "07700 900111"));
+  });
+
+  // THE one that matters. `email ?? phoneDigits(phone) ?? name` returned the
+  // empty STRING for a contactless row (`??` does not fall through on ""), so
+  // every such row shared one key: the first printed NEW and every one after it
+  // printed MATCH. A row with nothing to match on must collide with NOTHING.
+  it("returns null for a row with no email and no phone, so two of them never match", () => {
+    expect(contactKey("", "")).toBeNull();
+    expect(contactKey(null, null)).toBeNull();
+    expect(contactKey("", "   ")).toBeNull();
+  });
+
+  // Same threshold findClient uses: a short number cannot match a client there,
+  // so it must not produce a MATCH in the plan either.
+  it("returns null for a phone too short to match on", () => {
+    expect(contactKey("", "858564")).toBeNull();
+    expect(contactKey("", "0770090011")).toBe("p:0770090011"); // 10 digits: usable
+  });
+
+  // Without the namespace prefixes an all-digits email local part could key the
+  // same string as somebody's phone number.
+  it("keeps email and phone keys in separate namespaces", () => {
+    expect(contactKey("07700900111@example.com", "")).not.toBe(contactKey("", "07700900111"));
+  });
+});
+
+describe("duplicateKeyErrors", () => {
+  // The helper lives in an untyped .mjs, so its callback params need annotating
+  // here or tsc infers `any` and the typecheck gate fails.
+  type Row = { line: number; k: string | null };
+  const rows = (...ks: (string | null)[]): Row[] => ks.map((k, i) => ({ line: i + 2, k }));
+  const errs = (rs: Row[]) =>
+    duplicateKeyErrors(rs, (r: Row) => r.k, (r: Row) => `'${r.k}'`, "it would import twice");
+
+  it("says nothing when every key differs", () => {
+    expect(errs(rows("a", "b", "c"))).toEqual([]);
+  });
+
+  // The operator has the spreadsheet open — the message has to name both lines,
+  // or they are hunting for the other half of the clash by hand.
+  it("names the offending line AND the line it clashes with", () => {
+    expect(errs(rows("a", "b", "a"))).toEqual([
+      "line 4: 'a' is already on line 2 — it would import twice",
+    ]);
+  });
+
+  it("reports every later repeat against the first occurrence", () => {
+    expect(errs(rows("a", "a", "a"))).toEqual([
+      "line 3: 'a' is already on line 2 — it would import twice",
+      "line 4: 'a' is already on line 2 — it would import twice",
+    ]);
+  });
+
+  // A null key means "this row has nothing that could collide". Bucketing the
+  // blanks together is how a dedupe check invents duplicates out of missing
+  // data — three vans with no plate are three vans, not one repeated.
+  it("skips rows with no key rather than treating them as one shared key", () => {
+    expect(errs(rows(null, null, null))).toEqual([]);
+    expect(errs(rows("", "", ""))).toEqual([]);
+  });
+
+  it("still catches real clashes among rows that also include keyless ones", () => {
+    expect(errs(rows(null, "a", null, "a"))).toEqual([
+      "line 5: 'a' is already on line 3 — it would import twice",
+    ]);
+  });
+
+  // The importers key on normalised values but must speak to the operator in
+  // the sheet's own words, so describe() is read from the row, not from the key.
+  it("describes the row in the caller's words, not the normalised key", () => {
+    type Van = { line: number; name: string; reg: string };
+    const vans: Van[] = [
+      { line: 2, name: "Luton 3", reg: "HX21ABC" },
+      { line: 3, name: "luton  3", reg: "HX71ZZZ" },
+    ];
+    expect(
+      duplicateKeyErrors(
+        vans,
+        (v: Van) => v.name.trim().toLowerCase().replace(/\s+/g, " "),
+        (v: Van) => `the callsign '${v.name}'`,
+        "one van would import as two",
+      ),
+    ).toEqual(["line 3: the callsign 'luton  3' is already on line 2 — one van would import as two"]);
   });
 });

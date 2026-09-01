@@ -32,6 +32,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import {
+  duplicateKeyErrors,
   fetchAllRows,
   headerReader,
   isoDate,
@@ -170,6 +171,33 @@ const vans = rows.slice(1).map((r, idx) => {
     errors.push(`line ${line}: payment_day '${col(r, "payment_day")}' must be a whole number 1-31`);
   return van;
 });
+
+// byPlate/byName below are built ONCE from the pre-batch database read and are
+// never mutated, so a duplicate INSIDE this sheet is invisible to the planning
+// loop: neither row is in those maps, both plan as NEW, and both go into a
+// single .insert() that has nothing to key on. vehicles (migration 0020) has no
+// unique index on registration or name, and 0114 adds only a non-unique partial
+// index on import_batch, so nothing downstream catches it either. A fleet sheet
+// listing one van under two callsigns is exactly the input this hits.
+//
+// Both columns are checked because BOTH are used to match: registration first
+// (it identifies a physical vehicle), name as the fallback for a van whose
+// plate Mark did not supply. A collision on either would collapse to one row on
+// a re-run, so it must not create two rows now.
+errors.push(
+  ...duplicateKeyErrors(
+    vans,
+    (v) => plate(v.registration) || null,
+    (v) => `registration '${v.registration}'`,
+    "one physical vehicle would import as two",
+  ),
+  ...duplicateKeyErrors(
+    vans,
+    (v) => v.name.trim().toLowerCase() || null,
+    (v) => `the callsign '${v.name}'`,
+    "the office allocates by callsign, and a re-run matching on name would then pick an arbitrary one of the two",
+  ),
+);
 if (errors.length) die(`CSV problems — nothing imported:\n  - ${errors.join("\n  - ")}`);
 
 const existing = await fetchAllRows(() => sb.from("vehicles").select("id, name, registration").order("id"), die);

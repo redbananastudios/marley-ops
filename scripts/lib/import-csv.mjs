@@ -118,6 +118,80 @@ export const normEmail = (v) => String(v ?? "").trim().toLowerCase() || null;
 /** Digits only, 44-prefix normalised to 0, for loose phone matching. */
 export const phoneDigits = (v) => String(v ?? "").replace(/\D/g, "").replace(/^44/, "0");
 
+/**
+ * The ONE definition of "which customer is this row" — so an importer's dry-run
+ * plan and its findClient lookup cannot drift apart about who is the same
+ * person.
+ *
+ * Returns null, never a placeholder, when the row carries nothing that could
+ * identify anybody. That null is the whole point. `phoneDigits("")` is the
+ * empty STRING and `a ?? b` does not fall through on "", so a key written as
+ * `email ?? phoneDigits(phone) ?? name` handed every contactless row the same
+ * key "": the first printed NEW and every one after it printed MATCH. The
+ * write path was never fooled (it re-resolves through findClient, which
+ * correctly matches neither), but the printed plan is exactly what a human
+ * approves before a live-money import, and it was telling them a sheet of
+ * unrelated customers was one customer repeated.
+ *
+ * The `>= 10` threshold mirrors findClient: a six-digit phone can never match
+ * a client there either, so it must not produce a MATCH in the plan.
+ *
+ * There is deliberately NO name fallback. findClient has no name matching, so
+ * a name-keyed MATCH would advertise a dedupe the write path does not perform.
+ * The plan's notion of identity must mirror findClient's, never extend it.
+ *
+ * The `e:`/`p:` prefixes keep the two namespaces apart, so an email that
+ * happens to read as digits can never collide with a phone number.
+ */
+export function contactKey(email, phone) {
+  const e = normEmail(email);
+  if (e) return `e:${e}`;
+  const digits = phoneDigits(phone);
+  return digits.length >= 10 ? `p:${digits}` : null;
+}
+
+/**
+ * Line-numbered errors for rows of ONE sheet that collide on `keyFn`.
+ *
+ * Every importer resolves each row against the state as it was BEFORE the
+ * batch, so a duplicate inside a single CSV is invisible to it: both rows miss
+ * the pre-batch lookup maps, both plan as NEW, and both get written. That is
+ * how a fleet sheet listing one van under two callsigns becomes two vans, how a
+ * crew list with a repeated person becomes two payroll records, and how a
+ * storage sheet with a repeated CLOSED let re-raises a customer's entire
+ * billing history — storage_lets_open_uq is `unique (unit_id) where end_date is
+ * null`, so the database stops the open case and nothing stops the closed one.
+ *
+ * Catching it at validation, before a single row is read from the database, is
+ * deliberate: it names BOTH clashing lines while the operator still has the
+ * spreadsheet open, rather than failing part-way through a live import with a
+ * constraint name and no clue which rows collided. A dry run cannot find these
+ * either — it performs no inserts, so every duplicate row legitimately reports
+ * "would create".
+ *
+ * A null or empty key means "this row has nothing that could collide" and is
+ * SKIPPED, never bucketed with the other blanks. Treating missing data as a
+ * shared key is how a dedupe check invents duplicates that do not exist.
+ *
+ * @param rows     objects carrying `.line` (the 1-based CSV line number)
+ * @param keyFn    row -> key string, or null when the row cannot collide
+ * @param describe row -> how to name that row in the message, in the sheet's
+ *                 own words rather than in the normalised key
+ * @param why      the consequence clause appended to every message
+ */
+export function duplicateKeyErrors(rows, keyFn, describe, why) {
+  const firstLineByKey = new Map();
+  const errors = [];
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (key == null || key === "") continue;
+    const first = firstLineByKey.get(key);
+    if (first === undefined) firstLineByKey.set(key, row.line);
+    else errors.push(`line ${row.line}: ${describe(row)} is already on line ${first} — ${why}`);
+  }
+  return errors;
+}
+
 export function normMethod(v) {
   const s = String(v ?? "").trim().toLowerCase();
   if (!s) return null;

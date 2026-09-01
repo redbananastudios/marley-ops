@@ -38,6 +38,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import {
+  duplicateKeyErrors,
   fetchAllRows,
   headerReader,
   isoDate,
@@ -82,6 +83,9 @@ const die = (msg) => {
 };
 
 const ROLES = new Set(["crew", "driver", "estimator", "admin"]);
+
+/** How a person's name is compared: trimmed, lowercased, runs of space collapsed. */
+const key = (name) => String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 /** "12345" or "1,2,3" or "1 2 3" -> [1,2,3,4,5]; deduped and sorted. */
 function workingDays(raw) {
@@ -179,10 +183,43 @@ const people = rows.slice(1).map((r, idx) => {
     errors.push(`line ${line}: working_days '${col(r, "working_days")}' has no day numbers (1=Mon..7=Sun)`);
   return person;
 });
+
+// byName/byPhone/byEmail below are built ONCE from the pre-batch database read
+// and are never mutated, so a duplicate INSIDE this sheet is invisible to the
+// planning loop: neither row matches anything, both plan as NEW, and both go
+// into a single .insert() — one person, two payroll records, two people to
+// allocate to the same crew day.
+//
+// All three match columns are checked, because all three are what the loop
+// below matches on. The NAME check is the strictest of the three by design: two
+// rows sharing a name would collapse to one on a re-run (the loop skips a
+// name-only match to VERIFY), so importing them as two people now guarantees
+// the sheet and the database disagree. If they really are two different people,
+// that has to be a human decision made before a one-shot live import, not a
+// silent insert.
+errors.push(
+  ...duplicateKeyErrors(
+    people,
+    (p) => p.email,
+    (p) => `the email ${p.email}`,
+    "one person would import twice",
+  ),
+  ...duplicateKeyErrors(
+    people,
+    (p) => (phoneDigits(p.phone).length >= 10 ? phoneDigits(p.phone) : null),
+    (p) => `the phone ${p.phone}`,
+    "one person would import twice",
+  ),
+  ...duplicateKeyErrors(
+    people,
+    (p) => key(p.fullName) || null,
+    (p) => `the name '${p.fullName}'`,
+    "the import cannot tell two people of one name apart — remove the repeat, or if they really are two people, import the second separately",
+  ),
+);
 if (errors.length) die(`CSV problems — nothing imported:\n  - ${errors.join("\n  - ")}`);
 
 const existing = await fetchAllRows(() => sb.from("staff").select("id, full_name, phone, email").order("id"), die);
-const key = (name) => String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const byName = new Map(existing.map((s) => [key(s.full_name), s]));
 const byPhone = new Map();
 for (const s of existing) if (phoneDigits(s.phone).length >= 10) byPhone.set(phoneDigits(s.phone), s);
