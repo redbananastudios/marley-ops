@@ -1,17 +1,20 @@
-import { redirect } from "next/navigation";
 import { PageHeader } from "@/components/page-header";
 import { Card } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { listActiveBrands } from "@/lib/brand";
 import { ukPhone } from "@/lib/phone";
-import { createDraftQuote } from "@/app/(dashboard)/quotes/actions";
 import { AddLeadForm, type AddLeadBrandOption } from "@/app/(dashboard)/leads/new/add-lead-form";
+import { CreateDraftAndOpen } from "@/app/(dashboard)/quotes/new/create-draft-and-open";
 import type { ClientOption } from "@/components/clients/client-combobox";
 
 /**
  * /quotes/new
- *  - ?leadId=… → the quote already has a customer (created from a lead): make
- *    the draft and bounce straight to the builder (unchanged path).
+ *  - ?leadId=… → the quote already has a customer (created from a lead): hand
+ *    off to CreateDraftAndOpen, which makes the draft with ONE client-side
+ *    server-action call and navigates to the builder. The render itself stays
+ *    read-only: Next can invoke it twice for one client-side navigation, and
+ *    writing + redirecting here intermittently crashed the soft navigation
+ *    to the error boundary (QA-20260827-03 / QA-20260828-02).
  *  - no leadId → the "New quote" button: capture the customer + move details
  *    first (Peter, 2026-07-11 — every quote belongs to a client→lead, no orphan
  *    quotes), create the lead + draft quote in one step, then open the builder
@@ -31,9 +34,11 @@ export default async function NewQuotePage({
   const { leadId, clientId } = await searchParams;
 
   if (leadId) {
-    const res = await createDraftQuote({ leadId });
-    if (!res.ok) throw new Error(res.error || "Could not create a new quote");
-    redirect(`/quotes/${res.id}`);
+    return (
+      <main className="flex-1 p-6 md:p-8">
+        <CreateDraftAndOpen leadId={leadId} />
+      </main>
+    );
   }
 
   const sb = await createClient();

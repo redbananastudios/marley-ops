@@ -6,9 +6,10 @@ import { step } from "../fixtures/artefacts";
  * Estimator work+quote flow (closes the spec_gaps.estimator_work_quote_specs
  * gap tracked in qa/state.json): create a lead → book a survey for a PAST slot
  * today → open Create Quote from the lead's Quotes tab → land straight on
- * /quotes/{id} with a real draft row already created (createDraftQuote runs
- * server-side in app/(dashboard)/quotes/new/page.tsx; there is no separate
- * confirm step — the redirect IS the creation).
+ * /quotes/{id} with a real draft row already created (the /quotes/new?leadId=
+ * page renders read-only and CreateDraftAndOpen makes the draft with one
+ * client-side createDraftQuote call, QA-20260828-02; there is no separate
+ * confirm step — landing on /quotes/{id} IS the creation).
  *
  * Self-contained: creates its own throwaway lead by UI rather than depending on
  * a seeded survey/quote existing (mirrors pay-statement.spec.ts's reasoning —
@@ -139,19 +140,14 @@ test.describe.serial("Estimator — book survey (past slot) then Create Quote fr
       await expect(page.getByRole("heading", { name: "Quotes", exact: true })).toBeVisible();
     });
 
-    await step("New quote redirects straight to /quotes/{id} — the draft row already exists", page, async () => {
-      let created = false;
-      for (let attempt = 1; attempt <= 3 && !created; attempt++) {
-        await page.getByRole("link", { name: "New quote", exact: true }).click();
-        try {
-          await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15000 });
-          created = true;
-        } catch {
-          await page.waitForLoadState("networkidle").catch(() => {});
-          await page.waitForTimeout(600);
-        }
-      }
-      expect(created, "New quote should land on /quotes/{id} with the draft already created").toBe(true);
+    await step("New quote lands on /quotes/{id} first time — the draft row already exists", page, async () => {
+      // ONE click, no retry loop. The old 3-attempt loop here papered over
+      // QA-20260828-02: /quotes/new?leadId= wrote the draft during a render
+      // Next can fire twice per soft navigation, so the first transition
+      // intermittently crashed to the error boundary. The page render is
+      // read-only now — success on the first attempt is the assertion.
+      await page.getByRole("link", { name: "New quote", exact: true }).click();
+      await page.waitForURL(/\/quotes\/[0-9a-f-]{36}/, { timeout: 15000 });
       // No "confirm creation" dialog or intermediate step — the page that loads
       // IS the quote builder for the row createDraftQuote just inserted.
       await expect(page.getByText(/Something went wrong|Application error/i)).toHaveCount(0);
