@@ -4,6 +4,24 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-01T20:11Z — scheduled QA audit: CI-red abort, 1 headline finding, no rota run
+
+- Checked out latest `origin/staging`, sha `b931343` (docs-only on top of `82dac7a`, known deploy-filter trap — deployed staging correctly shows `82dac7a`).
+- Credentials: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present.
+- Verify-first: only open finding is `QA-20260827-04` (`open`/`risky`, Peter's, not `fixed-pending-verify`) — nothing to re-verify/close via that path.
+- Fresh `npm ci`. All four **local unit-level** gates green on the untouched tree: lint 0 errors (36 pre-existing warnings, unchanged) · `tsc --noEmit` clean · vitest 2959 passed/7 skipped · build clean.
+- **Health gate failed at the CI/deployed-staging level.** `mcp__github__actions_list` showed the last 4 real (non-docs-skipped) staging CI runs all `failure`: `cc42f50` (16:33Z, the QA push that shipped PRs #172-183's "/q accept-flow rewrite"), `0f67cf0` (18:57Z), `5e0fbaa` (19:14Z), `82dac7a` (19:32Z, currently deployed). All four fail the same 5 e2e tests in the customer-accept/payments surface (`e2e/office/customer-accept-to-bookings.spec.ts:135`, `e2e/office/p0-money.spec.ts:28`, `e2e/public/customer.spec.ts:37`, `e2e/public/customer.spec.ts:104`, `e2e/public/settle-in-full.spec.ts:56`) — root symptom: accepting a quote via bank transfer at `/q/<token>` no longer flips the lead to `accepted` or raises invoices. Per `qa/AUDIT.md` run lifecycle step 2, this red CI on a base predating this run is the run's headline finding; per the abort-condition rule, did read-only investigation only — no seeding, no role-agent dispatch, no new specs.
+- Cross-checked whether this reached production: `git merge-base --is-ancestor 82dac7a origin/master` → not an ancestor; `curl https://ops.marleymoves.co.uk/api/version` → `{"sha":"be31241"}`. **Confirmed staging-only, production unaffected** — but blocks safe further staging testing of the payments/booking surface, and would ship broken if promoted to `master` unfixed.
+- Marker sweep (before deciding whether any cleanup was owed): `clients`/`leads`/`profiles` by marker text + `auth.users` by metadata/email — all 0. Nothing to tear down; this run never seeded anything. (Noted but not swept, as it's a different marker convention: the failing CI job's own e2e teardown left orphaned `leads`/`clients`/`activities` rows behind under FK-constraint errors — the CI suite's own marker rows, not this run's `QA-SENTINEL` rows. Flagged inside the finding for a future sweep.)
+- Findings filed: **1 new** — `QA-20260901-02` (`risky`, `high`) — full CI evidence, root-cause pointers, and a note that the prior QA run's "0 findings" customer-agent check covered only the commercial accept gate, not the residential/bank-transfer path that's actually broken. Findings closed: **0**.
+- Ledger: `qa/state.json` **not updated** — no surfaces were tested this run (rota did not run).
+- Rota: **not run** (customer/admin/estimator/crew role agents, handoff scenarios, new specs) — per the abort rule, pushing nothing built on a broken base.
+- Pushes: one commit to `staging` (`qa/findings/open/QA-20260901-02.md` + this log entry only). Rebased onto `origin/staging` immediately before pushing. No PRs opened, `master` never touched.
+- Cleanup verification: N/A — nothing seeded this run, sweep at start confirmed 0 pre-existing `QA-SENTINEL` rows.
+- Time spent: ~30 min (checkout+creds ~2 min, `npm ci`+4 local gates ~6 min, CI history/log investigation via GitHub MCP ~14 min, master/prod cross-check ~2 min, marker sweep ~2 min, finding+log write-up ~4 min).
+
+---
+
 ## 2026-09-01T16:09Z — scheduled QA audit: freshness override (PRs #172-183), 1 new permanent spec, 0 findings
 
 - Checked out latest `origin/staging`, sha `4fd5640`. Deployed staging one commit behind (`2a4d85a`), `git diff --stat 2a4d85a HEAD` = `AGENTS.md` only (docs-only, known deploy-filter trap) — no wait needed.
