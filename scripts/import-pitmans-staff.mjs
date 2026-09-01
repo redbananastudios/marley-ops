@@ -267,6 +267,9 @@ const { data: written, error: wErr } = await sb
       phone: p.phone,
       email: p.email,
       day_rate: p.dayRate,
+      // Omitted when the sheet does not say, so the column default (Mon-Fri,
+      // migration 0055) applies — see `defaultToNull: false` below, WITHOUT
+      // which this line kills the whole import.
       ...(p.workingDays ? { working_days: p.workingDays } : {}),
       date_of_birth: p.dateOfBirth,
       address: p.address,
@@ -276,6 +279,30 @@ const { data: written, error: wErr } = await sb
       notes: p.notes,
       import_batch: batch,
     })),
+    // A BULK insert sends the UNION of keys across all rows, and PostgREST
+    // fills a key a given row omits with NULL rather than leaving it to the
+    // column default. `staff.working_days` is `int[] NOT NULL default
+    // '{1,2,3,4,5}'` (0055), so one crew member with no set days poisoned the
+    // whole statement:
+    //
+    //   FATAL: staff insert failed — null value in column "working_days" of
+    //   relation "staff" violates not-null constraint
+    //
+    // Not a rare shape: a real crew list has people on fixed days and people
+    // who are called in, and the sheet is filled in by hand. The import is a
+    // ONE-SHOT operation on takeover day, so aborting the batch is exactly when
+    // there is least time to work out why.
+    //
+    // `defaultToNull: false` makes PostgREST apply each column's own DEFAULT to
+    // a key the row omits, which is what the conditional spread above always
+    // intended. It does NOT affect a key that is present and explicitly null —
+    // every other field here is set unconditionally, so their nulls still land
+    // as nulls.
+    //
+    // The trap it introduces, for whoever edits this next: any NEW conditional
+    // spread added to this object will now silently take the column default
+    // instead of NULL. If you want NULL, name the key.
+    { defaultToNull: false },
   )
   .select("id, full_name");
 if (wErr) die(`staff insert failed — ${wErr.message} (nothing written: the batch inserts as one statement)`);

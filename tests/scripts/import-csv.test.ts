@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   contactKey,
   duplicateKeyErrors,
@@ -278,5 +280,52 @@ describe("duplicateKeyErrors", () => {
         "one van would import as two",
       ),
     ).toEqual(["line 3: the callsign 'luton  3' is already on line 2 — one van would import as two"]);
+  });
+});
+
+/**
+ * The staff import is the only one that writes its rows in a single BULK
+ * insert, and that is what makes this fragile enough to pin.
+ *
+ * PostgREST sends the UNION of keys across all rows in a bulk insert and fills
+ * a key a given row omits with NULL, rather than leaving it to the column
+ * default. `staff.working_days` is `int[] NOT NULL default '{1,2,3,4,5}'`
+ * (migration 0055), and the row builder omits the key when the sheet does not
+ * say — so ONE crew member with no set days aborted the entire statement:
+ *
+ *   FATAL: staff insert failed — null value in column "working_days" of
+ *   relation "staff" violates not-null constraint
+ *
+ * That is not an exotic sheet. A real crew list has people on fixed days and
+ * people who are called in, and it is filled in by hand. The import is a
+ * one-shot operation on takeover day, which is precisely when there is least
+ * time to work out why nothing landed.
+ *
+ * `{ defaultToNull: false }` makes PostgREST apply each column's own DEFAULT to
+ * an omitted key. Reproduced against local Supabase both ways: without it the
+ * mixed sheet dies; with it, a row saying "67" keeps [6,7] and a row saying
+ * nothing gets [1,2,3,4,5] — so the option does not clobber a supplied value.
+ *
+ * Asserted at the source because the write is deep IO (a live Supabase client
+ * plus a service-role key), which vitest cannot exercise here. The importer
+ * scripts are top-level-await and env-gated, so they cannot be imported at all
+ * — hence reading the file rather than calling into it.
+ */
+describe("the staff bulk insert lets the database supply its own defaults", () => {
+  const src = readFileSync(join(process.cwd(), "scripts/import-pitmans-staff.mjs"), "utf8");
+
+  it("passes defaultToNull: false", () => {
+    expect(
+      src,
+      "without this, one crew member with no working_days aborts the whole import",
+    ).toContain("{ defaultToNull: false }");
+  });
+
+  it("still omits working_days rather than sending an explicit null", () => {
+    // The option only helps a key that is ABSENT. Sending `working_days: null`
+    // would put the key in the union and write NULL into a NOT NULL column,
+    // which is the same failure by a different route.
+    expect(src).toContain("...(p.workingDays ? { working_days: p.workingDays } : {})");
+    expect(src).not.toContain("working_days: p.workingDays ?? null");
   });
 });
