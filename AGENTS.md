@@ -75,46 +75,42 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-08-29 - gates 10b, 16 and 20 all MERGED; staging green; only gate 15 left, and it is blocked)
+## Current State (2026-09-01 - reliability sweep MERGED end to end; staging green; zero open PRs)
 
-Last touched: 2026-08-29 on i9. Four PRs merged to `staging`: #162 (flaky diary spec), #161 (gates
-10b + 16), #163 (gate 20 - the four Pitmans importers), #164 (an ambiguous locator I created in
-10b). Staging is green end to end, e2e included. **Gate 20 was the last buildable gate**: 15 is
-blocked on Mark's terms document and 22 is the designated drop.
+Last touched: 2026-09-01 on i9. Twelve PRs merged to `staging`, every one staging-green before the
+next landed: #171 (master merge + Windows CRLF test + runbook rows), #172 (leak scan certified files
+it never read), #174 (crew e2e networkidle), then the six-lens review's findings - #173 (commercial
+completion invoice invisible to the bank feed and its alarm cleared by "Mark completed"), #175
+(rollback safety checks that could not run reported clean), #176 (in-CSV duplicates + staff import
+dying on a mixed sheet via PostgREST defaultToNull), #177 (/payments dated commercial money on move
+day, overdue from the next morning), #178 (reschedule stomped commercial_due_date; late-balance
+guard), #179 (completion invoice email said "due before move day" to a commercial client), #180
+(Reply-To brand identity + the card kill switch never reached copy - new `brandForComms` resolver,
+`card-availability.ts` extraction), #181 (/q accept + storage invoice notes promised card whatever
+the brand), #182 (Deposit cell invited a deposit on a commercial lead).
 
-- **Gate 20 shipped: four importers**, `import-pitmans-{bookings,storage,vehicles,staff}.mjs`, on
-  shared `scripts/lib/import-csv.mjs` (25 unit tests), with CSV templates + README in
-  `docs/import-templates/`. Every one proven end to end against LOCAL Supabase - dry run, guards,
-  `--commit`, SQL read-back, re-run idempotency, `--rollback`, and rollback REFUSAL with real
-  records seeded. Migration 0114 applied to staging + local, runbook appended.
-- **The safety seam is `lib/legacy.ts`.** `IMPORTED_SOURCES = ["imve","pitmans"]` drives
-  `legacyLocked()`, so imported bookings are excluded from chases, commitment invoicing and the
-  T-7 final invoice through ONE predicate. `importedBooking()` is the separate, never-lifted rule
-  for crew paperwork. Widening `leads/actions.ts` + `leads/[id]/page.tsx` mattered most: without
-  them the Pitmans comms lock had NO KEY and the T-7 invoice could never fire.
-- **A dry run cannot prove an importer.** The first real `--commit` created THREE sites called
-  Blandford, one per row: the write loop trusted what planning captured instead of the map it had
-  just updated. Same bug was latent for CLIENTS in the bookings importer. No dry run can show it -
-  it performs no inserts, so every row legitimately says "would create".
-- **`click({force:true})` still clicks a COORDINATE.** That is why the diary spec kept opening the
-  wrong FullCalendar event and writing a draft quote against a stranger's lead. `dispatchEvent`
-  fires on the node. Proven with a probe putting six surveys in one identical slot: force opened
-  `slot4` when told `slot3`. An ordinary local diary is NOT dense enough to reproduce it - the old
-  code passed locally too.
-- **I broke staging e2e in 10b and did not notice for two merges.** Added prose naming the "Owed
-  right now" tile, which made a page-wide exact-text locator match two elements; then merged #161
-  without watching its staging run, so #163 inherited a red that was not its own. `grep -rn
-  "<string>" e2e/` before committing is one second and is AGENTS.md's first e2e habit.
-- **Local e2e is the fast loop.** Docker + local Supabase on i9:54321, dev server on 3016 - but
-  Next refuses a second dev server for the same directory, so check whether 3016 is already yours
-  before allocating a port. Source BOTH `.env.local` and `.env.e2e` onto the playwright process.
+- **Merged-tree certification is what made 12 merges safe in one day**: every PR's gates ran
+  locally on a STACKED tree (staging + everything queued ahead of it), so each merge landed
+  pre-proven against the exact content staging would hold. The one cross-branch failure this
+  caught: #180 and #181 shipped CONTRADICTORY source tripwires on `raise-storage-invoices.ts`
+  (one forbids `getBrandOrDefault`, one required it). Reconciled by intent - the let's brand,
+  resolved through `brandForComms` - and both tripwires now pass together.
+- **The comms-canonical brand resolver is `brandForComms`** (`lib/comms/brand-theme.ts`): wraps
+  `getBrandOrDefault`, overlays `cardPaymentsEnabled` with the live ANDed verdict (global kill
+  switch AND brand toggle). Customer-copy surfaces must use it - `card-toggle.test.ts` enforces
+  the class. `cardPaymentsAvailable` lives in `lib/payments/card-availability.ts` (import-cycle
+  extraction); `card-payments.ts` re-exports it.
+- **Commercial policy is now consistent across every reader**: bank-feed visibility
+  (`balanceRungVisible`), /payments dating (terms date, `classifyBooking`'s verdict, undated
+  split "wait" vs "fix"), due-date authority (reschedules write nothing for commercial), the
+  payments-card Deposit cell, and the completion-invoice email copy.
 
 **Open decisions:** none new. **Blockers:** the staging Zoho refresh token is STILL dead
-(`invalid_code` = revoked, NOT the daily rate limit - a new day does not fix it). Re-mint per
-`scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk, org 20117092566; `.env.local` is the
-LIVE org, do not touch it. Nothing merged this session needed it. **Next:** gate 16's
-RENDERED-page leak check (the Playwright half of PRD 6.4) is still outstanding and the scan's
-success line now says so outright; gate 15 needs Mark's document; then the 18 September prod
-promotion from `docs/pitmans-prod-migration-runbook.md`, which now carries 0104-0114.
+(`invalid_code` = revoked; re-mint per `scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk,
+org 20117092566; `.env.local` is the LIVE org, do not touch it). **Next:** gate 15 needs Mark's
+terms document; gate 16's RENDERED-page leak check (Playwright half of PRD 6.4) still outstanding;
+QA-20260827-04 (`risky`) open; then the 18 September prod promotion per
+`docs/pitmans-prod-migration-runbook.md` (0104-0114). Staging `app.env` verified carrying
+`TAKEPAYMENTS_SIGNATURE_KEY` (docs template just omits it).
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
