@@ -95,6 +95,7 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | /q decline with reason | ✅ | public/decline.spec.ts |
 | /q a sent commercial quote renders review-only, no accept button/deposit copy (PRD §3.10) | 🟡 | public/commercial-accept.spec.ts — `test.skip`'d: QA-20260828-03, the page never gates on payment_policy/is_company; un-skips in the repair PR |
 | /s storage-agreement signing (render + affordance + bad-token 404) | ✅ | public/signing.spec.ts |
+| /s payment-method copy matches the current storage-terms version | 🟡 | public/signing.spec.ts — shipped `test.skip`, QA-20260901-01: `app/s/[token]/page.tsx:170` hardcodes "Invoices are payable by bank transfer on receipt.", now stale against storage-terms-v2-2026-08-31 (card/cash also accepted); un-skips once the page sources the payment-method line from the current terms version |
 | /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
 | /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
 | /join crew sign-up (submit → success state + bad-token dead-link card) | ✅ | public/join.spec.ts |

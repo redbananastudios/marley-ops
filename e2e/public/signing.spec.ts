@@ -29,4 +29,19 @@ test.describe("Customer — storage agreement (/s)", () => {
     const res = await page.goto("/s/e2e-not-a-real-token-9999");
     expect(res?.status()).toBe(404);
   });
+
+  // QA-20260901-01: app/s/[token]/page.tsx hardcodes "Invoices are payable by
+  // bank transfer on receipt." next to the storage-terms link, which now
+  // contradicts storage-terms-v2-2026-08-31 (card and cash are also accepted,
+  // no card surcharge). Un-skip once the page copy is sourced from (or kept in
+  // step with) the current storage-terms version instead of a second hardcoded
+  // string.
+  test.skip("payment-method copy matches the current storage terms (QA-20260901-01)", async ({ page }) => {
+    await page.goto(`/s/${SEED.storageAgreement.signToken}`);
+    await page.waitForLoadState("networkidle");
+    const body = (await page.textContent("body")) ?? "";
+    expect(body).not.toContain("Invoices are payable by bank transfer on receipt.");
+    expect(body.toLowerCase()).toContain("card");
+    expect(body.toLowerCase()).toContain("cash");
+  });
 });
