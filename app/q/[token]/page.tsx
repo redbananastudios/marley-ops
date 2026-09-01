@@ -12,7 +12,7 @@ import {
   type AcceptQuoteRow,
 } from "@/lib/quote/accept-flow";
 import { isAcceptExpired, moveDateLabel } from "@/lib/quote/payments";
-import { requestedDeposit } from "@/lib/payments-policy";
+import { policyOfQuote, requestedDeposit } from "@/lib/payments-policy";
 import { payInFullAvailable } from "@/lib/payments/pay-in-full";
 import { getBusinessSettings } from "@/lib/settings";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
@@ -438,6 +438,127 @@ export default async function AcceptPage({
             <DeclineOption token={token} phone={theme.phone} />
           </div>
         </Card>
+      </Shell>
+    );
+  }
+
+  /* --------------------------------------- accepted + commercial → on account */
+  // The commercial gate above covers `status === "sent"` ONLY, and the office
+  // marking the job won moves the row straight past it. Everything below this
+  // point is the residential ladder — a deposit ask, a date confirmation, a
+  // commitment, a balance due before move day — and a commercial booking has
+  // none of those rungs. Left to fall through, a client on account terms
+  // revisiting their own link met a screen headed "deposit to secure your
+  // date", carrying a figure taken from the Settings default rather than from
+  // their own quote, for money nobody had ever asked them for.
+  //
+  // It returns BEFORE the deposit machinery rather than correcting it after:
+  // `ensureDepositInvoice` already refuses this policy, so reaching it at all is
+  // not a safety question, it is simply one more chance to render the wrong
+  // screen.
+  //
+  // The policy is read straight off the row. Both accept paths stamp
+  // `payment_policy` at acceptance, so by this state it is the snapshot every
+  // money surface reads; re-resolving it live (which is right on the `sent`
+  // state, where the column is still null) could disagree with the ladder the
+  // booking is actually on.
+  if (policyOfQuote(quote) === "commercial") {
+    let settledAt: string | null = null;
+    if (quote.lead_id) {
+      const { data: lead } = await sb
+        .from("leads")
+        .select("balance_paid_at")
+        .eq("id", quote.lead_id)
+        .maybeSingle();
+      settledAt = lead?.balance_paid_at ?? null;
+    }
+    const moveOn = moveDateLabel(quote.moving_date);
+    const invoiceAmt = Number(quote.balance_invoice_amount ?? 0);
+    const showInvoice =
+      isRealZohoId(quote.zoho_balance_invoice_id) && invoiceAmt > 0 && !settledAt;
+    // A terms date that was never recorded names no day here either. The terms
+    // themselves are the whole truth available, and they are what the quote and
+    // the invoice document have already told this client.
+    const termsOn = moveDateLabel(quote.commercial_due_date ?? null);
+    return (
+      <Shell theme={theme}>
+        <Card>
+          <div className="p-6 text-center sm:p-8">
+            <CheckCircle2 className="mx-auto size-12 text-success" strokeWidth={1.5} />
+            <h1 className="mt-4 font-brand text-3xl font-semibold text-ink">
+              {settledAt ? "All settled" : "You're booked in"}
+            </h1>
+            <p className="mt-3 text-sm leading-relaxed text-mist-500">
+              Quote <strong className="text-ink">{quote.quote_ref}</strong> is confirmed
+              {moveOn ? (
+                <>
+                  {" "}
+                  for <strong className="text-ink">{moveOn}</strong>
+                </>
+              ) : null}
+              .{" "}
+              {settledAt
+                ? "Your invoice is paid in full, so there is nothing further to do. Thank you."
+                : showInvoice
+                  ? "Your invoice is below."
+                  : "There is nothing to pay now. We'll invoice your account once the job is done, payable on your agreed terms."}
+            </p>
+          </div>
+        </Card>
+
+        {showInvoice ? (
+          <div className="mt-6">
+            <Card>
+              <div className="space-y-5 p-6 sm:p-8">
+                <div>
+                  <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-mist-500">
+                    Amount due
+                    {quote.zoho_balance_invoice_number
+                      ? ` · Invoice ${quote.zoho_balance_invoice_number}`
+                      : ""}
+                  </p>
+                  <p className="mt-1 font-brand text-4xl font-bold text-ink">{gbp(invoiceAmt)}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-mist-500">
+                    Your move is complete, so this is your invoice for the job. It is payable on
+                    your agreed terms
+                    {termsOn ? (
+                      <>
+                        , by <strong className="text-ink">{termsOn}</strong>
+                      </>
+                    ) : null}
+                    .
+                  </p>
+                </div>
+                <BankPanel theme={theme} reference={quote.quote_ref} />
+                {/* No card rail: the completion invoice is raised with online
+                    payments disabled, so a card button here would be a dead
+                    end — the same reason the residential balance has none. */}
+                <p className="text-sm leading-relaxed text-mist-500">
+                  Any questions about this invoice? {theme.callLead}{" "}
+                  <a
+                    href={theme.telHref}
+                    className="font-semibold text-mm-red underline underline-offset-2"
+                  >
+                    {theme.phone}
+                  </a>
+                  .
+                </p>
+                {quote.zoho_balance_invoice_url ? (
+                  <p className="text-center text-xs text-mist-400">
+                    Your invoice{" "}
+                    <a
+                      href={quote.zoho_balance_invoice_url}
+                      className="font-semibold text-ink underline underline-offset-2"
+                    >
+                      {quote.zoho_balance_invoice_number ?? "is ready"}
+                    </a>{" "}
+                    is ready to view.
+                  </p>
+                ) : null}
+              </div>
+            </Card>
+          </div>
+        ) : null}
       </Shell>
     );
   }

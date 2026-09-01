@@ -206,7 +206,7 @@ async function clientPaymentTermsDays(
 const FUNNEL = ["website_enquiry", "survey_booked", "quoted", "provisional", "confirmed", "completed"];
 
 const QUOTE_COLS =
-  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at, po_number";
+  "id, quote_ref, status, source, brand, payment_policy, standard_comms_at, lead_id, client_id, estimator_id, customer_name, customer_email, customer_phone, collect_addr, dest_addr, moving_date, vat_enabled, grand_total, agreed_price, accepted_at, accept_token, accepted_name, created_at, email_sent_at, deposit_amount, deposit_paid_at, deposit_paid_method, deposit_selfreport_at, declined_at, zoho_contact_id, contact_provider, deposit_invoice_provider, balance_invoice_provider, commitment_invoice_provider, zoho_deposit_invoice_id, zoho_deposit_invoice_number, zoho_deposit_invoice_url, zoho_deposit_error, zoho_balance_invoice_id, zoho_balance_invoice_number, zoho_balance_invoice_url, balance_invoice_amount, balance_invoice_created_at, zoho_commitment_invoice_id, zoho_commitment_invoice_number, zoho_commitment_invoice_url, zoho_commitment_error, commitment_invoice_amount, commitment_invoice_created_at, commitment_due_date, commitment_paid_at, commitment_paid_method, commitment_chase_t10_at, date_releasable_at, booking_cancelled_at, po_number, commercial_due_date";
 
 export type AcceptQuoteRow = {
   id: string;
@@ -279,6 +279,16 @@ export type AcceptQuoteRow = {
   /** Commercial only: the client's own purchase-order reference, printed on
    *  the completion invoice when present (PRD §3.10). Never required. */
   po_number?: string | null;
+  /**
+   * Commercial only: the date the completion invoice falls due on the client's
+   * agreed terms, stamped in the same write as the invoice number.
+   *
+   * Selected here so the RE-send and `/q` can read it. A field absent from
+   * QUOTE_COLS arrives as `undefined`, which is indistinguishable from "no
+   * terms agreed" and would silently downgrade every re-sent commercial
+   * invoice to the dateless copy.
+   */
+  commercial_due_date?: string | null;
 };
 
 /** A real Zoho id (not unset, not a creation claim in flight). */
@@ -2660,7 +2670,18 @@ async function sendBalanceInvoiceEmail(
   actorId: string | null,
   quote: AcceptQuoteRow,
   inv: RaisedBalanceInvoice,
-  opts: { override?: boolean; overrideReason?: string } = {},
+  opts: {
+    override?: boolean;
+    overrideReason?: string;
+    /**
+     * The commercial terms date this invoice was raised against, passed in
+     * rather than re-derived. The raise computes it once and stamps it on the
+     * row in the same write as the invoice number; re-deriving it here would
+     * let the invoice DOCUMENT and the email carrying it fall due on two
+     * different days. The re-send passes the stored column for the same reason.
+     */
+    commercialDueDate?: string | null;
+  } = {},
 ): Promise<boolean> {
   if (!quote.customer_email) return false;
   let pdfBase64: string | undefined;
@@ -2684,6 +2705,17 @@ async function sendBalanceInvoiceEmail(
   // this email BEFORE paying anything. Derived from the quote rather than passed
   // in, so the raise, the early raise and the office re-send all tell one truth.
   const depositOutstanding = quote.deposit_paid_at ? 0 : round2(Number(quote.deposit_amount ?? 0));
+  // COMMERCIAL reaches this same function: `createBalanceInvoiceFlow` calls it
+  // unconditionally, because the completion invoice IS the last invoice on the
+  // job under either policy. The raise already knew that — it branched the
+  // invoice NOTES on it twenty lines earlier — but the policy stopped there, so
+  // the PDF said "Payable on your agreed terms" while the email wrapping it
+  // told a business client their money had been due before a move that had
+  // already happened. Read once, here, so the subject, the plain-text part, the
+  // HTML body and the template choice cannot disagree.
+  const commercialInvoice = policyOfQuote(quote) === "commercial";
+  const termsDueDate = opts.commercialDueDate ?? quote.commercial_due_date ?? null;
+  const termsDueDateLabel = commercialInvoice ? moveDateLabel(termsDueDate) : null;
   const meta: BalanceInvoiceMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2692,6 +2724,7 @@ async function sendBalanceInvoiceEmail(
     invoiceUrl: inv.invoiceUrl,
     invoiceNumber: inv.invoiceNumber,
     depositOutstanding,
+    ...(commercialInvoice ? { paymentPolicy: "commercial" as const, termsDueDateLabel } : {}),
     brand,
   };
   // The hosted Resend twin is a separately hand-written copy of this email
@@ -2699,20 +2732,39 @@ async function sendBalanceInvoiceEmail(
   // deposit, so sending through it would show the "already accounted for" line
   // to exactly the customer it is wrong for. Fall back to the locally built
   // HTML — the same shell, and the one that carries the correct figures.
+  //
+  // Commercial is excluded for the same reason and one more: the hosted copy is
+  // residential throughout, so it would restore in the template exactly the
+  // claim the in-repo body has just stopped making.
+  const templateVars = balanceInvoiceTemplateVars(meta);
   const templateId =
-    depositOutstanding > 0 ? null : templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE");
+    depositOutstanding > 0 || !templateVars
+      ? null
+      : templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE");
   const res = await dispatchComm(sb, actorId, {
     channel: "email",
     from: accountsFromFor(brand),
     to: quote.customer_email,
-    subject: `Your final balance: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`,
-    bodyText:
-      `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). ` +
-      (depositOutstanding > 0
-        ? `Your £${depositOutstanding.toFixed(2)} deposit is invoiced separately and still to pay, so £${(depositOutstanding + inv.amount).toFixed(2)} is due before move day.`
-        : `Payment in full is due before move day.`),
-    ...(templateId
-      ? { template: { id: templateId, variables: balanceInvoiceTemplateVars(meta) }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
+    // "Final balance" describes a residual after a deposit and a commitment,
+    // neither of which a commercial job has. The invoice is the whole bill.
+    subject: commercialInvoice
+      ? `Your invoice: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`
+      : `Your final balance: ${quote.quote_ref} (£${inv.amount.toFixed(2)})`,
+    bodyText: commercialInvoice
+      ? `Invoice ${inv.invoiceNumber} for quote ${quote.quote_ref}: £${inv.amount.toFixed(2)}. ` +
+        `Your move is complete. ` +
+        // No terms date recorded means no day is named — the terms are stated
+        // instead. Naming one anyway would turn missing information into a
+        // deadline the client never agreed to.
+        (termsDueDateLabel
+          ? `Payable on your agreed terms, by ${termsDueDateLabel}.`
+          : `Payable on your agreed terms.`)
+      : `Final balance of £${inv.amount.toFixed(2)} for quote ${quote.quote_ref} (invoice ${inv.invoiceNumber}). ` +
+        (depositOutstanding > 0
+          ? `Your £${depositOutstanding.toFixed(2)} deposit is invoiced separately and still to pay, so £${(depositOutstanding + inv.amount).toFixed(2)} is due before move day.`
+          : `Payment in full is due before move day.`),
+    ...(templateId && templateVars
+      ? { template: { id: templateId, variables: templateVars }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
       : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
     attachmentBase64: pdfBase64,
     attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
@@ -2796,7 +2848,14 @@ export async function resendBalanceInvoiceFlow(
       invoiceUrl: quote.zoho_balance_invoice_url,
       amount,
     },
-    { override: true, overrideReason: "Operator re-sent the final invoice" },
+    {
+      override: true,
+      overrideReason: "Operator re-sent the final invoice",
+      // The date stamped on the row when the invoice was raised — never
+      // recomputed from today, or a re-send a fortnight later would tell the
+      // client their terms run a fortnight further than the document says.
+      commercialDueDate: quote.commercial_due_date ?? null,
+    },
   );
   if (!emailed) return { ok: false, error: "The email did not send — check the comms log and try again." };
 
@@ -2881,10 +2940,16 @@ export async function createBalanceInvoiceFlow(
   // all until now, which made `pastTerms` false on every row forever — the
   // overdue state and its internal alert were unreachable code, and a
   // commercial invoice could age indefinitely while the board said "in terms".
-  const commercialDueDate =
-    policyOfQuote(quote) === "commercial"
-      ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
-      : null;
+  //
+  // Hoisted to the whole raise, not just the invoice-creation block it started
+  // in. It was derived inside `if (!inv)` and used only for the invoice NOTES,
+  // which is why the two OTHER things this function produces — the office
+  // activity note and the customer email — went on speaking residential twenty
+  // lines below a local that already knew better.
+  const commercialInvoice = policyOfQuote(quote) === "commercial";
+  const commercialDueDate = commercialInvoice
+    ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
+    : null;
   try {
     let inv = await findInvoiceByReference(ref); // crash-recovery orphan adoption
     if (inv && !adoptedInvoiceMatches(inv.total, amount)) {
@@ -2936,8 +3001,8 @@ export async function createBalanceInvoiceFlow(
       // — this raise happens AFTER the move. The residential lead sentence told
       // a business client their invoice was already overdue on the day they
       // received it, which is both wrong and the kind of wrong that gets
-      // forwarded to an accounts department.
-      const commercialInvoice = policyOfQuote(quote) === "commercial";
+      // forwarded to an accounts department. (Derived once for the whole raise,
+      // above the try — see the note there.)
       const payClause = invoicePayClause(
         notesBrand,
         quote.quote_ref,
@@ -3025,18 +3090,39 @@ export async function createBalanceInvoiceFlow(
         client_id: quote.client_id,
         actor_id: actorId,
         type: "note",
-        summary: `Final invoice ${inv.invoiceNumber} raised — £${amount.toFixed(2)} due before move day`,
+        // The office reads this note to know what the customer was told. It
+        // said "due before move day" on every job, commercial included — the
+        // one line in the log that would have shown the mismatch instead
+        // repeated it. A missing terms date says so plainly rather than
+        // implying an ordinary one.
+        summary: commercialInvoice
+          ? `Completion invoice ${inv.invoiceNumber} raised — £${amount.toFixed(2)} ${
+              commercialDueDate
+                ? `due ${moveDateLabel(commercialDueDate)} on the client's agreed terms`
+                : "payable on the client's agreed terms (no terms date recorded)"
+            }`
+          : `Final invoice ${inv.invoiceNumber} raised — £${amount.toFixed(2)} due before move day`,
         meta: { quote_id: quoteId, invoice_id: inv.invoiceId, amount },
       });
     }
 
     // Email the customer: branded balance email + Zoho's VAT invoice PDF.
-    const emailed = await sendBalanceInvoiceEmail(sb, actorId, quote, {
-      invoiceId: inv.invoiceId,
-      invoiceNumber: inv.invoiceNumber,
-      invoiceUrl: inv.invoiceUrl,
-      amount,
-    });
+    // `commercialDueDate` is handed over rather than read back off the row: the
+    // quote in hand was fetched BEFORE the stamp above, so its column is still
+    // null here and the email would fall back to the dateless copy on the one
+    // send that does know the date.
+    const emailed = await sendBalanceInvoiceEmail(
+      sb,
+      actorId,
+      quote,
+      {
+        invoiceId: inv.invoiceId,
+        invoiceNumber: inv.invoiceNumber,
+        invoiceUrl: inv.invoiceUrl,
+        amount,
+      },
+      { commercialDueDate },
+    );
 
     return { ok: true, invoiceNumber: inv.invoiceNumber, amount, emailed };
   } catch (err) {
