@@ -91,11 +91,22 @@ if (rollbackBatch) {
   // strip the vehicle off a real appointment (and appointment_assignments
   // cascades), leaving a crew day with no van and no record of which one it
   // was. Refuse and say so rather than quietly unassigning.
-  const { data: assigned } = await sb
+  //
+  // The error is FATAL, never discarded: `const { data } = …` on a failed query
+  // leaves `data` undefined, so `assigned?.length` is falsy and the refusal
+  // never fires — the gate would pass precisely when it could not check. The
+  // staff importer shipped that exact shape.
+  const { data: assigned, error: assignedErr } = await sb
     .from("appointment_assignments")
     .select("appointment_id, vehicle_id")
     .in("vehicle_id", ids)
     .limit(5);
+  if (assignedErr) {
+    die(
+      `Rollback safety check FAILED (appointment_assignments.vehicle_id): ${assignedErr.message}\n` +
+        `  Refusing. A check that could not run is not a clean result.`,
+    );
+  }
   if (assigned?.length) {
     die(
       `Refusing rollback — ${assigned.length}+ appointment allocations use vehicles in this batch. ` +

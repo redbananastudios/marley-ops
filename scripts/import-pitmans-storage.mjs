@@ -122,14 +122,24 @@ if (rollbackBatch) {
   // DELETE RESTRICT, so this would fail mid-way anyway — refusing up front says
   // why, instead of leaving a half-deleted chain.
   const blockers = [];
-  if (letIds.length) {
-    const { data: invs } = await sb.from("storage_invoices").select("id").in("let_id", letIds).limit(5);
-    if (invs?.length) blockers.push(`${invs.length}+ storage invoices raised against batch lets`);
-    const { data: sigs } = await sb.from("signatures").select("id").in("storage_let_id", letIds).limit(5);
-    if (sigs?.length) blockers.push(`${sigs.length}+ signed storage agreements on batch lets`);
-    const { data: events } = await sb.from("storage_handling_events").select("id").in("let_id", letIds).limit(5);
-    if (events?.length) blockers.push(`${events.length}+ handling events on batch lets`);
-  }
+  // Dies on a query error rather than reading it as "none found" — a discarded
+  // error leaves `data` undefined and the blocker silently unreachable, which
+  // is what shipped in the staff importer's pay-lines gate.
+  const probe = async (table, col, idList, label) => {
+    if (!idList.length) return;
+    const { data, error } = await sb.from(table).select("id").in(col, idList).limit(5);
+    if (error) {
+      die(
+        `Rollback safety check FAILED (${table}.${col}): ${error.message}\n` +
+          `  Refusing. A check that could not run is not a clean result.`,
+      );
+    }
+    if (data?.length) blockers.push(`${data.length}+ ${label}`);
+  };
+
+  await probe("storage_invoices", "let_id", letIds, "storage invoices raised against batch lets");
+  await probe("signatures", "storage_let_id", letIds, "signed storage agreements on batch lets");
+  await probe("storage_handling_events", "let_id", letIds, "handling events on batch lets");
   if (blockers.length) die(`Refusing rollback — real records exist:\n  - ${blockers.join("\n  - ")}`);
 
   console.log(

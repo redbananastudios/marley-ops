@@ -145,26 +145,50 @@ if (rollbackBatch) {
   // Refuse if real work has attached to the batch since import — a rollback
   // must never delete evidence of money or customer contact.
   const blockers = [];
-  if (quoteIds.length) {
-    const { data: txs } = await sb.from("bank_transactions").select("id").in("matched_quote_id", quoteIds).limit(5);
-    if (txs?.length) blockers.push(`${txs.length}+ bank transactions matched to batch quotes`);
-    const { data: sigs } = await sb.from("signatures").select("id").in("quote_id", quoteIds).limit(5);
-    if (sigs?.length) blockers.push(`${sigs.length}+ signatures on batch quotes`);
-  }
-  const { data: comms } = await sb.from("communications").select("id").in("lead_id", leadIds).limit(5);
-  if (comms?.length) blockers.push(`${comms.length}+ communications on batch leads`);
+  // Every probe DIES on a query error rather than reading it as "none found".
+  // A discarded error leaves `data` undefined and `data?.length` falsy, so a
+  // broken probe reports the reassuring answer and the rollback proceeds — the
+  // staff importer shipped exactly that, with a gate filtering a column its
+  // table has never had. A check that could not run is not a clean result.
+  const probe = async (table, col, idList, label) => {
+    if (!idList.length) return;
+    const { data, error } = await sb.from(table).select("id").in(col, idList).limit(5);
+    if (error) {
+      die(
+        `Rollback safety check FAILED (${table}.${col}): ${error.message}\n` +
+          `  Refusing. Deleting on the strength of a check that did not run is how a ` +
+          `rollback destroys the record it was guarding.`,
+      );
+    }
+    if (data?.length) blockers.push(`${data.length}+ ${label}`);
+  };
+
+  await probe("bank_transactions", "matched_quote_id", quoteIds, "bank transactions matched to batch quotes");
+  await probe("signatures", "quote_id", quoteIds, "signatures on batch quotes");
+  // The two RESTRICT parents of `quotes`. Every other quotes FK is ON DELETE
+  // SET NULL, so these are the only ones that can abort the delete — and they
+  // abort it at the FIFTH of six statements, after follow_ups, activities,
+  // appointments and booking_details are already gone. There is no transaction
+  // here (six separate PostgREST calls), so that is unrecoverable partial
+  // deletion of a LIVE booking: nothing puts the diary entry back, because
+  // ensureRemovalAppointment returns early with reason "legacy" for an
+  // imported booking.
+  //
+  // Reachable without any card payment: the importer stamps deposit_paid_at
+  // and lead.balance_paid_at for money Pitmans already took, buildHeldSnapshot
+  // counts those as held bank-rail money, and markLeadLostAction (or a
+  // date-change) then writes a refund_queue row with quote_id set and no
+  // legacy gate. That path writes NO communications row — its alerts go by
+  // sendOpsAlert — so the comms blocker above does not incidentally catch it.
+  await probe("card_payments", "quote_id", quoteIds, "card payments against batch quotes");
+  await probe("refund_queue", "quote_id", quoteIds, "refund-queue entries against batch quotes");
+  await probe("communications", "lead_id", leadIds, "communications on batch leads");
   // job_completions FK-RESTRICTs its appointment — a crew-completed job would
   // die mid-delete AFTER follow_ups/activities were gone. Refuse upfront.
-  const { data: batchAppts } = await sb.from("appointments").select("id").in("lead_id", leadIds);
+  const { data: batchAppts, error: apptErr } = await sb.from("appointments").select("id").in("lead_id", leadIds);
+  if (apptErr) die(`Rollback safety check FAILED (appointments.lead_id): ${apptErr.message} — refusing.`);
   const batchApptIds = (batchAppts ?? []).map((a) => a.id);
-  if (batchApptIds.length) {
-    const { data: completions } = await sb
-      .from("job_completions")
-      .select("id")
-      .in("appointment_id", batchApptIds)
-      .limit(5);
-    if (completions?.length) blockers.push(`${completions.length}+ crew job-completion sign-offs on batch appointments`);
-  }
+  await probe("job_completions", "appointment_id", batchApptIds, "crew job-completion sign-offs on batch appointments");
   if (blockers.length) die(`Refusing rollback — real records exist:\n  - ${blockers.join("\n  - ")}`);
 
   console.log(`rollback plan for '${rollbackBatch}': ${leads.length} leads, ${quoteIds.length} quotes`);

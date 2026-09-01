@@ -104,18 +104,43 @@ if (rollbackBatch) {
   const blockers = [];
   // Somebody rostered onto a job, or who has been paid, is not deletable: the
   // allocation and the pay line are the record of work actually done.
-  const { data: assigned } = await sb
-    .from("appointment_assignments")
-    .select("appointment_id")
-    .in("staff_id", ids)
-    .limit(5);
-  if (assigned?.length) blockers.push(`${assigned.length}+ appointment allocations`);
-  const { data: paid } = await sb
-    .from("staff_statement_lines")
+  //
+  // Every probe below DIES on a query error rather than reading it as "none
+  // found". That is not defensive padding — it is the bug this block had. The
+  // pay-lines gate used to filter `staff_statement_lines` on `staff_id`, a
+  // column that table has never had (0056 gives it statement_id, and a line
+  // reaches a person only via staff_statements.staff_id). PostgREST answered
+  // 400, the discarded error left `data` undefined, and `paid?.length` could
+  // not be truthy under any input. The gate was unreachable code that printed
+  // a reassuring plan for a human to approve.
+  const probe = async (table, col, idList, label, select = "id") => {
+    if (!idList.length) return;
+    const { data, error } = await sb.from(table).select(select).in(col, idList).limit(5);
+    if (error) {
+      die(
+        `Rollback safety check FAILED (${table}.${col}): ${error.message}\n` +
+          `  Refusing. A check that could not run is not a clean result — deleting on the ` +
+          `strength of it is exactly how a rollback destroys the record it was guarding.`,
+      );
+    }
+    if (data?.length) blockers.push(`${data.length}+ ${label}`);
+  };
+
+  await probe("appointment_assignments", "staff_id", ids, "appointment allocations", "appointment_id");
+  // Through the STATEMENT, which is the only path from a pay line to a person.
+  const { data: statements, error: stmtErr } = await sb
+    .from("staff_statements")
     .select("id")
     .in("staff_id", ids)
-    .limit(5);
-  if (paid?.length) blockers.push(`${paid.length}+ pay-statement lines`);
+    .limit(50);
+  if (stmtErr) die(`Rollback safety check FAILED (staff_statements.staff_id): ${stmtErr.message} — refusing.`);
+  if (statements?.length) blockers.push(`${statements.length}+ pay statements`);
+  await probe(
+    "staff_statement_lines",
+    "statement_id",
+    (statements ?? []).map((s) => s.id),
+    "pay-statement lines",
+  );
   const linked = people.filter((p) => p.profile_id);
   if (linked.length) blockers.push(`${linked.length} linked to a login (profile_id set)`);
   if (blockers.length) {
