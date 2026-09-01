@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { FORBIDDEN, MANIFEST, expandManifest, findLeaksInContent, scanRepo } from "../scripts/brand-leak-scan.mjs";
 
 /**
@@ -206,6 +208,77 @@ describe("brand-leak scan — shared-surface allows are evidence-disciplined", (
       { pattern: "lib/brand-filter.ts", allow: ["not-a-forbidden-literal"], reason: "test: typo'd allow" },
     ]);
     expect(errors.some((e) => e.includes("not in FORBIDDEN"))).toBe(true);
+  });
+});
+
+describe("brand-leak scan — a manifested folder is scanned WHOLE", () => {
+  /**
+   * The failure this pins (2026-09-01): the five token-route entries were
+   * written `app/<seg>/[token]/*.tsx`, which matches one segment ending in
+   * .tsx. The sibling server actions in those same folders were therefore
+   * never read, and two of them returned a customer-facing error string
+   * carrying a forbidden phone number — on a surface every run reported clean.
+   *
+   * The file's header rule is "a file not listed is NOT clean, it is
+   * UNSCANNED", and that rule is sound. The problem is that a folder-shaped
+   * pattern READS as covering the folder, so the gap is invisible to a
+   * reviewer. This test makes the manifest state its own coverage: if an entry
+   * names a directory, every scannable file in that directory must be covered
+   * by some entry. Narrowing a pattern then fails here loudly instead of
+   * quietly shrinking what "clean" means.
+   */
+  const SCANNABLE = /\.(ts|tsx|mjs|js|jsx)$/;
+
+  /**
+   * Scoped to GLOB entries only. An entry naming one explicit file claims only
+   * that file, and several do so deliberately in shared directories like
+   * `lib/quote/` where the siblings are not brand surfaces. An entry containing
+   * a wildcard is the one that claims a folder — so it is the one that has to
+   * cover it.
+   */
+  it("a glob entry covers every scannable file in the folder it claims", () => {
+    const { files } = expandManifest();
+    const covered = new Set(files.map((f) => f.replace(/\\/g, "/")));
+
+    const unscanned: string[] = [];
+    for (const entry of MANIFEST) {
+      // The manifest carries both shapes: a bare pattern string, and an object
+      // when the entry needs an `allow` + `reason`.
+      const raw: string = typeof entry === "string" ? entry : entry.pattern;
+      const pattern: string = raw.replace(/\\/g, "/");
+      const segments = pattern.split("/");
+      const wildcardAt = segments.findIndex((s) => s.includes("*"));
+      if (wildcardAt === -1) continue; // explicit single file — claims only itself
+      const dir = segments.slice(0, wildcardAt).join("/");
+      const deep = segments.slice(wildcardAt).some((s) => s === "**");
+
+      const walk = (rel: string): void => {
+        let listing;
+        try {
+          listing = readdirSync(join(process.cwd(), rel), { withFileTypes: true });
+        } catch {
+          return; // a pattern whose directory moved is expandManifest's error to report
+        }
+        for (const d of listing) {
+          const child = `${rel}/${d.name}`;
+          if (d.isDirectory()) {
+            if (deep) walk(child);
+          } else if (SCANNABLE.test(d.name) && !covered.has(child)) {
+            unscanned.push(`${child}   (claimed by "${pattern}")`);
+          }
+        }
+      };
+      walk(dir);
+    }
+
+    expect(
+      unscanned,
+      `a glob entry names a folder, which READS as covering it — but these files in that folder\n` +
+        `are not scanned, so a clean run says nothing about them. That is how two customer-facing\n` +
+        `error strings carrying a forbidden phone number sat behind an OK line until 2026-09-01.\n` +
+        `Widen the pattern to \`dir/**\`, or add the files explicitly:\n` +
+        unscanned.join("\n"),
+    ).toEqual([]);
   });
 });
 

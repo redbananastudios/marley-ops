@@ -74,7 +74,16 @@ export async function signStorageAgreementRemoteAction(
     user_agent: h.get("user-agent"),
   } as never);
   if (error && error.code !== "23505") {
-    return { ok: false, error: "Something went wrong — please call 01747 637070." };
+    // Deliberately NO message. The caller already holds the brand-resolved
+    // phone — `agreement-form.tsx` renders `res.error ?? "Something went wrong
+    // — call ${phone}."` from `pageTheme(getBrandOrDefault(let_.brand))` — and
+    // that component's own prop note says this number is "what a customer reads
+    // at the moment their signature has just failed", which is a poor moment to
+    // hand them another company's office. A hardcoded number here silently
+    // OUTRANKED that fallback, so a storage customer of one brand was shown a
+    // different brand's office number on exactly that screen. Returning no
+    // error lets the resolved fallback win.
+    return { ok: false };
   }
 
   if (!error) {
