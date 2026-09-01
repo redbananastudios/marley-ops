@@ -859,14 +859,25 @@ export async function markLeadLostAction(leadId: string, reason: string, note?: 
   let refundTask = false;
   let anyMoneyTaken = false;
 
-  // Free upcoming diary slots (surveys and removals both). starts_at/appt_type
-  // are captured so the refund-queue row can anchor to the cancelled removal.
+  // Free the diary (surveys and removals both). starts_at/appt_type are
+  // captured so the refund-queue row can anchor to the cancelled removal.
+  //
+  // Deliberately NOT filtered to future slots. A booking is often marked lost
+  // days AFTER its move date — the customer went quiet, nobody closed it out,
+  // and the office tidies up later. The old `.gte(now)` floor left those rows
+  // sitting on the calendar as `scheduled` forever: they kept drawing a chip,
+  // counted toward the day's capacity badge, and (because a cancelled quote is
+  // excluded from pricing) the month rail reported them as "not priced" —
+  // sending the office hunting for a price that already existed. Three live
+  // jobs were in exactly that state on 2026-08-28.
+  //
+  // Safe on history: only `scheduled` rows flip, so a move that actually ran is
+  // `completed` and is never touched.
   const { data: cancelledAppts } = await sb
     .from("appointments")
     .update({ status: "cancelled" as never })
     .eq("lead_id", leadId)
     .eq("status", "scheduled")
-    .gte("starts_at", new Date().toISOString())
     .select("id, appt_type, starts_at");
   const apptsCancelled = cancelledAppts?.length ?? 0;
 

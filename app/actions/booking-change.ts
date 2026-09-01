@@ -661,22 +661,23 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
   const quote = await acceptedQuoteFor(admin, leadId);
 
   // Free the diary (single-winner by construction — only scheduled rows flip)
-  // and capture what we cancelled for the queue row's old-date anchor. The
-  // window starts at the UK DAY start, not "now": a move-day cancel after the
-  // slot's start time must still free the row, or the post-move sweep later
-  // auto-completes (and review-requests) a move Marley pulled.
+  // and capture what we cancelled for the queue row's old-date anchor.
+  //
+  // No date floor at all. This started as `.gte(now)`, was widened to the UK
+  // DAY start so a move-day cancel after the slot's start time still freed the
+  // row, and the same reasoning goes the whole way: a booking cancelled DAYS
+  // after its move date must also leave the calendar. Otherwise the row stays
+  // `scheduled` forever, keeps its capacity badge, and reads as "not priced" on
+  // the month rail because a cancelled quote is excluded from pricing.
+  //
+  // Safe on history: only `scheduled` rows flip, so a move that actually ran is
+  // `completed` and is never touched.
   const nowIso = new Date().toISOString();
-  const todayUkDay = ukDayOf(nowIso) ?? nowIso.slice(0, 10);
-  const dm2 = /^(\d{4})-(\d{2})-(\d{2})$/.exec(todayUkDay);
-  const dayStartIso = dm2
-    ? ukInstant(Number(dm2[1]), Number(dm2[2]), Number(dm2[3]), 0, 0).toISOString()
-    : nowIso;
   const { data: cancelledAppts, error: cancelError } = await admin
     .from("appointments")
     .update({ status: "cancelled" as never })
     .eq("lead_id", leadId)
     .eq("status", "scheduled")
-    .gte("starts_at", dayStartIso)
     .select("id, appt_type, starts_at");
   if (cancelError) return { ok: false, error: cancelError.message };
   const apptsCancelled = cancelledAppts?.length ?? 0;

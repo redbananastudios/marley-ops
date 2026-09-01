@@ -26,10 +26,12 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 6 | `supabase/migrations/0109_ledger_provider_stamp.sql` | six nullable `*_provider` columns (four on `quotes`, one on `storage_invoices`, one on `card_payments`) recording WHICH ledger minted each stored document id, backfilled to `zoho` — prod has never run anything else. Without them the Zoho→Xero flip reads every stored Zoho id against Xero: the not-found looks transient, a customer who HAS paid is never marked paid, and the poller keeps reporting healthy runs while the chase emails go out | No — additive nullable columns plus a one-off backfill UPDATE; nothing reads them until the deploy |
 | 7 | `supabase/migrations/0111_payment_policy.sql` | `clients.payment_terms_days integer not null default 30` (check 30/60) and `quotes.payment_policy text` (check residential/commercial), plus a backfill stamping every ALREADY-ACCEPTED quote `residential` — which is the ladder they already ran. Lays the rails for the commercial path (gate 10); changes no behaviour on its own | **Ordering matters — see below.** Otherwise no: additive columns, and the backfill only writes rows that are already accepted |
 | 8 | `supabase/migrations/0112_small_job_threshold.sql` | `business_settings.small_job_threshold numeric(10,2) not null default 300` (check >= 0) — the gross at or under which acceptance asks for the WHOLE job in one payment, killing the £100-then-£20-tomorrow shape. 0 disables the rule | **Same ordering rule as 0111 — before the deploy.** `requestedDeposit()` takes the threshold as a REQUIRED argument read from settings, so once the code is live every ask on every surface reads this column |
-| 9 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 (which the new code writes to on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
-| 10 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
+| 9 | `supabase/migrations/0113_commercial_path.sql` | `quotes.commercial_due_date date` + `quotes.po_number text` (length-checked) — the completion invoice's terms date and the optional client PO. Inert for every existing row: both are read only when `payment_policy = 'commercial'`, and 0111 backfilled every accepted quote to `'residential'` | **Same ordering rule as 0111/0112 — before the deploy.** The deployed code names both columns in explicit select lists (`QUOTE_COLS` in `lib/quote/accept-flow.ts`, and `loadBookingRows`), so if it is missing, acceptance fails and every money surface silently renders empty — see below |
+| 10 | `supabase/migrations/0114_pitmans_import.sql` | `quotes.legacy_ref`, `import_batch` on the five tables the importers write, four partial indexes, and the `quotes_source_check` **widened** (never narrowed) to accept `'pitmans'` | No — additive and inert; nothing reads these columns until the importers run in the 21–28 September window. Placed before the deploy for one reason only: it keeps the whole batch in one pre-deploy block, so there is no second `psql` session to remember after the restart |
+| 11 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 and 0113 (which the new code writes to and selects on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
+| 12 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
 
-### 0111 and 0112 must run BEFORE the deploy — and therefore before 0110
+### 0111, 0112 and 0113 must run BEFORE the deploy — and therefore before 0110
 
 This is the mirror image of 0110's rule, so read both before running either.
 
@@ -43,10 +45,27 @@ single most expensive thing in this system to break.
 threshold as a required argument on every acceptance, quote page and chase email, so the
 column has to exist before the code that reads it.
 
-That is why 0111 and 0112 sit above the deploy row and 0110 sits below it, which means they
-applies BEFORE 0110 despite the higher number. They are independent (unrelated tables
-and columns), so the out-of-order run is safe — but it is deliberate, not a typo. Apply
-in the order the table gives, not in filename order.
+**0113 is the same rule again, and it fails in a quieter way, so it is the one to get
+right.** Its two columns are named in explicit select lists, not written conditionally:
+`QUOTE_COLS` in `lib/quote/accept-flow.ts` ends in `po_number` and backs every
+`fetchQuoteByToken` / `fetchQuoteById`, and `loadBookingRows` selects
+`commercial_due_date`. A missing column makes PostgREST reject the whole SELECT, so
+every customer's `/q` page renders as the friendly not-found card and every acceptance
+fails — and because `loadBookingRows` reads through `fetchAllRows`, which fail-softs by
+design, `/bookings`, both `/payments` tabs and the dashboard money tiles come back
+**empty and healthy-looking** rather than erroring. Every live booking and every pound
+outstanding would be invisible with nothing on screen saying a read had failed. That is
+the shape this codebase has been bitten by repeatedly: the surface that would have shown
+the problem is the one the failure just cleared.
+
+That is why 0111, 0112 and 0113 sit above the deploy row and 0110 sits below it, which
+means they apply BEFORE 0110 despite the higher numbers. They are independent (unrelated
+tables and columns), so the out-of-order run is safe — but it is deliberate, not a typo.
+Apply in the order the table gives, not in filename order.
+
+0114 has no such constraint — nothing in the deployed code reads its columns until the
+importers run in the import week — but it is listed in the batch anyway so the whole
+migration set is one pre-deploy block with no second session to remember.
 
 ### Changes the DEPLOY carries with no migration of their own
 

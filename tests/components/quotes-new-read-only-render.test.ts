@@ -22,14 +22,22 @@ import { join } from "node:path";
  * missing needle, so a rename cannot make these assertions pass vacuously.
  */
 
-const PAGE = readFileSync(
-  join(process.cwd(), "app/(dashboard)/quotes/new/page.tsx"),
-  "utf8",
-);
-const OPENER = readFileSync(
-  join(process.cwd(), "app/(dashboard)/quotes/new/create-draft-and-open.tsx"),
-  "utf8",
-);
+/**
+ * Read with line endings NORMALISED to LF. `core.autocrlf=true` on Windows
+ * materialises these .tsx files with CRLF, so the multi-line page-shell needle
+ * below returns -1 there while passing in CI, which checks out LF on Linux.
+ * That is the worst shape a gate can take — green on the machine nobody
+ * debugs on, red on the only machine the suite is run on by hand — because
+ * the local run gets abandoned as broken rather than trusted, and AGENTS.md's
+ * first e2e habit depends on it being runnable. Same root cause as the *.mjs
+ * and *.snap pins in .gitattributes; normalising at the read keeps the fix
+ * local to the assertions that actually care about layout.
+ */
+const readSource = (rel: string): string =>
+  readFileSync(join(process.cwd(), rel), "utf8").replace(/\r\n/g, "\n");
+
+const PAGE = readSource("app/(dashboard)/quotes/new/page.tsx");
+const OPENER = readSource("app/(dashboard)/quotes/new/create-draft-and-open.tsx");
 
 const at = (haystack: string, needle: string, what: string): number => {
   const i = haystack.indexOf(needle);
