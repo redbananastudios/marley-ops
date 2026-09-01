@@ -20,7 +20,22 @@ test.describe("Crew — job detail + notes", () => {
     });
 
     await step("add a private crew note", page, async () => {
-      await page.waitForLoadState("networkidle");
+      // Wait for the thing this step actually needs, NOT for networkidle.
+      //
+      // `networkidle` resolves only after 500ms with no more than 2 connections
+      // in flight, which this page never reliably reaches: it is a PWA with a
+      // service worker and a polling job list, so a background request can keep
+      // arriving forever. It failed exactly here on the 2026-09-01 staging run
+      // after the preceding step had already opened the job and read the brief
+      // — the page was fine, the wait condition was not. Playwright's own docs
+      // discourage it, and every OTHER networkidle in this suite is already
+      // wrapped in `.catch(() => {})`; these two were the unguarded outliers,
+      // and they are the ones that fail.
+      //
+      // The note box being visible is the real precondition, and `submitUntil`
+      // below already retries through the pre-hydration window, so nothing here
+      // needs a settled network at all.
+      await expect(page.getByPlaceholder(/Add a note — damage/i)).toBeVisible();
       const note = `E2E crew note ${Date.now()}`;
       // submitUntil re-fills + re-clicks through the pre-hydration window (the
       // Save button's onClick is a no-op until React attaches it).
@@ -54,7 +69,9 @@ test.describe("Crew — job detail + notes", () => {
     const note = `E2E crew photo note ${Date.now()}`;
 
     await step("attach a photo and save the note", page, async () => {
-      await page.waitForLoadState("networkidle");
+      // Same reasoning as the text-note test above: wait for the control, not
+      // for a quiet network this page does not reliably produce.
+      await expect(page.getByPlaceholder(/Add a note — damage/i)).toBeVisible();
       const fileInput = page.locator('input[type="file"][accept="image/*"]');
       await fileInput.setInputFiles({
         name: "receipt.png",
