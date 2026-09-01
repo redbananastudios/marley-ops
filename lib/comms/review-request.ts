@@ -19,7 +19,8 @@ import { buildReviewRequestEmailHtml } from "@/lib/comms/payment-email";
 import { replyAddressFor } from "@/lib/quote/chase";
 import { helloFromFor, leadOwnerIdentity, ownerFrom } from "@/lib/comms/sender";
 import { selectBrandReviewLink } from "@/lib/comms/review-platform";
-import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { DEFAULT_BRAND } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { emailTheme } from "@/lib/comms/email-brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { log } from "@/lib/log";
@@ -39,7 +40,7 @@ export async function sendReviewRequest(
     .select("id, client_id, estimator_id, name, email, entry_channel, review_requested_at, review_suppressed, brand")
     .eq("id", leadId)
     .maybeSingle();
-  const brand = await getBrandOrDefault(sb, (lead?.brand as string | null) ?? DEFAULT_BRAND);
+  const brand = await brandForComms(sb, (lead?.brand as string | null) ?? DEFAULT_BRAND);
 
   // The Settings field is MARLEY's review-ask kill switch — the Settings UI
   // has always said "clear it to switch the review ask off", so a cleared
@@ -128,7 +129,14 @@ export async function sendReviewRequest(
           },
         }
       : {}),
-    replyTo: token ? replyAddressFor(token) : undefined,
+    // The DISPLAY NAME must be this brand's, like every other send — omitting
+    // it took the "Marley Moves" default, so another brand's customer got a
+    // correct From beside a Reply-To naming a company they have never dealt
+    // with. This email's own copy invites a reply, so the leak surfaced on
+    // exactly the action it asked for. The reply DOMAIN stays shared on
+    // purpose (see replyAddressFor): it is machine-facing, and a stub brand's
+    // reply_domain has no MX, so a "correct" domain would be a dead Reply-To.
+    replyTo: token ? replyAddressFor(token, brand.name) : undefined,
     from: reviewFrom,
     leadId,
     clientId: lead.client_id ?? undefined,
