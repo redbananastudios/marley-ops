@@ -360,14 +360,24 @@ export const MANIFEST = [
   // inline styles would lose every `hover:`/`focus:` accent variant.
   //
   // Domains, phone numbers, mailboxes and Connor stay forbidden here, and the
-  // page carries none of them any more.
+  // route folder carries none of them any more.
+  //
+  // These five patterns are `**`, NOT `*.tsx`, and that is load-bearing. They
+  // were `*.tsx` until 2026-09-01, which made the scan certify a route folder
+  // while never reading its server actions: `app/s/[token]/actions.ts` and
+  // `app/cv/[token]/actions.ts` each returned a customer-facing error string
+  // carrying 01747 637070 — a FORBIDDEN literal, on a surface the run called
+  // clean. The header rule of this file is "a file not listed is NOT clean, it
+  // is UNSCANNED", but a folder-shaped pattern reads as covering the folder, so
+  // the reader had no way to see the gap. Scan the whole route folder and the
+  // question cannot arise again.
   {
-    pattern: "app/q/[token]/*.tsx",
+    pattern: "app/q/[token]/**",
     allow: ["mm-red"],
     reason:
       "accent utility classes re-pointed per brand via --color-mm-red on the shell (gate 16); no hardcoded name, phone, domain or named individual remains",
   },
-  // Gate 16, the remaining token pages. Same mechanism throughout: identity
+  // Gate 16, the remaining token routes. Same mechanism throughout: identity
   // from `pageTheme`, accent from one CSS-variable override on the page root.
   //
   // /s and /cv are RECORD surfaces — they take the brand of the let and the
@@ -375,25 +385,25 @@ export const MANIFEST = [
   // shared crew across every brand, so they take `GROUP_PAGE_THEME`, whose
   // accent is neutral charcoal rather than either brand's colour.
   {
-    pattern: "app/s/[token]/*.tsx",
+    pattern: "app/s/[token]/**",
     allow: ["mm-red"],
     reason:
       "accent utility classes re-pointed per brand via --color-mm-red on the page root (gate 16); the storage-agreement identity, terms link and phone are all theme-resolved",
   },
   {
-    pattern: "app/cv/[token]/*.tsx",
+    pattern: "app/cv/[token]/**",
     allow: ["mm-red"],
     reason:
       "accent utility classes re-pointed per brand via --color-mm-red on the page root (gate 16); CubicBuilder is shared with the office builder, which renders outside this element and is unaffected",
   },
   {
-    pattern: "app/sheet/[token]/*.tsx",
+    pattern: "app/sheet/[token]/**",
     allow: ["mm-red"],
     reason:
       "group surface (PRD §4): the mm-red utilities are re-pointed to neutral charcoal by GROUP_PAGE_THEME, so a mixed-brand crew day is coloured as neither brand",
   },
   {
-    pattern: "app/join/[token]/*.tsx",
+    pattern: "app/join/[token]/**",
     allow: ["mm-red"],
     reason:
       "group surface (PRD §4): one shared crew, so the copy names no brand and the accent is neutralised by GROUP_PAGE_THEME",

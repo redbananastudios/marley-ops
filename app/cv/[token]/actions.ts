@@ -39,7 +39,10 @@ export async function submitCubicCustomerAction(
     .select("id, lead_id, client_id, status, total_ft3, items")
     .eq("share_token", token)
     .maybeSingle();
-  if (!row) return { ok: false, error: "This link isn't valid — call us on 01747 637070." };
+  // No number: there is no row, so there is no lead and no brand to resolve one
+  // from — and a hardcoded number here is precisely how a customer of one brand
+  // was handed another brand's office. Wording matches the sibling below.
+  if (!row) return { ok: false, error: "This link isn't valid." };
   if (row.status === "complete") {
     return { ok: false, error: "This survey has already been finalised — call us if anything changed." };
   }
@@ -47,7 +50,9 @@ export async function submitCubicCustomerAction(
   const incomingLines = sanitizeCubicLines(raw.items);
   if (incomingLines === null || incomingLines.length === 0) return { ok: false, error: "Add at least one item first." };
   const trustedLines = sanitizeCubicLines(row.items);
-  if (trustedLines === null) return { ok: false, error: "This survey needs attention — call us on 01747 637070." };
+  // Same rule as above — "call us" without naming a number, matching the
+  // already-finalised message, so the page never quotes another brand's office.
+  if (trustedLines === null) return { ok: false, error: "This survey needs attention — please call us." };
   const lines = reconcileCubicLineProvenance(incomingLines, trustedLines);
   const totals = computeCubicTotals(lines);
   const customerNotes = String(raw.notes ?? "").trim().slice(0, 4000);
