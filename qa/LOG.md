@@ -4,6 +4,8 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+2026-09-01T23:34Z · first-pass repair (scheduled sweep) · 0 eligible findings (both open findings `class: risky` — QA-20260827-04, QA-20260901-02) · 0 PRs · 0 escalations · <5 min.
+
 ## 2026-09-01T20:11Z — scheduled QA audit: CI-red abort, 1 headline finding, no rota run
 
 - Checked out latest `origin/staging`, sha `b931343` (docs-only on top of `82dac7a`, known deploy-filter trap — deployed staging correctly shows `82dac7a`).
