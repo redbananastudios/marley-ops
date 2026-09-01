@@ -4,6 +4,30 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-01T12:09Z — scheduled QA audit run
+
+- Checked out latest `origin/staging`, sha `2c83bf4`. Deployed staging matched HEAD exactly (`curl /api/version` → `2c83bf4`) — no deploy wait needed.
+- Credentials: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present.
+- Verify-first: only open finding is `QA-20260827-04` (`open`/`risky`, Peter's, not `fixed-pending-verify`) — nothing to re-verify/close via that path.
+- Fresh `npm ci`. All four gates green on the untouched tree: lint 0 errors (36 pre-existing warnings, unchanged) · `tsc --noEmit` clean · vitest 2795 passed/7 skipped · build clean.
+- Seed sweep: 0 leftover `QA-SENTINEL` marker rows across 20+ table/column pairs + 0 qa-pattern `auth.users` before dispatch. Minted 3 throwaway users (`qa-admin`/`qa-estimator`/`qa-crew-9f31ac@qa.test`, staff rows for crew+estimator) + 1 marker client+lead+accepted-quote fixture.
+- Rota: **freshness override** — `git diff --stat lastAuditSha(7fbfaf7)..HEAD` showed commit `e21a30f` (merged same day, gates already green pre-merge) changed two app-code files: `markLeadLostAction` (`app/(dashboard)/leads/actions.ts`) and `cancelBookingAction` (`app/actions/booking-change.ts`) both had their date-floor filter removed entirely from the appointment-freeing unwind, so a booking cancelled/marked-lost days after its move date now also comes off the calendar. This jumped the admin agent's queue. Dispatched 4 parallel role-agent subagents (Sonnet), 1 op each (lean, time-boxed):
+  - **Admin agent** (freshness-driven, 2 sub-checks): `lead_status_lost_noreply` PASS — a marker appointment with `starts_at` 5 days in the past flipped `scheduled`→`cancelled` via Mark Lost (confirms the fix; pre-fix this stayed `scheduled`). `removal_book_changedate_cancel` PASS — same past-dated seed via `cancelBookingAction`'s "We cancelled (Marley)" path, same result. Two-hats gotcha flagged (not a bug): `CancelBookingButton`'s render gate reads `leads.deposit_paid_at`, not `quotes.deposit_paid_at`. 0 findings.
+  - **Crew agent**: `job_note_photo` (stalest crew item) PASS — real PNG through the actual file input, `job_notes` SQL-exact, storage object byte-identical + valid magic. 0 findings.
+  - **Estimator agent**: `estimator_pay_statement` (stalest estimator item) PASS — SQL SUM(lines)=statement.total=UI total=£50.00 exact three-way match; gating bonus still bounces the estimator off `/finance`/`/finance/statements`/`/refunds`. 0 findings.
+  - **Customer agent**: `cv_self_fill_survey` (stalest customer item) PASS — item+notes round-trip via the real submit action; corrected a wrong assumption that `/cv` autosaves server-side (it only autosaves to `localStorage` in customer mode, by design). Re-confirmed `QA-20260827-04`'s no-photo-upload gap still holds exactly as described. 0 findings.
+- **All 4/4 role-agent operations PASS, 0 new findings.** No handoff scenario run this pass (time-boxed).
+- Main-loop spot-check: independent full marker sweep across 28 table/column pairs + `auth.users` after all 4 agents reported clean — found only the main loop's own shared fixture + its own 3 throwaway users (all then torn down by the main loop itself). Every role agent's teardown claim held exactly.
+- Anomaly noted, not acted on: a `staff_submissions` row named "QA-SENTINEL h5 spec Applicant" appeared mid-run (created 12:27:42Z, after all 4 of this run's role agents had already finished and reported) — not created by any of this run's dispatched agents. Per the concurrent-repair-loop precedent already in this log (see the 2026-09-01T04:44Z entry below, which references "the concurrent run"), this is almost certainly a separate, independently-running process on the same staging DB. Left untouched — not this run's row to delete.
+- New permanent regression coverage: `tests/lib/booking/cancel-frees-diary.test.ts` (unit test mirroring `tests/lib/leads/mark-lost-frees-diary.test.ts` for the sibling `cancelBookingAction` path — `markLeadLostAction`'s own past-date case was already covered by the fix's own commit). Verified as a real regression test by negative control: temporarily reintroduced the old `.gte(starts_at, now)` filter, confirmed the new test **fails**, reverted, confirmed it **passes** again — then re-ran all four gates clean (tsc, lint, vitest 2798 passed/7 skipped incl. the 3 new tests, build).
+- Findings filed: **0 new**. Findings closed: **0** (nothing was `fixed-pending-verify`). Specs added: **1** new unit test (not an e2e spec — `e2e/COVERAGE.md` not touched, matching the precedent that this test family lives in `tests/lib/`).
+- Ledger: `qa/state.json` updated for the 4 tested items (2 admin, 1 crew, 1 estimator, 1 customer) + top-level comment. `lastAuditSha` → `2c83bf4`.
+- Pushes: one commit to `staging` (`tests/lib/booking/cancel-frees-diary.test.ts` + `qa/state.json` + this log entry together). No PRs opened, `master` never touched. Rebased onto `origin/staging` immediately before pushing.
+- Cleanup verification (final independent sweep, all marker-bearing tables + `auth.users`, by query): **0** for everything this run created. (The one unrelated anomaly above, left untouched, is not counted against this run's own cleanup.)
+- Time spent: ~20 min total (gates+sweep ~12 min incl. `npm ci`, seed+dispatch ~2 min, 4 parallel role agents ~8 min wall-clock for the slowest, new-test authoring+negative-control verification ~6 min, ledger/log write-up + push ~2 min) — comfortably inside the 45-minute box.
+
+---
+
 ## 2026-09-01T04:44Z — first-pass QA repair (push-triggered): QA-20260828-02 fixed, PR #170 opened
 
 - Tier: first-pass (Fable), fired by the claim push `cf58627` (the concurrent run's claim of QA-20260901-01). sha at checkout: `cf58627`.
