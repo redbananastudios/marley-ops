@@ -1364,3 +1364,7 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 ## 2026-09-01 (scheduled sweep) — no eligible findings
 
 - Tier: first-pass (Fable), scheduled sweep at `a37c282`. No `status: open` + `class: safe-fix` findings (QA-20260828-02 and QA-20260901-01 are `fixed-pending-verify` via #170/#169; QA-20260827-04 is risky). No branches, no PRs, no escalations. ~2 min.
+
+## 2026-09-01T06:35Z — escalation sweep: nothing escalated
+
+- Tier: escalation (Opus), scheduled sweep at `5876a0e`. No finding in `qa/findings/open/` carries `escalate: opus-5` (QA-20260828-02 and QA-20260901-01 are `fixed-pending-verify`; QA-20260827-04 is `class: risky` — never a repair target). No branches, no PRs, no escalations. ~2 min.
