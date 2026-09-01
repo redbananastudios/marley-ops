@@ -251,6 +251,17 @@ export function PaymentsCard({
                 <ResendInvoiceButton leadId={leadId} rail="deposit" />
               </div>
             </div>
+          ) : commercial ? (
+            /* Commercial takes no deposit (PRD §3.10 — one invoice, raised on
+               completion, due on the client's terms). A correctly-accepted
+               commercial quote writes deposit_amount 0 and requests nothing,
+               which is exactly the state the residential ladder below reads
+               as "not yet requested" — so without this branch the cell fell
+               through to the £-input and invited the office to start a chase
+               the policy says never runs. The paid/requested branches above
+               stay reachable on purpose: they state facts about money, and
+               hiding a real payment would be worse than the fall-through. */
+            <p className="text-sm text-foreground">None — business terms take no deposit.</p>
           ) : (
             <div className="flex items-center gap-2">
               <div className="flex h-9 w-28 items-center rounded-md border border-input bg-card px-2">
