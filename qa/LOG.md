@@ -4,6 +4,15 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-01T04:44Z — first-pass QA repair (push-triggered): QA-20260828-02 fixed, PR #170 opened
+
+- Tier: first-pass (Fable), fired by the claim push `cf58627` (the concurrent run's claim of QA-20260901-01). sha at checkout: `cf58627`.
+- Findings taken: **QA-20260828-02** (safe-fix, medium — `/quotes/new?leadId=` wrote the draft + `redirect()`ed during a Server Component render Next can fire twice per soft navigation; seven `<Link>` entry points shared the crash QA-20260827-03 fixed at only its own call site). Fixed on `qa-repair/QA-20260828-02` **in the shared render, not per entry point**: the leadId branch is read-only and hands off to new client component `create-draft-and-open.tsx` — one ref-guarded `createDraftQuote` call after mount, `router.replace` to the draft, inline error instead of a throw. Also covers the URL producer the finding missed (`lib/leads/funnel.ts:126`). Removed the retry loop in `e2e/estimator/work-quote.spec.ts` that masked the bug (per the finding's own Verify) + refreshed its stale docblock. New source-guard test `tests/components/quotes-new-read-only-render.test.ts` proven failing 2/4 pre-fix, green post-fix. All four gates green locally (lint 0 errors/36 pre-existing warnings · tsc clean · vitest 2790 passed · build clean). Finding → `fixed-pending-verify`.
+- PRs opened: **#170** to `staging`, labelled `qa-repair`. Paths touched are outside the risky-path guard, so auto-merge may take it.
+- QA-20260901-01: `status: fixing` at checkout, owned by the concurrent run (which shipped it as #169, merged while this run was mid-fix) — untouched here per REPAIR.md rule 2.
+- QA-20260827-04: `class: risky` — never a repair target, untouched.
+- Escalations: none. `master` never touched. Time spent: ~18 min.
+
 ## 2026-09-01T04:15Z — scheduled QA audit: 4 role agents, 8 ops, 1 new finding (stale storage-terms copy), 1 new permanent spec
 
 - sha at checkout: `1038f96` (`git fetch origin staging && git checkout staging && git reset --hard origin/staging`). Credential check: `QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET` all present.
