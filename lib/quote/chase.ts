@@ -14,7 +14,7 @@
  * should read like a genuine follow-up, not a campaign. UK English, no em-dashes.
  */
 
-import { capName, helloFromFor, ownerFrom } from "@/lib/comms/sender";
+import { capName, helloFromFor, ownerFrom, sanitizeDisplayName } from "@/lib/comms/sender";
 import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 import { emailTheme, type EmailTheme } from "@/lib/comms/email-brand";
 import { round2 } from "@/lib/quote/payments";
@@ -353,8 +353,12 @@ export function replyAddressFor(acceptToken: string, displayName = "Marley Moves
   // ADDRESS stays on Marley's Resend-inbound reply domain for every brand
   // (it is machine-facing; a stub brand's reply_domain has no MX yet and a
   // dead Reply-To would silently break the panel thread). The inbound
-  // webhook's tokenFromReplyAddress parses either form.
-  return `${displayName} <q-${acceptToken}@${domain}>`;
+  // webhook's tokenFromReplyAddress parses either form. The name arrives as
+  // brands.name and gets sender.ts's display-slot hardening, so a hostile
+  // value can never smuggle a bare address or a header break into the
+  // Reply-To; when nothing survives, the bare relay address stands alone.
+  const display = sanitizeDisplayName(displayName);
+  return display ? `${display} <q-${acceptToken}@${domain}>` : `q-${acceptToken}@${domain}`;
 }
 
 /** Parse a reply address back to its accept token (null when not ours).

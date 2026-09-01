@@ -103,12 +103,20 @@ describe("the raise carries the policy into the email and the activity note", ()
   const body = () => bodyOf(SRC, "export async function createBalanceInvoiceFlow(");
 
   it("the office note does not claim a move-day deadline on a commercial job", () => {
-    const b = body();
+    // Comments stripped and anchored to the branching EXPRESSION itself: the
+    // word "commercial" in nearby prose (the comment above the note names the
+    // defect it fixes) must not satisfy this — only the policy ternary in the
+    // summary's own statement may. The residential wording is allowed solely
+    // as that ternary's false arm.
+    const b = stripComments(body());
     const at = b.indexOf("Final invoice ${inv.invoiceNumber} raised");
-    // Either the summary is now built conditionally, or it no longer makes the
-    // claim at all. What it may not be is the unconditional literal it was.
-    const around = at === -1 ? "" : b.slice(Math.max(0, at - 400), at + 400);
-    expect(at === -1 || /commercial/i.test(around), "unconditional office note").toBe(true);
+    expect(at, "the office note must still be written").toBeGreaterThan(-1);
+    const stmtAt = b.lastIndexOf("summary:", at);
+    expect(stmtAt, "the note is written as an activities summary").toBeGreaterThan(-1);
+    expect(
+      b.slice(stmtAt, at),
+      "the note must branch on commercialInvoice before making the move-day claim",
+    ).toMatch(/commercialInvoice\s*\?/);
   });
 
   it("hands the freshly computed terms date to the email", () => {

@@ -41,19 +41,24 @@ const copy = stripComments(page).replace(/\s+/g, " ");
 describe("/q accept screen — card is promised only where card is live", () => {
   /**
    * The defect, stated as a shape rather than as a string: the promise used to
-   * be bare JSX text, which renders unconditionally. Inside a quoted string it
-   * can only reach the page through a branch, and the only branch here is the
-   * flag. This survives a rewording; a `toContain` on the old sentence would
-   * not.
+   * be bare JSX text, which renders unconditionally. The old check ("preceded
+   * by a quote") was satisfiable by an unconditional braced string literal —
+   * {"pay by card…"} is a quoted string AND renders on every brand. So EVERY
+   * card mention must sit inside a braced expression whose opening brace still
+   * encloses it (no intervening close) and which branches on the flag. This
+   * survives a rewording; a `toContain` on the old sentence would not.
    */
-  it("never renders the card promise as unconditional JSX text", () => {
-    const hits = [...copy.matchAll(/pay by card or bank transfer/g)];
+  it("gates every card mention on the cardOk flag — none renders unconditionally", () => {
+    const hits = [...copy.matchAll(/pay by card/g)];
     expect(hits.length, "the card promise has gone entirely").toBeGreaterThan(0);
     for (const hit of hits) {
+      const at = hit.index ?? 0;
+      const open = copy.lastIndexOf("{", at);
+      const expr = open === -1 ? "" : copy.slice(open + 1, at);
       expect(
-        copy[hit.index - 1],
-        "the card promise is bare JSX text, so every brand renders it",
-      ).toBe('"');
+        !expr.includes("}") && /\bcardOk\b/.test(expr),
+        `ungated card mention — every brand renders it: …${copy.slice(Math.max(0, at - 60), at + 40)}…`,
+      ).toBe(true);
     }
   });
 

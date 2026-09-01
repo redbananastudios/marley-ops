@@ -36,6 +36,19 @@ export function accountsFrom(): string {
 /* --------------------------------------------------- brand-aware identities */
 
 /**
+ * Strip address/header syntax from a display-name PHRASE — ownerFrom's strip
+ * set plus "@": a multi-word name keeps its spaces, so a smuggled bare address
+ * ("Evil <attacker@evil.test>") cannot survive as an @-token in the phrase and
+ * a CR/LF cannot break out of the header. The ONE hardening every interpolation
+ * of a brands.name display value must go through — brandFrom here plus the
+ * tokenized reply relay (replyAddressFor / latestReplyAddressForLead), which
+ * receive the same value. Empty when nothing survives; callers pick their own
+ * fallback.
+ */
+export const sanitizeDisplayName = (name: string | null | undefined): string =>
+  (name ?? "").replace(/[<>"\\;,@\r\n]/g, " ").replace(/\s+/g, " ").trim();
+
+/**
  * Build "Brand Name <address>" from a brands-table row, with the same header
  * hardening as ownerFrom: the display name (office-editable in Settings) loses
  * any address/header syntax, and the address must be a plain local@domain
@@ -46,9 +59,7 @@ export function accountsFrom(): string {
 const brandFrom = (brand: Pick<Brand, "name">, address: string | null): string | null => {
   const addr = plainAddress(address);
   if (!addr) return null;
-  // ownerFrom's strip set plus "@" — a multi-word brand name keeps its spaces,
-  // so a smuggled bare address must not survive as an @-token in the phrase.
-  const display = (brand.name ?? "").replace(/[<>"\\;,@\r\n]/g, " ").replace(/\s+/g, " ").trim();
+  const display = sanitizeDisplayName(brand.name);
   if (!display) return null;
   return `${display} <${addr}>`;
 };
@@ -314,6 +325,9 @@ export async function latestReplyAddressForLead(
   const domain = process.env.REPLY_EMAIL_DOMAIN || "reply.marleymoves.co.uk";
   // Display name only — the ADDRESS stays on Marley's Resend-inbound reply
   // domain for every brand (machine-facing; a stub brand's reply_domain has
-  // no MX yet, and a dead Reply-To silently breaks the panel thread).
-  return `${displayName} <q-${token}@${domain}>`;
+  // no MX yet, and a dead Reply-To silently breaks the panel thread). The
+  // name gets the same hardening as every other display slot; when nothing
+  // survives, the bare relay address stands alone (the webhook parses both).
+  const display = sanitizeDisplayName(displayName);
+  return display ? `${display} <q-${token}@${domain}>` : `q-${token}@${domain}`;
 }

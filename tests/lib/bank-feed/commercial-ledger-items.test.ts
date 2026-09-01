@@ -132,9 +132,19 @@ describe("loadLedgerItems actually uses it", () => {
 
   it("selects the columns the predicate reads", () => {
     // A predicate reading a column the query never asked for is undefined at
-    // runtime and silently falsy — the same blindness in a new place.
+    // runtime and silently falsy — the same blindness in a new place. The
+    // check anchors on loadLedgerItems' quotes SELECT string itself: the
+    // predicate's own interface declaration also names these columns, so a
+    // whole-file `toContain` stays green with the SELECT stripped bare.
+    const fnAt = src.indexOf("export async function loadLedgerItems(");
+    expect(fnAt, "loadLedgerItems must exist").toBeGreaterThan(-1);
+    const selAt = src.indexOf(".select(", fnAt);
+    expect(selAt, "loadLedgerItems must select from quotes").toBeGreaterThan(-1);
+    const lit = /\.select\(\s*"([^"]+)"/.exec(src.slice(selAt, selAt + 600));
+    expect(lit, "the quotes select must be a single string literal").not.toBeNull();
+    const cols = (lit as RegExpExecArray)[1].split(",").map((c) => c.trim());
     for (const col of ["payment_policy", "zoho_balance_invoice_id", "zoho_balance_invoice_number"]) {
-      expect(src, `loadLedgerItems must select ${col}`).toContain(col);
+      expect(cols, `loadLedgerItems must select ${col}`).toContain(col);
     }
   });
 });

@@ -3,6 +3,7 @@ import { join, relative, sep } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { replyAddressFor, tokenFromReplyAddress } from "@/lib/quote/chase";
+import { latestReplyAddressForLead } from "@/lib/comms/sender";
 
 /**
  * `replyAddressFor(token, displayName)` has a DEFAULT for its second argument,
@@ -49,19 +50,24 @@ const rel = (file: string) => relative(ROOT, file).split(sep).join("/");
 
 /** Every `replyAddressFor(...)` invocation, as `file:line` → argument text. The
  *  arguments are simple identifiers and property accesses at every site, so a
- *  non-nesting match is sufficient and stays readable. */
+ *  non-nesting match is sufficient and stays readable. The sweep runs over the
+ *  WHOLE file, not line by line — `[^)]*` crosses newlines, so a call whose
+ *  argument list is wrapped over several lines is still swept. The old
+ *  line-scoped sweep let a reformatted bare call escape both the count and
+ *  the bare-call check below. */
 function callSites(): { where: string; args: string }[] {
   const found: { where: string; args: string }[] = [];
   for (const root of ROOTS) {
     for (const file of walk(join(ROOT, root), [])) {
       const path = rel(file);
-      const lines = readFileSync(file, "utf8").split(/\r?\n/);
-      lines.forEach((line, i) => {
-        if (path === DECLARED_IN && /export function replyAddressFor/.test(line)) return;
-        for (const m of line.matchAll(/\breplyAddressFor\(([^)]*)\)/g)) {
-          found.push({ where: `${path}:${i + 1}`, args: m[1] });
-        }
-      });
+      const src = readFileSync(file, "utf8");
+      for (const m of src.matchAll(/\breplyAddressFor\(([^)]*)\)/g)) {
+        const at = m.index ?? 0;
+        // The declaration's own parameter list is not a call site.
+        if (path === DECLARED_IN && /\bfunction\s+$/.test(src.slice(Math.max(0, at - 20), at))) continue;
+        const line = src.slice(0, at).split(/\r?\n/).length;
+        found.push({ where: `${path}:${line}`, args: m[1] });
+      }
     }
   }
   return found;
@@ -100,6 +106,57 @@ describe("the shared reply domain is intact", () => {
     // the panel thread would silently break.
     const addr = replyAddressFor("tok123456789", "Another Brand Ltd");
     expect(addr.startsWith("Another Brand Ltd <q-tok123456789@")).toBe(true);
+    expect(tokenFromReplyAddress(addr)).toBe("tok123456789");
+  });
+});
+
+describe("a hostile display name cannot break out of the display slot", () => {
+  // Both reply-address builders interpolate brands.name into a header. Today
+  // that value is migration-seeded and Settings' sanitizeBrandUpdate does not
+  // expose `name`, so nothing hostile can reach here yet — this locks in the
+  // sender.ts display-slot hardening for the day either of those changes.
+  const HOSTILE = 'Evil <attacker@evil.test>,"\r\nBcc: victim@evil.test';
+
+  it("replyAddressFor strips address and header syntax from the phrase", () => {
+    const addr = replyAddressFor("tok123456789", HOSTILE);
+    // No header break survives — a raw CR or LF is a header injection.
+    expect(addr).not.toMatch(/[\r\n]/);
+    // No smuggled bare address survives — the ONLY @ left is the relay's own,
+    // so no mail client can parse a second recipient out of the phrase.
+    expect(addr.match(/@/g)).toHaveLength(1);
+    expect(addr).not.toContain("attacker@");
+    expect(addr).not.toContain("<attacker");
+    // The relay itself is intact and still routes to its token.
+    expect(addr.endsWith(" <q-tok123456789@reply.marleymoves.co.uk>")).toBe(true);
+    expect(tokenFromReplyAddress(addr)).toBe("tok123456789");
+  });
+
+  it("latestReplyAddressForLead applies the same hardening", async () => {
+    // Minimal chain stub for the one query the builder makes.
+    const sb = {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            not: () => ({
+              order: () => ({
+                limit: () => ({ maybeSingle: async () => ({ data: { accept_token: "tok123456789" } }) }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    } as unknown as Parameters<typeof latestReplyAddressForLead>[0];
+    const addr = await latestReplyAddressForLead(sb, "lead-1", HOSTILE);
+    expect(addr).toBeDefined();
+    expect(addr).not.toMatch(/[\r\n]/);
+    expect(addr?.match(/@/g)).toHaveLength(1);
+    expect(addr).not.toContain("attacker@");
+    expect(addr?.endsWith(" <q-tok123456789@reply.marleymoves.co.uk>")).toBe(true);
+  });
+
+  it("a name that sanitizes to nothing leaves the bare relay address, not a malformed header", () => {
+    const addr = replyAddressFor("tok123456789", '<>"@,;\r\n');
+    expect(addr).toBe("q-tok123456789@reply.marleymoves.co.uk");
     expect(tokenFromReplyAddress(addr)).toBe("tok123456789");
   });
 });
