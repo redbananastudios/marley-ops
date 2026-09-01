@@ -225,7 +225,27 @@ export async function loadBookingRows(
   for (const q of sorted) {
     const lead = leadById.get(q.lead_id as string);
     if (!lead || seen.has(lead.id)) continue;
-    if (lead.status === "completed" || lead.status === "declined") continue;
+    // `completed` retires a RESIDENTIAL booking correctly: its money ladder is
+    // finished by the time anyone marks it done.
+    //
+    // A COMMERCIAL job is the opposite shape. Its invoice is raised BY HAND on
+    // completion and then sits 30-60 days on the client's terms, so `completed`
+    // is precisely the status it carries for the entire window the
+    // credit-control alarm exists for. Dropping it here did not merely hide the
+    // row: `sweepCommercialOverdue` classifies off this same loader, and on an
+    // empty list takes its `else` branch and RESOLVES the overdue alarm — so a
+    // routine "Mark completed" click cleared an alarm that may already have
+    // fired, on the one policy that is deliberately never chased by email.
+    // Nothing else would have noticed: the post-move sweep `continue`s on
+    // commercial by design, so no follow-up or ops alert covers it either.
+    //
+    // So commercial stays visible until its money is actually settled. That is
+    // `balance_paid_at`, the same stamp `classifyCommercial` reads for
+    // `all_set` — not a second definition of "done".
+    const commercialUnsettled =
+      q.payment_policy === "commercial" && !lead.balance_paid_at;
+    if (lead.status === "declined") continue;
+    if (lead.status === "completed" && !commercialUnsettled) continue;
     seen.add(lead.id);
     const agreed = Number(q.agreed_price ?? q.grand_total ?? 0);
     // Policy-aware: COMMERCIAL takes no deposit, so nothing is deducted from

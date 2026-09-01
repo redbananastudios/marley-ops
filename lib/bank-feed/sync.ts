@@ -81,6 +81,52 @@ async function fetchSheet() {
   return parseSheetRows(json.values ?? []);
 }
 
+/** The fields `balanceRungVisible` reads. Kept structural so the predicate can
+ *  be unit-tested without a Supabase row. */
+export interface BalanceRungFields {
+  lead_id: string | null;
+  deposit_paid_at: string | null;
+  payment_policy: string | null;
+  zoho_balance_invoice_id: string | null;
+  zoho_balance_invoice_number: string | null;
+}
+
+/**
+ * Does this quote have a BALANCE rung the matcher is allowed to see?
+ *
+ * Residential: the deposit stamp, exactly as before. No balance exists on the
+ * ladder until the deposit lands, so nothing changes for a Marley booking.
+ *
+ * Commercial: the deposit stamp is the wrong question and always answers "no".
+ * There is no deposit rung — `deposit_amount` is 0 and `ensureDepositInvoice`
+ * early-returns on the policy — so nothing ever stamps `deposit_paid_at`, and
+ * gating on it made a commercial job produce ZERO ledger items. Its `-BAL`
+ * completion invoice, often the whole agreed price, was in neither the open nor
+ * the settled pool, so `matchTransaction`, `reconcileSettled` and the office's
+ * manual Attach flow were all blind to it: the payment landed in "needs a
+ * human" permanently and that human could not attach it either.
+ *
+ * The commercial gate is instead "has the completion invoice been RAISED",
+ * derived the same way `load-signals` derives `balanceInvoiceNumber` — id
+ * present and not the `"pending"` claim marker. Deliberately the same rule
+ * `owedNow` applies: nothing is owed before the invoice exists, so offering an
+ * item earlier would put money on the /payments headline nobody has been asked
+ * for. One definition of "a balance is outstanding", three surfaces.
+ *
+ * Anything not explicitly `"commercial"` runs the residential branch — the same
+ * direction of default as `resolvePaymentPolicy`, and for the same reason:
+ * guessing commercial would quietly change which rung a real booking has.
+ */
+export function balanceRungVisible(q: BalanceRungFields): boolean {
+  if (!q.lead_id) return false;
+  if (q.payment_policy === "commercial") {
+    return Boolean(
+      q.zoho_balance_invoice_id && q.zoho_balance_invoice_id !== "pending" && q.zoho_balance_invoice_number,
+    );
+  }
+  return Boolean(q.deposit_paid_at);
+}
+
 /** Open deposits, commitment invoices + balances the matcher can suggest
  *  against — mirrors the Bookings page's definitions of "awaiting deposit"
  *  and "balance due"; commitment mirrors the chase engine's "invoiced, not
@@ -95,7 +141,7 @@ export async function loadLedgerItems(
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at",
+        "id, quote_ref, lead_id, customer_name, status, deposit_amount, deposit_paid_at, balance_invoice_amount, agreed_price, grand_total, commitment_invoice_amount, commitment_paid_at, booking_cancelled_at, payment_policy, zoho_balance_invoice_id, zoho_balance_invoice_number",
       )
       .eq("status", "accepted")
       .order("id")
@@ -107,12 +153,19 @@ export async function loadLedgerItems(
     { strict: true },
   );
 
-  // Balance-paid lookup: only deposit-paid quotes can yield a balance item,
-  // and the .in() must be CHUNKED — a few hundred uuids in one GET blows the
-  // gateway's URL/header limit (the quotes-search 414, session 32d), and the
-  // old silent `const { data } = …` would then treat EVERY balance as open.
+  // Balance-paid lookup: only quotes whose balance rung is visible can yield a
+  // balance item, and the .in() must be CHUNKED — a few hundred uuids in one
+  // GET blows the gateway's URL/header limit (the quotes-search 414, session
+  // 32d), and the old silent `const { data } = …` would then treat EVERY
+  // balance as open.
+  //
+  // This filter MUST use the same predicate as the push gate below. A quote
+  // missing here has no `lead` entry, so even a corrected push gate would fall
+  // through to the computed fallback amount rather than the recorded one.
   const leadIds = [
-    ...new Set(quotes.filter((q) => q.deposit_paid_at && q.lead_id).map((q) => q.lead_id as string)),
+    ...new Set(
+      quotes.filter((q) => balanceRungVisible(q as unknown as BalanceRungFields)).map((q) => q.lead_id as string),
+    ),
   ];
   const leadBalance = new Map<string, { paidAt: string | null; amount: number | null }>();
   for (let i = 0; i < leadIds.length; i += 100) {
@@ -172,7 +225,7 @@ export async function loadLedgerItems(
       open.push({ ...base, kind: "deposit", amount: Number(q.deposit_amount) });
     }
 
-    if (q.deposit_paid_at && q.lead_id) {
+    if (balanceRungVisible(q as unknown as BalanceRungFields)) {
       if (lead?.paidAt) {
         // markBalancePaid can settle the LEAD's own balance figure when one was
         // set by hand — reconcile against that where present.
