@@ -114,8 +114,12 @@ if (rollbackBatch) {
     .select("id, unit_id, client_id, start_date")
     .eq("import_batch", rollbackBatch);
   if (error) die(error.message);
-  const { data: units } = await sb.from("storage_units").select("id, code, site_id").eq("import_batch", rollbackBatch);
-  const { data: sites } = await sb.from("storage_sites").select("id, name").eq("import_batch", rollbackBatch);
+  const { data: units, error: unitsErr } = await sb.from("storage_units").select("id, code, site_id").eq("import_batch", rollbackBatch);
+  if (unitsErr)
+    die(`storage_units read failed (import_batch='${rollbackBatch}') — ${unitsErr.message}. An unreadable answer must not roll back as "no units in this batch".`);
+  const { data: sites, error: sitesErr } = await sb.from("storage_sites").select("id, name").eq("import_batch", rollbackBatch);
+  if (sitesErr)
+    die(`storage_sites read failed (import_batch='${rollbackBatch}') — ${sitesErr.message}. An unreadable answer must not roll back as "no sites in this batch".`);
   if (!lets?.length && !units?.length && !sites?.length)
     die(`Nothing carries import_batch='${rollbackBatch}' — nothing to roll back.`);
   const letIds = (lets ?? []).map((l) => l.id);
@@ -157,21 +161,34 @@ if (rollbackBatch) {
   // the import may have added a unit to a site that already existed, or a let
   // to a unit somebody has since re-let to another customer.
   for (const u of units ?? []) {
-    const { data: otherLets } = await sb.from("storage_lets").select("id").eq("unit_id", u.id).limit(1);
+    const { data: otherLets, error: otherLetsErr } = await sb.from("storage_lets").select("id").eq("unit_id", u.id).limit(1);
+    if (otherLetsErr)
+      die(`in-use check FAILED (storage_lets.unit_id for unit ${u.code}): ${otherLetsErr.message} — refusing to delete a unit on a check that did not run.`);
     if (otherLets?.length) { console.warn(`  keeping unit ${u.code} — another let uses it`); continue; }
     const { error: e } = await sb.from("storage_units").delete().eq("id", u.id);
     if (e) console.warn(`  warning: unit ${u.code} not deleted — ${e.message}`);
   }
   for (const s of sites ?? []) {
-    const { data: otherUnits } = await sb.from("storage_units").select("id").eq("site_id", s.id).limit(1);
+    const { data: otherUnits, error: otherUnitsErr } = await sb.from("storage_units").select("id").eq("site_id", s.id).limit(1);
+    if (otherUnitsErr)
+      die(`in-use check FAILED (storage_units.site_id for site ${s.name}): ${otherUnitsErr.message} — refusing to delete a site on a check that did not run.`);
     if (otherUnits?.length) { console.warn(`  keeping site ${s.name} — it still has units`); continue; }
     const { error: e } = await sb.from("storage_sites").delete().eq("id", s.id);
     if (e) console.warn(`  warning: site ${s.name} not deleted — ${e.message}`);
   }
-  const { data: createdClients } = await sb.from("clients").select("id").eq("import_batch", rollbackBatch);
+  const { data: createdClients, error: createdClientsErr } = await sb.from("clients").select("id").eq("import_batch", rollbackBatch);
+  if (createdClientsErr)
+    die(
+      `clients cleanup read FAILED (clients.import_batch): ${createdClientsErr.message} — ` +
+        `lets/units/sites are already rolled back, but batch-created clients could not be listed. Clean them up by hand.`,
+    );
   for (const c of createdClients ?? []) {
-    const { data: otherLeads } = await sb.from("leads").select("id").eq("client_id", c.id).limit(1);
-    const { data: otherLets } = await sb.from("storage_lets").select("id").eq("client_id", c.id).limit(1);
+    const { data: otherLeads, error: otherLeadsErr } = await sb.from("leads").select("id").eq("client_id", c.id).limit(1);
+    if (otherLeadsErr)
+      die(`in-use check FAILED (leads.client_id for client ${c.id}): ${otherLeadsErr.message} — refusing to delete a client on a check that did not run.`);
+    const { data: otherLets, error: clientLetsErr } = await sb.from("storage_lets").select("id").eq("client_id", c.id).limit(1);
+    if (clientLetsErr)
+      die(`in-use check FAILED (storage_lets.client_id for client ${c.id}): ${clientLetsErr.message} — refusing to delete a client on a check that did not run.`);
     if (otherLeads?.length || otherLets?.length) continue;
     const { error: e } = await sb.from("clients").delete().eq("id", c.id);
     if (e) console.warn(`  warning: client ${c.id} not deleted — ${e.message}`);
