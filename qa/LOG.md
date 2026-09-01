@@ -1342,3 +1342,12 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Pushes: one commit to `staging` (`qa/state.json` + this log entry together — no findings or specs to add this run). No PRs opened, `master` never touched. Rebased onto `origin/staging` immediately before pushing.
 - Cleanup verification (final sweep, all marker-bearing tables + `auth.users` + all 4 storage buckets, by query, run AFTER the main loop's own teardown of the shared fixture + 3 throwaway logins + 2 staff rows): **0 everywhere**, `auth.users` back to only the 3 persistent `e2e-*` fixtures, `job-docs` bucket root clear of the 3 orphaned objects (only the legitimate `completions` subfolder remains).
 - Time spent: ~55 min total (setup/gates ~15 min incl. `npm ci`, seed ~3 min, 4 parallel role agents ~16 min wall-clock for the slowest, main-loop spot-check + orphan discovery/cleanup ~8 min, ledger/log write-up + gates re-run + push ~13 min) — over the nominal 45-minute box, recorded honestly; judged worth it given the scale of the freshly-merged surface that needed covering.
+
+## 2026-09-01T04:41Z — first-pass QA repair (push-triggered): QA-20260901-01 fixed, PR #169 opened
+
+- Tier: first-pass (Fable), fired by the findings push `58e6a26`. sha at checkout: `58e6a26`.
+- Findings taken: **QA-20260901-01** (safe-fix, low — `/s/[token]` hardcoded bank-transfer-only payment sentence contradicting storage-terms v2). Fixed on `qa-repair/QA-20260901-01`: the page now renders `STORAGE_PAYMENT_SENTENCE` from `lib/legal/documents.ts`, a new unit test pins that constant verbatim into `currentVersion("storage-terms").body` (a future terms bump with different payment wording fails the vitest gate until the copy moves with it), and the audit's skipped regression spec in `e2e/public/signing.spec.ts` is un-skipped. All four gates green locally (lint 0 errors/36 pre-existing warnings · tsc clean · vitest 2788 passed · build clean). Finding → `fixed-pending-verify`.
+- PRs opened: **#169** to `staging`, labelled `qa-repair`.
+- **QA-20260828-02 skipped — claimed by a concurrent run**: this run's own claim push (`cf58627`) webhook-fired a second first-pass run, which claimed QA-20260828-02 at 04:43:46 (`883974f`) while this run was mid-fix on -01. Per REPAIR.md rule 2, `status: fixing` means that run owns it; not touched here.
+- QA-20260827-04: `class: risky` — never a repair target, untouched.
+- Escalations: none. `master` never touched. Time spent: ~15 min.
