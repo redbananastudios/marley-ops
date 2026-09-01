@@ -137,10 +137,18 @@ export interface OwedNow {
  * invoice, raised when the job is done, due on the client's own terms.
  *
  * The balance columns carry it - `-BAL` is the last invoice on a job either
- * way, so reusing them keeps /finance, the bank-feed matcher and the ledger
- * adapter working with no new suffix and no new match_kind (PRD §10). What
- * differs is only WHEN it is raised (completion, not T-7) and when it falls
- * due (the client's terms, not before move day).
+ * way, so reusing them needs no new suffix and no new match_kind (PRD §10).
+ * What differs is only WHEN it is raised (completion, not T-7) and when it
+ * falls due (the client's terms, not before move day).
+ *
+ * This comment used to claim the reuse ALSO kept "/finance, the bank-feed
+ * matcher and the ledger adapter working". It did not, and saying so is part of
+ * why nobody checked: `loadLedgerItems` gated its balance item on
+ * `deposit_paid_at`, which commercial never has, so the completion invoice was
+ * invisible to the matcher, to `reconcileSettled` and to the office's manual
+ * attach flow. Fixed 2026-09-01 via `balanceRungVisible` in lib/bank-feed/sync.
+ * Reusing a column shape does not by itself make a reader policy-aware - each
+ * reader still has to be checked, and the check is a test, not a sentence.
  */
 function classifyCommercial(s: QueueSignals, todayUk: string): BookingBucket {
   if (s.balancePaidAt) return "all_set";

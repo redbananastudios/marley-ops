@@ -398,13 +398,23 @@ Expected: fails on `quotes_po_number_len`.
 
 **Why the completion invoice reuses the BALANCE columns rather than getting its
 own:** `-BAL` is the last invoice on a job under either policy, so reusing
-`zoho_balance_invoice_*` and `balance_invoice_amount` keeps `/finance`, the
-bank-feed matcher, the ledger adapter and the five-value `match_kind` set working
-with no new suffix and no new kind (PRD §10). Only the timing differs: raised at
-completion rather than T-7, due on the client's terms rather than before move day.
-A parallel set of invoice columns would have doubled every "what is outstanding
-on this job" read, and every one of them would have been a place to forget the
-second set.
+`zoho_balance_invoice_*` and `balance_invoice_amount` needs no new suffix and no
+new `match_kind` (PRD §10). Only the timing differs: raised at completion rather
+than T-7, due on the client's terms rather than before move day. A parallel set
+of invoice columns would have doubled every "what is outstanding on this job"
+read, and every one of them would have been a place to forget the second set.
+
+> **Corrected 2026-09-01.** This paragraph used to add that the reuse "keeps
+> /finance, the bank-feed matcher and the ledger adapter working". Two of those
+> three were true. `loadLedgerItems` gated its balance item on
+> `deposit_paid_at` — which a commercial quote never has, since it takes no
+> deposit — so the completion invoice appeared in neither the open nor the
+> settled pool and was invisible to the matcher, to `reconcileSettled` and to
+> the office's manual attach flow. A commercial BACS payment would have sat in
+> "needs a human" permanently, unattachable by that human. Fixed by
+> `balanceRungVisible` in `lib/bank-feed/sync.ts`. Reusing a column shape does
+> not by itself make a reader policy-aware — the readers still have to be
+> checked one by one, and the check is a test rather than a sentence.
 
 App-side, after the deploy: `/bookings` must look **byte-identical** to before
 while no commercial client exists — both new sections hide when empty. Confirm

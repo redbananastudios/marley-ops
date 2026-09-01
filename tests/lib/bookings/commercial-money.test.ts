@@ -204,3 +204,56 @@ describe("both readers of the deposit go through the policy-aware helper", () =>
     expect(body).not.toContain("quote.deposit_amount ?? settings.defaultDeposit");
   });
 });
+
+/**
+ * The completion invoice must survive the lead being marked "Completed".
+ *
+ * `loadBookingRows` dropped every `completed` lead. That retires a RESIDENTIAL
+ * booking correctly — its ladder is finished by then — and is exactly backwards
+ * for commercial, which is invoiced BY HAND on completion and then sits 30-60
+ * days on the client's terms. `completed` is the status it carries for the whole
+ * window the credit-control alarm exists for.
+ *
+ * The dangerous half was not the hidden row. `sweepCommercialOverdue`
+ * classifies off this same loader and, on an empty list, takes its `else`
+ * branch and RESOLVES the alarm — so a routine "Mark completed" click (a button
+ * on the lead action bar, and a kanban drag) cleared an alarm that may already
+ * have fired. Nothing else covers it: the post-move sweep `continue`s on
+ * commercial by design, so no follow-up and no ops alert is raised for it, and
+ * by policy the customer is never chased.
+ */
+describe("a commercial job stays visible until its money is settled", () => {
+  const src = read("lib/bookings/load-signals.ts");
+
+  it("no longer drops every completed lead in one breath", () => {
+    expect(
+      src,
+      "the combined skip is what hid the commercial invoice — it must not come back",
+    ).not.toContain('if (lead.status === "completed" || lead.status === "declined") continue;');
+  });
+
+  it("keeps a commercial row whose balance has not been paid", () => {
+    expect(src).toContain('q.payment_policy === "commercial" && !lead.balance_paid_at');
+    expect(src).toContain('if (lead.status === "completed" && !commercialUnsettled) continue;');
+  });
+
+  it("still retires declined leads unconditionally", () => {
+    expect(src).toContain('if (lead.status === "declined") continue;');
+  });
+
+  it("settles on balance_paid_at — the same stamp classifyCommercial reads", () => {
+    // Not a second definition of "done". classifyCommercial returns all_set on
+    // `s.balancePaidAt`; if these two ever disagree, the alarm fires for rows
+    // the office cannot find, or stays silent for rows shown in red.
+    const queue = read("lib/bookings/queue.ts");
+    expect(queue).toContain("if (s.balancePaidAt) return \"all_set\";");
+  });
+
+  it("the overdue sweep still classifies off this loader, not its own query", () => {
+    // One classifier, three surfaces — the sweep's own doc comment. A second
+    // definition of overdue is how the page and the alarm drift apart.
+    const sweep = read("lib/ops/commercial-overdue.ts");
+    expect(sweep).toContain("loadBookingRows(sb)");
+    expect(sweep).toContain('r.bucket === "commercial_overdue"');
+  });
+});
