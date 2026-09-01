@@ -83,7 +83,9 @@ export const zohoAdapter: LedgerAdapter = {
   findOrCreateContact: ({ name, email, phone }) =>
     wrap(() => zFindOrCreateContact({ name, email, phone })),
 
-  findInvoiceByReference: (reference): Promise<(LedgerInvoiceRef & { total?: number }) | null> =>
+  findInvoiceByReference: (
+    reference,
+  ): Promise<(LedgerInvoiceRef & { total?: number; dueDate?: string }) | null> =>
     wrap(() => zFindInvoiceByReference(reference)),
 
   createInvoice: (input: CreateInvoiceInput): Promise<LedgerInvoiceRef> =>

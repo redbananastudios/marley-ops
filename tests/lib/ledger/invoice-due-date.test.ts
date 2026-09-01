@@ -75,7 +75,11 @@ describe("the callers pass the client's agreed terms", () => {
     // is asserted rather than left to the compiler because the failure if the
     // binding were ever made `var`-like or hoisted differently is a silently
     // undefined due date, not a crash.
-    const computed = FLOW.indexOf("const commercialDueDate =");
+    // `let`, not `const`: the adoption branch replaces the derived date with
+    // the adopted document's own (see "an adopted invoice reports its own due
+    // date back" below). The property guarded here is unchanged — the date
+    // exists before the create call reads it.
+    const computed = FLOW.indexOf("let commercialDueDate =");
     const used = FLOW.indexOf("...(commercialDueDate ? { dueDate: commercialDueDate } : {}),");
     expect(computed, "commercialDueDate is no longer computed").toBeGreaterThan(-1);
     expect(used, "the completion invoice no longer passes a due date").toBeGreaterThan(-1);
@@ -108,5 +112,47 @@ describe("the callers pass the client's agreed terms", () => {
     // provider exactly as it did before gate 10b.
     expect(FLOW).toContain("commercialDueDate ?? balanceDueDate(quote.moving_date)");
     expect(STORAGE).toMatch(/const storageDueDate =\s*\r?\n?\s*resolvePaymentPolicy\(client\) === "commercial"/);
+  });
+});
+
+describe("an adopted invoice reports its own due date back", () => {
+  /**
+   * The adoption path (crash recovery, or a document raised by hand in the
+   * books) binds our record to an invoice that ALREADY EXISTS and already
+   * shows the client its own due date. `findInvoiceByReference` is the only
+   * read that path makes, so when it drops the date the flow can only guess —
+   * and it guessed today+terms, which the attached PDF then contradicted. The
+   * lookup returns the document's date the same way it returns the document's
+   * total: optionally, and adopters treat absence as absence.
+   */
+  it("the contract declares it on the reference lookup", () => {
+    expect(TYPES).toContain(
+      "): Promise<(LedgerInvoiceRef & { total?: number; dueDate?: string }) | null>;",
+    );
+  });
+
+  it("Zoho returns the list row's due_date", () => {
+    const at = ZOHO.indexOf("export async function findInvoiceByReference");
+    expect(at).toBeGreaterThan(-1);
+    const fn = ZOHO.slice(at, ZOHO.indexOf("\nexport", at + 10));
+    expect(fn).toContain("due_date");
+    // Conditionally, never as a present-but-undefined key — the same rule the
+    // create payload follows.
+    expect(fn).toContain("...(due ? { dueDate: due } : {})");
+  });
+
+  it("Xero returns the row's DueDate", () => {
+    const at = XERO.indexOf("export async function findInvoiceByReference");
+    expect(at).toBeGreaterThan(-1);
+    const fn = XERO.slice(at, XERO.indexOf("\nexport", at + 10));
+    expect(fn).toContain("dueDate");
+  });
+
+  it("the flow stamps the adopted document's date, never today+terms", () => {
+    // When the ledger returned no date, nothing is stamped and the email
+    // states the bare terms — a missing date fails to nothing, never to a
+    // guess. Behavioural ordering is locked in
+    // tests/lib/quote/commercial-completion-copy.test.ts.
+    expect(FLOW).toContain("commercialDueDate = inv.dueDate ?? null");
   });
 });

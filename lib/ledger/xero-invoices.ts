@@ -513,7 +513,7 @@ function whereClause(reference: string): string {
 
 export async function findInvoiceByReference(
   reference: string,
-): Promise<(LedgerInvoiceRef & { total?: number }) | null> {
+): Promise<(LedgerInvoiceRef & { total?: number; dueDate?: string }) | null> {
   const value = assertSafeReference(reference);
   // Exactly ONE encoding pass. Encoding twice turns `==` into `%253D%253D` and
   // a literal `%` reaches Xero's filter parser, which fails the request. And
@@ -553,6 +553,7 @@ export async function findInvoiceByReference(
   if (!inv.InvoiceID) {
     throw new LedgerError(`Xero returned an invoice for ${value} with no InvoiceID.`);
   }
+  const due = xeroDay(inv.DueDateString, inv.DueDate);
   return {
     invoiceId: inv.InvoiceID,
     invoiceNumber: inv.InvoiceNumber ?? "",
@@ -560,6 +561,11 @@ export async function findInvoiceByReference(
     // Adopters use the total to verify an orphan actually bills what we
     // computed, and never adopt a mismatch.
     ...(inv.Total != null ? { total: num(inv.Total) } : {}),
+    // The document's own due date — adopters on the commercial ladder stamp
+    // THIS rather than re-deriving today+terms, because the client already
+    // holds a PDF naming this day. Conditional, so absence stays absence
+    // (Xero omits DueDate on invoices raised without terms).
+    ...(due ? { dueDate: due } : {}),
   };
 }
 

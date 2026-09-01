@@ -189,3 +189,93 @@ describe("an accepted commercial quote is not asked for a deposit on /q", () => 
     expect(branch).not.toContain("due before move day");
   });
 });
+
+describe("the settlement receipt is composed for the right policy", () => {
+  const body = () => bodyOf(SRC, "export async function markBalancePaid(");
+
+  it("reads the policy at all", () => {
+    // It never did. The completion invoice email got its commercial arm; the
+    // receipt confirming its payment kept sending the residential rendering —
+    // move-day promise, attendance note and hosted residential template — to
+    // a business whose move finished before the invoice was even raised. The
+    // HTML body itself is covered properly, by rendering, in
+    // tests/lib/comms/commercial-settlement-receipt.test.ts.
+    expect(body()).toContain("policyOfQuote(");
+  });
+
+  it("does not send a commercial receipt through the hosted residential template", () => {
+    // `balanceReceivedTemplateVars` refuses commercial (locked by rendering in
+    // the comms test); this asserts the caller HONOURS that refusal rather
+    // than falling back to a truthy id — the same seam
+    // sendBalanceInvoiceEmail already has.
+    const b = body();
+    expect(b).toContain("const templateVars = balanceReceivedTemplateVars(meta)");
+    expect(b).toMatch(/const templateId =[\s\S]{0,200}templateVars/);
+    expect(b).toContain("templateId && templateVars");
+  });
+
+  it("the receipt panel does not call a completion invoice a final balance", () => {
+    // "Final balance" may still appear — but only inside a branch, never as
+    // the single unconditional label it was.
+    const b = stripComments(body());
+    for (const m of b.matchAll(/"Final balance"/g)) {
+      const line = b.slice(b.lastIndexOf("\n", m.index) + 1, b.indexOf("\n", m.index));
+      expect(
+        /commercial|\?/.test(line),
+        `unconditional final-balance label: ${line.trim()}`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe("an adopted completion invoice keeps its own due date", () => {
+  const body = () => bodyOf(SRC, "export async function createBalanceInvoiceFlow(");
+
+  it("the adoption path replaces the raise-day terms date with the document's own", () => {
+    // `commercialDueDate` is today+terms, computed for the invoice this raise
+    // is about to CREATE. The adoption branch binds to an invoice that already
+    // exists — a crashed prior run on an earlier day, or one raised by hand in
+    // the books — whose document already shows the client its own due date.
+    // Stamping today+terms there emails "payable by <today+terms>" with a PDF
+    // attached that names a different day. The document governs; when the
+    // ledger returned no date, nothing is stamped and the email states the
+    // bare terms (a missing date fails to nothing, never to a guess).
+    expect(body()).toContain("commercialDueDate = inv.dueDate ?? null");
+  });
+
+  it("that replacement sits between the lookup and every consumer of the date", () => {
+    const b = body();
+    const lookup = b.indexOf("findInvoiceByReference(ref)");
+    const replace = b.indexOf("commercialDueDate = inv.dueDate ?? null");
+    const stamp = b.indexOf("commercial_due_date: commercialDueDate");
+    const email = b.indexOf("sendBalanceInvoiceEmail(");
+    expect(lookup).toBeGreaterThan(-1);
+    expect(replace).toBeGreaterThan(lookup);
+    expect(stamp, "the row stamp must still exist").toBeGreaterThan(replace);
+    expect(email, "the email must still be sent").toBeGreaterThan(replace);
+  });
+
+  it("a fresh raise still computes today+terms and prints it on the document", () => {
+    // The control: the fresh-raise behaviour (gate 10b) is untouched.
+    const b = body();
+    expect(b).toContain("paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))");
+    expect(b).toContain("...(commercialDueDate ? { dueDate: commercialDueDate } : {}),");
+  });
+});
+
+describe("a failed paid-state read on /q does not render as an amount due", () => {
+  it("the commercial branch distinguishes a failed read from an unpaid invoice", () => {
+    // "I could not check" and "nothing has been paid" are different answers.
+    // The branch read `balance_paid_at` and dropped the error, so a failed
+    // read left `settledAt` null and rendered the full "Amount due" panel as
+    // if the ledger position were known — to a client who may have paid weeks
+    // ago.
+    const at = QPAGE.indexOf('policyOfQuote(quote) === "commercial"');
+    const end = QPAGE.indexOf("accepted → pay / done", at);
+    const branch = QPAGE.slice(at, end);
+    expect(branch).toContain("settledUnknown");
+    // The invoice panel is gated on the read having SUCCEEDED, not only on
+    // its answer.
+    expect(stripComments(branch)).toMatch(/showInvoice\s*=[^;]*settledUnknown/);
+  });
+});

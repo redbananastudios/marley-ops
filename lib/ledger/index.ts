@@ -137,7 +137,7 @@ export function findOrCreateContact(input: {
 
 export function findInvoiceByReference(
   reference: string,
-): Promise<(LedgerInvoiceRef & { total?: number }) | null> {
+): Promise<(LedgerInvoiceRef & { total?: number; dueDate?: string }) | null> {
   return adapterFor().findInvoiceByReference(reference);
 }
 

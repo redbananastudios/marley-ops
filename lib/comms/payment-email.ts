@@ -186,8 +186,21 @@ export function balanceReceivedTemplateVars(m: {
   amount: number;
   moveDateLabel?: string | null;
   receipt?: ReceiptDetails | null;
+  paymentPolicy?: PaymentPolicy | null;
+  /** Carried on the shared meta for the commercial in-repo body; the
+   *  residential template has no slot for it and it is never read here. */
+  invoiceNumber?: string | null;
   brand?: Brand | null;
-}): Record<string, string> {
+}): Record<string, string> | null {
+  // COMMERCIAL falls back to the in-repo body, exactly as the completion
+  // invoice it settles does. The published receipt template is a separately
+  // hand-written copy whose fixed slots promise "see you on move day" about a
+  // job that finished before the invoice was raised, and
+  // scripts/create-resend-templates.mjs PATCHes hosted templates BY NAME — so
+  // editing it for commercial would overwrite the live template every
+  // residential customer receives (PRD §11.7 trap 4). Returning null costs a
+  // commercial client the dashboard-editable copy and nothing else.
+  if (m.paymentPolicy === "commercial") return null;
   return {
     CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
     QUOTE_REF: escapeHtml(m.quoteRef),
@@ -256,6 +269,54 @@ export function buildDepositReceivedEmailHtml(m: DepositReceivedMeta): string {
   );
 }
 
+/**
+ * The COMMERCIAL settlement receipt — same document slot as the residential
+ * "all settled" email, different story: the completion invoice this payment
+ * settles was raised AFTER the move, so there is no move day to promise and no
+ * livery to prepare for. Payment received, which invoice it settles, all
+ * settled, thank you for the business — and nothing else.
+ *
+ * A separate function rather than ternaries inside the residential builder,
+ * for the same reason buildCompletionInvoiceEmailHtml is: residential parity
+ * is structural, and the parity lock in
+ * tests/lib/comms/commercial-settlement-receipt.test.ts asserts something the
+ * code shape already guarantees.
+ *
+ * The pre-move attendance disclosure is deliberately NOT carried here — it
+ * prepares a customer for the livery that turns up "on the day", and that day
+ * has passed. Same call the completion invoice email already made.
+ */
+function buildCompletionReceiptEmailHtml(m: {
+  firstName?: string | null;
+  quoteRef: string;
+  amount: number;
+  receipt?: ReceiptDetails | null;
+  invoiceNumber?: string | null;
+  brand?: Brand | null;
+}): string {
+  const t = emailTheme(m.brand);
+  const name = (m.firstName ?? "").trim().split(/\s+/)[0];
+  const invoiceMeta = m.invoiceNumber
+    ? ` against invoice <strong style="color:#1A1A1A;">${escapeHtml(m.invoiceNumber)}</strong>`
+    : "";
+  const inner = [
+    themedPill(`Payment received &middot; ${escapeHtml(m.quoteRef)}`, t),
+    headline(`All settled${name ? ", " + escapeHtml(name) : ""}`),
+    subline(
+      `We have received your payment of <strong style="color:#1A1A1A;">${gbp(m.amount)}</strong>${invoiceMeta}, so your account is settled and there is nothing more to pay. Thank you for your business.`,
+    ),
+    ...(m.receipt ? [receiptDetailsBlock(m.receipt, t)] : []),
+    subline(
+      `If your accounts team needs anything else from us, ${t.callHtml} or reply to this email.`,
+    ),
+  ].join("\n");
+  return themedEmailShell(
+    `Payment of ${gbp(m.amount)} received. Your account is settled.`,
+    inner,
+    t,
+  );
+}
+
 /** Balance received → "all settled, see you on move day". */
 export function buildBalanceReceivedEmailHtml(m: {
   firstName?: string | null;
@@ -263,8 +324,22 @@ export function buildBalanceReceivedEmailHtml(m: {
   amount: number;
   moveDateLabel?: string | null;
   receipt?: ReceiptDetails | null;
+  /**
+   * The policy snapshotted onto the quote at acceptance (PRD §3.10). Absent,
+   * null and `"residential"` all render today's exact bytes. On the
+   * commercial ladder the move finished BEFORE the invoice was raised, so the
+   * residential rendering's move-day promise, preheader and attendance note
+   * are all claims about a day already gone.
+   */
+  paymentPolicy?: PaymentPolicy | null;
+  /** Commercial only: the settled invoice's document number, for accounts. */
+  invoiceNumber?: string | null;
   brand?: Brand | null;
 }): string {
+  // Branch FIRST, so nothing below this line can be reached by a commercial
+  // send and nothing in the commercial builder can be reached by a residential
+  // one. Everything after it is byte-for-byte the email that has always gone out.
+  if (m.paymentPolicy === "commercial") return buildCompletionReceiptEmailHtml(m);
   const t = emailTheme(m.brand);
   const name = (m.firstName ?? "").trim().split(/\s+/)[0];
   const when = m.moveDateLabel
@@ -355,11 +430,15 @@ export interface BalanceInvoiceMeta {
   /**
    * Commercial only: the client's agreed terms date, pre-formatted the same way
    * `moveDateLabel` is ("Monday 29 September"). Carries `quotes.commercial_due_date`,
-   * which is the date printed on the invoice document itself, so the email and
-   * the PDF it attaches can never fall due on two different days.
+   * which is the date on the invoice document itself — computed from the
+   * client's terms when the raise CREATES the invoice, and read OFF the
+   * document when the raise ADOPTS one that already exists (a crashed prior
+   * run, or an invoice raised by hand in the books) — so the email and the PDF
+   * it attaches can never fall due on two different days.
    *
-   * Absent means no terms date is recorded, and the copy then states the TERMS
-   * and names no day. A missing value must not render as a confident claim.
+   * Absent means no terms date is recorded — including an adopted document
+   * whose ledger read returned none — and the copy then states the TERMS and
+   * names no day. A missing value must not render as a confident claim.
    */
   termsDueDateLabel?: string | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
