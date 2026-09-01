@@ -52,6 +52,8 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import {
+  contactKey,
+  duplicateKeyErrors,
   fetchAllRows,
   headerReader,
   isoDate,
@@ -252,17 +254,42 @@ const lets = rows.slice(1).map((r, idx) => {
   return let_;
 });
 
-// One OPEN let per unit is a unique index (storage_lets_open_uq). Catching it
-// here names the two lines that clash; letting it reach the DB fails halfway
-// through a batch with a constraint name and no idea which rows collided.
-const openByUnit = new Map();
-for (const l of lets) {
-  if (l.endDate || !l.siteName || !l.unitCode) continue;
-  const k = `${norm(l.siteName)}|${norm(l.unitCode)}`;
-  if (openByUnit.has(k))
-    errors.push(`line ${l.line}: a second OPEN let for ${l.siteName}/${l.unitCode} (already on line ${openByUnit.get(k)}) — a unit can only be occupied once`);
-  else openByUnit.set(k, l.line);
-}
+// Two rows of one sheet can describe the same tenancy in two ways, and NEITHER
+// is visible to the planning loop below — it resolves every row against the
+// state as it was before the batch, so both rows miss the lookup maps and both
+// plan as NEW.
+//
+// The OPEN case at least has a backstop: one open let per unit is a unique
+// index (storage_lets_open_uq), so it would fail at the database. Catching it
+// here names the two lines that clash instead of failing halfway through a
+// batch with a constraint name and no idea which rows collided.
+//
+// The CLOSED case has NO backstop, because that index is `unique (unit_id)
+// where end_date is null` — open lets only. Closed rows are genuinely in scope
+// (the shipped template carries one, "kept for the billing history"), and a
+// duplicated one is real money: lib/storage-billing.ts bills every period from
+// start_date to end_date, lib/storage/raise-storage-invoices.ts picks up lets
+// ended within the last 60 days, and storage_invoices' unique(let_id,
+// period_start) cannot dedupe two DIFFERENT let_ids — so an unpaused duplicate
+// re-raises the customer's whole tenancy history. Unit + start date is what
+// identifies a tenancy: the same unit cannot be let to anyone on the same day.
+errors.push(
+  ...duplicateKeyErrors(
+    lets,
+    (l) => (l.endDate || !l.siteName || !l.unitCode ? null : `${norm(l.siteName)}|${norm(l.unitCode)}`),
+    (l) => `an OPEN let for ${l.siteName}/${l.unitCode}`,
+    "a unit can only be occupied once",
+  ),
+  ...duplicateKeyErrors(
+    lets,
+    (l) =>
+      !l.siteName || !l.unitCode || !l.startDate
+        ? null
+        : `${norm(l.siteName)}|${norm(l.unitCode)}|${l.startDate}`,
+    (l) => `a let for ${l.siteName}/${l.unitCode} starting ${l.startDate}`,
+    "one unit cannot begin two tenancies on the same day, and a duplicated closed let re-bills the whole history",
+  ),
+);
 if (errors.length) die(`CSV problems — nothing imported:\n  - ${errors.join("\n  - ")}`);
 
 const sites = await fetchAllRows(() => sb.from("storage_sites").select("id, name").order("id"), die);
@@ -307,14 +334,27 @@ const plan = [];
 const plannedSites = new Set();
 const plannedUnits = new Set();
 const plannedClients = new Set();
-const clientKey = (l) => l.email ?? phoneDigits(l.phone) ?? norm(l.name);
+// contactKey, not a hand-rolled `email ?? phone ?? name`. The ?? chain returned
+// the EMPTY STRING for a row with no email and no phone — `??` only falls
+// through on null/undefined, and phoneDigits("") is "" — so every contactless
+// row shared one key: the first printed NEW and the rest printed MATCH, telling
+// whoever approves the dry run that several different people were one repeat
+// customer. contactKey returns null for such a row, and a null key is never
+// added to plannedClients and never looked up in it, so it can never collide.
+//
+// It errs toward NEW: two rows with DIFFERENT emails but the same phone key as
+// `e:` and print NEW twice, where the write path's findClient would match the
+// second on phone. Over-reporting new customers is the safe direction — the
+// plan may never claim a dedupe the write path will not perform.
+const clientKey = (l) => contactKey(l.email, l.phone);
 for (const l of lets) {
   const site = siteByName.get(norm(l.siteName)) ?? null;
   const unit = site ? unitByKey.get(`${site.id}|${norm(l.unitCode)}`) ?? null : null;
   const client = findClient(l);
+  const key = clientKey(l);
   const siteSeen = !!site || plannedSites.has(norm(l.siteName));
   const unitSeen = !!unit || plannedUnits.has(`${norm(l.siteName)}|${norm(l.unitCode)}`);
-  const clientSeen = !!client || plannedClients.has(clientKey(l));
+  const clientSeen = !!client || (key != null && plannedClients.has(key));
 
   // Already imported? Two independent reasons to skip.
   if (unit && !l.endDate && openUnitIds.has(unit.id)) {
@@ -328,7 +368,7 @@ for (const l of lets) {
   plan.push({ l, site, unit, client });
   plannedSites.add(norm(l.siteName));
   plannedUnits.add(`${norm(l.siteName)}|${norm(l.unitCode)}`);
-  plannedClients.add(clientKey(l));
+  if (key != null) plannedClients.add(key);
   const per = l.ratePeriod === "day" ? "day" : l.ratePeriod === "month" ? "mo" : "wk";
   console.log(
     `  ${siteSeen ? "site✓" : "site+"} ${unitSeen ? "unit✓" : "unit+"} ${clientSeen ? "MATCH" : "NEW  "} ` +

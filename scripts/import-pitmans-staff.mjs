@@ -38,6 +38,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import {
+  duplicateKeyErrors,
   fetchAllRows,
   headerReader,
   isoDate,
@@ -82,6 +83,9 @@ const die = (msg) => {
 };
 
 const ROLES = new Set(["crew", "driver", "estimator", "admin"]);
+
+/** How a person's name is compared: trimmed, lowercased, runs of space collapsed. */
+const key = (name) => String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 /** "12345" or "1,2,3" or "1 2 3" -> [1,2,3,4,5]; deduped and sorted. */
 function workingDays(raw) {
@@ -204,10 +208,43 @@ const people = rows.slice(1).map((r, idx) => {
     errors.push(`line ${line}: working_days '${col(r, "working_days")}' has no day numbers (1=Mon..7=Sun)`);
   return person;
 });
+
+// byName/byPhone/byEmail below are built ONCE from the pre-batch database read
+// and are never mutated, so a duplicate INSIDE this sheet is invisible to the
+// planning loop: neither row matches anything, both plan as NEW, and both go
+// into a single .insert() — one person, two payroll records, two people to
+// allocate to the same crew day.
+//
+// All three match columns are checked, because all three are what the loop
+// below matches on. The NAME check is the strictest of the three by design: two
+// rows sharing a name would collapse to one on a re-run (the loop skips a
+// name-only match to VERIFY), so importing them as two people now guarantees
+// the sheet and the database disagree. If they really are two different people,
+// that has to be a human decision made before a one-shot live import, not a
+// silent insert.
+errors.push(
+  ...duplicateKeyErrors(
+    people,
+    (p) => p.email,
+    (p) => `the email ${p.email}`,
+    "one person would import twice",
+  ),
+  ...duplicateKeyErrors(
+    people,
+    (p) => (phoneDigits(p.phone).length >= 10 ? phoneDigits(p.phone) : null),
+    (p) => `the phone ${p.phone}`,
+    "one person would import twice",
+  ),
+  ...duplicateKeyErrors(
+    people,
+    (p) => key(p.fullName) || null,
+    (p) => `the name '${p.fullName}'`,
+    "the import cannot tell two people of one name apart — remove the repeat, or if they really are two people, import the second separately",
+  ),
+);
 if (errors.length) die(`CSV problems — nothing imported:\n  - ${errors.join("\n  - ")}`);
 
 const existing = await fetchAllRows(() => sb.from("staff").select("id, full_name, phone, email").order("id"), die);
-const key = (name) => String(name ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 const byName = new Map(existing.map((s) => [key(s.full_name), s]));
 const byPhone = new Map();
 for (const s of existing) if (phoneDigits(s.phone).length >= 10) byPhone.set(phoneDigits(s.phone), s);
@@ -255,6 +292,9 @@ const { data: written, error: wErr } = await sb
       phone: p.phone,
       email: p.email,
       day_rate: p.dayRate,
+      // Omitted when the sheet does not say, so the column default (Mon-Fri,
+      // migration 0055) applies — see `defaultToNull: false` below, WITHOUT
+      // which this line kills the whole import.
       ...(p.workingDays ? { working_days: p.workingDays } : {}),
       date_of_birth: p.dateOfBirth,
       address: p.address,
@@ -264,6 +304,30 @@ const { data: written, error: wErr } = await sb
       notes: p.notes,
       import_batch: batch,
     })),
+    // A BULK insert sends the UNION of keys across all rows, and PostgREST
+    // fills a key a given row omits with NULL rather than leaving it to the
+    // column default. `staff.working_days` is `int[] NOT NULL default
+    // '{1,2,3,4,5}'` (0055), so one crew member with no set days poisoned the
+    // whole statement:
+    //
+    //   FATAL: staff insert failed — null value in column "working_days" of
+    //   relation "staff" violates not-null constraint
+    //
+    // Not a rare shape: a real crew list has people on fixed days and people
+    // who are called in, and the sheet is filled in by hand. The import is a
+    // ONE-SHOT operation on takeover day, so aborting the batch is exactly when
+    // there is least time to work out why.
+    //
+    // `defaultToNull: false` makes PostgREST apply each column's own DEFAULT to
+    // a key the row omits, which is what the conditional spread above always
+    // intended. It does NOT affect a key that is present and explicitly null —
+    // every other field here is set unconditionally, so their nulls still land
+    // as nulls.
+    //
+    // The trap it introduces, for whoever edits this next: any NEW conditional
+    // spread added to this object will now silently take the column default
+    // instead of NULL. If you want NULL, name the key.
+    { defaultToNull: false },
   )
   .select("id, full_name");
 if (wErr) die(`staff insert failed — ${wErr.message} (nothing written: the batch inserts as one statement)`);
