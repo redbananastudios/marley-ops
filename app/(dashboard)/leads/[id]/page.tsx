@@ -26,6 +26,7 @@ import { CancelBookingButton } from "@/components/bookings/booking-policy-action
 import { moveDateLabel } from "@/lib/quote/payments";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
 import { importedBooking } from "@/lib/legacy";
+import { policyOfQuote } from "@/lib/payments-policy";
 import {
   CompletionCard,
   ContractSignatureCard,
@@ -170,7 +171,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   const { data: quotes } = await supabase
     .from("quotes")
     .select(
-      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at, source, standard_comms_at, commitment_invoice_amount, commitment_due_date, commitment_paid_at, zoho_commitment_invoice_number",
+      "id, quote_ref, grand_total, agreed_price, status, email_send_count, email_sent_at, accepted_at, created_at, moving_date, deposit_paid_at, source, standard_comms_at, payment_policy, commercial_due_date, commitment_invoice_amount, commitment_due_date, commitment_paid_at, zoho_commitment_invoice_number",
     )
     .eq("lead_id", id)
     .order("created_at", { ascending: false });
@@ -326,6 +327,10 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           invoiceNumber: acceptedQuote.zoho_commitment_invoice_number ?? null,
         }
       : null;
+  // The ladder the Payments card is rendering, read through the one helper that
+  // owns the null rule — an unaccepted, pre-0111 or unreadable-client quote is
+  // residential, which is what every booking here has always run.
+  const paymentPolicyOfCard = policyOfQuote(acceptedQuote);
   // Payments matter once the job is real (or once any payment state exists).
   const showPayments =
     ["confirmed", "completed"].includes(lead.status) ||
@@ -631,6 +636,13 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
                   balanceAmount: lead.balance_amount != null ? Number(lead.balance_amount) : null,
                   balanceDueDate: lead.balance_due_date,
                   balancePaidAt: lead.balance_paid_at,
+                  // Which ladder the card is rendering, and the date that goes
+                  // with it. Without these it printed `lead.balance_due_date` —
+                  // a move-day date — as plain fact for a commercial lead whose
+                  // invoice is dated from the client's own terms. Both come off
+                  // the accepted quote, the same snapshot /bookings reads.
+                  paymentPolicy: paymentPolicyOfCard,
+                  commercialDueDate: acceptedQuote?.commercial_due_date ?? null,
                 }}
               />
             </div>

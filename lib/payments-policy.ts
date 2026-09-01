@@ -19,7 +19,7 @@
  */
 
 import { ukDayOf } from "@/lib/sales-report";
-import { round2 } from "@/lib/quote/payments";
+import { balanceDueDate, round2 } from "@/lib/quote/payments";
 
 /* -------------------------------------------------------------- constants */
 
@@ -317,6 +317,56 @@ export function paymentTermsDueDate(
   const base = dayToMs(raisedDay);
   if (base === null) return raisedDay;
   return msToDay(base + paymentTermsDays(termsDays) * DAY_MS);
+}
+
+/**
+ * The balance due date a MOVE implies — or null when the policy does not date
+ * its money from the move at all.
+ *
+ * The two ladders anchor their last money figure to different facts. Residential
+ * works BACK from the move (`balanceDueDate` — the day before, because the
+ * customer must have paid before we load the van). Commercial works FORWARD from
+ * the day the completion invoice was raised, plus the client's own terms
+ * (`paymentTermsDueDate`), because the job is already done and the client is
+ * being extended credit. Moving the van changes the first and cannot touch the
+ * second.
+ *
+ * Both date-change paths — `rescheduleAppointment` and the cancel-and-rebook
+ * half of `changeBookingDateAction` — recomputed `leads.balance_due_date` as
+ * `balanceDueDate(newMoveDate)` for EVERY accepted quote, with no policy check
+ * in either function. On a commercial booking whose completion invoice had
+ * already been raised, that silently replaced a terms date the client had been
+ * given with a day-before-move one, and re-dated the open balance follow-up the
+ * same wrong way — dropping the task into the overdue section of the queue for a
+ * client who is not late and who is never chased.
+ *
+ * Commercial returns null in BOTH of its states, and the collapse is deliberate:
+ *
+ *  - **Invoice already raised.** The terms date is stamped on `commercial_due_date`
+ *    and printed on the document the client's accounts department holds. Nothing
+ *    here is a better authority on it than that, so this path writes nothing
+ *    rather than restating it.
+ *  - **Invoice not raised yet.** There is no terms date in existence — it cannot
+ *    be computed until someone raises the invoice, because it counts from THAT
+ *    day. So the honest answer is no date, not a day-before-move guess. Writing
+ *    one would be an assertion of fact manufactured out of having no information,
+ *    which is the exact shape this codebase has been bitten by repeatedly.
+ *
+ * The two states DO differ on screen — the payments card shows the terms date
+ * once it exists and says the invoice is raised on completion until then — but a
+ * write path has the same answer for both: don't.
+ *
+ * An unknown or absent policy is residential, matching `policyOfQuote`: every
+ * booking before gate 8 ran the ladder, so a null column must never silently
+ * switch a job's money date off.
+ */
+export function balanceDueDateForMove(
+  quote: { payment_policy?: string | null; commercial_due_date?: string | null } | null | undefined,
+  movingDate: string | null | undefined,
+  today: Date = new Date(),
+): string | null {
+  if (policyOfQuote(quote) === "commercial") return null;
+  return balanceDueDate(movingDate, today);
 }
 
 /* ------------------------------------------------------------- held money */

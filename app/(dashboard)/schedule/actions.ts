@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
 import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrands } from "@/lib/brand";
-import { balanceDueDate } from "@/lib/quote/payments";
-import { commitmentDueDate } from "@/lib/payments-policy";
+import { balanceDueDateForMove, commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { ukInstant } from "@/lib/uk-time";
 import { sendCommunication } from "@/app/(dashboard)/comms-actions";
@@ -656,7 +655,7 @@ export async function rescheduleAppointment(
     const { data: accepted } = await sb
       .from("quotes")
       .select(
-        "id, moving_date, quote_ref, commitment_paid_at, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number",
+        "id, moving_date, quote_ref, payment_policy, commercial_due_date, commitment_paid_at, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number",
       )
       .eq("lead_id", appt.lead_id)
       .eq("status", "accepted")
@@ -677,17 +676,29 @@ export async function rescheduleAppointment(
           .eq("id", accepted.id)
           .is("commitment_paid_at", null);
       }
-      const dueDate = balanceDueDate(newMoveDate);
-      await sb.from("leads").update({ balance_due_date: dueDate } as never).eq("id", appt.lead_id);
-      const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
-      if (dm) {
-        const dueAt = ukInstant(Number(dm[1]), Number(dm[2]), Number(dm[3]), 9, 0).toISOString();
-        await sb
-          .from("follow_ups")
-          .update({ due_at: dueAt })
-          .eq("lead_id", appt.lead_id)
-          .eq("reason", "balance")
-          .eq("status", "open");
+      // Only a RESIDENTIAL balance is dated from the move. Commercial's one
+      // invoice is raised by hand on completion and falls due on the client's
+      // own terms, so `balanceDueDateForMove` returns null for it and this whole
+      // block is skipped — both the lead's date and the open balance follow-up.
+      // Before that check existed, re-dating a job here replaced a terms date
+      // the client had already been invoiced on with a day-before-move one, and
+      // pushed the follow-up into the overdue queue for a client who is not late
+      // and is never chased. Null also covers the not-yet-invoiced commercial
+      // job, where no terms date exists to compute at all: writing nothing is
+      // the honest answer, not a move-day guess.
+      const dueDate = balanceDueDateForMove(accepted, newMoveDate);
+      if (dueDate) {
+        await sb.from("leads").update({ balance_due_date: dueDate } as never).eq("id", appt.lead_id);
+        const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dueDate);
+        if (dm) {
+          const dueAt = ukInstant(Number(dm[1]), Number(dm[2]), Number(dm[3]), 9, 0).toISOString();
+          await sb
+            .from("follow_ups")
+            .update({ due_at: dueAt })
+            .eq("lead_id", appt.lead_id)
+            .eq("reason", "balance")
+            .eq("status", "open");
+        }
       }
 
       // Payments Policy v2: the commitment falls due move−7d (clamped to
