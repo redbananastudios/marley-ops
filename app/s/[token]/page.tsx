@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
 import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
-import { publicUrlFor } from "@/lib/legal/documents";
+import { publicUrlFor, STORAGE_PAYMENT_SENTENCE } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { getBrandOrDefault } from "@/lib/brand";
 import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
@@ -167,7 +167,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
               >
                 storage agreement terms
               </a>
-              . Invoices are payable by bank transfer on receipt.
+              . {STORAGE_PAYMENT_SENTENCE}
             </p>
 
             <div className="mt-6">

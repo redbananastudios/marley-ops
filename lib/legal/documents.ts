@@ -88,6 +88,17 @@ export function snapshotOf(version: LegalVersion): TermsSnapshot {
   };
 }
 
+/**
+ * The payment-method sentence shown on the storage signing page, verbatim from
+ * the CURRENT storage terms. It lives here, not in the page, because the page
+ * once carried its own copy ("payable by bank transfer on receipt") that
+ * contradicted the v2 terms it linked to. A unit test pins this string to the
+ * current version's body, so a v3 with different payment wording fails the
+ * gates until this is updated with it.
+ */
+export const STORAGE_PAYMENT_SENTENCE =
+  "Storage charges can be paid by bank transfer, card or cash. Bank transfer is preferred. We do not add a card fee.";
+
 /** Public URL of a document, for linking customers to what they are signing. */
 export function publicUrlFor(document: LegalDocument): string {
   return document === "storage-terms"
