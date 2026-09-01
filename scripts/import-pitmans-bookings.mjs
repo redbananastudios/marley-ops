@@ -137,7 +137,15 @@ if (rollbackBatch) {
   if (!leads?.length) die(`No leads carry import_batch='${rollbackBatch}' — nothing to roll back.`);
   const leadIds = leads.map((l) => l.id);
 
-  const { data: quotes } = await sb.from("quotes").select("id, quote_ref, source").in("lead_id", leadIds);
+  const { data: quotes, error: quotesErr } = await sb.from("quotes").select("id, quote_ref, source").in("lead_id", leadIds);
+  if (quotesErr) {
+    die(
+      `Rollback safety check FAILED (quotes.lead_id): ${quotesErr.message}\n` +
+        `  Refusing. This read feeds the foreign-quote refusal AND every quote-scoped money ` +
+        `blocker below — a discarded error empties the quote list, so all of them would ` +
+        `silently pass on a query that never ran.`,
+    );
+  }
   const foreign = (quotes ?? []).filter((q) => q.source !== BRAND);
   if (foreign.length) die(`Batch leads carry NON-pitmans quotes (${foreign.map((q) => q.quote_ref).join(", ")}) — refusing.`);
   const quoteIds = (quotes ?? []).map((q) => q.id);
@@ -213,9 +221,19 @@ if (rollbackBatch) {
   await del("quotes", "id", quoteIds);
   await del("leads", "id", leadIds);
   // Only clients this batch CREATED, and only if no other lead points at them.
-  const { data: createdClients } = await sb.from("clients").select("id").eq("import_batch", rollbackBatch);
+  const { data: createdClients, error: createdClientsErr } = await sb.from("clients").select("id").eq("import_batch", rollbackBatch);
+  if (createdClientsErr)
+    die(
+      `clients cleanup read FAILED (clients.import_batch): ${createdClientsErr.message} — ` +
+        `leads/quotes are already rolled back, but batch-created clients could not be listed. Clean them up by hand.`,
+    );
   for (const c of createdClients ?? []) {
-    const { data: otherLeads } = await sb.from("leads").select("id").eq("client_id", c.id).limit(1);
+    const { data: otherLeads, error: otherLeadsErr } = await sb.from("leads").select("id").eq("client_id", c.id).limit(1);
+    if (otherLeadsErr)
+      die(
+        `client cleanup check FAILED (leads.client_id for client ${c.id}): ${otherLeadsErr.message} — ` +
+          `an unreadable answer must not read as "no other leads point here". Remaining batch clients were left in place.`,
+      );
     if (!otherLeads?.length) {
       const { error: cDelErr } = await sb.from("clients").delete().eq("id", c.id);
       if (cDelErr) console.warn(`  warning: client ${c.id} not deleted — ${cDelErr.message}`);
@@ -374,10 +392,16 @@ async function mintRef(kind) {
 const refCounts = new Map();
 for (const j of jobs) refCounts.set(j.pitmansRef, (refCounts.get(j.pitmansRef) ?? 0) + 1);
 
-const { data: counters } = await sb
+const { data: counters, error: countersErr } = await sb
   .from("brand_ref_counters")
   .select("kind, n")
   .eq("brand", BRAND);
+if (countersErr)
+  die(
+    `brand_ref_counters read failed — ${countersErr.message}. The ref preview would be built ` +
+      `on a failed read and print "R=0, C=0" as if that were the counter state; a plan a ` +
+      `human approves before a live-money import must not contain fabricated facts.`,
+  );
 const counterByKind = new Map((counters ?? []).map((c) => [c.kind, Number(c.n)]));
 
 console.log(`\nbatch '${batch}' — ${jobs.length} rows:\n`);
