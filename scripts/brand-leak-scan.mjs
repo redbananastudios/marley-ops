@@ -167,6 +167,15 @@ export const MANIFEST = [
     reason:
       "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
   },
+  // The storage billing run. Its customer-visible note used to be four
+  // module-level strings carrying one office number and one card offer,
+  // resolved where no brand exists to resolve them against — so every storage
+  // customer read the same number whoever was billing them. The note is now
+  // built per invoice from the LET's brand (`storageInvoiceNote`), and the
+  // emailed half takes the same brand and the same card verdict, so the two
+  // halves of one invoice cannot disagree. Nothing brand-specific is left in
+  // the file, comments included, so it goes under scan with no allow list.
+  "lib/storage/raise-storage-invoices.ts",
   // Gate 19: the ingest stack. These three are brand-resolved by contract —
   // one route serves EVERY brand's website, the pure half derives the brand
   // from whichever secret matched (never the payload, PRD §3.8), and the

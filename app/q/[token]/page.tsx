@@ -420,9 +420,25 @@ export default async function AcceptPage({
               <ShieldCheck className="mt-0.5 size-5 shrink-0 text-mm-red" strokeWidth={1.75} />
               <p className="text-sm leading-relaxed text-mist-500">
                 Accepting reserves your date. A{" "}
-                <strong className="text-ink">{gbp(deposit)} deposit</strong> secures the booking —
-                pay by card or bank transfer on the next screen. The balance is due before move
-                day. Read our{" "}
+                <strong className="text-ink">{gbp(deposit)} deposit</strong> secures the booking —{" "}
+                {/* The rails named here must be the rails the NEXT screen
+                    actually offers. This sentence promised card unconditionally
+                    while the button below it has always been gated on `cardOk`,
+                    so a customer whose brand takes bank transfer only was told
+                    they could pay by card, accepted on that basis, and arrived
+                    at a screen with no card on it. The commercial branch
+                    returns earlier, so a residential quote is what reaches
+                    this.
+
+                    The card-off arm is not the card-on arm with the word
+                    removed: bank transfer is the instruction, and the phone is
+                    a real second route (the deposit screen ends with "Prefer to
+                    sort it by phone?"), not a hedge like "where available"
+                    that would stop the lie without telling anyone what to do. */}
+                {cardOk
+                  ? "pay by card or bank transfer on the next screen."
+                  : "pay by bank transfer on the next screen, or call us and we'll sort it with you."}{" "}
+                The balance is due before move day. Read our{" "}
                 <a
                   href={theme.termsUrl}
                   target="_blank"
