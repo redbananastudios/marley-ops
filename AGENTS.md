@@ -75,7 +75,7 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-01 - reliability sweep MERGED end to end; staging green; zero open PRs)
+## Current State (2026-09-01 - reliability sweep + adversarial re-review MERGED; staging green; zero open PRs)
 
 Last touched: 2026-09-01 on i9. Twelve PRs merged to `staging`, every one staging-green before the
 next landed: #171 (master merge + Windows CRLF test + runbook rows), #172 (leak scan certified files
@@ -104,6 +104,17 @@ the brand), #182 (Deposit cell invited a deposit on a commercial lead).
   (`balanceRungVisible`), /payments dating (terms date, `classifyBooking`'s verdict, undated
   split "wait" vs "fix"), due-date authority (reschedules write nothing for commercial), the
   payments-card Deposit cell, and the completion-invoice email copy.
+
+- **An adversarial re-review of the day's own work ran after the sweep** (6 domain reviewers, 2
+  refuters per finding): 3 confirmed defects, all fixed same-day - #184 (the reads FEEDING the
+  rollback probes could still fail silent, incl. the quotes read whose failure skipped all four
+  money blockers AND the foreign-source refusal), #185 (commercial settlements got the residential
+  "see you on move day" receipt; invoice ADOPTION stamped today+terms over the adopted document's
+  own due date - `findInvoiceByReference` now returns the document's `dueDate` from both adapters
+  and the document governs, else nothing is stamped), #186 (Reply-To display names now go through
+  sender.ts's `sanitizeDisplayName`; four test guards tightened with proven RED evasions). 3
+  findings refuted by the verify stage; 2 product-decision LOWs routed to ClickUp (869ett5wy card
+  kill-switch scope, 869ett5y8 payments-card invoiced inference).
 
 **Open decisions:** none new. **Blockers:** the staging Zoho refresh token is STILL dead
 (`invalid_code` = revoked; re-mint per `scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk,
