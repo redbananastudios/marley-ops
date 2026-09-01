@@ -245,10 +245,11 @@ export interface ZohoInvoiceStatus extends ZohoInvoiceRef {
  *  the DB write-back). */
 export async function findInvoiceByReference(
   reference: string,
-): Promise<(ZohoInvoiceRef & { total?: number }) | null> {
+): Promise<(ZohoInvoiceRef & { total?: number; dueDate?: string }) | null> {
   const res = await zoho("GET", `/invoices?reference_number=${encodeURIComponent(reference)}`);
   const inv = (res.invoices ?? []).find((i: any) => i.status !== "void");
   if (!inv) return null;
+  const due = typeof inv.due_date === "string" ? inv.due_date.slice(0, 10) : "";
   return {
     invoiceId: inv.invoice_id,
     invoiceNumber: inv.invoice_number,
@@ -256,6 +257,11 @@ export async function findInvoiceByReference(
     // Zoho returns the document total on list rows — adopters use it to verify
     // an orphan actually bills what we computed (never adopt a mismatch).
     ...(inv.total != null ? { total: Number(inv.total) } : {}),
+    // The document's own due date (yyyy-mm-dd), also on list rows — adopters
+    // on the commercial ladder stamp THIS rather than re-deriving today+terms,
+    // because the client already holds a PDF naming this day. Conditional, so
+    // absence stays absence.
+    ...(due ? { dueDate: due } : {}),
   };
 }
 

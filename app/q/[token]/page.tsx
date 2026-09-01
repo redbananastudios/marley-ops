@@ -480,18 +480,24 @@ export default async function AcceptPage({
   // booking is actually on.
   if (policyOfQuote(quote) === "commercial") {
     let settledAt: string | null = null;
+    let settledUnknown = false;
     if (quote.lead_id) {
-      const { data: lead } = await sb
+      const { data: lead, error: leadErr } = await sb
         .from("leads")
         .select("balance_paid_at")
         .eq("id", quote.lead_id)
         .maybeSingle();
+      // "I could not check" and "not paid" are different answers. A failed
+      // read left `settledAt` null, which rendered the full "Amount due"
+      // panel as if the payment position were known — to a client who may
+      // have settled weeks ago.
+      if (leadErr) settledUnknown = true;
       settledAt = lead?.balance_paid_at ?? null;
     }
     const moveOn = moveDateLabel(quote.moving_date);
     const invoiceAmt = Number(quote.balance_invoice_amount ?? 0);
-    const showInvoice =
-      isRealZohoId(quote.zoho_balance_invoice_id) && invoiceAmt > 0 && !settledAt;
+    const invoiceRaised = isRealZohoId(quote.zoho_balance_invoice_id) && invoiceAmt > 0;
+    const showInvoice = invoiceRaised && !settledAt && !settledUnknown;
     // A terms date that was never recorded names no day here either. The terms
     // themselves are the whole truth available, and they are what the quote and
     // the invoice document have already told this client.
@@ -515,9 +521,11 @@ export default async function AcceptPage({
               .{" "}
               {settledAt
                 ? "Your invoice is paid in full, so there is nothing further to do. Thank you."
-                : showInvoice
-                  ? "Your invoice is below."
-                  : "There is nothing to pay now. We'll invoice your account once the job is done, payable on your agreed terms."}
+                : invoiceRaised && settledUnknown
+                  ? "We could not confirm your payment position just now, so we are not showing an amount here. Your invoice was sent by email, and if you have already paid it there is nothing further to do."
+                  : showInvoice
+                    ? "Your invoice is below."
+                    : "There is nothing to pay now. We'll invoice your account once the job is done, payable on your agreed terms."}
             </p>
           </div>
         </Card>

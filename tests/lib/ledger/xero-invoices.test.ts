@@ -179,6 +179,27 @@ describe("findInvoiceByReference — ambiguity yields nothing", () => {
     );
   });
 
+  it("returns the document's own due date, for adopters that must not invent one", async () => {
+    // The adoption path stamps the ADOPTED document's due date onto the quote
+    // (never today+terms — the client already holds a PDF naming this day).
+    state.queue.push(
+      json({
+        Invoices: [
+          invoiceRow({ DueDate: "/Date(1790640000000+0000)/", DueDateString: "2026-09-29T00:00:00" }),
+        ],
+      }),
+      onlineUrl(),
+    );
+    const found = await findInvoiceByReference("MMR001-DEP");
+    expect(found?.dueDate).toBe("2026-09-29");
+  });
+
+  it("omits the due date when the document carries none, so absence stays absence", async () => {
+    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    const found = await findInvoiceByReference("MMR001-DEP");
+    expect(found && "dueDate" in found).toBe(false);
+  });
+
   /** A voided document is still returned by a reference query — verified live. */
   it("skips voided and deleted matches", async () => {
     state.queue.push(

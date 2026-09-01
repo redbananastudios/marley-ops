@@ -2950,7 +2950,10 @@ export async function createBalanceInvoiceFlow(
   // activity note and the customer email — went on speaking residential twenty
   // lines below a local that already knew better.
   const commercialInvoice = policyOfQuote(quote) === "commercial";
-  const commercialDueDate = commercialInvoice
+  // Derived for the invoice this raise is about to CREATE. When the lookup
+  // below ADOPTS one that already exists instead, the adopted document's own
+  // date replaces this — see the branch after the mismatch guard.
+  let commercialDueDate = commercialInvoice
     ? paymentTermsDueDate(new Date(), await clientPaymentTermsDays(sb, quote))
     : null;
   try {
@@ -2970,6 +2973,23 @@ export async function createBalanceInvoiceFlow(
         `It was NOT adopted. Reconcile ${inv.invoiceNumber} in Zoho (void it, or correct the figure), then retry.`,
       ], "money").catch(() => {});
       return { ok: false, error: `An invoice for ${ref} already exists in Zoho at a different figure — reconcile it there first.` };
+    }
+    if (inv && commercialInvoice) {
+      // ADOPTED document, adopted date. This invoice already exists — raised
+      // by a crashed prior run on an earlier day, or by hand in the books —
+      // and it carries its OWN due date, which the client's copy already
+      // shows. Stamping today+terms here would email "payable by
+      // <today+terms>" with a PDF attached that names a different day. The
+      // document governs: stamp what it says, and when the ledger returned no
+      // date, stamp nothing — the email then states the terms and names no
+      // day (a missing date fails to nothing, never to a guess).
+      commercialDueDate = inv.dueDate ?? null;
+      log.info("quote.balance_invoice.adopted_due_date", {
+        quoteId,
+        quoteRef: quote.quote_ref,
+        invoiceNumber: inv.invoiceNumber,
+        dueDate: commercialDueDate,
+      });
     }
     let contactId = quote.zoho_contact_id;
     let contactProvider = quote.contact_provider;
@@ -3406,11 +3426,17 @@ export async function markBalancePaid(
   );
 
   if (quote.customer_email && amount > 0) {
+    // COMMERCIAL settles a completion invoice for a move that already
+    // happened: no move day to promise, no livery to prepare for, and the
+    // residential receipt asserts both — so the send composes for the policy,
+    // exactly as the invoice it settles did (PRD §3.10).
+    const policy = policyOfQuote(quote);
+    const commercialSettlement = policy === "commercial";
     const receipt: ReceiptDetails = {
       receiptNumber: balanceReference(quote.quote_ref),
       paidAtLabel: ukReceiptDate(new Date(now)),
       method,
-      forLabel: "Final balance",
+      forLabel: commercialSettlement ? "Completion invoice" : "Final balance",
       amount,
     };
     const brand = await brandForComms(sb, quote.brand);
@@ -3421,16 +3447,24 @@ export async function markBalancePaid(
       moveDateLabel: moveDateLabel(quote.moving_date),
       receipt,
       brand,
+      paymentPolicy: policy,
+      invoiceNumber: quote.zoho_balance_invoice_number,
     };
-    const templateId = templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_RECEIPT");
+    // `balanceReceivedTemplateVars` refuses commercial — the hosted template's
+    // fixed slots promise move day (PRD §11.7 trap 4). Honour the refusal
+    // rather than falling back to a truthy id.
+    const templateVars = balanceReceivedTemplateVars(meta);
+    const templateId = templateVars ? templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_RECEIPT") : null;
     await dispatchComm(sb, actorId, {
       channel: "email",
       from: accountsFromFor(brand),
       to: quote.customer_email,
       subject: `Payment received — all settled (${quote.quote_ref})`,
-      bodyText: `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay.`,
-      ...(templateId
-        ? { template: { id: templateId, variables: balanceReceivedTemplateVars(meta) }, bodyHtml: buildBalanceReceivedEmailHtml(meta) }
+      bodyText: commercialSettlement
+        ? `Payment of £${amount.toFixed(2)} received against invoice ${quote.zoho_balance_invoice_number ?? balanceReference(quote.quote_ref)} for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay. Thank you for your business.`
+        : `Balance of £${amount.toFixed(2)} received for quote ${quote.quote_ref} — receipt ${receipt.receiptNumber}, paid by ${paymentMethodLabel(method).toLowerCase()} on ${receipt.paidAtLabel}. Nothing more to pay.`,
+      ...(templateId && templateVars
+        ? { template: { id: templateId, variables: templateVars }, bodyHtml: buildBalanceReceivedEmailHtml(meta) }
         : { bodyHtml: buildBalanceReceivedEmailHtml(meta) }),
       replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
       leadId: quote.lead_id,

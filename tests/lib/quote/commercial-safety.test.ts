@@ -320,8 +320,10 @@ describe("the completion invoice carries the client's reference and its real due
     const due = body.indexOf("const dueDate = commercialDueDate ?? balanceDueDate(quote.moving_date);");
     expect(due, "dueDate no longer prefers the commercial terms date").toBeGreaterThan(-1);
     // commercialDueDate must be computed BEFORE dueDate reads it, or this is a
-    // temporal-dead-zone crash rather than a wrong date.
-    const computed = body.indexOf("const commercialDueDate =");
+    // temporal-dead-zone crash rather than a wrong date. `let`, not `const`:
+    // the adoption path replaces the derived date with the adopted document's
+    // own (tests/lib/quote/commercial-completion-copy.test.ts).
+    const computed = body.indexOf("let commercialDueDate =");
     expect(computed, "commercialDueDate is no longer computed in this flow").toBeGreaterThan(-1);
     expect(computed).toBeLessThan(due);
   });

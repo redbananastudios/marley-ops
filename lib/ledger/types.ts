@@ -236,9 +236,17 @@ export interface LedgerAdapter {
   }): Promise<string>;
 
   /* invoices */
+  /**
+   * `total` lets adopters verify an orphan bills what we computed (never adopt
+   * a mismatch). `dueDate` (yyyy-mm-dd) is the ADOPTED document's own terms
+   * date: the adoption path stamps it rather than re-deriving today+terms,
+   * because the client already holds a PDF naming this day. Both optional —
+   * absence is absence, and adopters must treat a missing date as "no date",
+   * never invent one.
+   */
   findInvoiceByReference(
     reference: string,
-  ): Promise<(LedgerInvoiceRef & { total?: number }) | null>;
+  ): Promise<(LedgerInvoiceRef & { total?: number; dueDate?: string }) | null>;
   createInvoice(input: CreateInvoiceInput): Promise<LedgerInvoiceRef>;
   listInvoices(input: {
     dateStart?: string;
