@@ -5,6 +5,7 @@ import {
   currentVersion,
   publicUrlFor,
   snapshotOf,
+  STORAGE_PAYMENT_SENTENCE,
   termsSnapshot,
   versionById,
   versionEffectiveOn,
@@ -174,6 +175,24 @@ describe("storage terms", () => {
     expect(storage).toContain("for containers only");
     expect(storage).not.toContain("minimum period of 28 days");
     expect(storage).not.toContain("from day 29");
+  });
+});
+
+describe("STORAGE_PAYMENT_SENTENCE", () => {
+  it("is verbatim from the CURRENT storage terms (QA-20260901-01)", () => {
+    // The /s/[token] signing page shows this sentence beside its link to the
+    // storage terms. It once hand-maintained its own copy, which said
+    // "payable by bank transfer on receipt" while the v2 terms it linked to
+    // accepted card and cash. Pinning the constant to the current body means
+    // a v3 with different payment wording fails here until the page copy
+    // moves with it.
+    expect(currentVersion("storage-terms").body).toContain(STORAGE_PAYMENT_SENTENCE);
+  });
+
+  it("does not revert to bank-transfer-only", () => {
+    expect(STORAGE_PAYMENT_SENTENCE.toLowerCase()).toContain("card");
+    expect(STORAGE_PAYMENT_SENTENCE.toLowerCase()).toContain("cash");
+    expect(STORAGE_PAYMENT_SENTENCE).not.toContain("payable by bank transfer on receipt");
   });
 });
 

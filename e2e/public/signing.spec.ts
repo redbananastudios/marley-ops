@@ -30,13 +30,10 @@ test.describe("Customer — storage agreement (/s)", () => {
     expect(res?.status()).toBe(404);
   });
 
-  // QA-20260901-01: app/s/[token]/page.tsx hardcodes "Invoices are payable by
-  // bank transfer on receipt." next to the storage-terms link, which now
-  // contradicts storage-terms-v2-2026-08-31 (card and cash are also accepted,
-  // no card surcharge). Un-skip once the page copy is sourced from (or kept in
-  // step with) the current storage-terms version instead of a second hardcoded
-  // string.
-  test.skip("payment-method copy matches the current storage terms (QA-20260901-01)", async ({ page }) => {
+  // QA-20260901-01: the page's payment sentence is STORAGE_PAYMENT_SENTENCE
+  // from lib/legal/documents.ts, which a unit test pins verbatim to the
+  // current storage-terms body — this spec guards the rendered page itself.
+  test("payment-method copy matches the current storage terms (QA-20260901-01)", async ({ page }) => {
     await page.goto(`/s/${SEED.storageAgreement.signToken}`);
     await page.waitForLoadState("networkidle");
     const body = (await page.textContent("body")) ?? "";
