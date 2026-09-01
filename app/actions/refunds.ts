@@ -28,7 +28,7 @@ import {
 } from "@/lib/refunds/customer-notice";
 import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
-import { getBrandOrDefault } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor } from "@/lib/quote/chase";
 import { ukDayOf } from "@/lib/sales-report";
@@ -663,7 +663,7 @@ export async function completeRefundQueueAction(id: string): Promise<RefundActio
   let dispatched: DispatchOutcome = null;
   if (quote?.customer_email && lines.length) {
     // ONE brand resolve per send (multi-brand PRD §3.5); marley = today.
-    const brand = await getBrandOrDefault(admin, quote.brand);
+    const brand = await brandForComms(admin, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
@@ -814,7 +814,7 @@ export async function retainRefundQueueAction(
 
   let retainDispatched: DispatchOutcome = null;
   if (quote?.customer_email) {
-    const brand = await getBrandOrDefault(admin, quote.brand);
+    const brand = await brandForComms(admin, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,

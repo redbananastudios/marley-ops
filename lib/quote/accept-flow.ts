@@ -27,7 +27,10 @@ import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { escapeHtml } from "@/lib/comms/escape-html";
 import { paymentPush } from "@/lib/push/categories";
 import { accountsFromFor, ownerIdentity } from "@/lib/comms/sender";
-import { type Brand, DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { type Brand, DEFAULT_BRAND } from "@/lib/brand";
+// Customer copy, so the EFFECTIVE card flag, not the stored one — the global
+// kill switch is the other half of the gate and a Brand row cannot see it.
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { ensureRemovalAppointment } from "@/lib/schedule/ensure-removal-appointment";
 import { log, errorContext } from "@/lib/log";
@@ -1448,7 +1451,7 @@ async function sendDepositRequestEmail(
   const owner = await ownerIdentity(sb, quote.estimator_id);
   // ONE brand resolve per send — copy, From, signature and template set all
   // derive from it (multi-brand PRD §3.5); marley/absent is byte-identical.
-  const brand = await getBrandOrDefault(sb, quote.brand);
+  const brand = await brandForComms(sb, quote.brand);
   const email = depositChaseEmail(1, {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -1718,7 +1721,7 @@ export async function markDepositPaid(
       forLabel: "Booking deposit",
       amount: deposit,
     };
-    const brand = await getBrandOrDefault(sb, quote.brand);
+    const brand = await brandForComms(sb, quote.brand);
     const meta: DepositReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
@@ -1896,7 +1899,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       // Invoice notes are customer-visible: the card mention follows the brand's
       // own card switch (§11.10) and the MarleyMoves Ltd disclosure follows
       // whether this is the default brand (§3.5) — two separate facts.
-      const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      const notesBrand = await brandForComms(sb, quote.brand);
       const payClause = invoicePayClause(notesBrand, quote.quote_ref, "Payable by");
       inv = await createInvoice({
         customerId: contactId!,
@@ -2062,7 +2065,7 @@ export async function markCommitmentPaid(
       forLabel: "Booking commitment",
       amount,
     };
-    const brand = await getBrandOrDefault(sb, quote.brand);
+    const brand = await brandForComms(sb, quote.brand);
     const meta: CommitmentReceivedMeta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,
@@ -2440,7 +2443,7 @@ async function sendDateConfirmationEmail(
       });
     }
   }
-  const brand = await getBrandOrDefault(sb, quote.brand);
+  const brand = await brandForComms(sb, quote.brand);
   // Settle-in-full (PRD §3.10 Addition 3) is advertised only where the /q page
   // would actually honour it, so this reads the SAME gate rather than inferring
   // an offer from the commitment amount: an email offering a choice the page
@@ -2696,7 +2699,7 @@ async function sendBalanceInvoiceEmail(
       ...errorContext(err),
     });
   }
-  const brand = await getBrandOrDefault(sb, quote.brand);
+  const brand = await brandForComms(sb, quote.brand);
   // What the deposit rail still owes. The default copy tells the customer their
   // deposit "is already accounted for" — true of the arithmetic (the balance is
   // agreed − deposit whether or not it has been paid) and read by someone who
@@ -2996,7 +2999,7 @@ export async function createBalanceInvoiceFlow(
         (credits.length ? ` less ${credits.join(" and ")} already received` : "") + forfeitClause;
       // Same rule as the commitment invoice: card follows the brand's switch,
       // the disclosure follows the brand's identity.
-      const notesBrand = await getBrandOrDefault(sb, quote.brand);
+      const notesBrand = await brandForComms(sb, quote.brand);
       // COMMERCIAL falls due on the client's agreed terms, not before move day
       // — this raise happens AFTER the move. The residential lead sentence told
       // a business client their invoice was already overdue on the day they
@@ -3410,7 +3413,7 @@ export async function markBalancePaid(
       forLabel: "Final balance",
       amount,
     };
-    const brand = await getBrandOrDefault(sb, quote.brand);
+    const brand = await brandForComms(sb, quote.brand);
     const meta = {
       firstName: quote.customer_name,
       quoteRef: quote.quote_ref,

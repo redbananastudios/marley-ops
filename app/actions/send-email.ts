@@ -15,7 +15,8 @@ import { createClient } from "@/lib/supabase/server";
 import { dispatchComm, type DispatchCommResult } from "@/lib/comms/dispatch";
 import { brandedEmailHtml } from "@/lib/comms/branded-shell";
 import { helloFromFor, ownerFrom } from "@/lib/comms/sender";
-import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { DEFAULT_BRAND } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { replyAddressFor } from "@/lib/quote/chase";
 
 const schema = z.object({
@@ -61,7 +62,7 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
     const { data: l } = await sb.from("leads").select("brand").eq("id", v.leadId).maybeSingle();
     brandSlug = (l?.brand as string | null) ?? null;
   }
-  const brand = await getBrandOrDefault(sb, brandSlug ?? DEFAULT_BRAND);
+  const brand = await brandForComms(sb, brandSlug ?? DEFAULT_BRAND);
 
   const paragraphs = toParagraphs(v.message);
   const bodyHtml = brandedEmailHtml({

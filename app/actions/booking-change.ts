@@ -41,7 +41,8 @@ import { dispatchComm, sendOpsAlert } from "@/lib/comms/dispatch";
 import { dayDelta } from "@/lib/schedule/pack-days";
 import { shiftPackDays } from "@/lib/schedule/pack-days-io";
 import { accountsFromFor } from "@/lib/comms/sender";
-import { getBrandOrDefault, type Brand } from "@/lib/brand";
+import { type Brand } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
 import { asProvider, voidInvoice } from "@/lib/ledger";
@@ -249,7 +250,7 @@ export async function changeBookingDateAction(
   const customerEmail = quote?.customer_email ?? lead.email ?? null;
   // ONE brand resolve per flow (multi-brand PRD §3.5) — the money quote's
   // brand wins, the lead's brand covers a quote-less edge; marley = today.
-  const brand: Brand = await getBrandOrDefault(admin, quote?.brand ?? lead.brand);
+  const brand: Brand = await brandForComms(admin, quote?.brand ?? lead.brand);
   const replyTo = quote?.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined;
 
   /* ----------------------------- OUTSIDE the window: free reschedule ------ */
@@ -815,7 +816,7 @@ export async function cancelBookingAction(input: CancelBookingInput): Promise<Ca
   // Apology email — full-refund copy when money is held (fail-soft).
   const customerEmail = quote?.customer_email ?? lead.email ?? null;
   if (customerEmail) {
-    const brand: Brand = await getBrandOrDefault(admin, quote?.brand ?? lead.brand);
+    const brand: Brand = await brandForComms(admin, quote?.brand ?? lead.brand);
     const meta = {
       firstName: lead.name ?? quote?.customer_name,
       quoteRef: quote?.quote_ref ?? "your booking",

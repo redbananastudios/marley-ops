@@ -14,7 +14,8 @@ import {
   ownerIdentity,
   HELLO_FROM,
 } from "@/lib/comms/sender";
-import { DEFAULT_BRAND, getBrandOrDefault, type Brand } from "@/lib/brand";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { parseAltRecipient } from "@/lib/comms/alt-recipient";
 import { normalizeEmail } from "@/lib/leads/phone";
@@ -67,7 +68,7 @@ export async function sendCommunication(input: SendCommInput): Promise<SendCommR
     const { data: l } = await sb.from("leads").select("brand").eq("id", input.leadId).maybeSingle();
     slug = (l?.brand as string | null) ?? null;
   }
-  const brand: Brand = await getBrandOrDefault(sb, slug ?? DEFAULT_BRAND);
+  const brand: Brand = await brandForComms(sb, slug ?? DEFAULT_BRAND);
   input = { ...input, brand };
 
   if (input.templateKey && input.templateVariables && !input.template) {

@@ -31,7 +31,8 @@ import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
 import { policyOfQuote, requestedDeposit } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
 import { accountsFromFor, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
-import { getBrandOrDefault, type Brand } from "@/lib/brand";
+import { type Brand } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { latestAttendedSurveyAt, pendingSurveyLeadIds } from "@/lib/schedule/attended";
@@ -201,7 +202,7 @@ export async function GET(req: Request) {
   const brandFor = async (slug: string | null | undefined): Promise<Brand> => {
     const key = slug || "marley";
     if (brandCache.has(key)) return brandCache.get(key)!;
-    const brand = await getBrandOrDefault(sb, key);
+    const brand = await brandForComms(sb, key);
     brandCache.set(key, brand);
     return brand;
   };

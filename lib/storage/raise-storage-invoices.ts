@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { log, errorContext } from "@/lib/log";
 import { sendEmail } from "@/lib/comms/send";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
-import { getBrandOrDefault } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { asProvider, configuredProvider, createInvoice, findInvoiceByReference, findOrCreateContact, getInvoicePdfBase64 } from "@/lib/ledger";
 import {
   invoicesDue,
@@ -201,7 +201,7 @@ async function emailStorageInvoice(
     letBrand?: string | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const brand = await getBrandOrDefault(admin, args.letBrand ?? "marley");
+  const brand = await brandForComms(admin, args.letBrand ?? "marley");
   const input: StorageInvoiceEmailInput = {
     firstName: (args.clientName ?? "").trim().split(/\s+/)[0] || "there",
     unitLabel: args.unitLabel,

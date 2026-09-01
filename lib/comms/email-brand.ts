@@ -164,8 +164,20 @@ export interface EmailThemeOptions {
    * button off the GLOBAL switch alone (QA-20260826-07). The toggle and the
    * live behaviour could disagree in both directions.
    *
-   * Pass this only when the caller knows something the row does not — e.g. the
-   * global kill switch is off, so no card channel is live for any brand.
+   * THIS IS NOT HOW THE GLOBAL KILL SWITCH REACHES THE COPY, despite what this
+   * comment used to say. It never was: no caller anywhere in the repo ever
+   * assigned it, so the sentence described an intention rather than a wiring,
+   * and a brand whose own switch was on still advertised card while the global
+   * switch was down. The global switch arrives through the Brand instead —
+   * every customer-copy path resolves via `lib/comms/brand-theme.ts`
+   * `brandForComms`, which hands this function a Brand whose
+   * `cardPaymentsEnabled` is the EFFECTIVE flag (both switches ANDed). A
+   * resolver a caller must go through cannot be silently left unwired the way
+   * an optional flag can.
+   *
+   * So pass this only for the narrow case it genuinely covers: a caller that
+   * has decided this one send should not mention card, for a reason no switch
+   * expresses. Prefer `brandForComms` for everything else.
    */
   cardPhone?: boolean;
 }
