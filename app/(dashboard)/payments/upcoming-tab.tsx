@@ -13,11 +13,27 @@ import { poundsMoney, shortDate } from "./format";
  * move days (payment in full lands by move day; the T-7 cron raises the final
  * invoice inside that window). Deposit-paid bookings with no committed date
  * sit in the pencilled pipeline underneath — real money, no date to put it on.
+ *
+ * Commercial money is dated by the CLIENT'S TERMS instead (PRD §3.10) — 30 or
+ * 60 days after the job completes, never the move day. `buildUpcoming` owns
+ * that split; this file only has to render its two extra shapes. The undated
+ * commercial card is hidden when empty, like the commercial sections on the
+ * Due tab: with no commercial clients this tab reads exactly as it did before.
  */
 
 const KIND_CHIP: Record<string, { label: string; cls: string }> = {
   commitment: { label: "25%", cls: "bg-warn-bg text-warn" },
   balance: { label: "Balance", cls: "bg-info-bg text-info" },
+  commercial: { label: "Commercial", cls: "bg-muted text-mist-500" },
+};
+
+/** The line under a customer's name, per ladder. Commercial does NOT say "due
+ *  in full by move day": that sentence is true of the residential balance and
+ *  false of a completion invoice with a month of terms still to run. */
+const KIND_CAPTION: Record<string, string> = {
+  commitment: " · 25% invoice due",
+  balance: " · due in full by move day",
+  commercial: " · due on the client's agreed terms",
 };
 
 function weekLabel(startDay: string, endDay: string, todayUk: string): string {
@@ -59,6 +75,13 @@ export async function UpcomingTab({ brandFilter = "all" }: { brandFilter?: strin
     customer: r.customer,
     bucket: r.bucket,
     legacy: r.legacy,
+    // The two fields that keep a commercial row off the residential schedule.
+    // Drop either and every commercial booking silently re-reads as
+    // residential — dated on its move day and OVERDUE the morning after —
+    // with every unit test still green, because they hand `buildUpcoming` its
+    // input directly. A source-shape test pins this projection for that reason.
+    paymentPolicy: r.paymentPolicy,
+    commercialDueDate: r.commercialDueDate,
     commitmentInvoiceAmount: r.commitmentInvoiceAmount,
     commitmentPaidAt: r.commitmentPaidAt,
     commitmentDueDate: r.commitmentDueDate,
@@ -79,7 +102,8 @@ export async function UpcomingTab({ brandFilter = "all" }: { brandFilter?: strin
           <p className="eyebrow">Next 4 weeks</p>
           <p className="tabular mt-1 font-display text-2xl font-bold text-foreground">{poundsMoney(horizonTotal)}</p>
           <p className="mt-0.5 text-xs text-mist-400">
-            {shortDate(view.horizonStart)} – {shortDate(view.horizonEnd)} · invoiced 25% + booked balances
+            {shortDate(view.horizonStart)} – {shortDate(view.horizonEnd)} · invoiced 25% + booked balances +
+            commercial terms
           </p>
         </Card>
         <Card className="px-5 py-4">
@@ -129,7 +153,7 @@ export async function UpcomingTab({ brandFilter = "all" }: { brandFilter?: strin
                       ) : null}
                       <p className="text-xs text-mist-400">
                         {item.quoteRef}
-                        {item.kind === "balance" ? " · due in full by move day" : " · 25% invoice due"}
+                        {KIND_CAPTION[item.kind] ?? ""}
                       </p>
                     </div>
                     {item.overdue ? (
@@ -148,6 +172,57 @@ export async function UpcomingTab({ brandFilter = "all" }: { brandFilter?: strin
           )}
         </Card>
       ))}
+
+      {/* Commercial money that has no terms date to place it on. Hidden when
+          empty, like its Due-tab counterparts. It is a LIST rather than an
+          omission because the alternative is this board reporting "nothing
+          expected" about a live unpaid commercial invoice — the absence of a
+          finding read as good news, which is the failure shape this codebase
+          keeps hitting. The two reasons are printed per row: awaiting
+          completion is the ordinary state of a booked job, while a raised
+          invoice with no terms date is a defect NO overdue rule can ever
+          catch, so it sorts first and carries a marker. */}
+      {view.commercialUndated.items.length ? (
+        <Card className="p-0">
+          <div className="flex items-baseline gap-3 border-b px-5 py-3.5">
+            <h2 className="font-display text-lg text-foreground">Commercial, not yet dated</h2>
+            <span className="rounded-pill bg-muted px-2 py-0.5 text-xs font-semibold tabular text-mist-500">
+              {view.commercialUndated.items.length}
+            </span>
+            <span className="ml-auto hidden text-xs text-mist-400 sm:block">
+              invoiced on completion, then due on the client&rsquo;s terms
+            </span>
+            <span className="tabular text-sm font-bold text-foreground">
+              {poundsMoney(view.commercialUndated.total)}
+            </span>
+          </div>
+          <div className="divide-y divide-mist-150">
+            {view.commercialUndated.items.map((item) => (
+              <div key={item.quoteId} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
+                <div className="min-w-0 flex-1">
+                  <Link href={`/leads/${item.leadId}`} className="font-medium text-foreground hover:underline">
+                    {item.customer}
+                  </Link>
+                  {item.legacy ? (
+                    <span className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500">
+                      Legacy (iMVE)
+                    </span>
+                  ) : null}
+                  <p className="text-xs text-mist-400">
+                    {item.quoteRef} · {item.reason}
+                  </p>
+                </div>
+                {item.needsAttention ? (
+                  <span className="rounded-pill bg-warn-bg px-2.5 py-0.5 text-[11px] font-bold text-warn">
+                    CHECK INVOICE
+                  </span>
+                ) : null}
+                <span className="tabular text-sm font-semibold text-foreground">{poundsMoney(item.amount)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
 
       <Card className="p-0">
         <div className="flex items-baseline gap-3 border-b px-5 py-3.5">
