@@ -34,11 +34,14 @@
  * Pure, so the rules are unit-testable away from the flow.
  */
 import { legacyLocked, type LegacyLockFields } from "@/lib/legacy";
-import { commitmentDueImmediately } from "@/lib/payments-policy";
+import { commitmentDueImmediately, policyOfQuote } from "@/lib/payments-policy";
 
 export interface LateBalanceQuote extends LegacyLockFields {
   status: string;
   moving_date: string | null;
+  /** The ladder snapshotted at acceptance. Read through `policyOfQuote`, so a
+   *  null (unaccepted, pre-0111, or an unreadable client row) is residential. */
+  payment_policy?: string | null;
   /** Non-null covers 'pending' too: the CAS claim is held, hands off. */
   zoho_balance_invoice_id: string | null;
   booking_cancelled_at: string | null;
@@ -53,9 +56,22 @@ export interface LateBalanceQuote extends LegacyLockFields {
  * before it claims anything — which is exactly what a small job (gate 9a: the
  * ask IS the gross) does, with no side effect and no alert.
  *
- * Also not checked here: commercial quotes, which take no deposit and no
- * balance at all. Gate 10 excludes them at the accept-flow choke point that
- * already guards `ensureDepositInvoice`, rather than in each rule downstream.
+ * Commercial IS checked here, and the reason is worth recording because this
+ * docstring previously said the opposite. It claimed the exclusion happened at
+ * "the accept-flow choke point that already guards `ensureDepositInvoice`".
+ * There is no such choke point. `ensureDepositInvoice` guards ITSELF, on its
+ * own first lines; and `ensureLateBookingBalanceInvoice` has six call sites of
+ * which the commercial refusal covers one — the NEW-acceptance branch of the
+ * online flow. The already-accepted self-heal branches, the CAS-lost branch and
+ * the carried-deposit branch all reach it with no policy check whatsoever.
+ *
+ * It does not fire today, but only because office "Mark won" writes no
+ * `kind: "contract"` signature row, so `hasContractSignature` is false on the
+ * one path a commercial quote can be accepted through. That is an incidental
+ * property of a different function rather than a guard this rule asserts — and
+ * a T-7 residential final invoice raised against a business client, days before
+ * a job that has not happened, is customer-facing money. So the rule states its
+ * own precondition instead of borrowing one.
  */
 export function lateBalanceDueAtAcceptance(
   quote: LateBalanceQuote,
@@ -63,6 +79,9 @@ export function lateBalanceDueAtAcceptance(
   today: Date = new Date(),
 ): boolean {
   if (quote.status !== "accepted") return false;
+  // No deposit, no commitment, no T-7 balance: commercial has ONE invoice,
+  // raised by hand on completion and due on the client's own terms.
+  if (policyOfQuote(quote) === "commercial") return false;
   if (quote.booking_cancelled_at) return false;
   // Already raised — or mid-raise. Same rule as balanceInvoiceDue.
   if (quote.zoho_balance_invoice_id) return false;

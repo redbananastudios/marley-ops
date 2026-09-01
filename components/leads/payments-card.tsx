@@ -34,8 +34,30 @@ export interface PaymentState {
   depositRequestedAt: string | null;
   depositPaidAt: string | null;
   balanceAmount: number | null;
+  /**
+   * `leads.balance_due_date` — RESIDENTIAL machinery. It is worked back from the
+   * move day, so on a commercial booking it says nothing true and this card must
+   * never print it. Two date-change paths used to overwrite it with a move-day
+   * date for every accepted quote regardless of policy, so on a commercial lead
+   * it can hold an actively wrong value rather than merely an irrelevant one.
+   */
   balanceDueDate: string | null;
   balancePaidAt: string | null;
+  /**
+   * Which ladder this booking runs, snapshotted on its accepted quote.
+   *
+   * REQUIRED rather than optional on purpose (same reasoning as
+   * `requestedDeposit`'s `smallJobThreshold`): a defaulted field would let a
+   * second reader of this card render commercial money as residential and still
+   * compile. Making it required means tsc names every caller instead.
+   */
+  paymentPolicy: "residential" | "commercial" | null;
+  /**
+   * Commercial only: `quotes.commercial_due_date`, the terms date stamped when
+   * the completion invoice was raised. Null until it is raised — at which point
+   * no due date EXISTS, rather than one being unknown.
+   */
+  commercialDueDate: string | null;
 }
 
 /**
@@ -169,6 +191,23 @@ export function PaymentsCard({
   const [balance, setBalance] = useState(String(state.balanceAmount ?? (suggestedBalance ?? "")));
   const [balanceDue, setBalanceDue] = useState(state.balanceDueDate ?? "");
 
+  const commercial = state.paymentPolicy === "commercial";
+  /**
+   * The date this balance ACTUALLY falls due, per the ladder the booking runs.
+   *
+   * Residential is the lead's own column, worked back from the move. Commercial
+   * counts forward from the day the completion invoice was raised, plus the
+   * client's payment terms, and that date lives on the quote — so a commercial
+   * lead reads `commercialDueDate` and never `balanceDueDate`. Printing the
+   * latter stated a move-day date as plain fact for a client whose invoice was
+   * correctly dated weeks later, and it was the only screen showing that column.
+   *
+   * Null on a commercial lead means the completion invoice has not been raised,
+   * so no due date exists yet. The branch below says that rather than filling
+   * the gap with the residential date.
+   */
+  const dueDate = commercial ? state.commercialDueDate : state.balanceDueDate;
+
   async function run(fn: () => Promise<{ ok: boolean; error?: string }>, ok: string) {
     setBusy(true);
     const res = await fn();
@@ -268,10 +307,10 @@ export function PaymentsCard({
             <p className="text-sm font-semibold text-success">
               {gbp(state.balanceAmount)} paid {fmt(state.balancePaidAt)}
             </p>
-          ) : state.balanceAmount != null && state.balanceDueDate ? (
+          ) : state.balanceAmount != null && dueDate ? (
             <div className="space-y-2">
               <p className="text-sm text-foreground">
-                {gbp(state.balanceAmount)} due {fmt(state.balanceDueDate)}{" "}
+                {gbp(state.balanceAmount)} due {fmt(dueDate)}{" "}
                 <span className="font-medium text-warn">· unpaid</span>
               </p>
               <div className="flex flex-wrap items-center gap-2">
@@ -283,6 +322,29 @@ export function PaymentsCard({
                     Greig James asked where to pay and there was no button to press. */}
                 <BalanceInvoiceButton leadId={leadId} />
               </div>
+            </div>
+          ) : commercial ? (
+            /* Commercial, with no terms date to show. Two states share this
+               branch and it names both rather than blending them, because "not
+               invoiced yet" and "invoiced but we cannot say when it is due" are
+               different answers to the office — the second is the queue's own
+               `commercial_terms_unknown` bucket and needs a human.
+
+               What it must never do is fall through to the manual date box
+               below and invite someone to type a move-day date onto a job whose
+               money is dated from its invoice. */
+            <div className="space-y-2">
+              <p className="text-sm text-foreground">
+                {state.balanceAmount != null ? (
+                  <>
+                    {gbp(state.balanceAmount)} invoiced{" "}
+                    <span className="font-medium text-warn">· no terms date recorded</span>
+                  </>
+                ) : (
+                  "Business terms — one invoice, raised when the job is completed and due on the client's payment terms."
+                )}
+              </p>
+              <BalanceInvoiceButton leadId={leadId} />
             </div>
           ) : (
             <div className="space-y-2">

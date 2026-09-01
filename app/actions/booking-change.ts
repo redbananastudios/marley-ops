@@ -45,10 +45,10 @@ import { getBrandOrDefault, type Brand } from "@/lib/brand";
 import { templateIdFor } from "@/lib/comms/template-id";
 import { replyAddressFor, LOSS_REASONS } from "@/lib/quote/chase";
 import { asProvider, voidInvoice } from "@/lib/ledger";
-import { balanceDueDate, moveDateLabel } from "@/lib/quote/payments";
+import { moveDateLabel } from "@/lib/quote/payments";
 import { ukInstant } from "@/lib/uk-time";
 import { ukDayOf } from "@/lib/sales-report";
-import { commitmentDueDate } from "@/lib/payments-policy";
+import { balanceDueDateForMove, commitmentDueDate } from "@/lib/payments-policy";
 import { buildHeldSnapshot, createRefundQueueEntry } from "@/lib/refunds";
 import {
   bookingChangeMode,
@@ -76,7 +76,7 @@ const isRealZohoId = (v: string | null | undefined): boolean => !!v && v !== "pe
 
 /** The quote columns every flow here needs off the money quote. */
 const MONEY_QUOTE_COLS =
-  "id, quote_ref, brand, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, deposit_invoice_provider, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, commitment_invoice_provider, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_provider";
+  "id, quote_ref, brand, customer_name, customer_email, accept_token, client_id, agreed_price, grand_total, moving_date, payment_policy, commercial_due_date, deposit_amount, deposit_paid_at, zoho_deposit_invoice_id, zoho_deposit_invoice_number, deposit_invoice_provider, commitment_paid_at, commitment_invoice_amount, commitment_due_date, zoho_commitment_invoice_id, zoho_commitment_invoice_number, commitment_invoice_provider, zoho_balance_invoice_id, zoho_balance_invoice_number, balance_invoice_provider";
 
 interface MoneyQuote {
   id: string;
@@ -90,6 +90,10 @@ interface MoneyQuote {
   agreed_price: number | null;
   grand_total: number | null;
   moving_date: string | null;
+  /** The ladder snapshotted at acceptance — read through `policyOfQuote`. */
+  payment_policy: string | null;
+  /** Commercial only: the completion invoice's terms date. Null until raised. */
+  commercial_due_date: string | null;
   deposit_amount: number | null;
   deposit_paid_at: string | null;
   zoho_deposit_invoice_id: string | null;
@@ -376,8 +380,17 @@ export async function changeBookingDateAction(
     const { error } = await admin.from("quotes").update({ moving_date: newMoveDay } as never).eq("id", quote.id);
     if (error) sideEffectFailures.push(`quotes.moving_date: ${error.message}`);
   }
-  if (newMoveDay) {
-    const dueDate = balanceDueDate(newMoveDay);
+  // Same policy split as rescheduleAppointment, and the same reason: only a
+  // RESIDENTIAL balance is dated from the move. A commercial job's single
+  // invoice is raised by hand on completion and falls due on the client's own
+  // terms, so `balanceDueDateForMove` returns null and neither the lead's date
+  // nor the open balance follow-up is touched. That covers both commercial
+  // states — the invoiced one, whose terms date is already stamped and printed
+  // on the client's document, and the uninvoiced one, where no terms date can
+  // be computed yet and a move-day date would be a fact invented out of nothing.
+  // A quote-less lead resolves residential, so today's behaviour is unchanged.
+  const dueDate = newMoveDay ? balanceDueDateForMove(quote, newMoveDay) : null;
+  if (dueDate) {
     const { error: leadError } = await admin
       .from("leads")
       .update({ balance_due_date: dueDate } as never)
