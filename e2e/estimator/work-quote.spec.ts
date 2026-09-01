@@ -6,9 +6,10 @@ import { step } from "../fixtures/artefacts";
  * Estimator work+quote flow (closes the spec_gaps.estimator_work_quote_specs
  * gap tracked in qa/state.json): create a lead → book a survey for a PAST slot
  * today → open Create Quote from the lead's Quotes tab → land straight on
- * /quotes/{id} with a real draft row already created (createDraftQuote runs
- * server-side in app/(dashboard)/quotes/new/page.tsx; there is no separate
- * confirm step — the redirect IS the creation).
+ * /quotes/{id} with a real draft row already created (the /quotes/new?leadId=
+ * page renders read-only and CreateDraftAndOpen makes the draft with one
+ * client-side createDraftQuote call, QA-20260828-02; there is no separate
+ * confirm step — landing on /quotes/{id} IS the creation).
  *
  * Self-contained: creates its own throwaway lead by UI rather than depending on
  * a seeded survey/quote existing (mirrors pay-statement.spec.ts's reasoning —
