@@ -1360,3 +1360,7 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - **QA-20260828-02 skipped — claimed by a concurrent run**: this run's own claim push (`cf58627`) webhook-fired a second first-pass run, which claimed QA-20260828-02 at 04:43:46 (`883974f`) while this run was mid-fix on -01. Per REPAIR.md rule 2, `status: fixing` means that run owns it; not touched here.
 - QA-20260827-04: `class: risky` — never a repair target, untouched.
 - Escalations: none. `master` never touched. Time spent: ~15 min.
+
+## 2026-09-01 (scheduled sweep) — no eligible findings
+
+- Tier: first-pass (Fable), scheduled sweep at `a37c282`. No `status: open` + `class: safe-fix` findings (QA-20260828-02 and QA-20260901-01 are `fixed-pending-verify` via #170/#169; QA-20260827-04 is risky). No branches, no PRs, no escalations. ~2 min.
