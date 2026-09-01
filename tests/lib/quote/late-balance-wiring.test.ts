@@ -119,9 +119,22 @@ describe("gate 9b — the balance email never lies about an unpaid deposit", () 
     // The hosted Resend template is a separately hand-written copy with no slot
     // for the outstanding deposit, so it would render "your deposit is already
     // accounted for" to the one customer that is wrong for (§11.7 trap 4).
-    expect(SRC).toContain(
-      'depositOutstanding > 0 ? null : templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE")',
+    //
+    // Whitespace-normalised, and the condition now carries a second exclusion:
+    // COMMERCIAL. Same template, same trap one step further out — its hosted
+    // copy asserts "payment in full is due before move day" throughout, so
+    // rendering a completion invoice through it would restore in the template
+    // exactly the claim the in-repo body stopped making. `!templateVars` is
+    // that exclusion (balanceInvoiceTemplateVars returns null for commercial),
+    // so this guard is now strictly stronger than the literal it replaces, not
+    // relaxed to accommodate a reformat.
+    const flat = SRC.replace(/\s+/g, " ");
+    expect(flat).toContain(
+      'const templateId = depositOutstanding > 0 || !templateVars ? null : templateIdFor(brand, "RESEND_TEMPLATE_BALANCE_INVOICE")',
     );
+    // And the id is only ever USED with its vars, so a truthy id can never be
+    // paired with a null variable set.
+    expect(flat).toContain("...(templateId && templateVars");
   });
 
   it("derives the outstanding deposit from the quote, so every send path agrees", () => {

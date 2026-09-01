@@ -5,6 +5,9 @@
  *  - Deposit received  → "You're booked in" confirmation.
  *  - Balance invoice   → "Your final balance" request (pre-move, payment in
  *    full before the job), with BACS details + the hosted Zoho invoice link.
+ *    The same builder carries the COMMERCIAL completion invoice, which is the
+ *    last invoice on a job under either policy but falls due on the client's
+ *    agreed terms rather than before move day — it branches on `paymentPolicy`.
  *
  * Multi-brand (docs/multi-brand-prd.md §3.5): every meta takes an optional
  * `brand`; absent/null/marley renders BYTE-IDENTICAL to the single-brand
@@ -17,6 +20,7 @@
  */
 
 import type { Brand } from "@/lib/brand";
+import type { PaymentPolicy } from "@/lib/payments-policy";
 import {
   emailTheme,
   themedBankCard,
@@ -152,7 +156,15 @@ export function depositReceivedTemplateVars(m: DepositReceivedMeta): Record<stri
   };
 }
 
-export function balanceInvoiceTemplateVars(m: BalanceInvoiceMeta): Record<string, string> {
+export function balanceInvoiceTemplateVars(m: BalanceInvoiceMeta): Record<string, string> | null {
+  // COMMERCIAL falls back to the in-repo body, exactly as the commercial quote
+  // email does. The published template is a separately hand-written copy of
+  // this email whose fixed slots assert "payment in full is due before move
+  // day", and scripts/create-resend-templates.mjs PATCHes hosted templates BY
+  // NAME — so editing it for commercial would overwrite the live template every
+  // residential customer receives (PRD §11.7 trap 4). Returning null costs a
+  // commercial client the dashboard-editable copy and nothing else.
+  if (m.paymentPolicy === "commercial") return null;
   const t = emailTheme(m.brand);
   return {
     CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
@@ -326,11 +338,110 @@ export interface BalanceInvoiceMeta {
    * they add up to.
    */
   depositOutstanding?: number | null;
+  /**
+   * The policy snapshotted onto the quote at acceptance (PRD §3.10). Absent,
+   * null and `"residential"` all render today's exact bytes.
+   *
+   * This template is deliberately shared: the commercial COMPLETION invoice
+   * reuses the balance columns and the `-BAL` suffix because it is the last
+   * invoice on a job under either policy. The reuse is right; speaking
+   * residential to a commercial client is not. Commercial takes no deposit, so
+   * `depositOutstanding` is always 0 and the copy always took the arm that
+   * asserts "payment in full is due before move day" — about an invoice raised
+   * BY HAND after the move, payable on 30 or 60 day terms. There was no arm
+   * that did not make the claim.
+   */
+  paymentPolicy?: PaymentPolicy | null;
+  /**
+   * Commercial only: the client's agreed terms date, pre-formatted the same way
+   * `moveDateLabel` is ("Monday 29 September"). Carries `quotes.commercial_due_date`,
+   * which is the date printed on the invoice document itself, so the email and
+   * the PDF it attaches can never fall due on two different days.
+   *
+   * Absent means no terms date is recorded, and the copy then states the TERMS
+   * and names no day. A missing value must not render as a confident claim.
+   */
+  termsDueDateLabel?: string | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
   brand?: Brand | null;
 }
 
+/**
+ * The COMMERCIAL completion invoice (PRD §3.10) — same document slot, different
+ * story: the job is done, and the invoice falls due on the client's own terms.
+ *
+ * A separate function rather than a set of ternaries inside the residential
+ * builder, so residential parity is structural: not one byte of the copy below
+ * is reachable from a residential send, and the parity lock in
+ * tests/lib/comms/commercial-completion-invoice.test.ts is asserting something
+ * the code shape already guarantees.
+ *
+ * The vocabulary is borrowed, not invented — "payable on your agreed terms" is
+ * what the commercial quote email, the commercial quote PDF, /q's commercial
+ * review screen and this invoice's own Zoho notes already say. The word
+ * "penalty" never appears (hard copy rule, docs/payments-policy-v2-prd.md).
+ *
+ * The pre-move attendance disclosure is deliberately NOT carried here. It
+ * prepares a customer for the livery that turns up "on the day", and this
+ * invoice is raised after that day has passed; every pre-move touch a
+ * commercial client receives (quote email, quote PDF, /q) still carries it.
+ */
+function buildCompletionInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
+  const t = emailTheme(m.brand);
+  const name = (m.firstName ?? "").trim().split(/\s+/)[0];
+  const when = m.moveDateLabel
+    ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
+    : "";
+  const btn = m.invoiceUrl ? themedButtonRow(m.invoiceUrl, "View your invoice &rarr;", t) : "";
+  const due = (m.termsDueDateLabel ?? "").trim();
+  // No date means no day is named. Falling back to the move date, to today, or
+  // to a soothing "shortly" would each turn an absence of information into a
+  // statement of fact — the shape this codebase has been bitten by four times.
+  // The terms themselves are still stated, so the client is never left with
+  // nothing.
+  const termsSentence = due
+    ? `It is payable on your agreed terms, by <strong style="color:#1A1A1A;">${escapeHtml(due)}</strong>.`
+    : `It is payable on your agreed terms.`;
+  const cardNote = due
+    ? `Payable on your agreed terms, by ${escapeHtml(due)}.`
+    : `Payable on your agreed terms.`;
+
+  const inner = [
+    themedPill(`Invoice &middot; ${escapeHtml(m.quoteRef)}`, t),
+    headline(`Your invoice${name ? ", " + escapeHtml(name) : ""}`),
+    subline(`Your move${when} is complete, so here is your invoice. ${termsSentence}`),
+    `  <tr><td style="padding:0 36px 22px;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="background:#FFFFFF;border:1.5px solid #1A1A1A;border-radius:8px;overflow:hidden;">
+      <tr><td style="padding:20px 26px;border-left:4px solid ${t.accent};">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.22em;color:#6E6A65;margin-bottom:6px;">Amount due${
+          m.invoiceNumber ? ` &middot; Invoice ${escapeHtml(m.invoiceNumber)}` : ""
+        }</div>
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:36px;font-weight:700;color:#1A1A1A;letter-spacing:-0.02em;line-height:1;">${gbp(m.amount)}</div>
+        <div style="font-size:11px;color:#6E6A65;margin-top:6px;">${cardNote}</div>
+      </td></tr>
+    </table>
+  </td></tr>`,
+    btn,
+    themedBankCard(m.quoteRef, t),
+    subline(
+      `If your accounts team needs anything else from us, ${t.callHtml} or reply to this email.`,
+    ),
+  ].join("\n");
+
+  return themedEmailShell(
+    due
+      ? `Your invoice for ${gbp(m.amount)}, payable on your agreed terms by ${due}.`
+      : `Your invoice for ${gbp(m.amount)}, payable on your agreed terms.`,
+    inner,
+    t,
+  );
+}
+
 export function buildBalanceInvoiceEmailHtml(m: BalanceInvoiceMeta): string {
+  // Branch FIRST, so nothing below this line can be reached by a commercial
+  // send and nothing in the commercial builder can be reached by a residential
+  // one. Everything after it is byte-for-byte the email that has always gone out.
+  if (m.paymentPolicy === "commercial") return buildCompletionInvoiceEmailHtml(m);
   const t = emailTheme(m.brand);
   const name = (m.firstName ?? "").trim().split(/\s+/)[0];
   const when = m.moveDateLabel
