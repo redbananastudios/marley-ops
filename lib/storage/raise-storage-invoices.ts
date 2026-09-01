@@ -3,6 +3,8 @@ import { log, errorContext } from "@/lib/log";
 import { sendEmail } from "@/lib/comms/send";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
 import { brandForComms } from "@/lib/comms/brand-theme";
+import { emailTheme } from "@/lib/comms/email-brand";
+import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { asProvider, configuredProvider, createInvoice, findInvoiceByReference, findOrCreateContact, getInvoicePdfBase64 } from "@/lib/ledger";
 import {
   invoicesDue,
@@ -89,16 +91,52 @@ export function invoiceDescription(due: DueInvoice, unitLabel: string, dayRate: 
   }
 }
 
-const NOTES: Record<DueInvoice["kind"], string> = {
-  period:
-    "Storage is billed in advance per period. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
+/**
+ * The kind-specific opening line. Brand-free by construction — it describes
+ * the billing rule, which is the same whoever is billing.
+ */
+const NOTE_LEAD: Record<DueInvoice["kind"], string> = {
+  period: "Storage is billed in advance per period.",
   minimum:
-    "Your minimum storage period, billed in advance; further days are charged to the exact day in arrears. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
-  arrears:
-    "Storage days billed in arrears to the exact day. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
-  final:
-    "Final storage invoice. All charges are settled before items are released. Pay by bank transfer using the invoice number as the reference, or by card over the phone on 01747 637070.",
+    "Your minimum storage period, billed in advance; further days are charged to the exact day in arrears.",
+  arrears: "Storage days billed in arrears to the exact day.",
+  final: "Final storage invoice. All charges are settled before items are released.",
 };
+
+/**
+ * The customer-visible "how to pay" note on a storage ledger invoice.
+ *
+ * This was four fixed strings with one office number and one card offer baked
+ * into each, resolved at module load — where no brand exists to resolve them
+ * against. Every storage customer therefore read the same number and was
+ * offered the same rail, whichever brand's let they were being billed for. A
+ * customer of one brand ringing another brand's office reaches people who have
+ * never heard of them, and a card offer is worse still: it names a channel
+ * that may not exist, on a document they cannot argue with.
+ *
+ * Two independent facts were conflated into those literals: WHOSE invoice this
+ * is, and whether card is live at all. They are separate here, exactly as
+ * `invoicePayClause` separates them for the removals ladder.
+ *
+ * Pure, and takes the resolved values rather than a brand row: the card answer
+ * needs the global kill switch as well as the brand's own flag (PRD §11.10),
+ * and that lives in `business_settings`, which no pure function can see. The
+ * caller ANDs them via `cardPaymentsAvailable` and passes the verdict in — so
+ * "card is live" is decided in ONE place for this file rather than half-decided
+ * in two.
+ */
+export function storageInvoiceNote(
+  kind: DueInvoice["kind"],
+  pay: { phone: string; cardPhone: boolean },
+): string {
+  // Card off means the word does not appear, not that it appears hedged: the
+  // number still belongs on the invoice as a support line, which is why it
+  // survives here while the rail does not.
+  const how = pay.cardPhone
+    ? `Pay by bank transfer using the invoice number as the reference, or by card over the phone on ${pay.phone}.`
+    : `Pay by bank transfer using the invoice number as the reference. Any questions, call us on ${pay.phone}.`;
+  return `${NOTE_LEAD[kind]} ${how}`;
+}
 
 const FOOTER_NOTES: Partial<Record<DueInvoice["kind"], string>> = {
   minimum:
@@ -195,9 +233,9 @@ async function emailStorageInvoice(
     invoiceProvider?: string | null;
     invoiceNumber: string;
     invoiceUrl: string | null;
-    /** The let's brand slug (multi-brand PRD §3.5) — absent/marley sends
-     *  today's exact email; another brand gets its own chrome, From and the
-     *  MarleyMoves Ltd payment disclosure. */
+    /** The let's brand slug (multi-brand PRD §3.5) — absent, or the default
+     *  slug, sends today's exact email; another brand gets its own chrome,
+     *  From address and the operating-company payment disclosure. */
     letBrand?: string | null;
   },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -211,6 +249,13 @@ async function emailStorageInvoice(
     invoiceUrl: args.invoiceUrl,
     footerNote: FOOTER_NOTES[args.kind],
     brand,
+    // The email and the ledger note describe the SAME invoice, so they must
+    // answer the card question the same way. Left unset, the email theme falls
+    // back to the brand row alone — which ignores the global kill switch, and
+    // would have this email offering card while the note on the very invoice
+    // it attaches says bank transfer only. This is the explicit override
+    // `emailTheme` documents for a caller that can see both switches.
+    offerCardPhone: await cardPaymentsAvailable(admin, args.letBrand ?? null),
   };
   let pdf: string | undefined;
   try {
@@ -371,6 +416,10 @@ export async function raiseDueStorageInvoices(
     const unit = unitById.get(let_.unit_id);
     const client = clientById.get(let_.client_id);
     const unitLabel = buildUnitLabel(unit, siteName);
+    // Read ONCE per let, because both customer-facing halves of the invoice —
+    // the ledger note and the email — have to speak as the same brand. Two
+    // separate reads of the same column is how they come to disagree.
+    const letBrand = (let_ as { brand?: string | null }).brand ?? null;
 
     for (const inv of due) {
       let claimedId: string | null = null;
@@ -448,12 +497,33 @@ export async function raiseDueStorageInvoices(
             resolvePaymentPolicy(client) === "commercial"
               ? paymentTermsDueDate(new Date(), paymentTermsDays(client?.payment_terms_days))
               : null;
+          // The note names a phone number and possibly a payment rail, so it
+          // needs the LET's brand — the same value the email below already
+          // resolves. `createInvoice` takes no brand (PRD §3.4 would give it
+          // one; that is a larger seam), so the text is resolved here, before
+          // it is handed over, rather than by threading a brand through the
+          // ledger adapters.
+          //
+          // Resolved inside the try, so a brand or settings read that fails
+          // releases the claim and retries next run — the file's standing rule.
+          // Failing closed on card is the safe direction: a missed card
+          // mention costs a phone call, an offered-but-absent one costs trust.
+          //
+          // `emailTheme` rather than a local read because it already answers
+          // exactly the two questions the note asks — the display phone, with
+          // the default brand's literal as the fallback, and whether card may
+          // be named — and it is the same resolver the attached email uses two
+          // steps later. Reimplementing the fallback here would put a brand
+          // literal back into this file and let the note and the email drift.
+          const noteTheme = emailTheme(await brandForComms(admin, letBrand ?? "marley"), {
+            cardPhone: await cardPaymentsAvailable(admin, letBrand),
+          });
           ref = await createInvoice({
             customerId: contactId,
             reference,
             description: invoiceDescription(inv, unitLabel, Number(let_.rate ?? 0)),
             amount: inv.amount,
-            notes: NOTES[inv.kind],
+            notes: storageInvoiceNote(inv.kind, noteTheme),
             disableOnlinePayments: true, // card policy: deposit only
             itemName: "Storage", // income separation (accountant maps by item)
             ...(storageDueDate ? { dueDate: storageDueDate } : {}),
@@ -511,7 +581,7 @@ export async function raiseDueStorageInvoices(
             invoiceId: ref.invoiceId,
             invoiceNumber: ref.invoiceNumber,
             invoiceUrl: ref.invoiceUrl,
-            letBrand: (let_ as { brand?: string | null }).brand ?? null,
+            letBrand,
           });
           if (sent.ok) summary.emailed++;
           else summary.errors.push(`email ${ref.invoiceNumber}: ${sent.error}`);
