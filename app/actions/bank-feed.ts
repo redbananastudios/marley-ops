@@ -9,7 +9,7 @@ import {
   markQuoteDepositPaidAction,
 } from "@/app/(dashboard)/bookings/actions";
 import { backfillPaidMethod, loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
-import { wholeQuoteLinks } from "@/lib/bank-feed/whole-quote";
+import { coveringPairLinks, wholeQuoteLinks } from "@/lib/bank-feed/whole-quote";
 import type { OpenItem } from "@/lib/bank-feed/match";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { log } from "@/lib/log";
@@ -43,6 +43,13 @@ const PAY_KINDS = new Set<string>(["deposit", "commitment", "balance"]);
  *  nothing to record, only an already-recorded set to point the bank row at. */
 const WHOLE_QUOTE = "full" as const;
 type LinkKind = PayKind | typeof WHOLE_QUOTE;
+/** One transfer covering the OPEN commitment + balance pair — the gate-9c
+ *  settle-in-full shape (see coveringPairLinks). DISPLAY-ONLY target kind:
+ *  confirming records the two individual payments through the normal paid
+ *  pipelines, and the bank row is stamped with an EXISTING match_kind — this
+ *  value is never written to the database (the 0103 CHECK constraint stands). */
+const COVERING_PAIR = "pair" as const;
+type TargetKind = LinkKind | typeof COVERING_PAIR;
 
 const pennies = (n: number): number => Math.round(n * 100);
 
@@ -158,9 +165,10 @@ export interface AttachTarget {
   quoteId: string;
   quoteRef: string;
   customer: string | null;
-  kind: LinkKind;
-  /** For a whole-quote link, the recorded payments it covers ("deposit",
-   *  "balance") so the office sees what it is settling, not just a total. */
+  kind: TargetKind;
+  /** For a whole-quote or covering-pair target, the payments it covers
+   *  ("deposit", "balance") so the office sees what it is settling, not just
+   *  a total. */
   kinds?: PayKind[];
   amount: number;
   /** Equals the transfer to the penny — only these are attachable. */
@@ -222,8 +230,27 @@ export async function searchAttachTargetsAction(input: { txId: string; query: st
       settled: true,
     }));
 
+  // The gate-9c settle-in-full transfer: ONE payment covering the open
+  // commitment + balance pair exactly (the deposit is already settled, so no
+  // single item and no settled-sum can explain it). Same evidence bar as the
+  // whole-quote link — exact pennies against the pair, a human picks — but the
+  // confirm RECORDS both payments (they are open money, not recorded money).
+  const coveringPairs: AttachTarget[] = coveringPairLinks(open, txPennies)
+    .filter((p) => matchesQuery(p))
+    .map((p) => ({
+      quoteId: p.quoteId,
+      quoteRef: p.quoteRef,
+      customer: p.customer,
+      kind: COVERING_PAIR,
+      kinds: [...p.kinds],
+      amount: p.amount,
+      amountMatches: true,
+      settled: false,
+    }));
+
   const targets: AttachTarget[] = [
     ...open.filter((o) => (q ? matchesQuery(o) : pennies(o.amount) === txPennies)).map((o) => toTarget(o, false)),
+    ...coveringPairs,
     // Settled items only ever link on an EXACT amount (a link binds "this
     // transfer IS that payment" with no human-readable delta to reason about).
     ...settled.filter((s) => pennies(s.amount) === txPennies && matchesQuery(s)).map((s) => toTarget(s, true)),
@@ -467,6 +494,162 @@ export async function attachBankTransactionAction(input: {
   revalidatePath("/payments");
   revalidatePath("/bookings");
   return { ok: true as const, quoteRef: item.quoteRef };
+}
+
+/**
+ * Office confirms a settle-in-full covering transfer: ONE payment equal, to
+ * the penny, to the sum of a quote's open commitment + open balance (the gate-
+ * 9c shape — the deposit is already recorded, so no single open item, no
+ * settled item and no whole-quote settled-sum can explain the transfer, and it
+ * previously sat as a permanent mismatch while the customer was chased for the
+ * commitment they had paid).
+ *
+ * Same evidence bar as every other bank-feed money action: exact pennies,
+ * re-derived server-side at confirm time, and a HUMAN tap — this is never
+ * suggested by the sync and never auto-recorded. Confirming records the two
+ * individual payments through the existing paid pipelines (commitment first,
+ * ledger order). No new match_kind: the row is claimed as 'commitment' while
+ * that half records, then re-stamped 'balance' once both are recorded (the
+ * larger payment gets the row's duplicate/collision protection; either stamp
+ * is an under-claim of what the transfer paid, never a false claim).
+ *
+ * Partial failure is LOUD: if the commitment half fails nothing was recorded
+ * and the row is put back exactly as it was; if the balance half fails after
+ * the commitment recorded, the row is put back, the office is told exactly
+ * what state the quote is in, and an ops alert is raised — a half-recorded
+ * transfer must never silently read as "Recorded".
+ */
+export async function recordCoveringPairAction(input: { txId: string; quoteId: string }) {
+  const userId = await officeActor();
+  if (!userId) return { ok: false as const, error: "Office access required." };
+
+  const admin = createAdminClient();
+  const { data: tx, error: txErr } = await admin
+    .from("bank_transactions")
+    .select("id, amount, status, matched_quote_id, match_kind, match_confidence")
+    .eq("id", input.txId)
+    .maybeSingle();
+  if (txErr) return { ok: false as const, error: txErr.message };
+  if (!tx || (tx.status !== "unmatched" && tx.status !== "suggested")) {
+    return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
+  }
+
+  // Fresh pair check — the exact-sum invariant, server-side, never trusted
+  // from the client. coveringPairLinks refuses ambiguity (anything other than
+  // exactly one open commitment + one open balance on the quote) by design.
+  const open = await loadOpenItems(admin);
+  const pair = coveringPairLinks(open, pennies(Number(tx.amount))).find((p) => p.quoteId === input.quoteId);
+  if (!pair) {
+    return {
+      ok: false as const,
+      error:
+        "This transfer no longer covers that quote's open commitment + balance exactly (paid, cancelled or changed) — refresh and check it again.",
+    };
+  }
+
+  // Claim-first CAS against the status the office saw; a concurrent
+  // confirm/dismiss/re-match wins and nothing is recorded. Claimed as
+  // 'commitment' — the half that records first — so at every moment the row
+  // only ever claims a payment this transfer has actually bought.
+  const prior = {
+    status: tx.status,
+    matched_quote_id: (tx.matched_quote_id as string | null) ?? null,
+    match_kind: (tx.match_kind as string | null) ?? null,
+    match_confidence: (tx.match_confidence as string | null) ?? null,
+  };
+  const { data: claimed, error: claimErr } = await admin
+    .from("bank_transactions")
+    .update({
+      status: "confirmed",
+      matched_quote_id: input.quoteId,
+      match_kind: "commitment",
+      match_confidence: "manual",
+      confirmed_at: new Date().toISOString(),
+    } as never)
+    .eq("id", input.txId)
+    .eq("status", prior.status)
+    // Bind the amount too: the 2-min sync's sheet upsert may rewrite a
+    // mutable-window row between our read and this claim.
+    .eq("amount", tx.amount)
+    .select("id");
+  if (claimErr) return { ok: false as const, error: claimErr.message };
+  if (!claimed?.length) {
+    return { ok: false as const, error: "This transfer changed since the page loaded — refresh and check it again." };
+  }
+
+  const revert = async (status: string, context: string) => {
+    const { error } = await admin
+      .from("bank_transactions")
+      .update({
+        status,
+        matched_quote_id: prior.matched_quote_id,
+        match_kind: prior.match_kind,
+        match_confidence: prior.match_confidence,
+        confirmed_at: null,
+      } as never)
+      .eq("id", input.txId)
+      .eq("status", "confirmed");
+    if (error) await alertStuckRow(input.txId, context, error.message);
+  };
+
+  // 1. Commitment half. A failure here recorded nothing — put the row back.
+  const com = await runPaidPipeline("commitment", input.quoteId);
+  if (!com.ok) {
+    await revert(prior.status, "a covering-pair confirm (commitment half)");
+    return com;
+  }
+  if (com.already) {
+    await revert("unmatched", "a covering-pair confirm (commitment half)");
+    return {
+      ok: false as const,
+      error:
+        "That commitment was already recorded — this transfer looks like it includes a DUPLICATE. Check the bank and refund/credit before dismissing it.",
+    };
+  }
+
+  // 2. Balance half. The commitment IS now recorded, so from here the row must
+  //    never silently read "Recorded" for money that only half-landed: put the
+  //    row back in the queue (the unexplained portion stays visible), tell the
+  //    office exactly what happened, and page ops.
+  const bal = await runPaidPipeline("balance", input.quoteId);
+  if (!bal.ok || bal.already) {
+    await revert("unmatched", "a covering-pair confirm (balance half)");
+    const detail = bal.ok
+      ? "the balance was ALREADY recorded elsewhere, so the balance portion of this transfer may be a duplicate — check the bank before clearing the row"
+      : `recording the balance FAILED: ${bal.error}. Record the balance manually via Bookings/Zoho, then dismiss the row`;
+    log.error("bank-feed.covering-pair.balance_half_failed", {
+      txId: input.txId,
+      quoteId: input.quoteId,
+      quoteRef: pair.quoteRef,
+      already: bal.ok ? bal.already === true : false,
+    });
+    await sendOpsAlert(`Settle-in-full transfer only half recorded — ${pair.quoteRef} needs a manual fix`, [
+      `A £${Number(tx.amount).toFixed(2)} transfer was confirmed as ${pair.quoteRef}'s commitment + balance. The commitment (£${pair.commitmentAmount.toFixed(2)}) was recorded, but ${detail}.`,
+      `The bank row is back in the queue on /payments so the unexplained portion stays visible.`,
+    ], "system");
+    return {
+      ok: false as const,
+      error: `The commitment (£${pair.commitmentAmount.toFixed(2)}) was recorded, but ${detail}.`,
+    };
+  }
+
+  // Both recorded. Re-stamp the row as the balance — the larger payment — so
+  // the claimed/collision checks protect the bigger money and the ledger dates
+  // it to the day it really arrived. Best-effort: a failed re-stamp leaves the
+  // row truthfully (if less protectively) claiming the commitment.
+  const { error: stampErr } = await admin
+    .from("bank_transactions")
+    .update({ match_kind: "balance" } as never)
+    .eq("id", input.txId)
+    .eq("status", "confirmed")
+    .eq("matched_quote_id", input.quoteId);
+  if (stampErr) {
+    log.error("bank-feed.covering-pair.restamp_failed", { txId: input.txId, error: stampErr.message });
+  }
+
+  revalidatePath("/payments");
+  revalidatePath("/bookings");
+  return { ok: true as const, quoteRef: pair.quoteRef };
 }
 
 /**

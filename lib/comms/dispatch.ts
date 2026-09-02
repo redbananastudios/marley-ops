@@ -230,6 +230,14 @@ export async function dispatchComm(
           : undefined,
         replyTo: input.replyTo,
         from: input.from,
+        // Snapshot the reply-identity fields for a non-default brand so the
+        // FALLBACK Reply-To (emailReplyToFor — a tokenless send) fronts the
+        // brand's own door, and a comms-retry re-drive of the stored request
+        // fronts the SAME one (trap 7's email sibling). Marley rows carry no
+        // snapshot and stay byte-identical to today.
+        ...(input.brand && input.brand.slug !== DEFAULT_BRAND
+          ? { brand: { slug: input.brand.slug, helloFrom: input.brand.helloFrom } }
+          : {}),
       }
     : null;
   const providerPayloadHash = emailInput

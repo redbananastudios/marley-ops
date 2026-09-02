@@ -25,6 +25,7 @@ import {
   confirmBankTransactionAction,
   dismissBankTransactionAction,
   linkRecordedBankTransactionAction,
+  recordCoveringPairAction,
   unlinkBankTransactionAction,
 } from "@/app/actions/bank-feed";
 import { AttachDialog } from "@/components/payments/attach-dialog";
@@ -57,6 +58,14 @@ export interface BankFeedTx {
     customer: string | null;
     kind: "deposit" | "commitment" | "balance";
     leadId: string | null;
+  } | null;
+  /** This transfer equals, to the penny, the sum of its named quote's OPEN
+   * commitment + balance — the settle-in-full covering transfer (gate 9c).
+   * One tap records BOTH payments through the normal paid pipelines; nothing
+   * is automatic, and off-by-a-penny or ambiguity renders no hint at all. */
+  coveringPairHint?: {
+    commitmentAmount: number;
+    balanceAmount: number;
   } | null;
 }
 
@@ -266,11 +275,18 @@ function SuggestedRow({ tx }: { tx: BankFeedTx }) {
 }
 
 function MismatchRow({ tx }: { tx: BankFeedTx }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [, start] = useTransition();
   // A transfer for a payment that ALREADY has a bank row against it: the
   // customer has most likely paid twice, so this is money we owe back rather
   // than money to explain away. It is deliberately parked here instead of
   // being auto-reconciled, which would have hidden it on every surface.
   const duplicate = tx.matchConfidence === "duplicate";
+  // The settle-in-full covering transfer: equals the quote's open commitment +
+  // balance to the penny. One tap records both; the server re-verifies the
+  // exact sum against fresh open items before any money moves.
+  const pair = !duplicate ? tx.coveringPairHint ?? null : null;
   const quoteLink = tx.leadId ? (
     <Link href={`/leads/${tx.leadId}`} className="font-semibold hover:underline">
       {tx.quoteRef}
@@ -278,6 +294,30 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
   ) : (
     <span className="font-semibold">{tx.quoteRef}</span>
   );
+
+  function confirmPair() {
+    if (!pair || !tx.quoteId) return;
+    setBusy(true);
+    start(async () => {
+      try {
+        const res = await recordCoveringPairAction({ txId: tx.id, quoteId: tx.quoteId! });
+        if (!res.ok) {
+          toast.error(res.error ?? "Could not record the payments.");
+          router.refresh(); // the pair may have changed — show the truth
+          return;
+        }
+        toast.success(
+          `Recorded — ${tx.quoteRef ?? "quote"} commitment + balance marked paid (bank transfer).`,
+        );
+        router.refresh();
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Could not record the payments.");
+      } finally {
+        setBusy(false);
+      }
+    });
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-5 py-3.5">
       <span className="tabular w-14 shrink-0 text-xs text-mist-400">{fmtDay(tx.txDate)}</span>
@@ -292,6 +332,12 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
             already recorded and already has a transfer against it, so this looks like a second one. Check
             the bank, then refund or credit the customer before clearing this row.
           </p>
+        ) : pair ? (
+          <p className="text-xs text-mist-400">
+            covers {quoteLink}&apos;s open commitment ({gbp(pair.commitmentAmount)}) + balance (
+            {gbp(pair.balanceAmount)}) exactly — the customer settled in full with one transfer. Confirm
+            to record both payments.
+          </p>
         ) : (
           <p className="text-xs text-warn">
             references {quoteLink} but the open {tx.matchKind} is{" "}
@@ -301,9 +347,30 @@ function MismatchRow({ tx }: { tx: BankFeedTx }) {
           </p>
         )}
       </div>
-      <span className="tabular text-sm font-semibold text-warn">{gbp(tx.amount)}</span>
+      <span className={`tabular text-sm font-semibold ${pair ? "text-foreground" : "text-warn"}`}>
+        {gbp(tx.amount)}
+      </span>
+      {pair && tx.quoteId ? (
+        <button
+          type="button"
+          onClick={confirmPair}
+          disabled={busy}
+          className="focus-ring inline-flex min-h-9 items-center gap-1.5 rounded-md bg-mm-red px-3 text-sm font-semibold text-white transition-colors hover:brightness-95 disabled:opacity-60"
+        >
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" strokeWidth={2} />
+          ) : (
+            <Check className="size-4" strokeWidth={2} />
+          )}
+          Confirm — record both
+        </button>
+      ) : null}
       <AttachDialog txId={tx.id} amount={tx.amount} counterparty={tx.counterparty} reference={tx.reference} />
-      <DismissButton txId={tx.id} confirmWith={{ amount: tx.amount, counterparty: tx.counterparty }} />
+      <DismissButton
+        txId={tx.id}
+        busyExternal={busy}
+        confirmWith={{ amount: tx.amount, counterparty: tx.counterparty }}
+      />
     </div>
   );
 }

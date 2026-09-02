@@ -16,7 +16,7 @@
 
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
-import type { Brand } from "@/lib/brand";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 import { emailTheme, themedPill } from "@/lib/comms/email-brand";
 
 const gbp = (n: number | null | undefined): string =>
@@ -66,8 +66,11 @@ export interface QuoteEmailMeta {
   depositAmount?: number;
   /** Sending brand — absent/marley renders today's exact bytes. */
   brand?: Brand | null;
-  /** Card-at-accept availability for NON-default brands (global AND brand
-   *  card switches, PRD §11.10). Ignored for marley — its literals stand. */
+  /** Card-at-accept availability for NON-default brands: the caller's
+   *  RESOLVED two-switch verdict (global AND brand card switches, PRD §11.10
+   *  — brandForComms / cardPaymentsAvailable). UNSET fails safe to no card
+   *  copy, so an unwired caller can never advertise a rail it did not check.
+   *  Ignored for marley — its literals stand. */
   offerCard?: boolean;
   /**
    * Which ladder this quote runs (PRD §3.10). Absent means residential, so
@@ -84,12 +87,27 @@ export interface QuoteEmailMeta {
 /** The deposit-step copy for the accept-link path: today's literal for
  *  marley, card wording gated by the brand's card switches otherwise. */
 function depositStepCopy(m: QuoteEmailMeta): string {
-  // `offerCard` overrides; otherwise the theme derives it from the brand's own
-  // switch. It used to be the ONLY source, and no caller ever set it — so a
-  // non-default brand could never be given card copy however its Settings
-  // toggle was flipped (QA-20260826-07). Marley keeps card copy either way:
-  // its row seeds the switch on, and the default theme reports it true.
-  const t = emailTheme(m.brand, m.offerCard === undefined ? undefined : { cardPhone: m.offerCard });
+  // Marley's arm is unchanged (the byte-lock): its literals stand, with the
+  // pre-existing explicit-false escape hatch; the global switch's reach into
+  // Marley copy stays QA-20260826-07's deliberately open remainder.
+  //
+  // A NON-default brand shows card copy only on an explicit `offerCard: true`
+  // — the caller's resolved two-switch verdict. Deriving from the brand row's
+  // own switch here read the STORED flag, which bypasses the global kill
+  // switch whenever the caller's row was not resolved through brandForComms —
+  // and this gate has already been left with zero assigning callers once
+  // (QA-20260826-07). Unset FAILS SAFE to the bank-transfer wording: an
+  // unwired caller must under-promise a rail, never advertise one that may be
+  // switched off (PRD §11.10).
+  const isDefault = !m.brand || m.brand.slug === DEFAULT_BRAND;
+  const t = emailTheme(
+    m.brand,
+    isDefault
+      ? m.offerCard === undefined
+        ? undefined
+        : { cardPhone: m.offerCard }
+      : { cardPhone: m.offerCard === true },
+  );
   return t.cardPhone
     ? "Pay by card or bank transfer straight after accepting. This secures your booking; confirming your date then locks it in."
     : "Pay by bank transfer straight after accepting. This secures your booking; confirming your date then locks it in.";
