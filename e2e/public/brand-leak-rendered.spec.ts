@@ -315,6 +315,30 @@ const appOrigin: Permitted = {
     "the APP's own origin, not document identity — one app hosts every brand (app chrome per PRD §2, the same grounds lib/job-sheet-load.ts is exempted on in the source manifest). Absent from a page that links nothing back to itself.",
 };
 
+/**
+ * The installed-PWA name, from `app/layout.tsx`'s viewport/apple meta block.
+ *
+ * PRD §4 "Public token pages" decides this explicitly: "PWA manifest and app
+ * chrome (app/layout.tsx, app/manifest.ts, BrandMark) — UNCHANGED. Marley Ops
+ * stays the group's internal panel name, including for a Pitmans crew member
+ * installing the PWA. Brand belongs on the records, not the frame." These tags
+ * are emitted by the root layout on every route, so they reach a token page's
+ * <head> too; nothing renders them to a customer reading the page.
+ *
+ * Scoped to the exact `content="…"` strings rather than the bare product name,
+ * so any OTHER occurrence of that word on these pages is still a leak. This is
+ * the second thing the rendered half caught on /q — the first, an inherited
+ * `description` naming the default brand, was a real defect and is fixed
+ * (pageDescription, 2026-09-02). This one is the documented decision, so it is
+ * exempted VISIBLY here rather than by loosening the assertion.
+ */
+const appChrome: Permitted = {
+  text: 'content="Marley Ops"',
+  mustOccur: true,
+  reason:
+    'PRD §4: the installed-PWA name is app chrome and stays the group\'s panel name for every brand. `app/layout.tsx` sets `appleWebApp: { title: "Marley Ops" }` on every route, so it reaches a token page\'s <head>; iOS reads it at add-to-home-screen and nothing renders it to the customer. mustOccur because the layout emits it unconditionally — if it ever stops, this exemption is dead and the spec says so rather than quietly covering nothing.',
+};
+
 const gate15 = (text: string, which: string): Permitted => ({
   text,
   mustOccur: true,
@@ -899,7 +923,7 @@ const SECOND_BRAND_SURFACES: Surface[] = [
     label: "/q (accept and pay — brand from the quote)",
     path: `/q/${TOKENS.quote}`,
     expect: /Your removal quote/i,
-    permitted: (row) => [groupMark(row), legalEntity, gate15(TERMS_URL, "the /q terms link"), appOrigin],
+    permitted: (row) => [groupMark(row), legalEntity, gate15(TERMS_URL, "the /q terms link"), appOrigin, appChrome],
   },
   {
     label: "/s (storage agreement — brand from the let)",
@@ -910,13 +934,14 @@ const SECOND_BRAND_SURFACES: Surface[] = [
       legalEntity,
       gate15(STORAGE_TERMS_URL, "the /s storage-terms link"),
       appOrigin,
+      appChrome,
     ],
   },
   {
     label: "/cv (customer cubic survey — brand from the lead)",
     path: `/cv/${TOKENS.cubic}`,
     expect: /What's moving/i,
-    permitted: (row) => [groupMark(row), legalEntity, appOrigin],
+    permitted: (row) => [groupMark(row), legalEntity, appOrigin, appChrome],
   },
 ];
 
