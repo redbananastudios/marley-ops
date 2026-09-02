@@ -75,53 +75,38 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-01 - reliability sweep + adversarial re-review MERGED; staging green; zero open PRs)
+## Current State (2026-09-02 - full-PRD second QA pass CLOSED OUT; 15 more PRs; staging green; zero open)
 
-Last touched: 2026-09-01 on i9. Twelve PRs merged to `staging`, every one staging-green before the
-next landed: #171 (master merge + Windows CRLF test + runbook rows), #172 (leak scan certified files
-it never read), #174 (crew e2e networkidle), then the six-lens review's findings - #173 (commercial
-completion invoice invisible to the bank feed and its alarm cleared by "Mark completed"), #175
-(rollback safety checks that could not run reported clean), #176 (in-CSV duplicates + staff import
-dying on a mixed sheet via PostgREST defaultToNull), #177 (/payments dated commercial money on move
-day, overdue from the next morning), #178 (reschedule stomped commercial_due_date; late-balance
-guard), #179 (completion invoice email said "due before move day" to a commercial client), #180
-(Reply-To brand identity + the card kill switch never reached copy - new `brandForComms` resolver,
-`card-availability.ts` extraction), #181 (/q accept + storage invoice notes promised card whatever
-the brand), #182 (Deposit cell invited a deposit on a commercial lead).
+Last touched: 2026-09-02 on i9. A 23-reviewer adversarial second pass over the ENTIRE master->staging
+promotion payload (78 substantive commits, gate 1 -> #186), every finding judged against HEAD and
+attacked by two refuters: 16 confirmed / 0 refuted-of-verified / 19 LOW. ALL fixed same-day across
+15 PRs (#191-#198, #202-#205 + docs), every one gate-certified on a stacked merged tree before
+merging, every staging run green. The suite grew 2807 -> 3166 tests.
 
-- **Merged-tree certification is what made 12 merges safe in one day**: every PR's gates ran
-  locally on a STACKED tree (staging + everything queued ahead of it), so each merge landed
-  pre-proven against the exact content staging would hold. The one cross-branch failure this
-  caught: #180 and #181 shipped CONTRADICTORY source tripwires on `raise-storage-invoices.ts`
-  (one forbids `getBrandOrDefault`, one required it). Reconciled by intent - the let's brand,
-  resolved through `brandForComms` - and both tripwires now pass together.
-- **The comms-canonical brand resolver is `brandForComms`** (`lib/comms/brand-theme.ts`): wraps
-  `getBrandOrDefault`, overlays `cardPaymentsEnabled` with the live ANDed verdict (global kill
-  switch AND brand toggle). Customer-copy surfaces must use it - `card-toggle.test.ts` enforces
-  the class. `cardPaymentsAvailable` lives in `lib/payments/card-availability.ts` (import-cycle
-  extraction); `card-payments.ts` re-exports it.
-- **Commercial policy is now consistent across every reader**: bank-feed visibility
-  (`balanceRungVisible`), /payments dating (terms date, `classifyBooking`'s verdict, undated
-  split "wait" vs "fix"), due-date authority (reschedules write nothing for commercial), the
-  payments-card Deposit cell, and the completion-invoice email copy.
+Highlights (full detail in each PR body):
+- **#191** the chase cron read the ACCEPTANCE-time policy snapshot on unaccepted quotes (NULL ->
+  residential), so commercial clients got "pay the £100 deposit" chases and 30-day auto-lapse.
+  Pre-acceptance stages now resolve LIVE from clients.is_company; commercial excluded from lapse.
+- **#192** settle-in-full's covering transfer could never reconcile (whole-quote wants the sum of
+  ALL recorded payments, deposit included). New office-picked commitment+balance pair suggestion:
+  exact pennies, server-side re-derive, CAS claim, truthful under-claim staging, never auto.
+- **#194** crate billing matched the SIGNED terms: one calendar month minimum (migration 0115,
+  min_kind frozen per let, triple-guarded backfill; runbook row 11, applied to staging).
+- **#195/#193/#198** brand honesty: a failed brands read REFUSES instead of mis-filing a lead;
+  13 error strings + PDF names + Reply-To + card copy all brand-resolved; accept-flow joined the
+  leak scan.
+- **#196/#197** ledger cutover safety: per-payment provider stamps on refunds, void-aware Xero
+  idempotency keys, the watchdog probes the CONFIGURED provider and a green Zoho can no longer
+  clear a Xero lock-out.
+- **#203/#204/#205/#202** the 19 LOWs: typo-proof ref families, brand-stamped WP ingest, honest
+  unaccounted counts, UK-pinned dialogs, fail-soft directions corrected, e2e teardowns that throw.
 
-- **An adversarial re-review of the day's own work ran after the sweep** (6 domain reviewers, 2
-  refuters per finding): 3 confirmed defects, all fixed same-day - #184 (the reads FEEDING the
-  rollback probes could still fail silent, incl. the quotes read whose failure skipped all four
-  money blockers AND the foreign-source refusal), #185 (commercial settlements got the residential
-  "see you on move day" receipt; invoice ADOPTION stamped today+terms over the adopted document's
-  own due date - `findInvoiceByReference` now returns the document's `dueDate` from both adapters
-  and the document governs, else nothing is stamped), #186 (Reply-To display names now go through
-  sender.ts's `sanitizeDisplayName`; four test guards tightened with proven RED evasions). 3
-  findings refuted by the verify stage; 2 product-decision LOWs routed to ClickUp (869ett5wy card
-  kill-switch scope, 869ett5y8 payments-card invoiced inference).
-
-**Open decisions:** none new. **Blockers:** the staging Zoho refresh token is STILL dead
-(`invalid_code` = revoked; re-mint per `scripts/zoho-staging-token.mjs` as demo@marleymoves.co.uk,
-org 20117092566; `.env.local` is the LIVE org, do not touch it). **Next:** gate 15 needs Mark's
-terms document; gate 16's RENDERED-page leak check (Playwright half of PRD 6.4) still outstanding;
-QA-20260827-04 (`risky`) open; then the 18 September prod promotion per
-`docs/pitmans-prod-migration-runbook.md` (0104-0114). Staging `app.env` verified carrying
-`TAKEPAYMENTS_SIGNATURE_KEY` (docs template just omits it).
+**Routed to Peter (ClickUp), not patched:** card kill-switch scope asymmetry (869ett5wy),
+payments-card invoiced inference (869ett5y8), terms-promise-card wording pre-activation (869eu70v3).
+`publicUrlFor()` serving Marley-domain terms URLs to every brand lands with gate 15's per-brand
+terms_url. **Blockers:** staging Zoho refresh token still dead (re-mint per
+scripts/zoho-staging-token.mjs). **Next:** gate 15 (Mark's terms doc), gate 16's rendered-page leak
+check, QA-20260827-04, then the 18 September promotion - the runbook now carries 0104-0115 with
+0115 in the before-deploy block.
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
