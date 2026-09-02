@@ -638,6 +638,14 @@ export default async function AcceptPage({
     const balanceAmt = Number(quote.balance_invoice_amount ?? 0);
     const showBalanceCard = balanceInvoiced && balanceAmt > 0;
 
+    // Gate 9a: on a small job the FROZEN acceptance ask was the whole price —
+    // the commitment clamps to 0 and no balance invoice ever raises, so
+    // balance_paid_at never stamps. Without this flag the page promised "the
+    // balance" and a future final invoice forever, on a job that has neither.
+    // Checked AFTER the invoice signals above so an issued balance invoice
+    // (which should not coexist with a covering ask) keeps its authority.
+    const paidInFull = total > 0 && deposit >= total;
+
     // Settle-in-full at the commitment step (PRD §3.10 Addition 3). The SAME
     // rule the server action enforces decides whether the choice renders: an
     // option the page offers and the server refuses is worse than no option.
@@ -674,6 +682,8 @@ export default async function AcceptPage({
                 <> and your balance is settled in full, so there is nothing left to pay.</>
               ) : showBalanceCard ? (
                 <> — your final balance is below.</>
+              ) : paidInFull ? (
+                <> — your payment covers the whole job, so there is nothing more to pay.</>
               ) : (
                 <>
                   {" "}
@@ -748,6 +758,13 @@ export default async function AcceptPage({
                           sortCode: BANK_DETAILS.sortCode,
                           account: BANK_DETAILS.account,
                         }}
+                        // Same gate as BankPanel's PRD §3.5 line: the default
+                        // brand IS the operating company and renders nothing.
+                        disclosure={
+                          theme.groupLine
+                            ? { brandName: theme.name, legalEntity: theme.legalEntity }
+                            : null
+                        }
                       />
                     ) : (
                       <BankPanel theme={theme} reference={quote.quote_ref} />
@@ -781,7 +798,9 @@ export default async function AcceptPage({
                       ? ", and your balance is settled in full."
                       : showBalanceCard
                         ? ". Your final balance is below."
-                        : ", so there is nothing more to pay right now. The remaining balance is due in full before move day."}
+                        : paidInFull
+                          ? ", and it covers the whole job — there is nothing more to pay."
+                          : ", so there is nothing more to pay right now. The remaining balance is due in full before move day."}
                   </p>
                 )}
               </div>
