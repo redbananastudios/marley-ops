@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import {
   attachBankTransactionAction,
   linkRecordedBankTransactionAction,
+  recordCoveringPairAction,
   searchAttachTargetsAction,
   type AttachTarget,
 } from "@/app/actions/bank-feed";
@@ -37,6 +38,9 @@ const KIND_LABEL: Record<AttachTarget["kind"], string> = {
   commitment: "Commitment",
   balance: "Balance",
   full: "Whole job",
+  // The settle-in-full covering transfer: one payment for the OPEN commitment
+  // + balance pair. Confirming records BOTH through the normal paid pipelines.
+  pair: "Commitment + balance",
 };
 
 /** "Whole job (deposit + balance)" — the office must see WHICH payments a
@@ -86,20 +90,28 @@ export function AttachDialog({
         // Settled targets LINK (arrival-day truth, no pipeline); open targets
         // RECORD through the normal paid pipeline.
         // A whole-job target is ALWAYS a link: there is no open money to record,
-        // only an already-recorded set to point this transfer at. Narrowed
-        // explicitly so the attach path can never be handed kind "full".
+        // only an already-recorded set to point this transfer at. A covering-
+        // pair target is ALWAYS a record: both halves are open money, and the
+        // server re-verifies the exact pair sum before recording either.
+        // Narrowed explicitly so the attach path can never be handed either
+        // pseudo-kind.
         const res =
           target.kind === "full"
             ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: "full" })
-            : target.settled
-              ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind })
-              : await attachBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind });
+            : target.kind === "pair"
+              ? await recordCoveringPairAction({ txId, quoteId: target.quoteId })
+              : target.settled
+                ? await linkRecordedBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind })
+                : await attachBankTransactionAction({ txId, quoteId: target.quoteId, kind: target.kind });
         if (!res.ok) {
           toast.error(res.error ?? "Could not record the payment.");
           router.refresh();
           return;
         }
-        const what = target.kind === "full" ? (target.kinds ?? []).join(" + ") : target.kind;
+        const what =
+          target.kind === "full" || target.kind === "pair"
+            ? (target.kinds ?? []).join(" + ")
+            : target.kind;
         toast.success(
           target.settled
             ? `Linked — this transfer is ${target.quoteRef}'s ${what}, already recorded.`
@@ -185,9 +197,11 @@ export function AttachDialog({
                       {targetLabel(t)}
                       {t.settled
                         ? " — already recorded, tap to link this transfer to it"
-                        : t.amountMatches
-                          ? " — tap to record"
-                          : ` — ${gbp(t.amount)} due, amount differs`}
+                        : t.kind === "pair"
+                          ? " — one transfer settling both, tap to record both"
+                          : t.amountMatches
+                            ? " — tap to record"
+                            : ` — ${gbp(t.amount)} due, amount differs`}
                     </p>
                   </div>
                   {busy ? (

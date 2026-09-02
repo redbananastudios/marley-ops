@@ -6,9 +6,12 @@
  * customers would rather clear it in one transfer and stop thinking about it.
  * Choosing that raises the T-7 balance invoice EARLY, alongside the commitment:
  * two open invoices, individually matchable, **no new `match_kind` and no new
- * invoice suffix**. A single bank transfer covering both is exactly the case
- * `lib/bank-feed/whole-quote.ts` already handles — exact pennies against the
- * summed set, offered to the office, never auto-matched.
+ * invoice suffix**. A single bank transfer covering both is settled by
+ * `coveringPairLinks` (lib/bank-feed/whole-quote.ts) + the office's
+ * covering-pair confirm — exact pennies against the OPEN commitment + balance
+ * pair, offered to the office, never auto-matched, records both payments.
+ * (The whole-quote settled-sum link can never explain it: the recorded deposit
+ * makes the settled sum deposit + commitment + balance, not what was sent.)
  *
  * Ignoring the option changes nothing: the commitment chases as it does today
  * and the balance raises at T-7 as it does today. That is the whole safety
