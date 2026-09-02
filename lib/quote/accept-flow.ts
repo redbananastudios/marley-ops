@@ -1612,6 +1612,13 @@ export interface DepositPaidOpts {
   amountPence?: number;
   /** Last 4 of the card (card path only) — shown on the receipt. */
   cardLast4?: string | null;
+  /** A caller-held id that tells this payment apart from another of the same
+   *  amount on the same day (the card_payments row id, a bank tx id) — salts
+   *  Xero's payment Idempotency-Key so two distinct same-shaped payments
+   *  cannot collide in its ~6-minute replay window. Optional: the flip gate
+   *  above already means one recorded payment per slot, so this is
+   *  belt-and-braces where an id exists. */
+  paymentIdentity?: string;
 }
 
 const zohoMode = (method: string): "banktransfer" | "cash" | "creditcard" =>
@@ -1662,6 +1669,7 @@ export async function markDepositPaid(
             amount: Math.min(deposit, status.balance),
             mode: zohoMode(opts.method),
             reference: quote.quote_ref,
+            paymentIdentity: opts.paymentIdentity,
           },
           // Route to whichever ledger MINTED this invoice, exactly as the status
           // read above does. Without it, a payment against a pre-cutover Zoho

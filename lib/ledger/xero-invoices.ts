@@ -981,10 +981,18 @@ export async function recordInvoicePayment(input: RecordPaymentInput): Promise<s
     ],
   };
 
-  const res = await xeroFetch(
-    "/Payments",
-    writeInit(body, `payment|${input.invoiceId}|${round2(input.amount)}|${input.date ?? ukTodayDate()}`),
-  );
+  // The identity carries the caller's distinct payment id when one exists —
+  // the createInvoice pattern: extra distinguishing state folds in only when
+  // present, so without one the key is byte-identical to what it always was.
+  // invoice|amount|date alone collides two GENUINELY DISTINCT same-shaped
+  // payments inside Xero's ~6-minute replay window (the second PUT replays the
+  // first's cached response and is silently never recorded); the salt keeps a
+  // timeout retry of the SAME payment deduplicating while telling two real
+  // payments apart.
+  const identity =
+    `payment|${input.invoiceId}|${round2(input.amount)}|${input.date ?? ukTodayDate()}` +
+    (input.paymentIdentity ? `|distinct:${input.paymentIdentity}` : "");
+  const res = await xeroFetch("/Payments", writeInit(body, identity));
   const json = await xeroJson<{ Payments?: (XeroWriteElement & { PaymentID?: string })[] }>(
     res,
     `payment against invoice ${input.invoiceId}`,
