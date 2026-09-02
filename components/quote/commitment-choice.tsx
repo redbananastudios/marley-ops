@@ -56,6 +56,15 @@ export interface CommitmentChoiceProps {
   /** Pre-formatted move-date label, for the balance card's footnote. */
   moveDateLabel: string | null;
   bank: { name: string; sortCode: string; account: string };
+  /**
+   * PRD §3.5 operating-company disclosure for the bank block — null for the
+   * default brand, which IS the operating company (the same `theme.groupLine`
+   * gate BankPanel uses on this page). REQUIRED rather than optional so a call
+   * site cannot compile with it forgotten — which is exactly how this block
+   * lost the sentence in the first place. Names arrive as data, never
+   * literals: this is a shared surface under the brand-leak scan.
+   */
+  disclosure: { brandName: string; legalEntity: string } | null;
 }
 
 export function CommitmentChoice({
@@ -66,6 +75,7 @@ export function CommitmentChoice({
   balanceRemaining,
   moveDateLabel,
   bank,
+  disclosure,
 }: CommitmentChoiceProps) {
   const router = useRouter();
   const [choice, setChoice] = useState<"commitment" | "full">("commitment");
@@ -177,6 +187,18 @@ export function CommitmentChoice({
             </div>
           ))}
         </div>
+        {/* PRD §3.5 disclosure, beside the account name for the same reason
+            BankPanel places it there: the surprise happens at the moment a
+            non-default-brand customer reads an account name that is not the
+            brand they booked with. */}
+        {disclosure ? (
+          <p className="mt-2 text-xs leading-relaxed text-mist-500">
+            {disclosure.brandName} is part of {disclosure.legalEntity}, so your payment goes to
+            the <strong className="text-ink">{bank.name}</strong> account above. Please use
+            reference <strong className="text-ink">{quoteRef}</strong> so we can match it to your
+            booking.
+          </p>
+        ) : null}
         <p className="mt-2 text-xs leading-relaxed text-mist-400">
           Please use the reference exactly as shown so we can match your payment. The reference is
           the same whichever amount you send. We&apos;ll email your confirmation as soon as it

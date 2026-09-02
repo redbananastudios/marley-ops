@@ -68,6 +68,56 @@ describe("classifyBooking", () => {
   });
 });
 
+describe("classifyBooking — a paid-in-full small job is all_set, not balance-chased", () => {
+  /**
+   * Gate 9a: at or under the small-job threshold the acceptance ask IS the
+   * gross — commitment clamps to 0 and NO balance invoice ever raises, so
+   * `balance_paid_at` never stamps. The classifier's balance rung read that
+   * as "balance still unpaid" and bucketed a fully-collected job as
+   * balance_due (inside the window) or balance_overdue (after the move),
+   * chasing £0 forever. A known-zero balance with no invoice is a SETTLED
+   * job; an issued invoice keeps its authority, and an ABSENT amount is
+   * unknown and must keep today's behaviour (the silent direction would
+   * empty a chase list).
+   */
+  const paidSmallJob: QueueSignals = {
+    ...base,
+    hasRemovalAppt: true,
+    apptDayUk: "2026-08-01", // 2 days out — inside the balance window
+    commitmentInvoiceAmount: 0,
+    balanceAmount: 0,
+    balanceInvoiceNumber: null,
+  };
+
+  it("inside the balance window with £0 remaining and no invoice → all_set", () => {
+    expect(classifyBooking(paidSmallJob, TODAY)).toBe("all_set");
+  });
+
+  it("after move day with £0 remaining and no invoice → all_set, never balance_overdue", () => {
+    expect(classifyBooking({ ...paidSmallJob, apptDayUk: "2026-07-28" }, TODAY)).toBe("all_set");
+  });
+
+  it("control: a residential job WITH a balance is byte-identical to today", () => {
+    const withBalance = { ...paidSmallJob, balanceAmount: 1700 };
+    expect(classifyBooking(withBalance, TODAY)).toBe("balance_due");
+    expect(classifyBooking({ ...withBalance, apptDayUk: "2026-07-28" }, TODAY)).toBe("balance_overdue");
+    expect(classifyBooking({ ...withBalance, balanceInvoiceNumber: "INV-000210" }, TODAY)).toBe("balance_due");
+  });
+
+  it("control: an ISSUED invoice keeps its authority even at £0 — never skipped", () => {
+    expect(
+      classifyBooking({ ...paidSmallJob, balanceInvoiceNumber: "INV-000210" }, TODAY),
+    ).toBe("balance_due");
+  });
+
+  it("control: an ABSENT amount is unknown, which keeps today's behaviour", () => {
+    const unknown = { ...paidSmallJob };
+    delete (unknown as { balanceAmount?: number | null }).balanceAmount;
+    expect(classifyBooking(unknown, TODAY)).toBe("balance_due");
+    expect(classifyBooking({ ...unknown, apptDayUk: "2026-07-28" }, TODAY)).toBe("balance_overdue");
+  });
+});
+
 describe("daysBetweenUk", () => {
   it("counts calendar days, negative for the past", () => {
     expect(daysBetweenUk("2026-07-30", "2026-08-01")).toBe(2);

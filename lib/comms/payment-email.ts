@@ -140,12 +140,30 @@ export const receiptBlockVar = (receipt?: ReceiptDetails | null, t: EmailTheme =
 const firstNameOf = (name: string | null | undefined): string =>
   (name ?? "").trim().split(/\s+/)[0] || "there";
 
+/**
+ * The receipt's balance sentence, shared by the template variable and the
+ * in-repo builder so the two rails cannot drift. Three-way on purpose:
+ *
+ *  - `> 0`  → the due line, with the figure.
+ *  - `null` → UNKNOWN — the generic due line. A missing figure must never be
+ *             read as "nothing owed".
+ *  - known-zero → settled. Gate 9a small jobs pay the gross as the one
+ *             acceptance ask (markDepositPaid passes `balanceDue(agreed,
+ *             deposit)`, exactly £0 for them); telling that customer a
+ *             remaining balance was still due promised an invoice that never
+ *             comes.
+ */
+const depositBalanceLine = (balanceAmount: number | null | undefined): string => {
+  if (balanceAmount == null)
+    return `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
+  if (balanceAmount > 0)
+    return `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`;
+  return `Your payment settles your booking in full — there is nothing more to pay before your move.`;
+};
+
 export function depositReceivedTemplateVars(m: DepositReceivedMeta): Record<string, string> {
   const t = emailTheme(m.brand);
-  const balanceLine =
-    m.balanceAmount != null && m.balanceAmount > 0
-      ? `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`
-      : `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
+  const balanceLine = depositBalanceLine(m.balanceAmount);
   return {
     CUSTOMER_FIRST_NAME: firstNameOf(m.firstName),
     QUOTE_REF: escapeHtml(m.quoteRef),
@@ -229,10 +247,7 @@ export function buildDepositReceivedEmailHtml(m: DepositReceivedMeta): string {
   const when = m.moveDateLabel
     ? ` for your move on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
     : "";
-  const balanceLine =
-    m.balanceAmount != null && m.balanceAmount > 0
-      ? `Your remaining balance of <strong style="color:#1A1A1A;">${gbp(m.balanceAmount)}</strong> is due 24 hours before your move, unless we've agreed otherwise.`
-      : `Your remaining balance is due 24 hours before your move, unless we've agreed otherwise.`;
+  const balanceLine = depositBalanceLine(m.balanceAmount);
 
   // When we have receipt detail, the receipt panel carries the amount (and more);
   // otherwise fall back to the simple "Deposit paid £X" card.

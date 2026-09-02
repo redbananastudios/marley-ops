@@ -337,15 +337,23 @@ export default async function QuoteDetailPage({
           // quote produced a figure with no meaning (25% of gross inside T-7,
           // or the whole job under the small-job threshold) and offered it to
           // the office as the deposit to request. Commercial has no rung: 0.
+          //
+          // Once ACCEPTED, deposit_amount is the FROZEN ask — the figure the
+          // customer agreed to and the -DEP invoice bills. Recomputing it live
+          // here meant a settings change after acceptance (the small-job
+          // threshold especially) made "Re-send quote email" contradict both.
+          // The live computation is for quotes still in flight only.
           depositAmount={
             paymentPolicy === "commercial"
               ? 0
-              : requestedDeposit(
-                  Number(quote.agreed_price ?? quote.grand_total ?? 0),
-                  quote.deposit_amount ?? settings.defaultDeposit,
-                  quote.moving_date,
-                  settings.smallJobThreshold,
-                )
+              : statusStr === "accepted" && quote.deposit_amount != null
+                ? Number(quote.deposit_amount)
+                : requestedDeposit(
+                    Number(quote.agreed_price ?? quote.grand_total ?? 0),
+                    quote.deposit_amount ?? settings.defaultDeposit,
+                    quote.moving_date,
+                    settings.smallJobThreshold,
+                  )
           }
           readOnly={!editing}
           editHref={`/quotes/${quote.id}?edit=1`}

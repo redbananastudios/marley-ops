@@ -333,6 +333,10 @@ export async function loadBookingRows(
           dateReleasableAt: row.dateReleasableAt,
           balancePaidAt: row.balancePaidAt,
           balanceInvoiceNumber: row.balanceInvoiceNumber,
+          // The classifier's gate-9a settled test: a KNOWN £0 with no issued
+          // invoice means no balance exists (small job — the ask was the
+          // gross), so the row is all_set rather than balance-chased.
+          balanceAmount: row.balanceAmount,
           paymentPolicy: row.paymentPolicy,
           jobCompleted: row.jobCompleted,
           commercialDueDate: row.commercialDueDate,

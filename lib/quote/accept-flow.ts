@@ -684,14 +684,16 @@ export async function acceptQuoteOnline(
       .eq("kind", "contract")
       .limit(1)
       .maybeSingle();
-    if (!signature) return { ok: false, error: "We couldn't verify the acceptance record — please call 01747 637070." };
+    if (!signature) {
+      return { ok: false, error: `We couldn't verify the acceptance record — please call ${await errorPhone(sb, quote.brand)}.` };
+    }
     await ensureDepositInvoice(sb, quote.id); // self-heal, then treat as success
     await ensureLateBookingBalanceInvoice(sb, quote.id, null);
     return { ok: true, alreadyAccepted: true };
   }
   if (quote.status !== "sent") return { ok: false, error: "This quote link is no longer valid." };
   if (isAcceptExpired(quote.email_sent_at, quote.created_at)) {
-    return { ok: false, error: "This quote has expired. Call us on 01747 637070 for an updated price." };
+    return { ok: false, error: `This quote has expired. Call us on ${await errorPhone(sb, quote.brand)} for an updated price.` };
   }
   const name = fullName.trim().slice(0, 120);
   if (name.length < 2) return { ok: false, error: "Type your full name to accept the quote." };
@@ -746,7 +748,7 @@ export async function acceptQuoteOnline(
     .eq("id", quote.id)
     .eq("status", "sent") // double-submit / accept-vs-decline race: only one wins
     .select("id");
-  if (error) return { ok: false, error: "Something went wrong — please call 01747 637070." };
+  if (error) return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
   if (!won?.length) {
     const current = await fetchQuoteById(sb, quote.id);
     if (current?.status === "accepted") {
@@ -804,7 +806,7 @@ export async function acceptQuoteOnline(
         `Do not request payment until the contract evidence is repaired.`,
       ], "system").catch(() => {});
     }
-    return { ok: false, error: "We couldn't save the acceptance — please try again or call 01747 637070." };
+    return { ok: false, error: `We couldn't save the acceptance — please try again or call ${await errorPhone(sb, quote.brand)}.` };
   }
 
   // Retire sibling quotes (re-quote path): carries a paid deposit across,
@@ -1129,7 +1131,7 @@ export async function declineQuoteOnline(
   if (!quote) return { ok: false, error: "This quote link is no longer valid." };
   if (quote.status === "rejected") return { ok: true };
   if (quote.status !== "sent") {
-    return { ok: false, error: "This quote can't be declined online any more — call us on 01747 637070." };
+    return { ok: false, error: `This quote can't be declined online any more — call us on ${await errorPhone(sb, quote.brand)}.` };
   }
   const lostReason = DECLINE_REASONS.has(reason) ? reason : "other";
 
@@ -1149,7 +1151,7 @@ export async function declineQuoteOnline(
     // won the race, never tell the customer that their quote was declined.
     const current = await fetchQuoteById(sb, quote.id);
     if (current?.status === "rejected") return { ok: true };
-    return { ok: false, error: "This quote can't be declined online any more — call us on 01747 637070." };
+    return { ok: false, error: `This quote can't be declined online any more — call us on ${await errorPhone(sb, quote.brand)}.` };
   }
 
   if (quote.lead_id) {
@@ -1263,6 +1265,24 @@ export async function reportDepositSent(
 
 /* ------------------------------------------------------------- deposit invoice */
 
+/**
+ * The brand-correct "call us" number for a customer-facing ERROR string
+ * (multi-brand PRD §3.5). The happy paths were brand-resolved in gate 16; the
+ * error returns were not — they hardcoded the default brand's office number,
+ * and they render verbatim on /q via accept-form's `setError(res.error)`, so a
+ * second-brand customer was handed the default brand's number at exactly the
+ * moment they needed to ring someone.
+ *
+ * Resolved LAZILY — only when an error is actually being returned — so no
+ * happy path pays an extra read; each error return is terminal, so a call
+ * costs at most one resolve. Throw-free with the same fallback pattern as
+ * `invoicePayClause` below: an unreadable brands row degrades to the default
+ * brand's number rather than masking the error the caller is reporting.
+ */
+async function errorPhone(sb: Sb, slug: string | null): Promise<string> {
+  const brand = await brandForComms(sb, slug).catch(() => null);
+  return (brand?.phone ?? "").trim() || "01747 637070";
+}
 
 /**
  * The "how to pay" sentence on a customer-visible invoice note.
@@ -1341,6 +1361,14 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
 
   const settings = await getBusinessSettings(sb);
   const deposit = quote.deposit_amount ?? settings.defaultDeposit;
+  // Gate 9a: on a small job the acceptance ask IS the gross — the commitment
+  // clamps to 0 and no balance invoice will ever raise, so the note's promise
+  // that "the balance is invoiced separately" would be a promise of a document
+  // that never comes. Known-zero remainder → say the payment settles the job.
+  // The `agreed > 0` guard mirrors requestedDeposit's: a priceless quote must
+  // not claim to be settled by its base deposit.
+  const agreedForNote = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+  const coversWholeJob = agreedForNote > 0 && balanceDue(agreedForNote, deposit) <= 0;
   const ref = depositReference(quote.quote_ref);
   try {
     // Crash-recovery: adopt an orphan created on a previous attempt.
@@ -1382,7 +1410,9 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
         reference: ref,
         description: `Booking deposit — removal quote ${quote.quote_ref}`,
         amount: round2(deposit),
-        notes: `Deposit to secure your move date. Quote ${quote.quote_ref}. The balance is invoiced separately before move day.`,
+        notes: coversWholeJob
+          ? `Payment to secure your move date. Quote ${quote.quote_ref}. This covers your booking in full — nothing further will be invoiced.`
+          : `Deposit to secure your move date. Quote ${quote.quote_ref}. The balance is invoiced separately before move day.`,
       });
     }
     await sb
@@ -2162,7 +2192,7 @@ export async function confirmMoveDate(
     return { ok: false, error: "The quote must be accepted before the move date is confirmed." };
   }
   if (quote.booking_cancelled_at) {
-    return { ok: false, error: "This booking has been cancelled — call 01747 637070 if you'd like to rebook." };
+    return { ok: false, error: `This booking has been cancelled — call ${await errorPhone(sb, quote.brand)} if you'd like to rebook.` };
   }
   if (!quote.deposit_paid_at) {
     return { ok: false, error: "The deposit must be paid before the move date is confirmed." };
@@ -2189,7 +2219,7 @@ export async function confirmMoveDate(
   // raise a fresh commitment invoice for a cancelled job — the pending refund
   // row and a signed non-refundability record would contradict each other.
   if (lead.status === "declined") {
-    return { ok: false, error: "This booking has been cancelled — call 01747 637070 if you'd like to rebook." };
+    return { ok: false, error: `This booking has been cancelled — call ${await errorPhone(sb, quote.brand)} if you'd like to rebook.` };
   }
   if (lead.date_confirmed_at) return { ok: true, already: true };
 
@@ -2201,7 +2231,7 @@ export async function confirmMoveDate(
     .eq("id", quote.lead_id)
     .is("date_confirmed_at", null)
     .select("id");
-  if (gateErr) return { ok: false, error: "Something went wrong — please call 01747 637070." };
+  if (gateErr) return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
   if (!won?.length) {
     // Someone else won the race (two tabs, a replay) — that confirmation stands.
     const { data: again } = await sb
@@ -2210,7 +2240,7 @@ export async function confirmMoveDate(
       .eq("id", quote.lead_id)
       .maybeSingle();
     if (again?.date_confirmed_at) return { ok: true, already: true };
-    return { ok: false, error: "Something went wrong — please call 01747 637070." };
+    return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
   }
 
   // Evidence row. One per quote (partial unique index) — a 23505 means a
@@ -2259,7 +2289,7 @@ export async function confirmMoveDate(
         `Do not treat the deposit as non-refundable until the confirmation evidence is repaired.`,
       ], "system").catch(() => {});
     }
-    return { ok: false, error: "We couldn't save the confirmation — please try again or call 01747 637070." };
+    return { ok: false, error: `We couldn't save the confirmation — please try again or call ${await errorPhone(sb, quote.brand)}.` };
   } else {
     signatureId = sigRow.id;
   }
@@ -3289,7 +3319,7 @@ export async function settleQuoteInFull(
   if (!payInFullAvailable(quote, lead)) {
     return {
       ok: false,
-      error: "This booking can't be settled in full from here — please call 01747 637070.",
+      error: `This booking can't be settled in full from here — please call ${await errorPhone(sb, quote.brand)}.`,
     };
   }
 
@@ -3302,7 +3332,7 @@ export async function settleQuoteInFull(
     // stands, and the balance still raises at T-7 as it always would have.
     return {
       ok: false,
-      error: "We couldn't raise the final invoice just now — your commitment payment is unchanged. Please try again shortly or call 01747 637070.",
+      error: `We couldn't raise the final invoice just now — your commitment payment is unchanged. Please try again shortly or call ${await errorPhone(sb, quote.brand)}.`,
     };
   }
 

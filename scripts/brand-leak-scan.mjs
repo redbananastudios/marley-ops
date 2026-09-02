@@ -386,6 +386,26 @@ export const MANIFEST = [
     reason:
       "accent utility classes re-pointed per brand via --color-mm-red on the shell (gate 16); no hardcoded name, phone, domain or named individual remains",
   },
+  // The accept-flow money spine behind /q (2026-09-02). Fifteen customer-
+  // facing ERROR returns hardcoded the default brand's office number and
+  // rendered verbatim on /q via `setError(res.error)` — the happy paths were
+  // branded in gate 16 and the error paths were not. Every one now resolves
+  // the quote's own brand (`errorPhone`), and this entry is what keeps it so.
+  {
+    pattern: "lib/quote/accept-flow.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070", "Connor"],
+    reason:
+      "default-brand constants + contract docs: the 01747 fallback inside the shared brand-phone pattern (errorPhone + invoicePayClause — reached only when a brands row carries no phone) and the comment byte-locking it; the §3.5 MarleyMoves Ltd disclosure in invoicePayClause; the MarleyMoves-Invoice attachment filename shape (the same §10 shape lib/quote/pdf-client.ts documents); ops.marleymoves.co.uk as the app's own origin fallback (app chrome per PRD §2, as lib/job-sheet-load.ts); Marley/Connor elsewhere appear only in comments documenting orphan adoption and BACS recording",
+  },
+  // The settle-in-full bank block CommitmentChoice renders inside /q — the
+  // same shared account as BankPanel, so the §3.5 disclosure arrives as data
+  // (the `disclosure` prop) and no operating-company literal may live here.
+  {
+    pattern: "components/quote/commitment-choice.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the /q shell (gate 16): radio accent and the bank block's amount/reference emphasis",
+  },
   // Gate 16, the remaining token routes. Same mechanism throughout: identity
   // from `pageTheme`, accent from one CSS-variable override on the page root.
   //

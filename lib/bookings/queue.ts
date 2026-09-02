@@ -58,6 +58,13 @@ export interface QueueSignals {
   dateReleasableAt: string | null;
   balancePaidAt: string | null;
   balanceInvoiceNumber: string | null;
+  /** What the balance invoice will (or does) ask for — the same figure
+   *  load-signals hands `owedNow`. OPTIONAL, and absence means UNKNOWN, which
+   *  keeps the pre-gate-9a behaviour: only a KNOWN £0 with no issued invoice
+   *  may read as "no balance exists" (a fully-collected small job). Reading
+   *  absence as zero would silently empty a chase list, which is the failure
+   *  direction this codebase never chooses. */
+  balanceAmount?: number | null;
   /** The policy SNAPSHOTTED on the quote at acceptance (gate 8), never
    *  re-derived from the client - editing a client's type must not rewrite
    *  the schedule of a booking already in flight. Absent/unknown is
@@ -350,7 +357,15 @@ export function classifyBooking(s: QueueSignals, todayUk: string): BookingBucket
     return s.dateReleasableAt || pastDue ? "commitment_overdue" : "commitment_due";
   }
 
-  if (!s.balancePaidAt) {
+  // Gate 9a: a small job's acceptance ask WAS the gross, so no balance exists,
+  // no -BAL invoice will ever raise and balance_paid_at never stamps — without
+  // this a fully-collected job sat in balance_due/balance_overdue chasing £0
+  // forever. Only a KNOWN zero with no issued invoice reads as settled: an
+  // issued invoice keeps its authority whatever its figure, and an absent
+  // amount is unknown, which keeps the chase-side behaviour unchanged.
+  const noBalanceExists =
+    !s.balanceInvoiceNumber && s.balanceAmount != null && Number(s.balanceAmount) <= 0;
+  if (!s.balancePaidAt && !noBalanceExists) {
     const days = s.apptDayUk ? daysBetweenUk(todayUk, s.apptDayUk) : null;
     if (days !== null && days < 0) return "balance_overdue";
     if (s.balanceInvoiceNumber || (days !== null && days <= BALANCE_WINDOW_DAYS)) return "balance_due";
