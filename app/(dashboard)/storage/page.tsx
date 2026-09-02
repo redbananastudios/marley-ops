@@ -54,7 +54,7 @@ export default async function StoragePage({
         supabase
           .from("storage_lets")
           .select(
-            "id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, notes, billing_paused, billing_model, min_days, min_amount",
+            "id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, notes, billing_paused, billing_model, min_days, min_amount, min_kind",
           )
           .order("id")
           .range(f, t),
@@ -208,6 +208,7 @@ export default async function StoragePage({
       rate: l.rate == null ? null : Number(l.rate),
       min_days: l.min_days == null ? null : Number(l.min_days),
       min_amount: l.min_amount == null ? null : Number(l.min_amount),
+      min_kind: l.min_kind ?? null,
       billing_model: l.billing_model ?? "period",
       billing_paused: !!l.billing_paused,
       client_name: clientName.get(l.client_id) ?? "Unknown client",

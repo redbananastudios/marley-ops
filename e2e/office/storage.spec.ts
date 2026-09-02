@@ -52,8 +52,9 @@ test.describe("Office — Storage", () => {
       const dialog = await openDialog(page, page.getByRole("button", { name: "Assign client" }));
       // The default unit type is a crate, so the dialog carries the standing
       // policy: day rate pre-filled from the rate card, period locked to Day,
-      // the minimum spelled out, and handling-in ticked by default.
-      await expect(dialog.getByText(/28-day minimum/i)).toBeVisible();
+      // the minimum spelled out (one calendar month — storage-terms v2,
+      // 2026-08-31), and handling-in ticked by default.
+      await expect(dialog.getByText(/one calendar month minimum/i)).toBeVisible();
       await expect(dialog.getByText("Day (crate)")).toBeVisible();
       await expect(dialog.getByText(/Record handling in/i)).toBeVisible();
       // Search the picker and pick the existing client (picking proves hydration,

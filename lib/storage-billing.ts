@@ -12,13 +12,16 @@
  *    self-storage practice; the agreement says so.)
  *
  *  'crate_daily' (Sandys crates — standing policy, 2026-07-22):
- *  - 28-day minimum invoiced UPFRONT at commencement (min_amount frozen on
+ *  - A minimum stay invoiced UPFRONT at commencement (min_amount frozen on
  *    the let); early release still pays it in full and owes no day charges
- *    inside the window.
- *  - Day 29+ charged to the EXACT day, IN ARREARS, on a 28-day cycle: each
- *    window bills the day after it completes — or immediately once end_date
- *    is set (release settlement: all charges settled before goods leave;
- *    the departure day itself is chargeable).
+ *    inside the window. HOW LONG the window runs follows the let's frozen
+ *    min_kind: 'days' = min_days (the v1 terms' fixed 28) — 'calendar_month'
+ *    = one calendar month from the start date (storage-terms v2, 2026-08-31),
+ *    via the SAME clamped month arithmetic the period engine uses.
+ *  - After the minimum, charged to the EXACT day, IN ARREARS, on a 28-day
+ *    cycle: each window bills the day after it completes — or immediately
+ *    once end_date is set (release settlement: all charges settled before
+ *    goods leave; the departure day itself is chargeable).
  *  - Handling events (in/out/access, amount frozen at record time) ride the
  *    invoice whose period_end covers their date — deterministic, so a
  *    crash-retry recomputes the same sweep and Zoho orphan adoption stays
@@ -38,8 +41,12 @@ export interface BillableLet {
   rate_period: string; // 'week' | 'month' | 'day' (day = crate_daily lets)
   billing_paused: boolean;
   billing_model?: string | null; // 'period' (default) | 'crate_daily'
-  min_days?: number | null; // crate_daily: minimum-stay days (frozen at creation)
+  min_days?: number | null; // crate_daily: minimum-stay days (frozen at creation; the window ONLY when min_kind='days')
   min_amount?: number | null; // crate_daily: minimum-stay charge, VAT-inclusive
+  /** crate_daily: how the minimum window is measured, frozen at creation.
+   *  'days' (default — v1 terms, min_days) | 'calendar_month' (storage-terms
+   *  v2, 2026-08-31 — one calendar month from start_date; min_days ignored). */
+  min_kind?: string | null;
 }
 
 export interface HandlingEventLite {
@@ -172,6 +179,24 @@ function isCrateDaily(let_: BillableLet): boolean {
 }
 
 /**
+ * Inclusive last day of a crate let's minimum window — the ONE place the
+ * minimum's length is derived (the engine, the raise-day hint and the /s
+ * signing surfaces all agree through it).
+ *  - 'calendar_month' (storage-terms v2, 2026-08-31): one calendar month
+ *    from the start date, reusing periodEnd's clamped anniversary rule —
+ *    15 Sep → 14 Oct; 31 Jan → 27 Feb (28 Feb in a leap year).
+ *  - 'days' (default — v1 terms): the let's frozen min_days (28 unless set).
+ */
+export function crateMinimumEnd(
+  let_: Pick<BillableLet, "start_date" | "min_days" | "min_kind">,
+): string {
+  const start = let_.start_date.slice(0, 10);
+  if (let_.min_kind === "calendar_month") return periodEnd(start, start, "month");
+  const minDays = Math.max(1, Math.trunc(Number(let_.min_days ?? 0)) || CRATE_CYCLE_DAYS);
+  return addDays(start, minDays - 1);
+}
+
+/**
  * Due invoices for a crate_daily let. `events` must be the let's UNBILLED
  * handling events (billed_invoice_id null) — each is swept, in date order,
  * onto the first due invoice whose period_end covers its date.
@@ -184,7 +209,6 @@ export function crateInvoicesDue(
 ): DueInvoice[] {
   const rate = Number(let_.rate ?? 0);
   if (!rate || rate <= 0 || let_.billing_paused) return [];
-  const minDays = Math.max(1, Math.trunc(Number(let_.min_days ?? 0)) || CRATE_CYCLE_DAYS);
   const minAmount = r2(Number(let_.min_amount ?? 0));
   const start = let_.start_date.slice(0, 10);
   const today = todayIso.slice(0, 10);
@@ -205,7 +229,7 @@ export function crateInvoicesDue(
   };
 
   const out: DueInvoice[] = [];
-  const minEnd = addDays(start, minDays - 1);
+  const minEnd = crateMinimumEnd(let_);
 
   // 1) The minimum — in advance, due from commencement day. Never truncated
   //    by end_date (early release still pays it; days inside are covered).
@@ -219,14 +243,15 @@ export function crateInvoicesDue(
       handlingAmount: h.amount,
       handlingEvents: h.list,
       amount: r2(minAmount + h.amount),
-      days: minDays,
+      days: daysInclusive(start, minEnd),
     });
   }
 
-  // 2) Arrears cycles from start+minDays: each 28-day window bills the day
-  //    after it completes; a set end_date makes the truncated remainder due
-  //    IMMEDIATELY (release settlement) and stops cycles after departure.
-  let cursor = addDays(start, minDays);
+  // 2) Arrears cycles from the day after the minimum window ends: each 28-day
+  //    window bills the day after it completes; a set end_date makes the
+  //    truncated remainder due IMMEDIATELY (release settlement) and stops
+  //    cycles after departure.
+  let cursor = addDays(minEnd, 1);
   let guard = 0;
   while (guard < 500 && out.length < MAX_PERIODS_PER_RUN) {
     guard++;
@@ -310,10 +335,9 @@ export function crateNextInvoiceDate(
 ): string | null {
   const rate = Number(let_.rate ?? 0);
   if (!rate || rate <= 0 || let_.billing_paused || let_.end_date) return null;
-  const minDays = Math.max(1, Math.trunc(Number(let_.min_days ?? 0)) || CRATE_CYCLE_DAYS);
   const start = let_.start_date.slice(0, 10);
   if (!existingStarts.has(start)) return start; // minimum due at commencement
-  let cursor = addDays(start, minDays);
+  let cursor = addDays(crateMinimumEnd(let_), 1);
   let guard = 0;
   while (guard < 500) {
     guard++;

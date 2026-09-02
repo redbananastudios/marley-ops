@@ -21,6 +21,7 @@ import {
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { paymentTermsDays, paymentTermsDueDate, resolvePaymentPolicy } from "@/lib/payments-policy";
 import { UNIT_TYPES } from "@/lib/storage-units";
+import { crateMinimumLabel } from "@/lib/signatures";
 
 /**
  * SERVER ONLY — the shared "raise due storage invoices" core. The daily cron
@@ -75,12 +76,20 @@ function handlingSuffix(events: HandlingEventLite[]): string {
   return `; handling: ${parts.join(", ")}`;
 }
 
-/** Customer-facing line description per invoice kind. */
-export function invoiceDescription(due: DueInvoice, unitLabel: string, dayRate: number): string {
+/** Customer-facing line description per invoice kind. The minimum's wording
+ *  follows the let's frozen min_kind (crateMinimumLabel) so the invoice says
+ *  what the signed terms say — "one calendar month minimum" for storage-terms
+ *  v2 lets, the day count for legacy 'days' lets. */
+export function invoiceDescription(
+  due: DueInvoice,
+  unitLabel: string,
+  dayRate: number,
+  minKind?: string | null,
+): string {
   const span = `${prettyDay(due.period_start)} – ${prettyDay(due.period_end)}`;
   switch (due.kind) {
     case "minimum":
-      return `Storage: ${unitLabel}, ${due.days}-day minimum (${span})${handlingSuffix(due.handlingEvents)}`;
+      return `Storage: ${unitLabel}, ${crateMinimumLabel(minKind, due.days)} (${span})${handlingSuffix(due.handlingEvents)}`;
     case "arrears":
     case "final": {
       if (due.days === 0) return `Storage: ${unitLabel}${handlingSuffix(due.handlingEvents)}`;
@@ -147,10 +156,15 @@ const FOOTER_NOTES: Partial<Record<DueInvoice["kind"], string>> = {
     "This is your final storage invoice. All charges are settled before your items are released. If you have any questions, please get in touch.",
 };
 
-function periodLabelFor(due: Pick<DueInvoice, "kind" | "period_start" | "period_end" | "days">): string {
+function periodLabelFor(
+  due: Pick<DueInvoice, "kind" | "period_start" | "period_end" | "days">,
+  minKind?: string | null,
+): string {
   if (due.kind === "final" && due.days === 0) return "handling on release";
   const span = `${prettyDay(due.period_start)} – ${prettyDay(due.period_end)}`;
-  if (due.kind === "minimum") return `${due.days}-day minimum, ${span}`;
+  // Repair paths reconstruct from a stored claim with no let in hand — their
+  // day-count fallback is still accurate (the span pins the exact window).
+  if (due.kind === "minimum") return `${crateMinimumLabel(minKind, due.days)}, ${span}`;
   if (due.kind === "arrears" || due.kind === "final")
     return `${due.days} day${due.days === 1 ? "" : "s"}, ${span}`;
   return span;
@@ -306,7 +320,7 @@ export async function raiseDueStorageInvoices(
         let q = admin
           .from("storage_lets")
           .select(
-            "id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, billing_paused, billing_model, min_days, min_amount, notes",
+            "id, unit_id, client_id, brand, start_date, end_date, rate, rate_period, billing_paused, billing_model, min_days, min_amount, min_kind, notes",
           )
           .gt("rate", 0);
         q = opts.letId ? q.eq("id", opts.letId) : q.or(`end_date.is.null,end_date.gte.${cutoffIso}`);
@@ -521,7 +535,12 @@ export async function raiseDueStorageInvoices(
           ref = await createInvoice({
             customerId: contactId,
             reference,
-            description: invoiceDescription(inv, unitLabel, Number(let_.rate ?? 0)),
+            description: invoiceDescription(
+              inv,
+              unitLabel,
+              Number(let_.rate ?? 0),
+              (let_ as { min_kind?: string | null }).min_kind,
+            ),
             amount: inv.amount,
             notes: storageInvoiceNote(inv.kind, noteTheme),
             disableOnlinePayments: true, // card policy: deposit only
@@ -575,7 +594,7 @@ export async function raiseDueStorageInvoices(
             clientEmail: client.email,
             clientName: client.display_name,
             unitLabel,
-            periodLabel: periodLabelFor(inv),
+            periodLabel: periodLabelFor(inv, (let_ as { min_kind?: string | null }).min_kind),
             amount: inv.amount,
             kind: inv.kind,
             invoiceId: ref.invoiceId,

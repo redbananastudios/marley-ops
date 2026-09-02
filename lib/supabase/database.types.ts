@@ -4177,6 +4177,7 @@ export type Database = {
           lead_id: string | null
           min_amount: number | null
           min_days: number | null
+          min_kind: string
           notes: string | null
           rate: number | null
           rate_period: string
@@ -4197,6 +4198,7 @@ export type Database = {
           lead_id?: string | null
           min_amount?: number | null
           min_days?: number | null
+          min_kind?: string
           notes?: string | null
           rate?: number | null
           rate_period?: string
@@ -4217,6 +4219,7 @@ export type Database = {
           lead_id?: string | null
           min_amount?: number | null
           min_days?: number | null
+          min_kind?: string
           notes?: string | null
           rate?: number | null
           rate_period?: string

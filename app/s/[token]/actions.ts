@@ -33,7 +33,7 @@ export async function signStorageAgreementRemoteAction(
   const admin = createAdminClient();
   const { data: let_ } = await admin
     .from("storage_lets")
-    .select("id, client_id, lead_id, billing_model, min_days")
+    .select("id, client_id, lead_id, billing_model, min_days, min_kind")
     .eq("sign_token", token)
     .maybeSingle();
   if (!let_) return { ok: false, error: "This link is no longer valid." };
@@ -44,14 +44,17 @@ export async function signStorageAgreementRemoteAction(
   if (!acksOk) return { ok: false, error: "Please tick each confirmation box." };
 
   // Evidence: store the exact ack WORDING beside the ticked keys — the same
-  // derivation the /s page renders (the let's frozen min_days + the live
-  // rate-card handling figure), so the record shows what was agreed even
+  // derivation the /s page renders (the let's frozen min_kind/min_days + the
+  // live rate-card handling figure), so the record shows what was agreed even
   // after the rate card changes.
   let ackDefs: ReadonlyArray<{ key: string; label: string }> = STORAGE_ACKS;
   if (isCrate) {
     const rates = await getStorageRates(admin);
-    const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
-    ackDefs = crateStorageAcks(minDays, gbpInc(rates.handlingEventInc));
+    const l = let_ as { min_days?: number | null; min_kind?: string | null };
+    ackDefs = crateStorageAcks(
+      { kind: l.min_kind, days: Number(l.min_days ?? rates.crateMinDays) },
+      gbpInc(rates.handlingEventInc),
+    );
   }
   const ackLabels = Object.fromEntries(ackDefs.map((a) => [a.key, a.label]));
 

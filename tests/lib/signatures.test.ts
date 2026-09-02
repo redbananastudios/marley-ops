@@ -151,3 +151,37 @@ describe("signature kind labels", () => {
     expect(signatureActionLabel("waiver")).toBe("Signed");
   });
 });
+
+describe("crate storage acks — the minimum wording follows the let's frozen min_kind", () => {
+  // storage-terms v2 (2026-08-31) changed the crate minimum from "28 days"
+  // to "one calendar month". The ack label a customer ticks is stored in
+  // signatures.ack_labels beside the terms snapshot, so the two MUST agree:
+  // a 'calendar_month' let never records a day-count minimum, and a legacy
+  // 'days' let keeps the wording it signed under.
+  it("crateMinimumLabel derives from the same rule the billing engine uses", () => {
+    expect(signaturesModule.crateMinimumLabel("calendar_month", 28)).toBe("one calendar month minimum");
+    expect(signaturesModule.crateMinimumLabel("days", 28)).toBe("28-day minimum");
+    expect(signaturesModule.crateMinimumLabel(null, 28)).toBe("28-day minimum");
+    expect(signaturesModule.crateMinimumLabel(undefined, 35)).toBe("35-day minimum");
+  });
+
+  it("a calendar-month let's ack says 'one calendar month minimum', never '28-day'", () => {
+    const acks = signaturesModule.crateStorageAcks({ kind: "calendar_month", days: 28 }, "£60");
+    const billing = acks.find((a) => a.key === "crate_billing")!;
+    expect(billing.label).toContain("one calendar month minimum, then charged to the day");
+    expect(billing.label).not.toContain("28-day");
+  });
+
+  it("a legacy days let keeps the exact wording it signed under (v1 terms)", () => {
+    const acks = signaturesModule.crateStorageAcks({ kind: "days", days: 28 }, "£60");
+    const billing = acks.find((a) => a.key === "crate_billing")!;
+    expect(billing.label).toBe(
+      "I agree to the crate storage terms: 28-day minimum, then charged to the day; handling £60 inc VAT per crate in and out; all charges settled before release.",
+    );
+  });
+
+  it("lien and prohibited-items acks still ride along unchanged", () => {
+    const acks = signaturesModule.crateStorageAcks({ kind: "calendar_month", days: 28 }, "£60");
+    expect(acks.map((a) => a.key)).toEqual(["crate_billing", "lien", "no_prohibited"]);
+  });
+});
