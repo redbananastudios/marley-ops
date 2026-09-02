@@ -47,7 +47,10 @@
  *   is_company       y/n - commercial account. Drives the PMC ref, the
  *                    commercial payment policy (invoice on completion, on the
  *                    client's terms) and the net/VAT/gross presentation
- *   payment_terms_days  30 (default) or 60 - commercial accounts only
+ *   payment_terms_days  30 (default) or 60 - commercial accounts only. Applied
+ *                    when the client is CREATED; a matched existing client
+ *                    keeps its stored terms, and a differing CSV value is
+ *                    flagged in the plan (VERIFY), never silently written
  *   po_number        printed on the commercial invoice when present
  *   from_address     from_postcode    to_address        to_postcode
  *   moving_date*     YYYY-MM-DD or DD/MM/YYYY
@@ -357,7 +360,7 @@ for (const q of existingQuotes) {
     importedCountByRef.set(q.legacy_ref, (importedCountByRef.get(q.legacy_ref) ?? 0) + 1);
 }
 const clients = await fetchAllRows(
-  () => sb.from("clients").select("id, display_name, email, phone_raw, phone_e164, is_company").order("id"),
+  () => sb.from("clients").select("id, display_name, email, phone_raw, phone_e164, is_company, payment_terms_days").order("id"),
   die,
 );
 
@@ -437,6 +440,15 @@ for (const job of jobs) {
     warnings.push(
       `existing client '${client.display_name}' is ${client.is_company ? "COMMERCIAL" : "residential"} but this row says ${job.isCompany ? "commercial" : "residential"} — the client record is left as it is`,
     );
+  // Terms follow the is_company idiom above: an existing client's stored terms
+  // are what every raised invoice will use, and this importer must never
+  // silently rewrite them off a CSV cell (the sheet may be stale, the client
+  // record may have been renegotiated). A difference is a VERIFY line for the
+  // human approving the plan; the write path deliberately does not touch it.
+  if (client && job.isCompany && job.termsDays && (client.payment_terms_days ?? 30) !== job.termsDays)
+    warnings.push(
+      `VERIFY payment terms: existing client '${client.display_name}' is on ${client.payment_terms_days ?? 30}-day terms but this row says ${job.termsDays} — the client record is left as it is (change it in the ops UI if the CSV is right)`,
+    );
   if (job.balancePaid && !job.depositPaid && job.deposit > 0)
     warnings.push(
       "balance_paid without deposit_paid — a settled job implies the deposit landed, importing both as paid" +
@@ -499,6 +511,9 @@ for (const { job, client, kind, policy, depositSettled } of plan) {
       phone_raw: job.phone,
       phone_e164: null,
       is_company: job.isCompany,
+      // Mirror what the insert produced (DB default 30 when not written), so
+      // the in-memory row matches the select shape above.
+      payment_terms_days: job.isCompany && job.termsDays ? job.termsDays : 30,
     });
   }
 
