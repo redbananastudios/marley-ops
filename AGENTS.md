@@ -75,7 +75,7 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-02 - THIRD QA pass closed out; 35 findings; 2 PRs; staging green; zero open)
+## Current State (2026-09-02 - THIRD QA pass closed out; 35 findings; 3 PRs; staging 182 pass / 4 red on the Zoho quota ONLY; zero open findings)
 
 Last touched: 2026-09-02 on i9. A third adversarial pass (Opus 5) over the whole un-promoted
 payload - `master...staging` @ 79f5a98, 473 files - reviewed as ONE TREE rather than per-PR diffs,
@@ -117,7 +117,11 @@ suspected #205 regression) are **neither a regression nor flake - the staging Zo
 1,000-call DAILY QUOTA**, burned by our own CI volume. `POST /oauth/v2/token` -> 200 with a valid
 token while `GET /invoice/v3/invoices` -> 429 code=45: a green auth layer over a dead integration,
 the same trap as the 2026-08-27 lock-out. **PR #205 is cleared, and the previously recorded blocker
-"staging Zoho refresh token dead" was WRONG - the token is fine.** Nothing classified a 429, so a
+"staging Zoho refresh token dead" was WRONG - the token is fine.** Those four specs are STILL RED and
+will stay red until the quota resets: three consecutive staging runs (`aaecea3` before this session,
+then `5f03c3a` and `7279ed4`) each returned **182 passed / the same 4 failed**, identical assertions,
+which is exactly the evidence that 35 findings' worth of changes introduced nothing. Re-run the
+workflow once the quota resets to confirm - and do NOT read "4 red" as this payload's doing. Nothing classified a 429, so a
 spent quota raised no alarm at all; #211 adds `reportLedgerRateLimited` on its own key with its own
 remedy copy (a quota resets at midnight - it must never borrow the lock-out's "re-enable the user").
 Prod runs against the same cap on the live org.
