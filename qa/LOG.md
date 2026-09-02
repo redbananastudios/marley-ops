@@ -1505,3 +1505,5 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Escalations: none. `master` never touched. Time spent: ~15 min.
 
 ## 2026-09-02 (scheduled sweep) — first-pass repair: no eligible findings (QA-20260902-02 already fixed-pending-verify via PR #190; QA-20260827-04 risky). No action.
+
+## 2026-09-02 (scheduled sweep) — escalation repair (Opus): nothing escalated. No finding in `qa/findings/open/` carries `escalate: opus-5` (QA-20260902-02 is `fixed-pending-verify` via PR #190; QA-20260827-04 is `class: risky`). No action.
