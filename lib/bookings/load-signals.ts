@@ -104,9 +104,35 @@ export interface BookingRow {
   owed: OwedNow;
 }
 
+/**
+ * Load the ledger.
+ *
+ * `strict` decides what a FAILED read is allowed to look like, and the two
+ * answers are both correct for their caller:
+ *
+ *  - **Default (fail-soft).** /bookings, /payments and the dashboard tiles
+ *    would rather render the rows they have than meet a 500 — the office can
+ *    see the newest bookings and reload. `fetchAllRows` keeps its completed
+ *    windows, and a secondary read that errors costs a chip, not the page.
+ *  - **`strict: true`.** For a caller that DECIDES on the absence of rows. An
+ *    empty ledger and a ledger that could not be read are the same value here,
+ *    and `sweepCommercialOverdue` resolves both commercial credit-control
+ *    alarms on the empty one — so a broken read would clear a live alarm and
+ *    report the sweep clean, on the one ladder that is deliberately never
+ *    chased by email. supabase-js RESOLVES with `{data:null,error}` rather than
+ *    throwing, so without this the sweep's catch could never fire: strict is
+ *    what turns a database error back into a thrown error the caller can see.
+ */
 export async function loadBookingRows(
   sb: SupabaseClient,
+  options?: { strict?: boolean },
 ): Promise<{ rows: BookingRow[]; todayUk: string }> {
+  const strict = options?.strict === true;
+  /** Under strict, an errored read is a failure rather than a short list. The
+   *  default keeps the historic fail-soft: the page renders without it. */
+  const failIfStrict = (what: string, error: { message: string } | null | undefined) => {
+    if (error && strict) throw new Error(`Could not load ${what}: ${error.message}`);
+  };
   const settings = await getBusinessSettings(sb);
   const todayUk = new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 
@@ -131,16 +157,21 @@ export async function loadBookingRows(
       .not("lead_id", "is", null)
       .order("id")
       .range(f, t),
+    { strict },
   );
 
   const leadIds = [...new Set((quotes ?? []).map((q) => q.lead_id as string))];
-  const [{ data: leads }, { data: appts }, { data: bookingDetails }] = await Promise.all([
+  const [
+    { data: leads, error: leadsError },
+    { data: appts, error: apptsError },
+    { data: bookingDetails, error: bdError },
+  ] = await Promise.all([
     leadIds.length
       ? sb
           .from("leads")
           .select("id, name, status, preferred_date, chase_paused, deposit_chase_step, balance_paid_at, date_confirmed_at")
           .in("id", leadIds)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     leadIds.length
       ? sb
           .from("appointments")
@@ -150,7 +181,7 @@ export async function loadBookingRows(
           // the booking row must keep its move date (only cancelled drops out).
           .in("status", ["scheduled", "completed"])
           .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
     // Move-window capture — prefills the shared drawer and splits "no date"
     // from "provisional" in the queue.
     leadIds.length
@@ -158,20 +189,28 @@ export async function loadBookingRows(
           .from("booking_details")
           .select("lead_id, approx_window, approx_month, provisional_date, property_type")
           .in("lead_id", leadIds)
-      : Promise.resolve({ data: [] as never[] }),
+      : Promise.resolve({ data: [] as never[], error: null }),
   ]);
+  // The leads read is the quiet one: a null `leads` empties `leadById`, so every
+  // quote hits the `continue` below and a full ledger arrives as zero rows with
+  // nothing thrown. The appointments read decides `jobCompleted`, which is what
+  // puts a commercial job in front of the invoice.
+  failIfStrict("leads", leadsError);
+  failIfStrict("removal appointments", apptsError);
+  failIfStrict("booking details", bdError);
   const bdByLead = new Map((bookingDetails ?? []).map((b) => [b.lead_id as string, b]));
 
   // Latest card-payment attempt per lead → a small "did they try to pay?" chip
   // on awaiting rows (the first question on a deposit chase call).
-  const { data: cardAttempts } = leadIds.length
+  const { data: cardAttempts, error: cardError } = leadIds.length
     ? await sb
         .from("card_payments")
         .select("lead_id, status, created_at")
         .in("lead_id", leadIds)
         .in("status", ["pending", "failed", "paid", "partially_refunded", "refunded", "voided"])
         .order("created_at", { ascending: false })
-    : { data: [] as { lead_id: string | null; status: string; created_at: string }[] };
+    : { data: [] as { lead_id: string | null; status: string; created_at: string }[], error: null };
+  failIfStrict("card payment attempts", cardError);
   const cardStatusByLead = new Map<string, string>();
   for (const a of cardAttempts ?? []) {
     if (a.lead_id && !cardStatusByLead.has(a.lead_id)) cardStatusByLead.set(a.lead_id, a.status);
@@ -210,9 +249,10 @@ export async function loadBookingRows(
 
   // Crew assigned per appointment → the "confirmed, not allocated" flag.
   const apptIds = [...apptByLead.values()].map((a) => a.id);
-  const { data: assignments } = apptIds.length
+  const { data: assignments, error: assignmentsError } = apptIds.length
     ? await sb.from("appointment_assignments").select("appointment_id, staff_id").in("appointment_id", apptIds)
-    : { data: [] as { appointment_id: string; staff_id: string | null }[] };
+    : { data: [] as { appointment_id: string; staff_id: string | null }[], error: null };
+  failIfStrict("crew assignments", assignmentsError);
   const crewByAppt = new Map<string, number>();
   for (const a of assignments ?? []) {
     if (a.staff_id) crewByAppt.set(a.appointment_id, (crewByAppt.get(a.appointment_id) ?? 0) + 1);

@@ -18,6 +18,13 @@
 
 export type SettledKind = "deposit" | "commitment" | "balance";
 
+/** The ledger fields the pair derivation needs; `OpenItem`/`SettledItem` fit. */
+export interface LedgerLike {
+  quoteId: string;
+  kind: SettledKind;
+  amount: number;
+}
+
 export interface SettledLike {
   quoteId: string;
   quoteRef: string;
@@ -173,4 +180,49 @@ export function coveringPairLinks(
     });
   }
   return out.sort((a, b) => a.quoteRef.localeCompare(b.quoteRef));
+}
+
+/**
+ * The OTHER payment a covering-pair bank row also paid.
+ *
+ * `recordCoveringPairAction` records TWO payments, but a bank row carries ONE
+ * `match_kind` — the 0103 CHECK set has no value for a pair and inventing one
+ * is a migration — so the row's stamp is always an under-claim, and the
+ * unstamped half is recorded money no bank row claims. That gap is not
+ * cosmetic: the sync's `claimed` set is the only thing stopping
+ * `reconcileSettled` filing a LATER transfer for the same payment as
+ * "explained" (MMR112's £1,900 settle-in-full, then the standing £400
+ * commitment the customer forgot to cancel), and that outcome is AUTOMATIC —
+ * nobody is watching it.
+ *
+ * The shape is recoverable from the ledger, so it is re-derived rather than
+ * stored: a row stamped with one half of a quote's commitment/balance pair,
+ * whose amount equals that pair to the penny, paid BOTH. Nothing else can wear
+ * that shape — confirm, attach and link all bind a row's amount to a SINGLE
+ * item's amount exactly, and a pair sum equals one half only when the other is
+ * zero, which never forms a pair.
+ *
+ * Ambiguity yields nothing, exactly as `coveringPairLinks` does: anything other
+ * than one commitment and one balance on the quote returns null. Items may be
+ * settled OR open — the balance half of a pair confirm can fail after the
+ * commitment recorded, and that row must still claim what it bought.
+ */
+export function coveringPairPartner(
+  row: { quoteId: string; kind: string | null; amount: number },
+  items: readonly LedgerLike[],
+): SettledKind | null {
+  if (row.kind !== "commitment" && row.kind !== "balance") return null;
+  const txPennies = pennies(row.amount);
+  if (!Number.isFinite(txPennies) || txPennies <= 0) return null;
+
+  const mine = items.filter((i) => i.quoteId === row.quoteId);
+  const commitments = mine.filter((i) => i.kind === "commitment");
+  const balances = mine.filter((i) => i.kind === "balance");
+  if (commitments.length !== 1 || balances.length !== 1) return null;
+  const comPennies = pennies(commitments[0].amount);
+  const balPennies = pennies(balances[0].amount);
+  if (comPennies <= 0 || balPennies <= 0) return null;
+  // Pennies, never pounds — same floating-point rule as coveringPairLinks.
+  if (comPennies + balPennies !== txPennies) return null;
+  return row.kind === "commitment" ? "balance" : "commitment";
 }

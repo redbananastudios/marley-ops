@@ -109,6 +109,26 @@ export interface DateConfirmationMeta {
    * Absent/false renders today's exact bytes (jobs that DO carry a balance).
    */
   paidInFull?: boolean;
+  /**
+   * An ALREADY-ISSUED final balance invoice, gross. A late booking (PRD §3.10
+   * Addition 2) raises AND emails the -BAL at ACCEPTANCE, and
+   * `ensureCommitmentInvoice` then refuses to raise a commitment behind it —
+   * so `commitmentAmount` arrives here as 0 for a reason that has nothing to
+   * do with there being nothing to pay. Without this the zero-commitment copy
+   * below told a customer holding an unpaid invoice that there was nothing to
+   * pay right now and that we would send the final invoice nearer the time,
+   * days before the move. This is the same signal /q renders as
+   * `showBalanceCard` (app/q/[token]/page.tsx), so the two surfaces agree.
+   *
+   * Absent/0 renders today's exact bytes (no balance invoice raised yet).
+   */
+  balanceInvoiced?: number | null;
+  /** That invoice's number, so the copy names the document already in the
+   *  customer's inbox rather than describing a second one. */
+  balanceInvoiceNumber?: string | null;
+  /** The issued balance is settled (leads.balance_paid_at). The ask then
+   *  becomes a reassurance: never ask twice for money already handed over. */
+  balanceSettled?: boolean;
   /** Where the customer takes the choice — their own /q page. */
   payUrl?: string | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
@@ -128,6 +148,14 @@ function dueClause(dueLabel: string | null | undefined): string {
 
 function dueClausePlain(dueLabel: string | null | undefined): string {
   return dueLabel ? `Due by ${escapeHtml(dueLabel)}` : `Due now`;
+}
+
+/** The final balance invoice that has ALREADY been raised, if any, and whether
+ *  it is still owed. Both the block copy and the preheader branch on it, so it
+ *  is derived once. */
+function issuedBalance(m: DateConfirmationMeta): { amount: number; outstanding: boolean } {
+  const amount = Number(m.balanceInvoiced ?? 0) > 0 ? Number(m.balanceInvoiced) : 0;
+  return { amount, outstanding: amount > 0 && !m.balanceSettled };
 }
 
 function commitmentBlockHtml(m: DateConfirmationMeta, t: EmailTheme): string {
@@ -167,6 +195,36 @@ function commitmentBlockHtml(m: DateConfirmationMeta, t: EmailTheme): string {
       .filter(Boolean)
       .join("\n");
   }
+  // An already-ISSUED final balance outranks both zero-commitment arms below,
+  // exactly as it does on /q (`showBalanceCard` is checked before `paidInFull`
+  // there, for the same reason): those arms speak about an invoice still to
+  // come, and this customer is already holding one. The vocabulary is borrowed
+  // from the balance invoice email itself (payment-email.ts) rather than
+  // invented, so the two documents describe one debt in one voice. No card
+  // copy: the balance is bank transfer, phone card or cash only (Peter,
+  // 2026-07-09), and the invoice is raised with online payments disabled.
+  const bal = issuedBalance(m);
+  if (bal.amount > 0) {
+    if (!bal.outstanding) {
+      return subline(
+        `Your deposit already covers the commitment for your booking, and your final balance of <strong style="color:#1A1A1A;">${gbp(bal.amount)}</strong> is settled in full, so there is nothing left to pay.`,
+      );
+    }
+    return [
+      amountCard(
+        `Balance due${m.balanceInvoiceNumber ? ` · Invoice ${escapeHtml(m.balanceInvoiceNumber)}` : ""}`,
+        bal.amount,
+        t,
+        "Payment in full is due before move day",
+      ),
+      themedBankCard(m.quoteRef, t),
+      subline(
+        `Your deposit already covers the commitment for your booking, so this final balance is all that is left to pay. We have already sent you that invoice${
+          m.balanceInvoiceNumber ? ` (${escapeHtml(m.balanceInvoiceNumber)})` : ""
+        }, and payment in full is due before move day. Already paid or need a different arrangement? ${t.callHtmlCap} or reply to this email.`,
+      ),
+    ].join("\n");
+  }
   // Gate 9a: `paidInFull` is the caller's frozen-figures verdict that the
   // payment WAS the whole job — no balance will ever be invoiced, so the
   // with-balance sentence below would promise a document and a debit that
@@ -195,6 +253,7 @@ export function dateConfirmationTemplateVars(m: DateConfirmationMeta): Record<st
 
 export function buildDateConfirmationEmailHtml(m: DateConfirmationMeta): string {
   const t = emailTheme(m.brand);
+  const bal = issuedBalance(m);
   const name = (m.firstName ?? "").trim().split(/\s+/)[0];
   const when = m.moveDateLabel
     ? ` on <strong style="color:#1A1A1A;">${escapeHtml(m.moveDateLabel)}</strong>`
@@ -215,13 +274,20 @@ export function buildDateConfirmationEmailHtml(m: DateConfirmationMeta): string 
   ].join("\n");
 
   return themedEmailShell(
+    // The preheader is the line the customer reads in their inbox list, so it
+    // branches on the same facts the block does — an unpaid issued invoice
+    // must never be previewed as "nothing more to pay right now".
     m.commitmentAmount > 0
       ? `Your move date is confirmed. Your ${gbp(m.commitmentAmount)} commitment payment is ${
           m.commitmentDueLabel ? `due by ${m.commitmentDueLabel}` : "due now"
         }.`
-      : m.paidInFull
-        ? `Your move date is confirmed. Nothing more to pay.`
-        : `Your move date is confirmed. Nothing more to pay right now.`,
+      : bal.outstanding
+        ? `Your move date is confirmed. Your ${gbp(bal.amount)} final balance is due before move day.`
+        : bal.amount > 0
+          ? `Your move date is confirmed. Your balance is settled in full, so there is nothing left to pay.`
+          : m.paidInFull
+            ? `Your move date is confirmed. Nothing more to pay.`
+            : `Your move date is confirmed. Nothing more to pay right now.`,
     inner,
     t,
   );
