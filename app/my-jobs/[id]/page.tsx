@@ -97,7 +97,14 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
   if (!loaded) notFound();
   const { data: d, apptType, apptStatus, surveyId, cubicSurveyId } = loaded;
   const [photos, videos, crewNotes, { data: completion }, { data: myStaff }] = await Promise.all([
-    surveyId ? loadPhotoSignedUrls(admin, surveyId) : Promise.resolve([]),
+    // loadPhotoSignedUrls THROWS on a failed read (it must never render "no
+    // photos" for "I could not check"). That belongs in the log, not on this
+    // page: a crew member standing at the customer's door needs the address,
+    // the phone, the access notes and the Complete button far more than the
+    // photo strip, and letting this reject would replace all of it with the
+    // generic error screen. assertPhotoRead has already logged by the time we
+    // get here, so the failure is recorded — the strip just renders empty.
+    surveyId ? loadPhotoSignedUrls(admin, surveyId).catch(() => []) : Promise.resolve([]),
     cubicSurveyId ? loadSurveyVideoSignedUrls(admin, cubicSurveyId) : Promise.resolve([]),
     loadJobNotesForAppointment(admin, id),
     admin

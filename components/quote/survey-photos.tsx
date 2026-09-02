@@ -47,6 +47,12 @@ export function SurveyPhotos({
   const [photos, setPhotos] = useState<PhotoState[]>([]);
   const [uploading, setUploading] = useState(0);
   const [dragOver, setDragOver] = useState(false);
+  /** How many older photos in THIS category the load's per-category cap left
+   *  behind. Rendered rather than swallowed: a gallery that hides rows while
+   *  looking complete is what lets an estimator believe they are seeing the
+   *  whole visit. It is set once, from the load, so later uploads and deletions
+   *  (which never fetch the older rows) cannot make it lie. */
+  const [olderNotShown, setOlderNotShown] = useState(0);
   const inputId = `survey-photos-${category}`;
 
   const surveyIdRef = useRef<string | null>(null);
@@ -80,9 +86,16 @@ export function SurveyPhotos({
     let alive = true;
     void (async () => {
       const res = await loadSurveyPhotos(leadId);
-      if (!alive || !res.ok) return;
+      if (!alive) return;
+      // A failed read used to return here in silence, which renders as an empty
+      // gallery — indistinguishable from a survey with no photos on it.
+      if (!res.ok) {
+        toast.error(res.error || "Couldn’t load the photos already on this survey.");
+        return;
+      }
       const mine = res.photos.filter((p) => p.category === category);
       if (mine.length) setPhotos(mine.map((p) => ({ ...p })));
+      setOlderNotShown(Math.max(0, (res.totals[category] ?? mine.length) - mine.length));
     })();
     return () => {
       alive = false;
@@ -200,13 +213,25 @@ export function SurveyPhotos({
         />
       </label>
 
+      {olderNotShown > 0 && (
+        <p className="text-xs text-mist-500">
+          Showing the {photos.length} most recent.{" "}
+          {olderNotShown === 1 ? "1 older photo is" : `${olderNotShown} older photos are`} not shown.
+        </p>
+      )}
+
       {photos.length > 0 && (
         <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
           {photos.map((photo) => (
             <div key={photo.id} className="group relative aspect-square overflow-hidden rounded-md border bg-muted">
               {photo.url ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={photo.url} alt={`${label} survey photo`} className="size-full object-cover" />
+                <img
+                  src={photo.url}
+                  alt={`${label} survey photo`}
+                  loading="lazy"
+                  className="size-full object-cover"
+                />
               ) : (
                 <div className="flex size-full items-center justify-center">
                   <Loader2 className="size-4 animate-spin text-mist-400" strokeWidth={1.75} />

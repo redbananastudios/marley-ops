@@ -18,7 +18,7 @@
  * the held/refunded-if-rebooked framing.
  */
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarCheck2, CalendarClock, Link2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
-import { DATE_CONFIRM_ACKS, type DateConfirmAckKey } from "@/lib/signatures";
+import { dateConfirmAcks, type DateConfirmAckKey } from "@/lib/signatures";
 import { ScriptSignature, renderNameToPng } from "@/lib/signature-script";
 import {
   confirmDateInPersonAction,
@@ -61,9 +61,23 @@ const chipBase =
 export function DateConfirmStatus({
   leadId,
   state,
+  companyName,
 }: {
   leadId: string;
   state: DateConfirmStatusState;
+  /**
+   * The company the acknowledgment names as the party that may retain up to
+   * 25% of what the customer has paid — the LEAD's brand name, so the wording
+   * the office reads out in person is the wording the customer would have read
+   * on their own /q. Absent/blank falls back to the default company, which is
+   * today's behaviour and byte-identical for a single-brand install.
+   *
+   * UNWIRED at both call sites — app/(dashboard)/bookings/page.tsx and
+   * app/(dashboard)/leads/[id]/page.tsx must pass this, or a second brand's
+   * customer confirming in person still signs under the default company's
+   * name. Those files were outside this change's lane.
+   */
+  companyName?: string | null;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -138,6 +152,7 @@ export function DateConfirmStatus({
       <ConfirmInPersonDialog
         leadId={leadId}
         moveDateLabel={state.moveDateLabel ?? null}
+        companyName={companyName}
         open={open}
         onOpenChange={setOpen}
         onDone={() => router.refresh()}
@@ -149,12 +164,14 @@ export function DateConfirmStatus({
 function ConfirmInPersonDialog({
   leadId,
   moveDateLabel,
+  companyName,
   open,
   onOpenChange,
   onDone,
 }: {
   leadId: string;
   moveDateLabel: string | null;
+  companyName?: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onDone: () => void;
@@ -165,7 +182,8 @@ function ConfirmInPersonDialog({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const allTicked = DATE_CONFIRM_ACKS.every((a) => acks[a.key]);
+  const ackList = useMemo(() => dateConfirmAcks(companyName), [companyName]);
+  const allTicked = ackList.every((a) => acks[a.key]);
 
   function submit() {
     setError(null);
@@ -212,7 +230,7 @@ function ConfirmInPersonDialog({
 
         <div className="space-y-4 py-1">
           <div className="space-y-2.5">
-            {DATE_CONFIRM_ACKS.map((a) => (
+            {ackList.map((a) => (
               <label
                 key={a.key}
                 className="flex cursor-pointer items-start gap-3 rounded-md border border-mist-200 bg-white px-4 py-3 transition has-[:checked]:border-mm-red/50 has-[:checked]:bg-mm-red/[0.03]"

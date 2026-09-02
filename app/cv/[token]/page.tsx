@@ -6,7 +6,10 @@ import { sanitizeCubicLines, type CubicLine } from "@/lib/cubic-survey";
 import { CubicBuilder } from "@/components/cubic/cubic-builder";
 import { getBrandOrDefault } from "@/lib/brand";
 import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
-import { submitCubicCustomerAction } from "./actions";
+import { MAX_CUSTOMER_SURVEY_PHOTOS } from "@/lib/survey-photos";
+import { deleteCubicCustomerPhotoAction, submitCubicCustomerAction } from "./actions";
+import { CustomerSurveyPhotos, type CustomerPhoto } from "./customer-photos";
+import { findSurveyRowId, listCustomerPhotos, signCustomerPhotoUrls } from "./photo-store";
 
 /**
  * /cv/<token> — customer self-fill cubic survey (/q model: the unguessable
@@ -57,6 +60,28 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
   // The survey belongs to a LEAD, and the lead carries the brand (PRD §3.2).
   const theme = pageTheme(lead?.brand ? await getBrandOrDefault(admin, lead.brand) : null);
 
+  // Photos the customer has already added through this link (QA-20260827-04).
+  // `survey_photos` hangs off `surveys`, not `cubic_surveys`, so this reads the
+  // same row the office review page reads — and only ever READS here: the row is
+  // created lazily by the upload route, so simply opening the link writes
+  // nothing. A failed read is reported as a failed read, never as "no photos".
+  let initialPhotos: CustomerPhoto[] = [];
+  let photosUnavailable = false;
+  if (survey.lead_id && survey.status !== "complete") {
+    const surveyRow = await findSurveyRowId(admin, survey.lead_id);
+    if (!surveyRow.ok) {
+      photosUnavailable = true;
+    } else if (surveyRow.id) {
+      const rows = await listCustomerPhotos(admin, surveyRow.id);
+      if (rows === null) {
+        photosUnavailable = true;
+      } else {
+        const urls = await signCustomerPhotoUrls(rows.map((row) => row.storagePath));
+        initialPhotos = rows.map((row) => ({ id: row.id, url: urls[row.storagePath] ?? null }));
+      }
+    }
+  }
+
   return (
     // One override re-points every mm-red utility below — including the 14 in
     // CubicBuilder, which is SHARED with the office quote builder. The office
@@ -102,6 +127,13 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
           <div className="rounded-lg border border-border bg-card px-5 pb-6 md:px-8">
             <CubicBuilder
               mode="customer"
+              // The builder's two customer-facing identity strings — the submit
+              // button and the confirmation card's callback number. They used to
+              // be literals inside the shared builder, which put the default
+              // brand's name and office number on every other brand's page,
+              // under this page's own logo. Same theme, so the header and the
+              // button cannot disagree.
+              brand={{ name: theme.name, phone: theme.phone }}
               initialLines={lines}
               initialNotes={survey.customer_notes ?? ""}
               initialStatus={survey.status ?? "draft"}
@@ -114,6 +146,17 @@ export default async function CustomerCubicPage({ params }: { params: Promise<{ 
                 sevenFiveTFt3: settings.cubic75tFt3,
               }}
               save={submitCubicCustomerAction.bind(null, token)}
+              photoSlot={
+                survey.lead_id ? (
+                  <CustomerSurveyPhotos
+                    uploadUrl={`/cv/${encodeURIComponent(token)}/photos`}
+                    remove={deleteCubicCustomerPhotoAction.bind(null, token)}
+                    initial={initialPhotos}
+                    max={MAX_CUSTOMER_SURVEY_PHOTOS}
+                    unavailable={photosUnavailable}
+                  />
+                ) : null
+              }
             />
           </div>
         ) : null}

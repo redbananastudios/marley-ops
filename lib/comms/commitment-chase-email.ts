@@ -22,7 +22,7 @@
  * carry disclosure (a) inside the bank block via the shared theme.
  */
 
-import { DATE_CONFIRM_ACKS } from "@/lib/signatures";
+import { dateConfirmAcks } from "@/lib/signatures";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { moveDateLabel } from "@/lib/quote/payments";
 import type { Brand } from "@/lib/brand";
@@ -32,12 +32,35 @@ import {
   themedButtonRow,
   themedEmailShell,
   themedPill,
+  type EmailTheme,
 } from "@/lib/comms/email-brand";
 
 export const COMMITMENT_CHASE_TEMPLATE_ENV = "RESEND_TEMPLATE_COMMITMENT_CHASE";
 
-/** The verbatim promise the customer signed at date confirmation. */
-export const COMMITMENT_CHASE_WARNING = DATE_CONFIRM_ACKS[0].label;
+/**
+ * The verbatim promise the customer signed at date confirmation, in the
+ * SENDING brand's name.
+ *
+ * A function of the theme, not a module constant. It used to be
+ * `DATE_CONFIRM_ACKS[0].label` — evaluated once at import, so every brand's
+ * customer was chased with the DEFAULT company's name quoted back at them
+ * inside a sentence that begins "A quick reminder of what you agreed". The
+ * name arrives the way every other brand-varying string in this file does,
+ * through `emailTheme(m.brand)`; nothing here re-queries a brand.
+ *
+ * The ack builder falls back to the default company for a blank name, and the
+ * default theme's `name` IS that same default company, so an absent or
+ * default-brand send still yields today's exact bytes.
+ */
+function warningFor(t: EmailTheme): string {
+  return dateConfirmAcks(t.name)[0].label;
+}
+
+/** The same promise, addressed by brand — for callers outside a composition
+ *  (tests, and anything that needs the sentence on its own). */
+export function commitmentChaseWarning(brand?: Brand | null): string {
+  return warningFor(emailTheme(brand));
+}
 
 const gbp = (n: number): string =>
   "£" +
@@ -90,6 +113,7 @@ export interface ComposedCommitmentChaseEmail {
 /** One composition point so the template path and the fallback can never drift. */
 export function composeCommitmentChaseEmail(m: CommitmentChaseMeta): ComposedCommitmentChaseEmail {
   const t = emailTheme(m.brand);
+  const warning = warningFor(t);
   const name = firstNameOf(m.firstName);
   const dueLabel = commitmentDueLabel(m.dueDate, m.todayUk);
   const moveLabel = moveDateLabel(m.movingDate) ?? "your booked date";
@@ -112,7 +136,7 @@ Sort code: ${BANK_DETAILS.sortCode}
 Account number: ${BANK_DETAILS.account}
 Reference: ${m.quoteRef}
 ${payToTextLine ? `\n${payToTextLine}\n` : ""}${invoiceTextLine}
-A quick reminder of what you agreed when you confirmed your date: "${COMMITMENT_CHASE_WARNING}"
+A quick reminder of what you agreed when you confirmed your date: "${warning}"
 
 If anything about your move has changed, or you would like to talk it through, reply to this email or ${t.callUsText} and we will help.
 
@@ -129,7 +153,7 @@ The ${t.name} Accounts Team`;
     MOVE_DATE_LABEL: escapeHtml(moveLabel),
     INVOICE_META: m.invoiceNumber ? ` · Invoice ${escapeHtml(m.invoiceNumber)}` : "",
     INVOICE_BUTTON: invoiceButton,
-    DATE_CONFIRM_ACK: escapeHtml(COMMITMENT_CHASE_WARNING),
+    DATE_CONFIRM_ACK: escapeHtml(warning),
   };
 
   return { subject, text, html: buildCommitmentChaseEmailHtml(m), variables };
@@ -156,6 +180,7 @@ function headline(text: string): string {
 /** Branded fallback used when RESEND_TEMPLATE_COMMITMENT_CHASE isn't set. */
 export function buildCommitmentChaseEmailHtml(m: CommitmentChaseMeta): string {
   const t = emailTheme(m.brand);
+  const warning = warningFor(t);
   const name = firstNameOf(m.firstName);
   const dueLabel = commitmentDueLabel(m.dueDate, m.todayUk);
   const moveLabel = moveDateLabel(m.movingDate) ?? "your booked date";
@@ -181,7 +206,7 @@ export function buildCommitmentChaseEmailHtml(m: CommitmentChaseMeta): string {
     invoiceButton,
     themedBankCard(m.quoteRef, t),
     subline(
-      `A quick reminder of what you agreed when you confirmed your date: &ldquo;${escapeHtml(COMMITMENT_CHASE_WARNING)}&rdquo;`,
+      `A quick reminder of what you agreed when you confirmed your date: &ldquo;${escapeHtml(warning)}&rdquo;`,
     ),
     subline(
       `If anything about your move has changed, or you would like to talk it through, reply to this email or ${t.callUsHtml} and we will help.`,

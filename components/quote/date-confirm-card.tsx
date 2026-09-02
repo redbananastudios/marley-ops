@@ -11,20 +11,30 @@
  * Copy rule: the word "penalty" never appears anywhere on this surface.
  */
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarCheck2, Loader2 } from "lucide-react";
-import { DATE_CONFIRM_ACKS, type DateConfirmAckKey } from "@/lib/signatures";
+import { dateConfirmAcks, type DateConfirmAckKey } from "@/lib/signatures";
 import { ScriptSignature, renderNameToPng } from "@/lib/signature-script";
 import { confirmMoveDateAction } from "@/app/q/[token]/actions";
 
 export function DateConfirmCard({
   token,
   moveDateLabel,
+  companyName,
 }: {
   token: string;
   /** Pre-formatted, e.g. "Monday 20 July". */
   moveDateLabel: string;
+  /**
+   * The company the acknowledgment names as the party that may retain up to
+   * 25% of what the customer has paid — `pageTheme(...).name` from the page,
+   * which resolves it from the QUOTE's brand. Every other element of this card
+   * is already this brand's; the clause was the one that named the default
+   * company on every brand's /q. Absent/blank falls back to the default
+   * company, so a single-brand render is byte-identical.
+   */
+  companyName?: string | null;
 }) {
   const router = useRouter();
   const [name, setName] = useState("");
@@ -34,7 +44,8 @@ export function DateConfirmCard({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const allTicked = DATE_CONFIRM_ACKS.every((a) => acks[a.key]);
+  const ackList = useMemo(() => dateConfirmAcks(companyName), [companyName]);
+  const allTicked = ackList.every((a) => acks[a.key]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -70,7 +81,7 @@ export function DateConfirmCard({
       </div>
 
       <div className="space-y-2.5">
-        {DATE_CONFIRM_ACKS.map((a) => (
+        {ackList.map((a) => (
           <label
             key={a.key}
             className="flex min-h-14 cursor-pointer items-center gap-3 rounded-md border border-mist-200 bg-white px-4 py-3 transition has-[:checked]:border-mm-red/50 has-[:checked]:bg-mm-red/[0.03]"

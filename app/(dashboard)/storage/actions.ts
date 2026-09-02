@@ -15,10 +15,11 @@ import {
   isValidSignatureDataUri,
   normalizeCrateStorageAcks,
   normalizeStorageAcks,
-  STORAGE_ACKS,
+  storageAcks,
 } from "@/lib/signatures";
 import { termsSnapshot } from "@/lib/legal/documents";
 import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrandsForWrite } from "@/lib/brand";
+import { pageTheme } from "@/lib/brand-page-theme";
 import { helloFromFor } from "@/lib/comms/sender";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
@@ -764,7 +765,7 @@ export async function signStorageAgreementAction(
 
   const { data: let_ } = await sb
     .from("storage_lets")
-    .select("id, client_id, lead_id, billing_model, min_days, min_kind")
+    .select("id, client_id, lead_id, billing_model, min_days, min_kind, brand")
     .eq("id", letId)
     .single();
   if (!let_) return { ok: false as const, error: "Let not found." };
@@ -777,17 +778,34 @@ export async function signStorageAgreementAction(
     return { ok: false as const, error: "Tick each confirmation with the customer first." };
   }
 
+  // The company the lien tick-box names — the party the customer grants the
+  // right to dispose of or sell their stored goods to. This is the path most
+  // storage agreements actually take (in person, on the crew device), and it
+  // named the DEFAULT brand for every brand: a second brand's customer signing
+  // in front of the crew was granting Marley Moves rights over their goods,
+  // with the rendered and recorded wording agreeing because BOTH were wrong.
+  //
+  // Resolved through getBrandOrDefault → pageTheme from the let's PERSISTED
+  // brand column, exactly as app/s/[token]/actions.ts does for the remote path,
+  // so the two channels record identical wording for the same let.
+  // components/storage/manage-let-dialog.tsx renders from the same slug and
+  // refuses to open the signing panel when it cannot resolve the name, so it
+  // can never show one company here and record another.
+  const company = pageTheme(await getBrandOrDefault(sb, let_.brand)).name;
+
   // Evidence: store the exact ack WORDING beside the ticked keys. Derived
-  // server-side from the same sources the dialog renders (the let's frozen
-  // min_kind/min_days + the live rate-card handling figure — mirrors /s), so
-  // the record shows what was agreed even after the rate card changes.
-  let ackDefs: ReadonlyArray<{ key: string; label: string }> = STORAGE_ACKS;
+  // server-side from the same sources the dialog renders (this brand's name +
+  // the let's frozen min_kind/min_days + the live rate-card handling figure —
+  // mirrors /s), so the record shows what was agreed even after the rate card
+  // changes.
+  let ackDefs: ReadonlyArray<{ key: string; label: string }> = storageAcks(company);
   if (isCrate) {
     const rates = await getStorageRates(sb);
     const l = let_ as { min_days?: number | null; min_kind?: string | null };
     ackDefs = crateStorageAcks(
       { kind: l.min_kind, days: Number(l.min_days ?? rates.crateMinDays) },
       gbpInc(rates.handlingEventInc),
+      company,
     );
   }
   const ackLabels = Object.fromEntries(ackDefs.map((a) => [a.key, a.label]));

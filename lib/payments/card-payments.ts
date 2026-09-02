@@ -714,7 +714,16 @@ export async function refundCardPayment(
     const brand = await brandForComms(sb, quote.brand);
     const isDefaultBrand = brand.slug === DEFAULT_BRAND;
     const brandName = isDefaultBrand ? "Marley Moves" : brand.name;
-    const brandPhone = isDefaultBrand ? "01747 637070" : (brand.phone ?? "01747 637070");
+    // A second brand with no phone on its row must NOT borrow the default
+    // brand's number: that put the default office's line in front of a customer
+    // who has never dealt with them, in a money email, over a refund. Same
+    // blank-phone-borrow family as the theme fix in #211. No phone means the
+    // sentence offering one is dropped, not filled in with somebody else's.
+    const brandPhone = isDefaultBrand ? "01747 637070" : brand.phone?.trim() || null;
+    const callClause = brandPhone ? ` Any questions, call us on ${brandPhone}.` : "";
+    const replyClause = brandPhone
+      ? `Any questions at all, just reply to this email or call us on ${brandPhone}.`
+      : "Any questions at all, just reply to this email.";
     const firstName = (quote.customer_name ?? "").trim().split(/\s+/)[0] || undefined;
     const endsLine = row.card_number_mask ? ` ending ${row.card_number_mask.slice(-4)}` : "";
     const bodyPara = voided
@@ -730,12 +739,12 @@ export async function refundCardPayment(
       subject: voided
         ? `Your ${label} card payment has been cancelled (${quote.quote_ref})`
         : `Your ${label} refund from ${brandName} (${quote.quote_ref})`,
-      bodyText: `${bodyPara} Any questions, call us on ${brandPhone}.`,
+      bodyText: `${bodyPara}${callClause}`,
       bodyHtml: brandedEmailHtml({
         preheader: voided ? `${label} card payment cancelled` : `${label} refunded to your card`,
         greeting: firstName,
         headline: voided ? "Your payment has been cancelled" : "Your refund is on its way",
-        paragraphs: [bodyPara, `Any questions at all, just reply to this email or call us on ${brandPhone}.`],
+        paragraphs: [bodyPara, replyClause],
         brand,
       }),
       brand,

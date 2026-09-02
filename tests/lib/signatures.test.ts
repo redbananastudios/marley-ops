@@ -185,3 +185,101 @@ describe("crate storage acks — the minimum wording follows the let's frozen mi
     expect(acks.map((a) => a.key)).toEqual(["crate_billing", "lien", "no_prohibited"]);
   });
 });
+
+describe("the acks that name a company name the CUSTOMER'S company", () => {
+  // A second brand's storage customer read a page whose header, logo, footer and
+  // phone were all that brand's, and ticked a box granting the DEFAULT brand the
+  // right to sell their belongings. Same shape on the date-confirmation tick,
+  // which names the company that may retain up to 25% of what they have paid.
+  //
+  // Both now take the company as data. The two things that must hold are in
+  // tension, so both are asserted rather than argued: an unbranded call renders
+  // TODAY'S EXACT BYTES (PRD §1 — a single-brand install cannot move), and a
+  // branded call actually substitutes (an inert switch is the failure mode that
+  // looks identical to a correct one).
+
+  /** The literals as they stood before the company became data. Written out in
+   *  full on purpose: a test that rebuilds the string from the same template the
+   *  code uses would pass on any wording change at all. */
+  const LIEN_TODAY =
+    "I understand that if invoices stay unpaid for 60+ days, Marley Moves may, after written notice, dispose of or sell stored items to recover the charges.";
+  const DATE_CONFIRM_TODAY =
+    "I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and Marley Moves cannot re-book the day, amounts I've paid up to 25% of my job price may be retained, and are refunded in full if the day is re-booked.";
+
+  it("byte parity: an unbranded call renders exactly what it rendered before", () => {
+    expect(signaturesModule.STORAGE_ACKS.map((a) => a.key)).toEqual([
+      "rate_advance",
+      "lien",
+      "no_prohibited",
+    ]);
+    expect(signaturesModule.STORAGE_ACKS[0].label).toBe(
+      "I agree to the storage rate shown, billed in advance each period until I end the storage.",
+    );
+    expect(signaturesModule.STORAGE_ACKS[1].label).toBe(LIEN_TODAY);
+    expect(signaturesModule.STORAGE_ACKS[2].label).toBe(
+      "Nothing stored is hazardous, perishable, illegal, or irreplaceable without my own insurance.",
+    );
+    expect(signaturesModule.DATE_CONFIRM_ACKS).toHaveLength(1);
+    expect(signaturesModule.DATE_CONFIRM_ACKS[0].label).toBe(DATE_CONFIRM_TODAY);
+
+    // The builders reached with no argument, and with the shapes a blank
+    // brands-table field actually takes, are the same thing.
+    for (const blank of [undefined, null, "", "   "]) {
+      expect(signaturesModule.storageAcks(blank)[1].label).toBe(LIEN_TODAY);
+      expect(signaturesModule.dateConfirmAcks(blank)[0].label).toBe(DATE_CONFIRM_TODAY);
+      expect(
+        signaturesModule.crateStorageAcks({ kind: "calendar_month", days: 28 }, "£60", blank)[1].label,
+      ).toBe(LIEN_TODAY);
+    }
+  });
+
+  it("a branded call really substitutes — the switch is not inert", () => {
+    // Unchanged output would be equally consistent with the company never being
+    // read at all, so the discriminating assertion is that MUTATING the input
+    // changes the output, and that the default brand's name is then absent.
+    const lien = signaturesModule.storageAcks("Pitmans Removals")[1].label;
+    expect(lien).toBe(
+      "I understand that if invoices stay unpaid for 60+ days, Pitmans Removals may, after written notice, dispose of or sell stored items to recover the charges.",
+    );
+    expect(lien).not.toContain("Marley");
+
+    const crateLien = signaturesModule.crateStorageAcks(
+      { kind: "calendar_month", days: 28 },
+      "£60",
+      "Pitmans Removals",
+    )[1].label;
+    expect(crateLien).toBe(lien);
+
+    const dateConfirm = signaturesModule.dateConfirmAcks("Pitmans Removals")[0].label;
+    expect(dateConfirm).toContain("and Pitmans Removals cannot re-book the day");
+    expect(dateConfirm).not.toContain("Marley");
+    // Everything either side of the name is untouched — the substitution must
+    // not be a rewrite of a clause a solicitor has read.
+    expect(dateConfirm).toBe(DATE_CONFIRM_TODAY.replace("Marley Moves", "Pitmans Removals"));
+  });
+
+  it("the ack KEYS never move, whatever the brand — stored signatures are read back by key", () => {
+    // acknowledgments/ack_labels are keyed; renaming or reordering a key
+    // silently rewrites what every historical signature appears to have agreed
+    // to. So the key list is fixed and the confirmed/normalise pairs run off it
+    // rather than off a built label set.
+    expect(signaturesModule.STORAGE_ACK_KEYS).toEqual(["rate_advance", "lien", "no_prohibited"]);
+    expect(signaturesModule.DATE_CONFIRM_ACK_KEYS).toEqual(["date_confirm"]);
+    expect(signaturesModule.storageAcks("Pitmans Removals").map((a) => a.key)).toEqual([
+      ...signaturesModule.STORAGE_ACK_KEYS,
+    ]);
+    expect(
+      signaturesModule.crateStorageAcks({ kind: "days", days: 28 }, "£60", "Pitmans Removals").map((a) => a.key),
+    ).toEqual(["crate_billing", "lien", "no_prohibited"]);
+
+    const ticked = { rate_advance: true, lien: true, no_prohibited: true };
+    expect(signaturesModule.allStorageAcksConfirmed(ticked)).toBe(true);
+    expect(signaturesModule.allStorageAcksConfirmed({ ...ticked, lien: false })).toBe(false);
+    expect(Object.keys(signaturesModule.normalizeStorageAcks({ lien: true, evil: true } as never)).sort()).toEqual(
+      ["lien", "no_prohibited", "rate_advance"],
+    );
+    expect(signaturesModule.allDateConfirmAcksConfirmed({ date_confirm: true })).toBe(true);
+    expect(signaturesModule.allDateConfirmAcksConfirmed({ date_confirm: "1" } as never)).toBe(false);
+    expect(Object.keys(signaturesModule.normalizeDateConfirmAcks({} as never))).toEqual(["date_confirm"]);
+  });
+});

@@ -19,7 +19,7 @@
  * 2026-07-10). Totals here are display-only; the server recomputes.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition, type ReactNode } from "react";
 import {
   Camera,
   Check,
@@ -51,8 +51,29 @@ export type CubicSaveResult =
   | { ok: true; totalFt3: number; updatedAt: string }
   | { ok: false; error: string; conflict?: boolean };
 
-export interface CubicBuilderProps {
-  mode: "office" | "customer";
+/**
+ * The brand whose customer this is — the two places this shared builder speaks
+ * to a customer AS a company (multi-brand PRD §4, gate 16).
+ *
+ * `/cv/<token>` already resolves a full `PageTheme` from the lead's brand: the
+ * wordmark, the group line and the phone in the page header all come from it.
+ * The builder rendered inside that page then named the DEFAULT brand on the
+ * only call to action ("Send to …") and gave the default brand's number to ring
+ * afterwards, because both were literals in here — so a second brand's customer
+ * read one company in the header and a different one on the button.
+ *
+ * Passed IN rather than resolved here on purpose: this component is shared with
+ * the office quote builder, it is a client component, and re-querying the brand
+ * inside it would put a second, divergent resolution beside `pageTheme`.
+ */
+export interface CubicCustomerBrand {
+  /** Customer-facing brand name — `PageTheme.name`. */
+  name: string;
+  /** The number the confirmation card tells them to ring — `PageTheme.phone`. */
+  phone: string;
+}
+
+interface CubicBuilderBaseProps {
   initialLines: CubicLine[];
   initialNotes: string;
   initialStatus: string;
@@ -72,14 +93,33 @@ export interface CubicBuilderProps {
   customerNotes?: string;
   /** Customer mode: localStorage key for the pre-submit draft. */
   draftKey?: string;
+  /**
+   * Customer mode: the photo widget for this route, rendered where the office
+   * mode renders its own. Passed in rather than imported so this shared builder
+   * stays free of route-specific plumbing — the office branch below is
+   * untouched, and office callers pass nothing (QA-20260827-04).
+   */
+  photoSlot?: ReactNode;
   /** Server-owned AI readiness and contingency; omitted for manual/customer surveys. */
   planning?: { planningFt3: number; contingencyPct: number; guidanceReady: boolean; aiInProgress: boolean };
 }
+
+/**
+ * `brand` is REQUIRED in customer mode and forbidden in office mode, enforced by
+ * the type rather than by a default. A fallback literal here would be the defect
+ * all over again: it renders the default brand's identity on a page that had a
+ * perfectly good brand of its own and simply forgot to pass it, silently and
+ * only for the other brand's customers. The office builder is internal chrome
+ * and names no company at all, so it passes nothing.
+ */
+export type CubicBuilderProps = CubicBuilderBaseProps &
+  ({ mode: "office"; brand?: never } | { mode: "customer"; brand: CubicCustomerBrand });
 
 const CUSTOM_CATEGORY = "custom";
 
 export function CubicBuilder({
   mode,
+  brand,
   initialLines,
   initialNotes,
   initialStatus,
@@ -89,6 +129,7 @@ export function CubicBuilder({
   leadId,
   customerNotes,
   draftKey,
+  photoSlot,
   planning,
 }: CubicBuilderProps) {
   const office = mode === "office";
@@ -351,7 +392,7 @@ export function CubicBuilder({
         <h2 className="mt-3 font-display text-2xl font-semibold text-foreground">Sent — thank you.</h2>
         <p className="mt-2 text-sm text-mist-500">
           We&apos;ve got your list ({totals.itemCount} items). We&apos;ll use it to size the right van and crew for
-          your move — any questions, call 01747 637070.
+          your move{brand ? ` — any questions, call ${brand.phone}.` : "."}
         </p>
       </div>
     );
@@ -455,7 +496,7 @@ export function CubicBuilder({
                 className="focus-ring inline-flex min-h-11 items-center gap-2 rounded-md bg-mm-red px-5 text-sm font-semibold text-white hover:bg-mm-red-deep disabled:opacity-50"
               >
                 {completing ? <Loader2 className="size-4 animate-spin" strokeWidth={2} /> : null}
-                Send to Marley Moves
+                {brand ? `Send to ${brand.name}` : "Send"}
               </button>
             )}
           </div>
@@ -744,6 +785,13 @@ export function CubicBuilder({
               <Camera className="size-3.5" strokeWidth={1.75} /> Survey photos
             </p>
             <SurveyPhotos leadId={leadId} category="cubic" label="Volume survey" />
+          </div>
+        ) : !office && photoSlot ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <p className="eyebrow mb-3 flex items-center gap-1.5">
+              <Camera className="size-3.5" strokeWidth={1.75} /> Photos
+            </p>
+            {photoSlot}
           </div>
         ) : null}
         <div className="rounded-lg border border-border bg-card p-4">

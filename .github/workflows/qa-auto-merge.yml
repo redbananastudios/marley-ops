@@ -33,15 +33,43 @@ jobs:
       # comms-sending and auth paths must never land without a human, whatever
       # the finding's class says (PR #28 auto-merged a migration under a
       # safe-fix label, 2026-08-20). A hit fails the gate; the PR then sits for
-      # Peter — exactly the behaviour an unlabelled PR gets.
+      # a human — exactly the behaviour an unlabelled PR gets.
+      #
+      # The list is the guard's SCOPE, spelled out as paths — and a path list
+      # does not grow itself when the code does. The Pitmans build added a
+      # whole second generation of money rails that landed OUTSIDE every
+      # pattern here, so a `pitmans-gate` PR touching only those robot-merged
+      # unreviewed (third-pass completeness critic, 2026-09-02). Each family
+      # below is in the scope the comment above already claims:
+      #   lib/ledger/**        raises and voids customer invoices
+      #   lib/bank-feed/**     decides which customer payments are explained
+      #   lib/payments-policy  decides what we ASK a customer to pay — the
+      #                        `lib/payments/**` folder pattern never matched
+      #                        this file, which sits at lib/ root
+      #   raise-storage-inv    raises storage invoices AND emails them
+      #   quote/accept-flow    raises invoices AND sends customer email
+      #   zoho.ts, zoho-access the ledger client, and the alarm that is
+      #                        supposed to fire when it breaks
+      #   lib/brand.ts         which brand's name, from-address and BANK
+      #                        DETAILS a customer is shown
+      # Widening a guard only ever costs a human merge; the failure it
+      # prevents is a money path landing with nobody reading it.
       - name: Refuse risky paths (human-only)
         run: |
           risky=$(git diff --name-only origin/${{ github.event.pull_request.base.ref }}...HEAD -- \
             'supabase/migrations/**' \
             'lib/payments/**' \
+            'lib/payments-policy.ts' \
             'lib/comms/**' \
             'app/api/card/**' \
-            'lib/supabase/proxy-session.ts')
+            'lib/supabase/proxy-session.ts' \
+            'lib/ledger/**' \
+            'lib/bank-feed/**' \
+            'lib/storage/raise-storage-invoices.ts' \
+            'lib/quote/accept-flow.ts' \
+            'lib/zoho.ts' \
+            'lib/ops/zoho-access.ts' \
+            'lib/brand.ts')
           if [ -n "$risky" ]; then
             echo "::error::qa-repair PR touches human-only paths — auto-merge refused:"
             echo "$risky"

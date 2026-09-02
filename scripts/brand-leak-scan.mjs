@@ -36,52 +36,48 @@
  * an exemption can never outlive its justification.
  *
  * THE SPLIT (PRD §10): this script is the source grep. The RENDERED-PAGE half
- * — a Playwright assertion over the second brand's pages on staging, catching
- * what a grep can't see through a token — lands with gate 16 as an e2e spec.
- * Neither half caps or substitutes for the other; a green source scan says
- * nothing about rendered output, and this header says so rather than letting
- * the gap be silent.
+ * is `e2e/public/brand-leak-rendered.spec.ts` — a Playwright assertion that
+ * seeds a second-brand quote, storage let and cubic survey, opens `/q`, `/s`
+ * and `/cv`, and scans the post-hydration DOM for the same literal list this
+ * file uses (imported from ./brand-leak-literals.mjs, so the two halves cannot
+ * drift). Neither half caps or substitutes for the other, and the asymmetry is
+ * the point: a grep cannot see a literal that arrives through a token, a
+ * database row or a Tailwind class re-pointed at runtime, and the rendered
+ * check cannot see a file no page happens to render. So a clean run HERE still
+ * says nothing about what the pages actually rendered — read this file's OK
+ * line and that spec's result together, never either alone.
  *
  * Evidence discipline (house rule: "I could not check" must never render as
  * "nothing to report"): a manifest pattern that matches no files is an ERROR,
  * and a run that scanned zero files FAILS — a scan that scanned nothing must
  * never print clean.
  *
- * This script itself necessarily contains every forbidden literal (the list
- * below), so it must never be added to MANIFEST. The vitest twin
- * (tests/brand-leak-scan.test.ts) imports and runs the same check so it rides
- * `npm test` with no package.json change; run standalone with
- * `node scripts/brand-leak-scan.mjs`.
+ * This script necessarily names every forbidden literal (via the shared module
+ * it re-exports), so neither it nor `scripts/brand-leak-literals.mjs` may ever
+ * be added to MANIFEST. The vitest twin (tests/brand-leak-scan.test.ts) imports
+ * and runs the same check so it rides `npm test` with no package.json change;
+ * run standalone with `node scripts/brand-leak-scan.mjs`.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-
 /**
- * Forbidden literals per PRD §6.4, both directions. `ci: true` matches
- * case-insensitively (domains, phones, tokens, mailboxes); name literals stay
- * case-SENSITIVE on purpose — the lowercase brand slugs (`marley`,
- * `pitmans`) are data keys (DEFAULT_BRAND, `?brand=` values, data-brand
- * attributes) and are legal everywhere.
+ * The literal list and the detector live in a SEPARATE module, and the reason
+ * is the two `import.meta.url` uses in this file. Playwright transpiles a spec
+ * and everything it imports to CommonJS, where `import.meta` is a load-time
+ * syntax error — so the rendered half (e2e/public/brand-leak-rendered.spec.ts)
+ * cannot import from here at all. Rather than let it keep a second copy of the
+ * list, the shared parts moved to a module with no filesystem awareness. They
+ * are re-exported below so this file's existing importers — the vitest twin,
+ * and anything reading `FORBIDDEN` off the scan — are unchanged.
  */
-export const FORBIDDEN = [
-  // Default-brand literals that must not reach a second-brand-capable surface.
-  { literal: "Marley", brand: "marley", ci: false },
-  { literal: "marleymoves.co.uk", brand: "marley", ci: true },
-  { literal: "01747 637070", brand: "marley", ci: true },
-  { literal: "01747637070", brand: "marley", ci: true },
-  { literal: "Connor", brand: "marley", ci: false },
-  { literal: "connor@", brand: "marley", ci: true }, // the mailbox form a case-sensitive "Connor" misses
-  { literal: "mm-red", brand: "marley", ci: true }, // the brand-colour Tailwind token — colour comes from brands.colour_primary
-  // Reverse direction: second-brand literals must not be hardcoded either.
-  { literal: "Pitmans", brand: "pitmans", ci: false },
-  { literal: "pitmansremovals.co.uk", brand: "pitmans", ci: true },
-  { literal: "01258 858564", brand: "pitmans", ci: true },
-  { literal: "01258858564", brand: "pitmans", ci: true },
-];
+import { FORBIDDEN, findLeaksInContent } from "./brand-leak-literals.mjs";
+
+export { FORBIDDEN, findLeaksInContent };
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 /**
  * Brand-resolved source globs, repo-relative with forward slashes. Grows gate
@@ -477,6 +473,99 @@ export const MANIFEST = [
   //     listing URLs. A non-default brand may only use ITS OWN listing, never
   //     borrow this one, which is the rule review-request.ts enforces.
   //
+  // Added 2026-09-02, when lib/signatures.ts and components/cubic/cubic-builder
+  // .tsx went under scan (see the shared-module block at the end of MANIFEST).
+  // Sweeping the import graph of the five public token routes for anything else
+  // rendering customer copy turned up these, and each is excluded on its own
+  // grounds rather than by silence:
+  //
+  //   lib/brand.ts and lib/brand-page-theme.ts — the RESOLVERS. MARLEY_THEME is
+  //     the default brand's identity written out verbatim, on purpose (PRD §1:
+  //     the default render must not be able to move when a brands row changes),
+  //     and the file also names the second brand in the comments explaining the
+  //     colour and named-person rules. Exactly the grounds lib/comms/email-brand
+  //     .ts sits here on. An allow list covering them would suppress the file.
+  //   lib/legal/generated.ts — GENERATED from legal/, and the published bodies
+  //     are immutable by design (hashes checked by scripts/build-legal.mjs
+  //     --check in the gates). Its acknowledgment labels still name the default
+  //     brand for every brand, which is why `signatures` keeps TWO columns: the
+  //     RENDERED wording in ack_labels, and the published document's own in
+  //     acknowledgment_labels. Gate 15 supersedes the document; nothing else can.
+  //   components/quote/survey-photos.tsx — reachable from /cv only through an
+  //     import, never through a render: cubic-builder gates it behind
+  //     `office && leadId`. Its mm-red is office chrome (PRD §2). If a customer
+  //     mode ever renders it, it joins the block above in the same change.
+  //   components/crew/collect-contract-button.tsx — the IN-PERSON contract flow.
+  //     It carries no literal of its own (only mm-red), so a bare entry would
+  //     pass today and prove nothing: the defect is that it takes no brand at
+  //     all and links TERMS_URL, the default brand's terms, for every brand's
+  //     customer. Listing it would read as coverage of a surface that is
+  //     genuinely wrong. It belongs here until it takes a brand.
+  //
+  // THE REST OF THE TOKEN ROUTES' IMPORT GRAPH (2026-09-02, second pass).
+  //
+  // The block above added the rule "a module that renders CUSTOMER-FACING COPY
+  // on a brand-resolved surface belongs here, wherever it lives" and named four
+  // files. It was written from a hand sweep, and a hand sweep is exactly the
+  // instrument that cannot support the word "one by one": walking the import
+  // graph of app/{q,s,cv,sheet,join}/[token] MECHANICALLY reaches 123 modules,
+  // and TWENTY of them carry a forbidden literal while appearing neither in
+  // MANIFEST nor anywhere in this note. One of them —
+  // lib/payments/card-payments.ts — turned out to be customer email on a
+  // brand-resolved surface, i.e. precisely what the new rule says belongs under
+  // scan, and it is now listed above. The other nineteen are below, each with
+  // its own grounds, because silence about them is the same defect the rule was
+  // written to end.
+  //
+  // tests/scripts/brand-leak-scan-routes.test.ts now does that walk on every
+  // run, so this list cannot rot: a new import that reaches a literal-carrying
+  // module fails the suite until someone lists it or names it here.
+  //
+  // (a) CUSTOMER COPY, excluded because an allow list would suppress the file:
+  //
+  //   lib/quote/chase.ts — the chase and acceptance emails. It IS brand-resolved
+  //     (`emailTheme(brand)`; every sign-off, pay line and signature block picks
+  //     an arm off `t.isDefault`, and the non-default arm builds from the brands
+  //     row), and the §3.5 group disclosure it renders for a non-default brand
+  //     is mandated copy. But TEAM_SIGNATURE_HTML is the default brand's own
+  //     signature written out verbatim — name, phone, mailbox, website, address,
+  //     socials, logo — which is the same thing lib/comms/email-brand.ts is and
+  //     sits here on. Listing it needs an allow of essentially every default
+  //     literal, which would suppress the file rather than police it. What
+  //     protects the non-default arms instead is
+  //     tests/lib/comms/reply-display-name.test.ts (it pins every
+  //     `replyAddressFor` call site to `brand.name`, so the function's
+  //     default-brand default parameter cannot reach a second brand's customer)
+  //     and the RENDERED half, which reads what a page actually served.
+  //
+  // (b) INTERNAL surfaces — staff read these, never a customer, so a default
+  //     literal in them is addressed to the right audience:
+  //
+  //   lib/ops/issues.ts — the daily operational-issues email to the office, and
+  //     the app's own origin behind its link (app chrome per PRD §2, as
+  //     lib/comms/retry-worker.ts).
+  //   lib/ops/zoho-access.ts — the ops alert telling an admin which ledger org
+  //     to go and fix. Naming that org IS the remedy; a brand-neutral version
+  //     would send them hunting.
+  //   lib/refunds/queue-view.ts — the office refunds queue's TRIGGER_LABELS,
+  //     keyed by the stored `marley_cancel` trigger enum that predates the brand
+  //     layer. Office-facing, never rendered to a customer. (Its label is
+  //     nonetheless wrong for a second-brand booking — recorded as a finding,
+  //     not fixed by adding it here.)
+  //
+  // (c) NOT CUSTOMER-COPY SURFACES AT ALL — money computation, ledger clients,
+  //     catalogues, settings, push payloads. Every hit in each is in a COMMENT
+  //     (a business-rule note, an account name, a dated decision), so the rule's
+  //     antecedent is not met and a bare entry could not pass anyway: buying an
+  //     allow to exempt a comment would exempt the same literal in that file's
+  //     code, which is the masking this note exists to refuse.
+  //
+  //   lib/cubic-catalogue.ts, lib/finance/invoices.ts, lib/ledger/xero-config.ts,
+  //   lib/ledger/xero-contacts.ts, lib/ledger/xero-guard.ts, lib/legacy.ts,
+  //   lib/payments-policy.ts, lib/payments/invoice-resend.ts, lib/posthog.ts,
+  //   lib/push/categories.ts, lib/push/payload.ts, lib/quote/constants.ts,
+  //   lib/quote/pricing.ts, lib/settings.ts, lib/zoho.ts
+  //
   // So these remain unscanned, and that gap is stated here rather than being
   // hidden behind a green run (this file's own evidence-discipline rule: "I
   // could not check" must never render as "nothing to report"). Whoever
@@ -524,6 +613,18 @@ export const MANIFEST = [
     reason:
       "default-brand constants + contract docs: the 01747 fallback inside the shared brand-phone pattern (errorPhone + invoicePayClause — reached only when a brands row carries no phone) and the comment byte-locking it; the §3.5 MarleyMoves Ltd disclosure in invoicePayClause; ops.marleymoves.co.uk as the app's own origin fallback (app chrome per PRD §2, as lib/job-sheet-load.ts); Marley/Connor elsewhere appear only in comments documenting orphan adoption and BACS recording. (The invoice attachment filenames now resolve through invoicePdfFilename in lib/quote/pdf-client.ts — no MarleyMoves-Invoice literal remains here.)",
   },
+  // The card rail behind /q's "Pay by card" button (2026-09-02, found by the
+  // import-graph walk described in the STILL-NOT note below). Its refund and
+  // void notes are customer email, resolved from the QUOTE's brand
+  // (`brandForComms` → `isDefaultBrand`), so it is a brand-resolved surface by
+  // the rule this manifest states: a module that renders customer-facing copy on
+  // one belongs here, wherever it lives.
+  {
+    pattern: "lib/payments/card-payments.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity): the name and phone selected by `isDefaultBrand` in the refund/void note, and ops.marleymoves.co.uk as the app's own origin for the hosted-payment return URL (app chrome per PRD §2, as lib/job-sheet-load.ts). The phone literal is allowed ONLY on the isDefaultBrand arm: the second-brand arm used to read `brand.phone ?? \"01747 637070\"`, which put the default office's line in a refund email to a customer who had never dealt with them, and an allow entry here would have hidden exactly that. It is now `brand.phone?.trim() || null` and the offer-to-call sentence is dropped when a brand carries no number. Nothing here names the second brand or a named individual, and both stay forbidden",
+  },
   // The settle-in-full bank block CommitmentChoice renders inside /q — the
   // same shared account as BankPanel, so the §3.5 disclosure arrives as data
   // (the `disclosure` prop) and no operating-company literal may live here.
@@ -563,6 +664,46 @@ export const MANIFEST = [
     allow: ["mm-red"],
     reason:
       "group surface (PRD §4): one shared crew, so the copy names no brand and the accent is neutralised by GROUP_PAGE_THEME",
+  },
+  // Gate 16 residual (2026-09-02): the SHARED modules those route folders
+  // render through.
+  //
+  // The four `**` patterns above cover the route folders and nothing else, and
+  // a folder-shaped pattern reads as covering everything the folder puts on
+  // screen — which is not what it does. Two of the worst leaks in the project
+  // sat one import away from a scanned folder and were therefore UNSCANNED
+  // while the run printed OK: `lib/signatures.ts`, whose storage lien tick-box
+  // named the DEFAULT brand as the company that may sell a second brand's
+  // customer's belongings, and `components/cubic/cubic-builder.tsx`, which put
+  // the default brand's name and office number on /cv's only call to action.
+  // Neither is exotic; both are simply the copy the route delegates.
+  //
+  // So the rule this block adds: a module that renders CUSTOMER-FACING COPY on
+  // a brand-resolved surface belongs here, wherever it happens to live. Being
+  // imported by a listed folder is not coverage.
+  {
+    pattern: "lib/signatures.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "default-brand constants (byte-parity, PRD §1): DEFAULT_SIGNING_COMPANY — the fallback the ack builders use when a caller has no brand in hand, so an unbranded call still renders today's exact bytes — and TERMS_URL, the default brand's published terms (a brand-resolved surface reads PageTheme.termsUrl instead; gate 15 retires the fallback). The lien and date-confirmation clauses themselves now take the company as data",
+  },
+  {
+    pattern: "components/cubic/cubic-builder.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the /cv page root (gate 16) — the same mechanism app/cv/[token]/** is allowed on, and this component is the thing that root wraps. Identity (the send button's company name and the confirmation card's phone) arrives as a CubicCustomerBrand prop from pageTheme; the office builder renders outside that root and is unaffected",
+  },
+  {
+    pattern: "components/quote/date-confirm-card.tsx",
+    allow: ["mm-red"],
+    reason:
+      "accent utility classes re-pointed per brand via --color-mm-red on the /q shell (gate 16): the icon tint, the option rows' checked state, the radio accent, the field focus ring and the confirm button. Rendered only by app/q/[token]/page.tsx; its ack wording comes from lib/signatures.ts and carries no literal",
+  },
+  {
+    pattern: "lib/legal/documents.ts",
+    allow: ["marleymoves.co.uk"],
+    reason:
+      'GATE 15 PENDING: publicUrlFor() is brand-blind, so the terms link /q and /s put in front of EVERY brand\'s customer points at the default brand\'s documents (0104_brands.sql: "terms_url null renders Marley terms until gate 15 ships the unified brand-neutral document"). Listed rather than excluded so the allow is the retirement trigger — when gate 15 lands, the dead-allow rule fails this scan and names the line to delete. e2e/public/brand-leak-rendered.spec.ts carries the same exemption, mustOccur, on the rendered half',
   },
 ];
 
@@ -673,27 +814,6 @@ export function expandManifest(manifest = MANIFEST, root = ROOT) {
 }
 
 /**
- * The core detector: every forbidden-literal hit in one file's content, with
- * 1-based line numbers. Exported so the vitest twin can prove the detector
- * detects (a zero-findings run is evidence only if the detector demonstrably
- * fires on seeded content).
- */
-export function findLeaksInContent(content, file = "<content>") {
-  const findings = [];
-  const lines = content.split(/\r?\n/);
-  for (const [i, line] of lines.entries()) {
-    for (const { literal, brand, ci } of FORBIDDEN) {
-      const haystack = ci ? line.toLowerCase() : line;
-      const needle = ci ? literal.toLowerCase() : literal;
-      if (haystack.includes(needle)) {
-        findings.push({ file, line: i + 1, literal, brand });
-      }
-    }
-  }
-  return findings;
-}
-
-/**
  * Scan every manifest-matched file. Returns { files, findings, errors };
  * clean means files.length > 0, findings empty AND errors empty. Findings
  * for a shared-surface entry's allowed literals are suppressed — but a dead
@@ -760,6 +880,6 @@ if (isMain) {
     process.exit(1);
   }
   console.log(
-    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Only the ${MANIFEST.length} MANIFEST entries are read; anything else is UNSCANNED, not clean, and the deliberate exclusions are named one by one in the STILL-NOT-manifest note in this file. Source half only: the rendered-page half of PRD 6.4 is NOT implemented - gate 16 shipped the source conversion without it, so a clean run here does not mean the rendered pages were checked.)`,
+    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Only the ${MANIFEST.length} MANIFEST entries are read; anything else is UNSCANNED, not clean. WHERE THE EXCLUSIONS ARE ACCOUNTED FOR, AND WHERE THEY ARE NOT: two trees have their absences named file by file in the STILL-NOT-manifest note above, and a test holds each to it - lib/comms/ (tests/scripts/brand-leak-scan-comms.test.ts) and the import graph of the five public token routes (tests/scripts/brand-leak-scan-routes.test.ts). Everywhere ELSE in the repo, a file's absence from the manifest is recorded nowhere at all and means only that nobody has looked. This line previously claimed the exclusions were named one by one, full stop; walking that import graph mechanically found twenty literal-carrying modules the note had never mentioned, one of which was customer email. SOURCE HALF ONLY: this reads source text and nothing else, so it says NOTHING about what the pages rendered - a literal reaching a customer through a brands-table value, a helper outside the manifest, or a re-pointed mm-red token is invisible here by construction. The rendered half of PRD 6.4 is e2e/public/brand-leak-rendered.spec.ts; this line is clean only alongside that spec's result.)`,
   );
 }

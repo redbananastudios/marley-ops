@@ -66,7 +66,59 @@ export function signatureActionLabel(kind: string): string {
  * separately from the document it names will drift again.
  */
 
+/**
+ * The DEFAULT brand's published terms. A default-brand constant, not a
+ * universal one: `PageTheme.termsUrl` (lib/brand-page-theme.ts) resolves the
+ * brand's own `terms_url` and falls back to this, so any brand-resolved surface
+ * must read it from the theme rather than importing this. The one importer left
+ * is the in-person crew contract flow (components/crew/collect-contract-button
+ * .tsx), which takes no brand at all yet, so every brand's customer signs
+ * against the default brand's terms there. Named in the brand-leak scan's
+ * STILL-NOT-manifest note; gate 15 is what retires the whole question.
+ */
 export const TERMS_URL = "https://marleymoves.co.uk/terms-conditions/";
+
+/**
+ * The company a tick-box names as the party the customer is granting something
+ * to — disposal rights over stored goods, the right to retain money on a
+ * cancelled date. The DEFAULT brand's trading name, and the fallback for every
+ * ack builder below.
+ *
+ * ## Why the acks are built, not written
+ *
+ * Two of these tick-boxes named a company in their text, and both were
+ * hardcoded. A second brand's storage customer read a page whose header, logo,
+ * footer and phone were all that brand's, and ticked a box granting the DEFAULT
+ * brand the right to sell their belongings. It is the clause in this file with
+ * the most teeth, and it named the wrong company.
+ *
+ * Every brand is a trading name of ONE operating company (PRD §2:
+ * `PageTheme.legalEntity`), so nothing here was legally void — but a signed
+ * agreement that names a trading name the customer has never dealt with is
+ * wrong copy on the one document that exists to be produced years later.
+ *
+ * So the company arrives as data. Callers on a brand-resolved surface pass
+ * `pageTheme(...).name`; callers with no brand in hand omit it and get today's
+ * exact bytes, which is the §1 single-brand invariant and is pinned by a test
+ * (tests/lib/signatures.test.ts, "byte parity").
+ *
+ * ## What this does NOT reach
+ *
+ * The PUBLISHED terms are separate and immutable. `termsSnapshot()` stores the
+ * document body and the document's OWN acknowledgment labels (legal/, hashed,
+ * `scripts/build-legal.mjs --check` in the gates), and those still name the
+ * default brand for every brand. That is gate 15's job — a published version
+ * cannot be edited, only superseded — so the two are deliberately different
+ * columns on `signatures`: `ack_labels` is what was RENDERED, and
+ * `acknowledgment_labels` is what the published document said.
+ */
+export const DEFAULT_SIGNING_COMPANY = "Marley Moves";
+
+/** Blank, whitespace or absent → the default brand's name, never an empty gap
+ *  in the middle of a sentence a customer is about to sign. */
+function signingCompany(companyName?: string | null): string {
+  return (companyName ?? "").trim() || DEFAULT_SIGNING_COMPANY;
+}
 
 /** Private storage bucket for signed contracts + completion-certificate PDFs.
  *  Access it ONLY through the media-store seam (createMediaStore(env, { bucket })),
@@ -95,26 +147,48 @@ export const CONTRACT_ACKS = [
 
 export type ContractAckKey = (typeof CONTRACT_ACKS)[number]["key"];
 
+/**
+ * The storage-agreement ack KEYS — the identity of each tick-box, and the thing
+ * stored in `signatures.acknowledgments`.
+ *
+ * Split from the labels deliberately (same shape as CRATE_STORAGE_ACK_KEYS
+ * below). The labels now vary by brand; the keys must not, because a stored
+ * signature is read back by key years later. Never renumber, rename or reorder
+ * these — a key that changes meaning silently rewrites what every historical
+ * signature appears to have agreed to.
+ */
+export const STORAGE_ACK_KEYS = ["rate_advance", "lien", "no_prohibited"] as const;
+
+export type StorageAckKey = (typeof STORAGE_ACK_KEYS)[number];
+
 /** The storage-agreement acknowledgments (kind='storage'). GENERIC wording at
  *  launch — legal review before full go-live (ClickUp 869e35z42); the lien
- *  clause is the one with real teeth. */
-export const STORAGE_ACKS = [
-  {
-    key: "rate_advance",
-    label: "I agree to the storage rate shown, billed in advance each period until I end the storage.",
-  },
-  {
-    key: "lien",
-    label:
-      "I understand that if invoices stay unpaid for 60+ days, Marley Moves may, after written notice, dispose of or sell stored items to recover the charges.",
-  },
-  {
-    key: "no_prohibited",
-    label: "Nothing stored is hazardous, perishable, illegal, or irreplaceable without my own insurance.",
-  },
-] as const;
+ *  clause is the one with real teeth, and it is the one that names a company —
+ *  see `DEFAULT_SIGNING_COMPANY` for why that arrives as data. */
+export function storageAcks(
+  companyName?: string | null,
+): ReadonlyArray<{ key: StorageAckKey; label: string }> {
+  const company = signingCompany(companyName);
+  return [
+    {
+      key: "rate_advance",
+      label: "I agree to the storage rate shown, billed in advance each period until I end the storage.",
+    },
+    {
+      key: "lien",
+      label: `I understand that if invoices stay unpaid for 60+ days, ${company} may, after written notice, dispose of or sell stored items to recover the charges.`,
+    },
+    {
+      key: "no_prohibited",
+      label: "Nothing stored is hazardous, perishable, illegal, or irreplaceable without my own insurance.",
+    },
+  ];
+}
 
-export type StorageAckKey = (typeof STORAGE_ACKS)[number]["key"];
+/** The DEFAULT brand's storage acks — today's exact bytes, for every caller
+ *  that has no brand in hand. A brand-resolved surface calls `storageAcks(name)`
+ *  instead. */
+export const STORAGE_ACKS = storageAcks();
 
 /** The minimum-stay wording, derived from the let's frozen min_kind — the
  *  SAME dial lib/storage-billing.ts bills from, so the ack a customer ticks,
@@ -132,13 +206,16 @@ export function crateMinimumLabel(minKind: string | null | undefined, minDays: n
  *  let's frozen min_kind/min_days (crateMinimumLabel) and the handling figure
  *  renders LIVE from the Settings rate card so the signed wording always
  *  matches what's actually charged (PRD D1/D5) — a rate-card edit must be
- *  mirrored in the published terms clause. */
+ *  mirrored in the published terms clause. `companyName` threads through to the
+ *  lien clause the crate set carries verbatim; omit it for today's bytes. */
 export function crateStorageAcks(
   minimum: { kind: string | null | undefined; days: number },
   handlingIncLabel: string,
+  companyName?: string | null,
 ) {
-  const lien = STORAGE_ACKS.find((a) => a.key === "lien")!;
-  const prohibited = STORAGE_ACKS.find((a) => a.key === "no_prohibited")!;
+  const base = storageAcks(companyName);
+  const lien = base.find((a) => a.key === "lien")!;
+  const prohibited = base.find((a) => a.key === "no_prohibited")!;
   return [
     {
       key: "crate_billing" as const,
@@ -171,41 +248,55 @@ export function normalizeCrateStorageAcks(
  *  the commitment ladder. Wording is PROVISIONAL pending solicitor review —
  *  this string and the published T&Cs clause must ALWAYS change in the same
  *  commit. Deliberately "held/retained" framing; never "penalty". */
-export const DATE_CONFIRM_ACKS = [
-  {
-    key: "date_confirm",
-    label:
-      "I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and Marley Moves cannot re-book the day, amounts I've paid up to 25% of my job price may be retained, and are refunded in full if the day is re-booked.",
-  },
-] as const;
+export const DATE_CONFIRM_ACK_KEYS = ["date_confirm"] as const;
 
-export type DateConfirmAckKey = (typeof DATE_CONFIRM_ACKS)[number]["key"];
+export type DateConfirmAckKey = (typeof DATE_CONFIRM_ACK_KEYS)[number];
+
+export function dateConfirmAcks(
+  companyName?: string | null,
+): ReadonlyArray<{ key: DateConfirmAckKey; label: string }> {
+  const company = signingCompany(companyName);
+  return [
+    {
+      key: "date_confirm",
+      label: `I'm confirming this move date. I understand my deposit is now non-refundable and still counts towards my final bill. If I later cancel or move this date within 7 days of the move and ${company} cannot re-book the day, amounts I've paid up to 25% of my job price may be retained, and are refunded in full if the day is re-booked.`,
+    },
+  ];
+}
+
+/** The DEFAULT brand's date-confirmation ack — today's exact bytes. A
+ *  brand-resolved surface calls `dateConfirmAcks(name)` instead. */
+export const DATE_CONFIRM_ACKS = dateConfirmAcks();
+
+// The confirmed/normalise pairs below run off the KEY lists, never off a built
+// label set: which boxes were ticked is a fact about the record and must not
+// move when the wording that names a brand does.
 
 export function allDateConfirmAcksConfirmed(
   acks: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!acks) return false;
-  return DATE_CONFIRM_ACKS.every((a) => acks[a.key] === true);
+  return DATE_CONFIRM_ACK_KEYS.every((k) => acks[k] === true);
 }
 
 export function normalizeDateConfirmAcks(
   acks: Record<string, unknown> | null | undefined,
 ): Record<DateConfirmAckKey, boolean> {
   const out = {} as Record<DateConfirmAckKey, boolean>;
-  for (const a of DATE_CONFIRM_ACKS) out[a.key] = acks?.[a.key] === true;
+  for (const k of DATE_CONFIRM_ACK_KEYS) out[k] = acks?.[k] === true;
   return out;
 }
 
 export function allStorageAcksConfirmed(acks: Record<string, unknown> | null | undefined): boolean {
   if (!acks) return false;
-  return STORAGE_ACKS.every((a) => acks[a.key] === true);
+  return STORAGE_ACK_KEYS.every((k) => acks[k] === true);
 }
 
 export function normalizeStorageAcks(
   acks: Record<string, unknown> | null | undefined,
 ): Record<StorageAckKey, boolean> {
   const out = {} as Record<StorageAckKey, boolean>;
-  for (const a of STORAGE_ACKS) out[a.key] = acks?.[a.key] === true;
+  for (const k of STORAGE_ACK_KEYS) out[k] = acks?.[k] === true;
   return out;
 }
 

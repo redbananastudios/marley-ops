@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import { crateMinimumLabel, crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { crateMinimumLabel, crateStorageAcks, storageAcks } from "@/lib/signatures";
 import {
   publicUrlFor,
   STORAGE_PAYMENT_SENTENCE,
@@ -101,6 +101,13 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const firstName = (client?.display_name ?? "").trim().split(/\s+/)[0] || "there";
   const rateLabel = let_.rate ? `${gbp(Number(let_.rate))} per ${let_.rate_period}` : "as agreed";
 
+  // Identity comes from the LET's own brand (gate 12 put the column there),
+  // resolved BEFORE the acks are built: the lien tick-box names the company the
+  // customer is granting disposal rights to, so it has to be this brand's name
+  // and not the default's on a page whose logo, footer and phone are this
+  // brand's. Everything below reads identity from here.
+  const theme = pageTheme(await getBrandOrDefault(admin, let_.brand));
+
   // The ack set follows the product: crates sign the billing schedule
   // (minimum + day-rate arrears + handling), containers keep the rate ack.
   const isCrate = (let_ as { billing_model?: string }).billing_model === "crate_daily";
@@ -112,12 +119,10 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   // "one calendar month minimum" for v2-terms lets, "N-day minimum" legacy.
   const minLabel = crateMinimumLabel(minKind, minDays);
   const ackList = (
-    isCrate ? crateStorageAcks({ kind: minKind, days: minDays }, gbpInc(rates.handlingEventInc)) : [...STORAGE_ACKS]
+    isCrate
+      ? crateStorageAcks({ kind: minKind, days: minDays }, gbpInc(rates.handlingEventInc), theme.name)
+      : [...storageAcks(theme.name)]
   ).map((a) => ({ key: a.key as string, label: a.label }));
-
-  // Identity comes from the LET's own brand (gate 12 put the column there),
-  // resolved once before the render.
-  const theme = pageTheme(await getBrandOrDefault(admin, let_.brand));
 
   // The payment-method sentence names "card" only when this LET's brand has a
   // LIVE card channel (the §11.10 two-switch verdict: global kill switch AND
