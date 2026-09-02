@@ -1503,3 +1503,5 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Test shipped: `tests/components/hours-editor-expense-only.test.ts` (source-guard style, 5 assertions: ladder order, neutral label, two-part condition, shared verdict, old concatenation gone). Proven RED on the pre-fix source (5/5 fail), green after.
 - Gates on the branch: lint 0 errors · tsc clean · vitest 2967 passed · build green. `e2e/` grepped for every touched label — crew specs' "Add" assertions apply only to entry-less days, unaffected. PR **#190** to staging, label `qa-repair`. Finding flipped to `fixed-pending-verify` in the same branch.
 - Escalations: none. `master` never touched. Time spent: ~15 min.
+
+## 2026-09-02 (scheduled sweep) — first-pass repair: no eligible findings (QA-20260902-02 already fixed-pending-verify via PR #190; QA-20260827-04 risky). No action.
