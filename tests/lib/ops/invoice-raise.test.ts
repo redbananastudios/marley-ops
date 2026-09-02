@@ -129,7 +129,7 @@ describe("every invoice rail reports a non-lock-out failure", () => {
     expect(SRC).toContain("export async function ensureDepositInvoice(");
   });
 
-  it("pairs a reportInvoiceRaiseFailed with every raise-side reportZohoAccessDenied", () => {
+  it("pairs a reportInvoiceRaiseFailed with every raise-side reportLedgerAccessDenied", () => {
     // The lock-out branch and the everything-else branch are the two halves of
     // one catch. A rail that has only the first half is silent for rate limits,
     // validation errors and outages — the 2026-08-28 shape.
@@ -137,7 +137,7 @@ describe("every invoice rail reports a non-lock-out failure", () => {
     // Counted on `message: msg`, which is what a RAISE catch passes: the
     // payment-status watch reports a lock-out too, but it reads invoices rather
     // than creating them, so it has no unraised invoice to report.
-    const lockout = count(SRC, 'reportZohoAccessDenied(sb, { message: msg, while: "');
+    const lockout = count(SRC, 'reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "');
     const other = count(SRC, "reportInvoiceRaiseFailed(sb,");
     expect(lockout).toBe(3); // deposit, commitment, balance
     expect(other).toBe(lockout);

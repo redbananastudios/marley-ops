@@ -12,7 +12,7 @@ export type InvoiceKind = "deposit" | "commitment" | "balance";
 
 /**
  * An invoice could not be raised in the books, for a reason that is not a
- * lock-out (`reportZohoAccessDenied` owns that one).
+ * lock-out (`reportLedgerAccessDenied` owns that one).
  *
  * Until this existed the failure was written to `quotes.zoho_<kind>_error` and
  * emailed per quote, and NOWHERE else — no operational issue, so the ops board

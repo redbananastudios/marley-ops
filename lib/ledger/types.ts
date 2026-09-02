@@ -86,6 +86,18 @@ export class LedgerError extends Error {
   }
 }
 
+/**
+ * Verdict of an adapter's org-scoped health probe — see
+ * {@link LedgerAdapter.checkAccess}. `accessDenied` separates the PERMANENT
+ * lock-out class (deactivated user, revoked grant, dead refresh token, missing
+ * creds — a human must act) from a transient blip that clears on the next pass
+ * and must not page anyone at 3am. Same shape as `lib/zoho.ts`'s
+ * `ZohoAccessCheck`, which the Zoho adapter passes through unchanged.
+ */
+export type LedgerAccessCheck =
+  | { ok: true }
+  | { ok: false; accessDenied: boolean; message: string };
+
 export interface LedgerInvoiceRef {
   invoiceId: string;
   invoiceNumber: string;
@@ -212,14 +224,35 @@ import type { LedgerParty } from "./party";
 export type { LedgerParty };
 
 /**
- * The 13 app-facing operations. Measured, not assumed: the other six exports on
- * `lib/zoho.ts` are either test/script cleanup (voidAndDelete*, deletePayment,
- * deleteContact — zero app/ or lib/ callers) or internal plumbing
- * (getVatTaxId, isPaymentGatewayActive — no callers outside that module).
- * Neither belongs on a production interface (design §0).
+ * The 13 app-facing operations, plus the watchdog's health probe. Measured, not
+ * assumed: the other six exports on `lib/zoho.ts` are either test/script
+ * cleanup (voidAndDelete*, deletePayment, deleteContact — zero app/ or lib/
+ * callers) or internal plumbing (getVatTaxId, isPaymentGatewayActive — no
+ * callers outside that module). Neither belongs on a production interface
+ * (design §0).
  */
 export interface LedgerAdapter {
   readonly provider: LedgerProvider;
+
+  /**
+   * Org-scoped health probe: one cheap read that FAILS under this provider's
+   * own lock-out class (deactivated user, revoked grant, dead refresh token,
+   * disconnected tenant, missing creds), not merely when the host is down.
+   *
+   * On the interface rather than beside the watchdog because the probe must
+   * certify the SAME system the raises use: before this existed the watchdog
+   * called Zoho directly, so with `LEDGER_PROVIDER=xero` it greened off a
+   * healthy Zoho while Xero was locked out — and then auto-cleared the very
+   * lock-out alarm a failed Xero raise had just opened.
+   *
+   * Zoho probes `GET /settings/currencies` (its `GET /organizations` answers
+   * happily for a deactivated user — the 2026-08-27 outage ran green on it for
+   * hours). Xero probes `GET /Organisation` through the full token-refresh +
+   * tenant chain (`GET /connections` answers with just a bare token).
+   *
+   * Never throws — a probe failure IS the answer.
+   */
+  checkAccess(): Promise<LedgerAccessCheck>;
 
   /* contacts */
   findOrCreateContact(input: {

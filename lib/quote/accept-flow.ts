@@ -123,7 +123,7 @@ import {
 // this file's errors arrive as LedgerError, and that function opens by
 // rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
 import { isLedgerAccessDenied } from "@/lib/ledger/access";
-import { reportZohoAccessDenied, resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
+import { reportLedgerAccessDenied, resolveLedgerAccessDenied } from "@/lib/ops/zoho-access";
 import { reportInvoiceRaiseFailed, resolveInvoiceRaiseFailed } from "@/lib/ops/invoice-raise";
 
 type Sb = SupabaseClient<Database>;
@@ -1397,7 +1397,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
         zoho_deposit_error: null,
       } as never)
       .eq("id", quoteId);
-    await resolveZohoAccessDenied(sb);
+    await resolveLedgerAccessDenied(sb, ledger);
     await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
@@ -1410,7 +1410,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       .eq("zoho_deposit_invoice_id", "pending");
     // A lock-out is not this quote's problem — it is every quote's. Collapse it
     // into the one integration-level alert that names the actual remedy.
-    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "deposit invoice" });
+    if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "deposit invoice" });
     else {
       // The email alone left no trace anywhere a human looks: the ops board and
       // the daily digest read clean while the customer went unbilled.
@@ -1935,7 +1935,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .update({ zoho_commitment_invoice_id: null, zoho_commitment_error: msg } as never)
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
-    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "commitment invoice" });
+    if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "commitment invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "commitment", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
@@ -3155,7 +3155,7 @@ export async function createBalanceInvoiceFlow(
       .update({ zoho_balance_invoice_id: null } as never)
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
-    if (isLedgerAccessDenied(err)) await reportZohoAccessDenied(sb, { message: msg, while: "balance invoice" });
+    if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "balance invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "balance", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
@@ -3520,16 +3520,42 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
   //    a total outage that never returns a recognisable code.
   let attempted = 0;
   let unreadable = 0;
-  let accessDenied = false;
-  const note = (slot: string, err: unknown) => {
+  // Which ledger each read actually addressed. The reads route by PER-DOCUMENT
+  // provider stamp (design §8), so one sweep can touch Zoho-minted and
+  // Xero-minted invoices in a single pass — and a lock-out must be reported
+  // against the provider whose read was refused, not whichever one the env is
+  // configured for today. Attributing a Xero refusal to Zoho would page a
+  // human into the wrong system AND open the issue under a key that a later
+  // healthy-Zoho pass would clear.
+  const readProviders = new Set<LedgerProvider>();
+  const deniedProviders = new Set<LedgerProvider>();
+  // Memoised so a garbled LEDGER_PROVIDER throws inside the per-slot try (a
+  // counted, noted failure) rather than out of the whole sweep.
+  let configuredCache: LedgerProvider | undefined;
+  const configured = () => (configuredCache ??= configuredProvider());
+  const note = (slot: string, err: unknown, provider: LedgerProvider | null) => {
     unreadable++;
-    if (isLedgerAccessDenied(err)) accessDenied = true;
-    log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, ...errorContext(err) });
+    // `provider` can be null only when resolving it was itself the failure
+    // (unrecognised stamp / garbled config) — and those throws are
+    // "refusing to guess" errors, never the access-denied class, so a denial
+    // always carries the provider that issued it.
+    if (isLedgerAccessDenied(err) && provider) deniedProviders.add(provider);
+    log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, provider, ...errorContext(err) });
   };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
+    let provider: LedgerProvider | null = null;
     try {
       attempted++;
-      const s = await getInvoiceStatus(quote.zoho_deposit_invoice_id, asProvider(quote.deposit_invoice_provider));
+      // The stamp derivation stays INSIDE the call parens (assignment
+      // expression) so the stored-id stamp guard in tests/lib/ledger/access.test.ts
+      // keeps matching it; the `?? configured()` is byte-equivalent to what
+      // adapterFor does with a null stamp, surfaced here so `note` can name
+      // the provider whose read was refused.
+      const s = await getInvoiceStatus(
+        quote.zoho_deposit_invoice_id,
+        (provider = asProvider(quote.deposit_invoice_provider) ?? configured()),
+      );
+      readProviders.add(provider);
       if (s.status === "paid") {
         // BACS, not card — same reasoning as the commitment branch below. No
         // Zoho card gateway is active, so an invoice reaching 'paid' in Zoho was
@@ -3543,13 +3569,18 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
         changed = true;
       }
     } catch (err) {
-      note("deposit", err);
+      note("deposit", err, provider);
     }
   }
   if (isRealZohoId(quote.zoho_commitment_invoice_id) && !quote.commitment_paid_at) {
+    let provider: LedgerProvider | null = null;
     try {
       attempted++;
-      const s = await getInvoiceStatus(quote.zoho_commitment_invoice_id, asProvider(quote.commitment_invoice_provider));
+      const s = await getInvoiceStatus(
+        quote.zoho_commitment_invoice_id,
+        (provider = asProvider(quote.commitment_invoice_provider) ?? configured()),
+      );
+      readProviders.add(provider);
       if (s.status === "paid") {
         // Commitment is BACS/cash only; a payment Connor records in Zoho lands
         // here. Method defaults to bank transfer (cash one-taps record in ops).
@@ -3561,10 +3592,11 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
         changed = true;
       }
     } catch (err) {
-      note("commitment", err);
+      note("commitment", err, provider);
     }
   }
   if (isRealZohoId(quote.zoho_balance_invoice_id) && quote.lead_id) {
+    let provider: LedgerProvider | null = null;
     try {
       const { data: lead } = await sb
         .from("leads")
@@ -3573,18 +3605,31 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
         .single();
       if (lead && !lead.balance_paid_at) {
         attempted++;
-        const s = await getInvoiceStatus(quote.zoho_balance_invoice_id, asProvider(quote.balance_invoice_provider));
+        const s = await getInvoiceStatus(
+          quote.zoho_balance_invoice_id,
+          (provider = asProvider(quote.balance_invoice_provider) ?? configured()),
+        );
+        readProviders.add(provider);
         if (s.status === "paid") {
           await markBalancePaid(sb, quote.id, null);
           changed = true;
         }
       }
     } catch (err) {
-      note("balance", err);
+      note("balance", err, provider);
     }
   }
-  if (accessDenied) await reportZohoAccessDenied(sb, { message: "invoice status unreadable", while: "payment watch" });
-  else if (!unreadable && changed) await resolveZohoAccessDenied(sb);
+  // One alarm per broken integration: a mixed sweep can prove two providers
+  // dead independently, and collapsing them would name only one remedy.
+  for (const provider of deniedProviders) {
+    await reportLedgerAccessDenied(sb, { provider, message: "invoice status unreadable", while: "payment watch" });
+  }
+  // The clean-sweep resolve clears only the providers this sweep actually
+  // READ: a pass that never touched Xero has no evidence about Xero.
+  if (!deniedProviders.size && !unreadable && changed) {
+    for (const provider of readProviders) await resolveLedgerAccessDenied(sb, provider);
+  }
+  const accessDenied = deniedProviders.size > 0;
   const after = changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;
   return { quote: after, attempted, unreadable, accessDenied };
 }

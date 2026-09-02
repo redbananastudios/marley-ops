@@ -1,58 +1,115 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import type { LedgerProvider } from "@/lib/ledger/types";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issues";
 
 type Sb = SupabaseClient<Database>;
 
-/** One key for the WHOLE integration, not one per quote — see below. */
-export const ZOHO_ACCESS_ISSUE_KEY = "zoho:access-denied";
+/**
+ * One key for the WHOLE integration, not one per quote — and one key PER
+ * PROVIDER, not one shared across them. An "integration" here is a provider
+ * connection: Zoho's is Peter's org seat, Xero's is a rotating refresh token
+ * in the ledger token store. They fail independently and are fixed by
+ * different humans doing different things, so sharing a key would let a green
+ * probe of the healthy provider auto-resolve the broken one's alarm — the
+ * monitor erasing the very alert it exists to corroborate.
+ *
+ * Zoho's key is byte-identical to the pre-seam constant so any issue already
+ * open in prod under it keeps resolving.
+ */
+export function ledgerAccessIssueKey(provider: LedgerProvider): string {
+  return `${provider}:access-denied`;
+}
 
 /**
- * Zoho has locked us out (deactivated user / revoked grant / missing creds).
+ * Everything about the lock-out alert that depends on WHICH books refused us.
+ * The remedy line is the whole point of the alert (2026-08-27: five per-quote
+ * failure emails and not one of them said the only thing that mattered), so it
+ * must be the remedy for the provider that actually failed — Zoho's fix lives
+ * in its Users & Roles screen, Xero's in re-consenting at /api/xero/connect,
+ * which writes a fresh rotating refresh token to the ledger token store.
  *
- * Every caller that touches the books funnels its access-denied failures here
- * instead of sending its own per-quote "FAILED" email, because this failure is
- * never about one quote: on 2026-08-27 the org user behind the refresh token
- * was deactivated, and each acceptance then fired its own alert naming its own
- * quote ref and amount. The office read five different-looking incidents when
- * there was one, and none of them said the only thing that mattered — that a
- * human has to re-enable the user in Zoho before ANY of it can clear.
- *
- * So: one deduped operational issue (occurrence_count carries the volume) and
- * one quote-agnostic email whose body is byte-identical every time, so
- * sendOpsAlert's content hash collapses the repeats at the provider instead of
- * filling the inbox. The per-quote detail is not lost — it is already written
- * to each quote's `zoho_*_error` column, which is where a per-quote question
- * belongs.
- *
- * Retries deliberately continue: the moment the account is re-enabled the
- * invoice paths self-heal on their next pass, with no replay to run by hand.
+ * The email paragraphs are deliberately INPUT-INDEPENDENT: sendOpsAlert's
+ * content hash collapses byte-identical repeats at the provider, which is what
+ * keeps a lock-out from filling the inbox while retries continue.
  */
-export async function reportZohoAccessDenied(
-  sb: Sb,
-  input: { message: string; while: string },
-): Promise<void> {
-  await reportOperationalIssue(sb, {
-    key: ZOHO_ACCESS_ISSUE_KEY,
-    severity: "critical",
-    source: "zoho",
+const PROVIDER_COPY: Record<
+  LedgerProvider,
+  { event: string; issueMessage: string; subject: string; paragraphs: string[] }
+> = {
+  zoho: {
     event: "zoho.access_denied",
-    message: "Zoho has locked the ops integration out — invoices and payment checks are failing.",
-    context: { zohoError: input.message, failedWhile: input.while },
-  });
-  await sendOpsAlert(
-    "Zoho access denied — the books integration is locked out",
-    [
+    issueMessage: "Zoho has locked the ops integration out — invoices and payment checks are failing.",
+    subject: "Zoho access denied — the books integration is locked out",
+    paragraphs: [
       "Ops can no longer read or write anything in Zoho, so deposit, commitment and balance invoices are not being raised and payments recorded in Zoho are not reaching ops.",
       "<strong>Fix:</strong> a Zoho admin on the MarleyMoves Ltd org opens Settings &rarr; Users &amp; Roles and marks the ops integration user <strong>Active</strong> again (its status is currently Inactive).",
       "Nothing needs replaying afterwards — every invoice retries itself on the next pass, and affected quotes keep their own error on the quote record.",
     ],
-    "system",
-  );
+  },
+  xero: {
+    event: "xero.access_denied",
+    issueMessage: "Xero has locked the ops integration out — invoices and payment checks are failing.",
+    subject: "Xero access denied — the books integration is locked out",
+    paragraphs: [
+      "Ops can no longer read or write anything in the books, so deposit, commitment and balance invoices are not being raised and recorded payments are not reaching ops.",
+      "<strong>Fix:</strong> an admin signs into ops and opens <strong>/api/xero/connect</strong> to re-authorise the connection (usually a dead or revoked refresh token — the fresh one is stored automatically in the ledger token store, nothing to paste anywhere).",
+      "Nothing needs replaying afterwards — every invoice retries itself on the next pass, and affected quotes keep their own error on the quote record.",
+    ],
+  },
+};
+
+/**
+ * The books have locked us out (deactivated user / revoked grant / dead
+ * refresh token / missing creds).
+ *
+ * Every caller that touches the books funnels its access-denied failures here
+ * instead of sending its own per-quote "FAILED" email, because this failure is
+ * never about one quote: on 2026-08-27 the Zoho org user behind the refresh
+ * token was deactivated, and each acceptance then fired its own alert naming
+ * its own quote ref and amount. The office read five different-looking
+ * incidents when there was one, and none of them said the only thing that
+ * mattered — that a human has to re-enable the user in Zoho before ANY of it
+ * could clear.
+ *
+ * So: one deduped operational issue per provider (occurrence_count carries the
+ * volume) and one quote-agnostic email whose body is byte-identical every
+ * time, so sendOpsAlert's content hash collapses the repeats at the provider
+ * instead of filling the inbox. The per-quote detail is not lost — it is
+ * already written to each quote's `zoho_*_error` column, which is where a
+ * per-quote question belongs.
+ *
+ * `provider` is REQUIRED: since gate 18 both ledgers raise into this alert,
+ * and the remedy text, the dedup key and the auto-resolve scope all hang off
+ * which one actually refused us.
+ *
+ * Retries deliberately continue: the moment access is restored the invoice
+ * paths self-heal on their next pass, with no replay to run by hand.
+ */
+export async function reportLedgerAccessDenied(
+  sb: Sb,
+  input: { provider: LedgerProvider; message: string; while: string },
+): Promise<void> {
+  const copy = PROVIDER_COPY[input.provider];
+  await reportOperationalIssue(sb, {
+    key: ledgerAccessIssueKey(input.provider),
+    severity: "critical",
+    source: input.provider,
+    event: copy.event,
+    message: copy.issueMessage,
+    context: { provider: input.provider, ledgerError: input.message, failedWhile: input.while },
+  });
+  await sendOpsAlert(copy.subject, copy.paragraphs, "system");
 }
 
-/** A Zoho call succeeded — clear the lock-out issue if one was open. */
-export async function resolveZohoAccessDenied(sb: Sb): Promise<void> {
-  await resolveOperationalIssue(sb, ZOHO_ACCESS_ISSUE_KEY);
+/**
+ * A call to `provider`'s books succeeded — clear THAT provider's lock-out
+ * issue if one was open, and no other's. Scoped on purpose: a green Zoho probe
+ * proves nothing about Xero, and before this took a provider the watchdog's
+ * healthy-Zoho pass auto-cleared Xero lock-outs raised by failed invoice
+ * raises.
+ */
+export async function resolveLedgerAccessDenied(sb: Sb, provider: LedgerProvider): Promise<void> {
+  await resolveOperationalIssue(sb, ledgerAccessIssueKey(provider));
 }

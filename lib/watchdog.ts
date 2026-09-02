@@ -8,11 +8,11 @@ import {
   feedStalenessAlert,
   findOverdueJobs,
   WATCHDOG_JOB,
-  zohoAccessAlert,
+  ledgerAccessAlert,
   type HealthAlert,
 } from "@/lib/watchdog-rules";
-import { checkZohoAccess } from "@/lib/zoho";
-import { resolveZohoAccessDenied } from "@/lib/ops/zoho-access";
+import { checkLedgerAccess, configuredProvider } from "@/lib/ledger";
+import { resolveLedgerAccessDenied } from "@/lib/ops/zoho-access";
 import {
   checkpointOperationalIssues,
   deliverDailyOperationalIssueDigest,
@@ -99,14 +99,35 @@ export async function runHealthWatchdog(
   if (stale) alerts.push(stale);
 
   // Prove the books integration is reachable rather than merely un-exercised.
-  // Cron freshness cannot answer this: on a quiet day nothing calls Zoho at
-  // all, so a lock-out stays invisible until the next customer accepts a quote
-  // and the office gets the failure as a surprise (2026-08-27). Probing costs
-  // one cheap org-scoped read every 15 minutes.
-  const zoho = await checkZohoAccess();
-  const zohoAlert = zohoAccessAlert(zoho);
-  if (zohoAlert) alerts.push(zohoAlert);
-  else if (zoho.ok) await resolveZohoAccessDenied(sb);
+  // Cron freshness cannot answer this: on a quiet day nothing calls the ledger
+  // at all, so a lock-out stays invisible until the next customer accepts a
+  // quote and the office gets the failure as a surprise (2026-08-27). Probing
+  // costs one cheap org-scoped read every 15 minutes.
+  //
+  // The probe goes through the ledger seam to the CONFIGURED provider — the
+  // one every new raise talks to — because a probe certifies only the system
+  // it exercised: with the provider flipped to Xero, probing Zoho directly
+  // (as this used to) greened off a healthy Zoho while Xero was locked out.
+  // The auto-resolve is scoped to that same provider for the same reason: a
+  // green Zoho must never clear a Xero lock-out raised by a failed invoice,
+  // or the monitor erases the very alarm it exists to corroborate.
+  try {
+    const provider = configuredProvider();
+    const books = await checkLedgerAccess(provider);
+    const booksAlert = ledgerAccessAlert(provider, books);
+    if (booksAlert) alerts.push(booksAlert);
+    else if (books.ok) await resolveLedgerAccessDenied(sb, provider);
+  } catch (err) {
+    // configuredProvider() fails closed on a garbled LEDGER_PROVIDER — the
+    // exact state that also stops every raise. The watchdog must render that
+    // as an alarm rather than crash on it: a monitor that dies with its
+    // subject reports nothing, and "I could not check" must never render as
+    // "nothing to report".
+    alerts.push({
+      key: "ledger-config",
+      message: `Books probe could not run: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
 
   const activeAlertKeys = new Set(alerts.map((alert) => alert.key));
   const { data: existingWatchdogIssues } = await sb

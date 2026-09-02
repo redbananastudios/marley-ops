@@ -55,18 +55,34 @@ export function feedStalenessAlert(
   };
 }
 
-/** Zoho refusing us outright — a deactivated org user, a revoked grant, missing
- *  credentials. Only the PERMANENT class alerts: a timeout or a 5xx clears on
- *  the next pass and must not page anyone at 3am, whereas a lock-out silently
- *  stops every invoice and every payment check until a human acts. On
- *  2026-08-27 that state ran for hours with `alerts: []` on every pass, because
- *  this watchdog only ever asked whether the CRONS were running — and they
- *  were, faithfully reporting nothing-to-do. */
-export function zohoAccessAlert(check: { ok: boolean; accessDenied?: boolean }): HealthAlert | null {
+/** The configured books provider refusing us outright — a deactivated org
+ *  user, a revoked grant, a dead refresh token, missing credentials. Only the
+ *  PERMANENT class alerts: a timeout or a 5xx clears on the next pass and must
+ *  not page anyone at 3am, whereas a lock-out silently stops every invoice and
+ *  every payment check until a human acts. On 2026-08-27 that state ran for
+ *  hours with `alerts: []` on every pass, because this watchdog only ever asked
+ *  whether the CRONS were running — and they were, faithfully reporting
+ *  nothing-to-do.
+ *
+ *  Keyed and worded PER PROVIDER, because the SMS is the remedy's front door:
+ *  a Xero lock-out that says "re-enable the ops user in Zoho" sends a human
+ *  into the wrong system with a clear conscience. The zoho branch is
+ *  byte-identical to what shipped 2026-08-27 (key included — cooldown state
+ *  and the `watchdog:zoho-access` issue both live under it). */
+export function ledgerAccessAlert(
+  provider: "zoho" | "xero",
+  check: { ok: boolean; accessDenied?: boolean },
+): HealthAlert | null {
   if (check.ok || !check.accessDenied) return null;
+  if (provider === "zoho") {
+    return {
+      key: "zoho-access",
+      message: "Zoho is refusing the ops integration — no invoices are being raised. Re-enable the ops user in Zoho",
+    };
+  }
   return {
-    key: "zoho-access",
-    message: "Zoho is refusing the ops integration — no invoices are being raised. Re-enable the ops user in Zoho",
+    key: "xero-access",
+    message: "Xero is refusing the ops integration — no invoices are being raised. Re-authorise at /api/xero/connect",
   };
 }
 
