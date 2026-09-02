@@ -18,6 +18,25 @@ export type JobCardLook = {
   completed: boolean;
 };
 
+/**
+ * Completion state for the /my-jobs/[id] DETAIL page. The list keys "Done"
+ * purely on `appointments.status` (jobCardLook above); the detail page used to
+ * key its banner and Complete-job gate on a `job_completions` row existing, so
+ * a job the balance-settled cron auto-completed (status flipped directly, no
+ * sign-off row) still offered "Complete job" on its own page (QA-20260902-03).
+ * Status is the authority: "signed" renders the crew sign-off banner, "auto" a
+ * neutral completed state with nothing left for the crew to do.
+ */
+export type JobDetailCompletion = "signed" | "auto" | "none";
+
+export function jobDetailCompletion(
+  status: string | null | undefined,
+  hasSignOff: boolean,
+): JobDetailCompletion {
+  if (hasSignOff) return "signed";
+  return status === "completed" ? "auto" : "none";
+}
+
 export function jobCardLook(apptType: string, status: string | null | undefined): JobCardLook {
   const typeLabel = apptType === "removal" ? "Move" : apptType === "pack" ? "Packing" : "Survey";
   if (status === "completed") {

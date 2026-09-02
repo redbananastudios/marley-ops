@@ -87,13 +87,6 @@ test.describe("Crew — job completion status consistency", () => {
     if (clientId) await sb.from("clients").delete().eq("id", clientId);
   });
 
-  test.skip(
-    true,
-    "QA-20260902-03: detail page reads job_completions instead of appointments.status, so an " +
-      "auto-completed job (no job_completions row) still shows a live Complete-job button. " +
-      "Un-skip once the repair PR makes the detail page treat appointments.status='completed' " +
-      "as completed regardless of job_completions.",
-  );
   test("an auto-completed job (no job_completions row) is not offered for completion again", async ({ page }) => {
     await page.goto(`/my-jobs/${appointmentId}`);
     // The list already treats this appointment as done purely on
