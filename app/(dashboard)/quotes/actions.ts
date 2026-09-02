@@ -98,7 +98,22 @@ export async function createDraftQuote(opts: { leadId?: string } = {}) {
 
   let lead = null;
   if (opts.leadId) {
-    const { data } = await sb.from("leads").select("*").eq("id", opts.leadId).single();
+    const { data, error } = await sb.from("leads").select("*").eq("id", opts.leadId).single();
+    // A lead we ASKED for and did not get is not a lead-less draft. Falling
+    // through resolved `lead?.brand ?? DEFAULT_BRAND` below, which burned a
+    // DEFAULT-prefixed reference and inserted a quote stamped with a brand
+    // nobody chose and no lead_id — returned as ok, so the office typed a real
+    // customer into it. Refuse instead, the same rule the storage let read
+    // applies: "could not check" never acts like "single-brand mode".
+    if (error || !data) {
+      return {
+        ok: false as const,
+        error:
+          error?.code === "PGRST116"
+            ? "That lead no longer exists, so no quote was created."
+            : `Could not read the lead, so no quote was created: ${error?.message ?? "no row returned"}`,
+      };
+    }
     lead = data;
   }
 

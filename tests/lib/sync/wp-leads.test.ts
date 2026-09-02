@@ -69,17 +69,32 @@ import { payloadBrandMismatch, websiteLeadIngestSchema } from "@/lib/leads/inges
  * accidentally describe a world where the two disagree.
  */
 let cursorReadError: string | null = null;
+
+/** PostgREST caps every response at PGRST_DB_MAX_ROWS — 1000 on this stack (see
+ *  lib/supabase/fetch-all.ts). The fake enforces it, so a plain awaited select
+ *  comes back TRUNCATED and only a paged `.range()` read sees the whole held
+ *  set. A stub that always answered in full could not express the difference,
+ *  which is precisely the failure the cursor is exposed to. */
+const PGRST_MAX_ROWS = 1000;
+
+function cursorWindow(from: number, to: number) {
+  if (cursorReadError) return { data: null, error: { message: cursorReadError } };
+  const rows = [...existingExternalIds]
+    .map((id) => ({ external_lead_id: id }))
+    .sort((a, b) => a.external_lead_id.localeCompare(b.external_lead_id));
+  return { data: rows.slice(from, Math.min(to + 1, from + PGRST_MAX_ROWS)), error: null };
+}
+
 const SB = {
   from: () => ({
     select: () => ({
       eq: () => ({
-        like: async () =>
-          cursorReadError
-            ? { data: null, error: { message: cursorReadError } }
-            : {
-                data: [...existingExternalIds].map((id) => ({ external_lead_id: id })),
-                error: null,
-              },
+        like: () => ({
+          then: (resolve: (v: unknown) => void) => resolve(cursorWindow(0, PGRST_MAX_ROWS - 1)),
+          order: () => ({
+            range: async (from: number, to: number) => cursorWindow(from, to),
+          }),
+        }),
       }),
     }),
   }),
@@ -658,6 +673,39 @@ describe("syncWpLeads — the loss cannot scroll out of the window", () => {
     expect(summary.unaccounted).toBe(50);
     expect(issueCalls.map((i) => i.key)).toContain(WP_RECONCILE_ISSUE_KEY);
     expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("a held set past the 1000-row response cap still anchors the cursor at what landed", async () => {
+    // The cursor is the ONLY thing standing between a push failure and a
+    // customer nobody answers, and it is derived from a read of our own table
+    // — so a silently truncated read pins it. Held 1..1300 against a 1600-row
+    // table: truncated at 1000 the window asks for 1001..1200, all of which
+    // already landed, and rows 1301..1600 are offered by no poll ever again.
+    // The standing issue then cannot clear either, so the one visible symptom
+    // degrades into permanent noise.
+    const ids = Array.from({ length: 1600 }, (_, i) => i + 1);
+    existingExternalIds = held(ids.slice(0, 1300));
+    const plugin = fakePlugin(ids);
+
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+
+    expect(summary.sinceId).toBe(1300);
+    expect(plugin.polledFrom).toEqual([1300]);
+    expect(summary.inserted).toBe(WP_PULL_LIMIT);
+    expect(landCalls.map((c) => c.input.externalLeadId)).toContain(wpExternalLeadId(1500));
+    // The rest is a backlog draining over polls, counted honestly in between.
+    expect(summary.unaccounted).toBe(100);
+  });
+
+  it("a windowed read failure is still a FAILED run, not a partially-held set", async () => {
+    // Paging must not turn an unreadable table into "we hold fewer rows than we
+    // do": a short set reads as a lower cursor, and a lower cursor re-offers
+    // rows as new. Fail the run instead.
+    existingExternalIds = held(Array.from({ length: 1200 }, (_, i) => i + 1));
+    cursorReadError = "connection terminated";
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: fetchReturning({ submissions: [] }) });
+    expect(summary.ok).toBe(false);
+    expect(summary.error).toContain("cursor read failed");
   });
 
   it("an unreadable leads table is a FAILED run, never a poll from zero", async () => {

@@ -94,6 +94,25 @@ function amountsCard(title: string, lines: RefundLine[], totalLabel: string, tot
 export const REFUND_SLA_LINE =
   "Card refunds normally show on your statement within 3 to 5 working days and bank transfers usually arrive the same day, all well within the 14 days we promise.";
 
+/** The same promise for a brand whose card channel is not live. */
+const REFUND_SLA_LINE_NO_CARD =
+  "Bank transfers usually arrive the same day, well within the 14 days we promise.";
+
+/**
+ * The one line of refund copy that names a payment rail, so it follows the
+ * brand's card switch like every other card mention (PRD §11.10). A brand that
+ * never offered card cannot have a card refund to explain, and the word is
+ * scrubbed from its every other surface.
+ *
+ * It must be resolved HERE rather than left to the hosted template's card-free
+ * fallback_value: SLA_LINE is supplied on every send, and a supplied variable
+ * always beats a fallback, so gating only the fallback would change nothing a
+ * customer reads.
+ */
+export function refundSlaLine(t: EmailTheme): string {
+  return t.cardPhone ? REFUND_SLA_LINE : REFUND_SLA_LINE_NO_CARD;
+}
+
 /* ------------------------------------------------------- refund executed */
 
 export interface RefundExecutedMeta {
@@ -111,7 +130,7 @@ export function refundExecutedTemplateVars(m: RefundExecutedMeta): Record<string
     QUOTE_REF: escapeHtml(m.quoteRef),
     TOTAL_REFUND: gbp(m.totalRefund),
     REFUND_LINES: lineRows(m.lines),
-    SLA_LINE: REFUND_SLA_LINE,
+    SLA_LINE: refundSlaLine(emailTheme(m.brand)),
   };
 }
 
@@ -125,7 +144,7 @@ export function buildRefundExecutedEmailHtml(m: RefundExecutedMeta): string {
       `We have now returned everything due back to you for booking ${escapeHtml(m.quoteRef)}. Each payment goes back the way it came in.`,
     ),
     amountsCard("Refunded to you", m.lines, "Total refunded", m.totalRefund, t),
-    subline(REFUND_SLA_LINE),
+    subline(refundSlaLine(t)),
     subline(
       `Any questions at all, just reply to this email or ${t.callUsHtml}.`,
     ),
@@ -162,7 +181,7 @@ export function retainedOutcomeTemplateVars(m: RetainedOutcomeMeta): Record<stri
       m.refundLines.length > 0
         ? amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal, t) +
           "\n" +
-          subline(REFUND_SLA_LINE)
+          subline(refundSlaLine(t))
         : "",
   };
 }
@@ -180,7 +199,7 @@ export function buildRetainedOutcomeEmailHtml(m: RetainedOutcomeMeta): string {
             `Anything you paid above that held amount has been refunded in full, as promised:`,
           ),
           amountsCard("Refunded to you", m.refundLines, "Total refunded", m.refundTotal, t),
-          subline(REFUND_SLA_LINE),
+          subline(refundSlaLine(t)),
         ]
       : [];
   const inner = [

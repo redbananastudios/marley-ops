@@ -42,6 +42,21 @@ interface Fixture {
   otherBrand: { slug: string; colour_primary: string; colour_accent: string };
 }
 
+/**
+ * What the seed has actually written, recorded row by row as it writes rather
+ * than handed over when it finishes. A seed that throws part-way — a new NOT
+ * NULL column on appointments, one dropped round-trip — would otherwise leave
+ * the client and both leads in staging with the fixture variable still null and
+ * afterAll a no-op, and nothing else sweeps them: globalTeardown purges only
+ * staging ledger invoices, and scripts/seed-e2e.mjs wipes on a "E2E " prefix
+ * whose SPACE this spec's hyphenated marker does not match. The leak would
+ * survive every reseed and accumulate one set per CI run.
+ */
+const created: { clientId?: string; leadIds: string[]; apptIds: string[] } = {
+  leadIds: [],
+  apptIds: [],
+};
+
 function hexToRgb(hex: string): string {
   const h = hex.replace("#", "");
   const n = parseInt(h.length === 3 ? h.split("").map((c) => c + c).join("") : h, 16);
@@ -76,6 +91,7 @@ async function seed(): Promise<Fixture | null> {
     .single();
   if (cErr || !client) throw new Error(`seed client: ${cErr?.message ?? "no row returned"}`);
   const clientId = client.id as string;
+  created.clientId = clientId;
 
   async function lead(brand: string, confirmed: boolean) {
     const { data, error } = await sb
@@ -96,6 +112,7 @@ async function seed(): Promise<Fixture | null> {
       .select("id")
       .single();
     if (error) throw new Error(`seed lead (${brand}): ${error.message}`);
+    created.leadIds.push(data.id as string);
     return data.id as string;
   }
   const marleyLeadId = await lead("marley", true);
@@ -120,6 +137,7 @@ async function seed(): Promise<Fixture | null> {
       .select("id")
       .single();
     if (error) throw new Error(`seed appointment (${title}): ${error.message}`);
+    created.apptIds.push(data.id as string);
     return data.id as string;
   }
   const apptIds = [
@@ -130,23 +148,39 @@ async function seed(): Promise<Fixture | null> {
   return { clientId, marleyLeadId, otherLeadId, apptIds, otherBrand: other };
 }
 
-async function teardown(fx: Fixture) {
+/**
+ * Deletes whatever `created` records, FK-ordered (children before the leads and
+ * client they hang off) and loud — a partial teardown throws rather than
+ * leaving rows to be discovered later by whoever's spec they break.
+ */
+async function teardown(rows: typeof created) {
+  const clientId = rows.clientId;
+  if (!clientId) return; // seed wrote nothing (single-brand mode)
   const sb = adminClient();
   const problems: string[] = [];
   const check = (label: string, error: { message: string } | null) => {
     if (error) problems.push(`${label}: ${error.message}`);
   };
-  for (const id of fx.apptIds) check("appointments", (await sb.from("appointments").delete().eq("id", id)).error);
-  for (const leadId of [fx.marleyLeadId, fx.otherLeadId]) {
+  for (const id of rows.apptIds) check("appointments", (await sb.from("appointments").delete().eq("id", id)).error);
+  for (const leadId of rows.leadIds) {
     check("activities", (await sb.from("activities").delete().eq("lead_id", leadId)).error);
     check("leads", (await sb.from("leads").delete().eq("id", leadId)).error);
   }
-  check("clients", (await sb.from("clients").delete().eq("id", fx.clientId)).error);
-  const { count } = await sb
+  check("clients", (await sb.from("clients").delete().eq("id", clientId)).error);
+  // Read back both halves: the appointments by their marker titles, and the
+  // client by the id we wrote. A seed that fell over before the appointments
+  // leaves a clean title count and a stranded client, so counting only the
+  // titles is exactly the blind spot this teardown exists to close.
+  const { count: apptCount } = await sb
     .from("appointments")
     .select("*", { count: "exact", head: true })
     .ilike("title", `${MARKER}%`);
-  if (count) problems.push(`appointments: ${count} marker row(s) still present after delete`);
+  if (apptCount) problems.push(`appointments: ${apptCount} marker row(s) still present after delete`);
+  const { count: clientCount } = await sb
+    .from("clients")
+    .select("*", { count: "exact", head: true })
+    .eq("id", clientId);
+  if (clientCount) problems.push("clients: the marker client is still present after delete");
   if (problems.length) throw new Error(`teardown left rows behind: ${problems.join("; ")}`);
 }
 
@@ -171,8 +205,11 @@ test.describe("Office — diary brand layer (gate 11)", () => {
     fx = await seed();
   });
 
+  // Unconditional, and keyed off `created` rather than `fx`: a beforeAll that
+  // threw still leaves rows, and that is precisely the case the old `if (fx)`
+  // guard skipped.
   test.afterAll(async () => {
-    if (fx) await teardown(fx);
+    await teardown(created);
   });
 
   test("brand-derived fills, hollow-unconfirmed flip, legend", async ({ page }) => {

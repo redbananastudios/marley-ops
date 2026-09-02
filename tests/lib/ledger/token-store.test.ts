@@ -193,6 +193,59 @@ describe("claiming the lease and rotating", () => {
   });
 });
 
+/**
+ * A provider may hand back a failure it deliberately did NOT throw, because
+ * throwing it would have happened inside the one window where a throw is
+ * unrecoverable: after a rotating provider has spent the old refresh token and
+ * before the replacement is written down. Xero's tenant lookup is that call.
+ *
+ * The contract is "persist first, then fail just as loudly" — so both halves
+ * are asserted together. Asserting only the throw would pass against the very
+ * bug this exists to stop, and asserting only the write would let the failure
+ * be swallowed.
+ */
+describe("a failure the provider deferred until after the write", () => {
+  beforeEach(() => seed({ access_expires_at: iso(-1000) }));
+
+  it("persists the rotated token AND raises the deferred failure", async () => {
+    const deferred = new Error("Xero connections lookup failed (HTTP 429)");
+    await expect(
+      getLedgerAccessToken("xero", vi.fn().mockResolvedValue({ ...rotated, deferredError: deferred }), "own-1"),
+    ).rejects.toBe(deferred);
+    expect(state.row?.refresh_token).toBe("rt1");
+    expect(state.row?.access_token).toBe("at1");
+  });
+
+  /**
+   * The next pass must be able to self-heal off the cached access token rather
+   * than spending another rotation — which is the whole reason the write goes
+   * first.
+   */
+  it("leaves the lease clear so the cached token is usable next pass", async () => {
+    await expect(
+      getLedgerAccessToken(
+        "xero",
+        vi.fn().mockResolvedValue({ ...rotated, tenantId: undefined, deferredError: new Error("boom") }),
+        "own-1",
+      ),
+    ).rejects.toThrow(/boom/);
+    expect(state.row?.refresh_lease_until).toBeNull();
+    // tenantId undefined means "could not re-read it", never "there isn't one".
+    expect(state.row?.tenant_id).toBe("tenant-1");
+    await expect(getLedgerAccessToken("xero", vi.fn(), "own-1")).resolves.toMatchObject({
+      accessToken: "at1",
+    });
+  });
+
+  /** A write failure still wins: there is no rotation to report against. */
+  it("reports the unsaved rotation, not the deferred failure, when the write fails", async () => {
+    state.updateError = "connection reset";
+    await expect(
+      getLedgerAccessToken("xero", vi.fn().mockResolvedValue({ ...rotated, deferredError: new Error("boom") }), "own-1"),
+    ).rejects.toThrow(/rotated but could not be saved/);
+  });
+});
+
 describe("losing the claim", () => {
   it("waits for the winner's write instead of refreshing alongside it", async () => {
     seed({ access_expires_at: iso(-1000) });

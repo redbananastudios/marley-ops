@@ -1,6 +1,6 @@
 # Pitmans multi-brand — production migration runbook
 
-**Who runs this: Peter, over SSH, on promotion day** — which is work-bound rather than dated (multi-brand PRD §5, §11.6): validated gates plus Peter's word, on a clear working day outside the 21–28 September import week. The build agent applies these files to STAGING only; production is human-only. Files apply **in order**, in one sitting, followed by the single `notify pgrst` (each file also carries its own where it matters — running it twice is harmless).
+**Who runs this: Peter, over SSH, on promotion day** — which is work-bound rather than dated (multi-brand PRD §5, §11.6): validated gates plus Peter's word, on a clear working day outside the 21–28 September import week. The build agent applies these files to STAGING only; production is human-only. Files apply **in order**, in one sitting. There are **two** `notify pgrst` steps in that order — one before the deploy and one after the last file — because the deploy sits in the middle of the batch and the code it starts reads columns applied either side of it. Some files carry their own as well; running it twice is harmless.
 
 Every gate that adds a migration appends its row here in the same commit. The runbook stays current from gate 1 so promotion day is a scripted operation, not an act of memory.
 
@@ -29,10 +29,12 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 9 | `supabase/migrations/0113_commercial_path.sql` | `quotes.commercial_due_date date` + `quotes.po_number text` (length-checked) — the completion invoice's terms date and the optional client PO. Inert for every existing row: both are read only when `payment_policy = 'commercial'`, and 0111 backfilled every accepted quote to `'residential'` | **Same ordering rule as 0111/0112 — before the deploy.** The deployed code names both columns in explicit select lists (`QUOTE_COLS` in `lib/quote/accept-flow.ts`, and `loadBookingRows`), so if it is missing, acceptance fails and every money surface silently renders empty — see below |
 | 10 | `supabase/migrations/0114_pitmans_import.sql` | `quotes.legacy_ref`, `import_batch` on the five tables the importers write, four partial indexes, and the `quotes_source_check` **widened** (never narrowed) to accept `'pitmans'` | No — additive and inert; nothing reads these columns until the importers run in the 21–28 September window. Placed before the deploy for one reason only: it keeps the whole batch in one pre-deploy block, so there is no second `psql` session to remember after the restart |
 | 11 | `supabase/migrations/0115_crate_calendar_month_minimum.sql` | `storage_lets.min_kind text not null default 'days'` (check `days`/`calendar_month`) — freezes HOW a crate let's minimum window is measured, per the 0075 pattern; plus a triple-guarded backfill flipping only crate lets with no arrears grid in motion, no v1 (28-day) signature, and no `import_batch` to `calendar_month` (storage-terms v2, 2026-08-31) | **Same ordering rule as 0111–0113 — before the deploy.** The deployed code names `min_kind` in explicit storage-billing select lists; missing, crate billing fails on every run. Every existing row defaults to `'days'` = bit-identical billing |
-| 12 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 and 0113 (which the new code writes to and selects on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
-| 13 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
+| 12 | `supabase/migrations/0116_crate_minimum_pre_v2_signatures.sql` | takes back the crate lets 0115 flipped whose storage signature predates the calendar-month terms. 0115 recognised a v1 signature by `terms_version like 'storage-terms-v1%'`, which is false or NULL for every signature taken before the first published storage terms — so the cohort its guard names as "keeps exactly the schedule they signed" is the cohort it flipped. Reverts only lets already on `calendar_month` whose storage signature is not demonstrably v2-or-later; a let with no storage signature is left alone, as 0115 intended | No — one UPDATE, narrower than 0115's, and a no-op when the class is empty. Must run immediately after 0115 |
+| 13 | **RELOAD THE SCHEMA CACHE** — `notify pgrst, 'reload schema';` | not a migration. 0109, 0113, 0114 and 0115 carry no reload of their own, so without this the container started on the next row queries a PostgREST whose cached schema has never seen `commercial_due_date`, `po_number`, `legacy_ref`, `import_batch` or `min_kind` — and PostgREST rejects a select naming a column it does not know about, which is exactly the empty-and-healthy failure described under 0113 below | — |
+| 14 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 and 0113 (which the new code writes to and selects on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
+| 15 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
 
-### 0111, 0112, 0113 and 0115 must run BEFORE the deploy — and therefore before 0110
+### 0111, 0112, 0113, 0115 and 0116 must run BEFORE the deploy — and therefore before 0110
 
 This is the mirror image of 0110's rule, so read both before running either.
 
@@ -67,6 +69,17 @@ Apply in the order the table gives, not in filename order.
 0114 has no such constraint — nothing in the deployed code reads its columns until the
 importers run in the import week — but it is listed in the batch anyway so the whole
 migration set is one pre-deploy block with no second session to remember.
+
+0116 inherits 0115's position for a different reason: it corrects rows 0115 has just
+written, so the two belong in the same breath. Leaving it for later would mean crate
+billing runs, and the /s page renders, against a minimum the customer did not sign.
+
+**And the reload row exists for the same reason 0113 does.** Applying a column is not
+the same as PostgREST knowing about it: the cache reloads on `notify pgrst`, and 0109,
+0113, 0114 and 0115 are the batch members that carry none of their own. Restarting the
+container against a cache that predates them puts the new code's explicit select lists
+in front of columns PostgREST will refuse — the empty-and-healthy shape above, only
+this time with nothing wrong in the database at all. It costs one statement; run it.
 
 ### Changes the DEPLOY carries with no migration of their own
 
@@ -115,6 +128,27 @@ So the order is: **0109 → deploy → 0110 → `notify pgrst`.** If the deploy 
 rolled back after 0110 is on, drop the six constraints first — the old image cannot
 satisfy them.
 
+**Apply this one file with `--single-transaction`.** 0110's header says it is safe to
+re-run after a failure. That is true of its six sweeps and false of the three
+`alter table … add constraint` statements underneath them: Postgres has no
+`ADD CONSTRAINT IF NOT EXISTS`, and the standard recipe in `docs/ovh-deployment.md`
+pipes the file into `psql -v ON_ERROR_STOP=1` with no transaction, so each statement
+autocommits on its own. A failure at the storage or card-payments ALTER therefore
+leaves the four `quotes` constraints committed, and the documented recovery — re-run
+the file — fails on `constraint "quotes_deposit_invoice_provider_ck" … already exists`,
+which reads like a fresh problem mid-promotion:
+
+```bash
+ssh -i ~/.ssh/rbs_vps ubuntu@51.195.253.165 \
+  "sudo docker exec -i supabase-db psql -U postgres -d postgres -v ON_ERROR_STOP=1 --single-transaction" \
+  < supabase/migrations/0110_ledger_provider_checks.sql
+```
+
+Then a failure rolls the whole file back and re-running it really is safe. If it has
+already been applied without the flag and stopped part-way, drop whichever constraints
+landed (`select conname from pg_constraint where conname like '%_provider_ck';`) before
+re-running — do not try to re-run over them.
+
 
 ### The image/migration window cuts BOTH ways — keep it inside the quiet window
 
@@ -143,6 +177,10 @@ notify pgrst, 'reload schema';
 ```
 
 Self-hosted PostgREST caches the schema — skipping this leaves every new column invisible and, for 0104 specifically, breaks quote creation (the cached one-arg `next_quote_ref` no longer exists).
+
+This is the **second** of the two reloads, and it is not a substitute for the one at row
+13: that one is the cache the deploying container reads, this one closes the batch after
+0110. Running it twice is harmless; running it only here is not.
 
 ---
 
@@ -477,6 +515,84 @@ never delete a customer, van or staff member that existed beforehand.
 
 App-side, after the deploy: nothing should change at all. No importer runs
 automatically, and `source = 'pitmans'` does not exist in prod until one does.
+
+---
+
+## `0115_crate_calendar_month_minimum.sql` + `0116_crate_minimum_pre_v2_signatures.sql` — the crate minimum
+
+The only file in the batch whose backfill moves live billing rows, and the only
+dial that decides both what a crate let is charged and what its signing page
+says it agreed to. So the question is not "did the column land" but **which
+lets moved, and is that the set that should have moved** — a backfill that
+matched nothing looks exactly like a correct no-op from here.
+
+Run this AFTER both files. Every count is a claim about money.
+
+```sql
+select
+  (select count(*) from storage_lets where billing_model = 'crate_daily')                        as crate_lets,
+  (select count(*) from storage_lets where billing_model = 'crate_daily'
+                                       and min_kind = 'calendar_month')                          as on_calendar_month,
+  (select count(*) from storage_lets where billing_model <> 'crate_daily'
+                                       and min_kind <> 'days')                                   as non_crate_moved,
+  (select count(*) from storage_lets where import_batch is not null
+                                       and min_kind <> 'days')                                   as imported_moved,
+  -- 0116's cohort: still on the calendar month with a signature that predates
+  -- the calendar-month terms. This is the number 0115 alone got wrong.
+  (select count(*) from storage_lets l
+     where l.min_kind = 'calendar_month'
+       and exists (select 1 from signatures s
+                    where s.storage_let_id = l.id and s.kind = 'storage'
+                      and (s.terms_version is null
+                           or s.terms_version !~ '^storage-terms-v([2-9]|[1-9][0-9])-'))) as pre_v2_still_moved;
+```
+
+Expected: `non_crate_moved` **0**, `imported_moved` **0** (a legacy let bills on
+Mark's paperwork, never on our published terms), and `pre_v2_still_moved` **0** —
+that last one is 0116's whole job, and a non-zero answer means 0116 did not run.
+
+`on_calendar_month` has no single right value, so read it rather than tick it: it
+must be ≤ `crate_lets`, and every let inside it should be one you would expect a
+customer to have signed the calendar-month agreement for. **If `crate_lets` is 0
+the migration proved nothing** — say so rather than recording a pass.
+
+Then the class 0115 deliberately declines to touch, which nothing else surfaces:
+
+```sql
+-- Signed the calendar-month terms, but the 28-day arrears grid is already in
+-- motion, so 0115 left it on 'days' rather than re-anchor a moving cursor.
+select l.id, l.start_date, l.min_days,
+       (select max(i.period_end) from storage_invoices i where i.let_id = l.id) as billed_through
+from storage_lets l
+where l.billing_model = 'crate_daily'
+  and l.min_kind = 'days'
+  and exists (select 1 from storage_invoices i
+               where i.let_id = l.id and i.kind in ('arrears', 'final'))
+  and exists (select 1 from signatures s
+               where s.storage_let_id = l.id and s.kind = 'storage'
+                 and s.terms_version ~ '^storage-terms-v([2-9]|[1-9][0-9])-');
+```
+
+Expected: **no rows.** Any row here is a manual decision for Peter, not something
+to fix in psql — the customer signed a calendar month and is being billed on a
+28-day grid, and re-anchoring a live cursor double-bills. Take it out of the
+window and deal with it separately.
+
+Finally prove the CHECK bites, since a committed `alter table` is not evidence
+that anything is enforced (it rolls back either way):
+
+```sql
+begin;
+  update storage_lets set min_kind = 'month' where id = (select id from storage_lets limit 1);
+rollback;
+```
+
+Expected: fails on `storage_lets_min_kind_check`.
+
+App-side, after the deploy: start one crate let on staging-shaped test data and
+confirm its `/s` signing page reads "one calendar month minimum", while an
+existing let that kept `'days'` still reads its own day count. Those two surfaces
+disagreeing with the invoices is the failure this pair exists to prevent.
 
 ---
 

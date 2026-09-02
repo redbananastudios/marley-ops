@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { LedgerError } from "@/lib/ledger";
-import { isLedgerAccessDenied } from "@/lib/ledger/access";
+import { isLedgerAccessDenied, isLedgerRateLimited } from "@/lib/ledger/access";
 import { ZohoError } from "@/lib/zoho";
 
 /**
@@ -98,6 +98,24 @@ describe("isLedgerAccessDenied — the Xero lock-out shapes", () => {
     expect(isLedgerAccessDenied(new LedgerError("No Xero tenant is recorded for this connection."))).toBe(true);
   });
 
+  /**
+   * A connection granting two organisations. The refresh itself succeeds — the
+   * tenant lookup is what refuses — so it repeats on every pass forever and no
+   * retry can resolve it: a human has to re-consent granting exactly one org.
+   * That is the same permanent class and the same /api/xero/connect remedy, but
+   * it carries no code and no status, so the wording is the only signal.
+   */
+  it("recognises a connection granting more than one organisation", () => {
+    expect(
+      isLedgerAccessDenied(
+        new LedgerError(
+          "This Xero connection grants access to 2 organisations (One Ltd, Two Ltd). " +
+            "Refusing to guess which set of books to use — re-authorise and grant exactly one.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
   it("still leaves an ordinary Xero 400 alone", () => {
     // A validation error on one invoice is not an integration outage, and
     // escalating it would train people to ignore the alert that matters.
@@ -162,6 +180,69 @@ describe("isLedgerAccessDenied — the Xero lock-out shapes", () => {
         ),
       ),
     ).toBe(false);
+  });
+});
+
+/**
+ * Quota exhaustion — integration-wide, and neither of the two classes above.
+ *
+ * Zoho meters 1,000 API calls per organisation per day and answers a 429 with
+ * code 45 once the org has spent them; the staging org hit exactly that. Every
+ * invoice raise then fails at once, which is the same BLAST RADIUS as a
+ * lock-out — so it must produce one integration-level alarm, not one "invoice
+ * FAILED" email per accepted quote. That per-entity shape is the thing the
+ * 2026-08-27 decision exists to prevent, and it was reachable again here purely
+ * because nothing classified a 429 at all.
+ *
+ * But it is NOT access denied and must never borrow that remedy. The lock-out
+ * copy tells a human to re-enable a user or re-consent; the truthful remedy for
+ * a daily quota is to stop what is burning the calls and wait for the reset.
+ * Sending the wrong instruction to an office at 2am is worse than sending none,
+ * so the two stay separate classifiers with separate wording.
+ */
+describe("isLedgerRateLimited — its own class, never access-denied", () => {
+  it("recognises a quota-exhausted 429 whichever provider raised it", () => {
+    expect(
+      isLedgerRateLimited(
+        new LedgerError("You have exceeded the maximum call rate limit of 1,000 API calls", 45, 429),
+      ),
+    ).toBe(true);
+    expect(isLedgerRateLimited(new LedgerError("Xero invoice create failed: rate limited — retry after 37s (…)", undefined, 429))).toBe(
+      true,
+    );
+  });
+
+  /**
+   * Zoho puts a non-zero `code` in the BODY of some 200s, so the status alone
+   * is not the whole signal — the client raises those with the HTTP status it
+   * actually got. The provider's own wording is the second, independent signal.
+   */
+  it("recognises the provider's own wording even without the status", () => {
+    expect(
+      isLedgerRateLimited(new LedgerError("You have exceeded the maximum call rate limit of 1,000 API calls", 45, 200)),
+    ).toBe(true);
+  });
+
+  it("leaves ordinary failures alone", () => {
+    expect(isLedgerRateLimited(new LedgerError("Xero rejected the invoice: account code invalid", undefined, 400))).toBe(
+      false,
+    );
+    expect(isLedgerRateLimited(new LedgerError("gateway timeout", undefined, 504))).toBe(false);
+    expect(isLedgerRateLimited(new Error("plain"))).toBe(false);
+    expect(isLedgerRateLimited(null)).toBe(false);
+  });
+
+  /**
+   * The half that must never drift. A quota resets on its own, so classifying
+   * it permanent would put "a Zoho admin marks the ops user Active again" in
+   * front of an office whose user was never disabled — an alarm that names the
+   * wrong remedy is worse than the per-quote noise it replaced.
+   */
+  it("a rate limit is not a lock-out, in either direction", () => {
+    const quota = new LedgerError("You have exceeded the maximum call rate limit of 1,000 API calls", 45, 429);
+    expect(isLedgerAccessDenied(quota)).toBe(false);
+    const lockout = new LedgerError("denied", 6018);
+    expect(isLedgerRateLimited(lockout)).toBe(false);
   });
 });
 

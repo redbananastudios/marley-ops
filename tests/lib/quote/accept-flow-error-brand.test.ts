@@ -7,8 +7,10 @@ import {
   acceptQuoteOnline,
   confirmMoveDate,
   declineQuoteOnline,
+  invoicePayClause,
   settleQuoteInFull,
 } from "@/lib/quote/accept-flow";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { pitmans } from "../comms/brand-fixture";
 
 /**
@@ -184,6 +186,57 @@ describe("accept-flow error strings resolve the quote's brand (behavioural)", ()
   });
 });
 
+/**
+ * The blank-phone half of the same rule (2026-09-02).
+ *
+ * Both customer-facing phone fallbacks in this file resolved the DEFAULT
+ * brand's office number for ANY brand, so one Settings save — the Phone field
+ * is free text and `optText` maps "" to null — put that number into another
+ * brand's own invoice pay clause and its 13 `/q` error strings. The rule
+ * lib/comms/templates.ts already states is that the number is the DEFAULT-
+ * BRAND fallback ONLY; a named brand with no number degrades to reply-first
+ * contact, because a made-up number is worse and a borrowed one is worse still.
+ */
+describe("a brand with no phone number degrades to reply-first, never to the default number", () => {
+  const noPhone = { ...pitmans, phone: null, cardPaymentsEnabled: true };
+
+  it("invoicePayClause drops the card offer rather than naming a number that is not this brand's", () => {
+    const clause = invoicePayClause(noPhone, "PMR034", "Payable by");
+    expect(clause).not.toContain(MARLEY_NUMBER);
+    expect(clause).not.toContain("by card over the phone");
+    // Still a complete, payable sentence — the bank rail is the one that works.
+    expect(clause).toContain("bank transfer (reference PMR034) or cash.");
+  });
+
+  it("a brand WITH a phone and card on still offers the card on its own number", () => {
+    const clause = invoicePayClause({ ...pitmans, cardPaymentsEnabled: true }, "PMR034", "Payable by");
+    expect(clause).toContain("by card over the phone on 01258 858564");
+  });
+
+  it("the default brand's clause is unchanged — the fallback belongs to it", () => {
+    const marleyBrand = { ...pitmans, slug: DEFAULT_BRAND, phone: null, cardPaymentsEnabled: false };
+    expect(invoicePayClause(marleyBrand, "MMR001", "Payable by")).toBe(
+      "Payable by bank transfer (reference MMR001), by card over the phone on 01747 637070, or cash.",
+    );
+  });
+
+  it("a phone-less brand's /q error tells the customer to reply, not to ring another company", async () => {
+    const quote = baseQuote("pitmans");
+    const noPhoneSb = {
+      from(table: string) {
+        if (table === "quotes") return queryStub(() => quote);
+        if (table === "brands") return queryStub(() => ({ ...BRAND_ROWS.pitmans, phone: null }));
+        return queryStub(() => null);
+      },
+    } as unknown as SupabaseClient<Database>;
+    const res = await acceptQuoteOnline(noPhoneSb, "tok-1234567890", "A Customer", null);
+    expect(res.ok).toBe(false);
+    if (res.ok) return;
+    expect(res.error).not.toContain(MARLEY_NUMBER);
+    expect(res.error).toBe("This quote has expired. Reply to your quote email for an updated price.");
+  });
+});
+
 /* ---------------------------------------------------------- source guards */
 
 const SRC = readFileSync(join(process.cwd(), "lib/quote/accept-flow.ts"), "utf8");
@@ -206,11 +259,11 @@ describe("accept-flow error strings resolve the quote's brand (source guards)", 
     }
   });
 
-  it("every error phone goes through the shared brand-phone resolver", () => {
+  it("every error contact goes through the shared brand resolver", () => {
     for (const fn of ACTIONS) {
       expect(
-        count(spanOf(fn), "errorPhone(sb, quote.brand)"),
-        `${fn} must resolve its error phone from the quote's brand`,
+        count(spanOf(fn), "errorContact(sb, quote.brand)"),
+        `${fn} must resolve its error contact from the quote's brand`,
       ).toBeGreaterThan(0);
     }
   });

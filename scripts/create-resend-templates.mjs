@@ -31,16 +31,19 @@
  *
  * LIVE PUSH FOR PITMANS IS GATED: do not run a keyed --brand pitmans push
  * until Resend domain verification for pitmansremovals.co.uk lands (Phase 0).
- * After a live push the script prints the template-key -> id JSON. Store it on
- * the brand row (id capture, PRD §3.5) with:
+ * After a live push the script prints the envVar -> id JSON. Store it on the
+ * brand row (id capture, PRD §3.5) with:
  *
  *   update brands
  *      set resend_template_ids = '<paste the printed JSON>'::jsonb
  *    where slug = 'pitmans';
  *
- * The JSON is keyed by the UNPREFIXED template key ("quote-email") — the key
- * templateIdFor(brand, key) resolves — while the brand prefix lives only in
- * the Resend dashboard name.
+ * The JSON is keyed by the ENV VAR NAME ("RESEND_TEMPLATE_QUOTE_EMAIL"),
+ * because that is the key templateIdFor(brand, envName) resolves and the
+ * identifier every call site already passes — see lib/comms/template-id.ts.
+ * The hosted NAME is a separate identifier (it is the PATCH match key, and it
+ * carries the brand prefix), and it is not mechanically convertible into the
+ * env var, so recording ids under it would produce a map no send ever hits.
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -417,6 +420,11 @@ const cancellationAckHtml = shellHtml(
     ),
     "{{{HELD_CARD}}}",
     sublineRow("{{{HELD_SENTENCES}}}", "0 36px 16px"),
+    // The booking rolls to a new date, so this is pre-move comms and carries
+    // the §3.5 disclosure — same as the date-change confirmation, which is the
+    // same rebook sent from outside the 7-day window. Only one of the two ever
+    // fires, so a disclosure on one of them is a disclosure on neither.
+    ...fleetNoteRows,
     sublineRow(
       `Any questions, call <strong style="color:${ACCENT};">the team</strong> on ${PHONE} or reply to this email.`,
       "0 36px 6px",
@@ -1132,12 +1140,12 @@ const TEMPLATES = [
 ];
 
   // Group comms (PRD §11.10) keep Marley's identity: the crew portal invite is
-  // never cloned into another brand's set. key = the unprefixed lookup key
-  // (what brands.resend_template_ids and the env fallback are keyed by);
-  // name = what Resend displays and the PATCH-by-name matcher matches on.
+  // never cloned into another brand's set. Only the NAME takes the prefix —
+  // that is what Resend displays and what the PATCH-by-name matcher matches on.
+  // envVar is deliberately left alone and stays the single lookup key, so the
+  // ids this run records land under exactly what templateIdFor resolves.
   return TEMPLATES.filter((t) => B.includeCrewInvite || t.name !== "crew-portal-invite").map((t) => ({
     ...t,
-    key: t.name,
     name: B.namePrefix + t.name,
   }));
 }
@@ -1232,6 +1240,16 @@ if (B.namePrefix) {
   }
 }
 
+// envVar is the key the ids are recorded under, so a template missing one would
+// store its id at "undefined" and that brand's send would resolve nothing for
+// the rest of its life — silently, since a missed lookup degrades to inline
+// HTML rather than erroring. Refuse the push instead of printing a broken map.
+const unkeyed = SELECTED.filter((t) => !t.envVar);
+if (unkeyed.length > 0) {
+  console.error(`Refusing to push: no envVar on ${unkeyed.map((t) => t.name).join(", ")}`);
+  process.exit(1);
+}
+
 // Resend enforces declared-variables ≡ html-variables at every moment, so an
 // in-place PATCH that changes the variable SET is rejected. So: try PATCH first
 // (keeps the id — no env re-wire for copy/design-only edits); only if that fails
@@ -1240,7 +1258,7 @@ if (B.namePrefix) {
 const envLines = [];
 const idsByKey = {};
 for (const t of SELECTED) {
-  const { envVar, key, ...def } = t;
+  const { envVar, ...def } = t;
   const old = byName.get(t.name)?.id;
   let id = old;
   if (old) {
@@ -1260,12 +1278,12 @@ for (const t of SELECTED) {
     console.warn(`  publish failed (${e.message}) — publish "${t.name}" in the dashboard.`);
   });
   if (envVar && !B.namePrefix) envLines.push(`${envVar}=${id}`);
-  idsByKey[key] = id;
+  idsByKey[envVar] = id;
 }
 if (B.namePrefix) {
   // Id capture (PRD §3.5): paste this JSON into brands.resend_template_ids —
   // the exact update statement is documented in the header comment. Keys are
-  // the unprefixed template keys templateIdFor(brand, key) resolves.
+  // the env-var names templateIdFor(brand, envName) resolves.
   console.log(`\n--- brands.resend_template_ids for '${BRAND}' ---`);
   console.log(JSON.stringify(idsByKey, null, 2));
 } else {

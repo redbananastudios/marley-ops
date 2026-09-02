@@ -159,7 +159,23 @@ export function pageTheme(brand?: Brand | null): PageTheme {
   }
 
   const name = brand.name.trim() || MARLEY_THEME.name;
-  const phone = (brand.phone ?? "").trim() || MARLEY_PHONE;
+  // No fallback, for the same reason as the logo below — and this one is
+  // sharper, because a phone number is ACTIONABLE. The default brand's number
+  // on another brand's page is a live tel: link to an office that has never
+  // heard of the customer holding it, on every /q, /s and /cv state. The blank
+  // is reachable without a deploy (Settings › Brands takes free text and
+  // lib/brand-update.ts maps "" → null), and it is invisible to the source-
+  // level brand-leak scan because the number arrives through a token. A
+  // required string is the only shape this type allows, so the honest answer
+  // is to refuse the render and name the fix, loudly, on the request that
+  // caused it. The default brand never reaches here — its theme is the literal
+  // above — so a single-brand install cannot be broken by this.
+  const phone = (brand.phone ?? "").trim();
+  if (!phone) {
+    throw new Error(
+      `Brand "${brand.slug}" has no phone number, so its customer pages cannot be rendered. Add one in Settings › Brands.`,
+    );
+  }
   const accent = brandCtaColour(brand) ?? "#C03838";
   const primary = (brand.colourPrimary ?? "").trim();
 

@@ -8,6 +8,7 @@ import {
   type RefundExecutedMeta,
   type RetainedOutcomeMeta,
 } from "@/lib/comms/refund-emails";
+import { pitmans } from "./comms/brand-fixture";
 
 /**
  * Refund-queue customer emails (Payments Policy v2). The hard copy rules are
@@ -127,5 +128,49 @@ describe("retained-outcome email", () => {
   it("copes with a missing date label", () => {
     const html = buildRetainedOutcomeEmailHtml(retainedMeta({ originalDateLabel: null }));
     expect(html).toContain("your original move date");
+  });
+});
+
+/**
+ * The SLA sentence is the one line of refund copy that names a payment rail, so
+ * it is gated on the brand's card switch like every other card mention (PRD
+ * §11.10: the word reaches customer copy only when the global and brand
+ * switches are both true). A brand that never offered card cannot have a card
+ * refund, and its every other surface is scrubbed of the word.
+ *
+ * BOTH paths matter, and the template path is the easier one to get wrong: the
+ * hosted template declares a card-free fallback for such a brand, but a
+ * SUPPLIED variable always beats a fallback_value, so gating only the template
+ * fallback would have fixed nothing. SLA_LINE is supplied on every send.
+ */
+describe("the refund SLA line follows the brand's card switch", () => {
+  const cardOff = { brand: pitmans };
+  const cardOn = { brand: { ...pitmans, cardPaymentsEnabled: true } };
+
+  it("names card for a brand whose card channel is live", () => {
+    expect(buildRefundExecutedEmailHtml(executedMeta(cardOn))).toMatch(/card refunds/i);
+    expect(refundExecutedTemplateVars(executedMeta(cardOn)).SLA_LINE).toMatch(/card refunds/i);
+    expect(retainedOutcomeTemplateVars(retainedMeta(cardOn)).REFUND_SECTION).toMatch(/card refunds/i);
+  });
+
+  it("never names card for a card-off brand, on either render path", () => {
+    expect(buildRefundExecutedEmailHtml(executedMeta(cardOff))).not.toMatch(/card refunds/i);
+    expect(refundExecutedTemplateVars(executedMeta(cardOff)).SLA_LINE).not.toMatch(/card/i);
+    expect(buildRetainedOutcomeEmailHtml(retainedMeta(cardOff))).not.toMatch(/card refunds/i);
+    expect(retainedOutcomeTemplateVars(retainedMeta(cardOff)).REFUND_SECTION).not.toMatch(/card refunds/i);
+  });
+
+  it("still promises the 14 days it always did, card or no card", () => {
+    expect(refundExecutedTemplateVars(executedMeta(cardOff)).SLA_LINE).toContain("14 days");
+    expect(buildRefundExecutedEmailHtml(executedMeta(cardOff))).toContain("14 days");
+    expect(buildRetainedOutcomeEmailHtml(retainedMeta(cardOff))).toContain("14 days");
+  });
+
+  /** The single-brand invariant: no brand, and the default brand, are literal. */
+  it("leaves the default brand's line exactly as it is today", () => {
+    expect(refundExecutedTemplateVars(executedMeta()).SLA_LINE).toBe(REFUND_SLA_LINE);
+    expect(buildRefundExecutedEmailHtml(executedMeta({ brand: null }))).toBe(
+      buildRefundExecutedEmailHtml(executedMeta()),
+    );
   });
 });

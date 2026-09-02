@@ -7,6 +7,7 @@ import { websiteLeadIngestSchema, firstIssueMessage, MIN_INGEST_SECRET_LENGTH } 
 import { decideEnquiryPushes } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import { reportOperationalIssue, resolveOperationalIssue } from "@/lib/ops/issues";
+import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { errorContext, log } from "@/lib/log";
 
 type Sb = SupabaseClient<Database>;
@@ -148,16 +149,38 @@ export function contiguousReconciledUpTo(ids: ReadonlySet<number>, floorId = 1):
  * Returns the error rather than an empty set on failure: an unreadable leads
  * table must not look like a rail that has landed nothing, which would reset
  * the cursor to zero and re-offer every row as if new.
+ *
+ * PAGED, and strictly so. A plain select is truncated at PGRST_DB_MAX_ROWS
+ * (lib/supabase/fetch-all.ts) the moment this brand has landed more rows than
+ * that, and a truncated held set does not look wrong — it looks like a lower
+ * cursor. The window then freezes one page above the truncation point, so a
+ * submission past it is offered by no poll ever, `unaccounted` never returns
+ * to zero, and the standing issue that is supposed to name the loss becomes
+ * permanent noise no human can clear. Strict because a PARTIAL set is the same
+ * lie in a smaller size: any window that fails aborts the run instead.
  */
 async function reconciledRowIds(sb: Sb): Promise<Set<number> | { error: string }> {
-  const { data, error } = await sb
-    .from("leads")
-    .select("external_lead_id")
-    .eq("brand", WP_PULL_BRAND)
-    .like("external_lead_id", "wp-%");
-  if (error) return { error: error.message };
+  let rows: { external_lead_id: string | null }[];
+  try {
+    rows = await fetchAllRows<{ external_lead_id: string | null }>(
+      (from, to) =>
+        sb
+          .from("leads")
+          .select("external_lead_id")
+          .eq("brand", WP_PULL_BRAND)
+          .like("external_lead_id", "wp-%")
+          // Ordered so the windows tile the set exactly once: external_lead_id
+          // is unique per brand, so it is a total order and no row can fall
+          // between two pages.
+          .order("external_lead_id")
+          .range(from, to),
+      { strict: true },
+    );
+  } catch (err) {
+    return { error: errorContext(err).error };
+  }
   const ids = new Set<number>();
-  for (const row of (data ?? []) as { external_lead_id: string | null }[]) {
+  for (const row of rows) {
     const m = /^wp-(\d+)$/.exec(row.external_lead_id ?? "");
     if (m) ids.add(Number(m[1]));
   }

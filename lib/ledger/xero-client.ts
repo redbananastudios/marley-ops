@@ -245,11 +245,41 @@ export async function refreshXeroTokens(currentRefreshToken: string): Promise<Re
         "the connection will expire. Re-authorise with /api/xero/connect (admin only).",
     );
   }
+  /**
+   * The tenant read is DEFERRED rather than awaited into the return value.
+   *
+   * By the time this line runs Xero has already spent `currentRefreshToken`, so
+   * everything from here to the store's write-back is the one stretch of this
+   * integration where an ordinary transient failure is UNRECOVERABLE: throwing
+   * leaves the replacement in a dead stack frame, the row keeps the consumed
+   * token, and only the 30-minute grace this file's header refuses to treat as
+   * the mechanism stands between that and `invalid_grant`. `GET /connections`
+   * throws on a 429 (Xero meters it per tenant), on the 10s timeout, and
+   * unconditionally on a multi-org grant — and that last one throws on EVERY
+   * refresh, burning a fresh rotation each pass until the grace lapses and the
+   * connection is locked out of the live books with no self-heal.
+   *
+   * So the failure is carried back instead: the store persists the rotation and
+   * then raises it, which refuses exactly as loudly at a cost of nothing. The
+   * connect path can keep awaiting the same lookup inline
+   * (`app/api/xero/callback`) because a spent AUTHORISATION code is replaced by
+   * re-authorising; a spent refresh token has no such recovery.
+   */
+  let tenantId: string | null | undefined;
+  let deferredError: unknown;
+  try {
+    tenantId = await firstTenantId(accessToken);
+  } catch (err) {
+    // Left undefined, never null: the store then leaves the recorded tenant
+    // alone rather than clearing a value it merely failed to re-read.
+    deferredError = err;
+  }
   return {
     accessToken,
     refreshToken,
     expiresInSeconds: json.expires_in ?? 1800,
-    tenantId: await firstTenantId(accessToken),
+    tenantId,
+    deferredError,
   };
 }
 

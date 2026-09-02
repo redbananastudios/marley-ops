@@ -64,6 +64,15 @@ export interface RefreshedTokens {
   /** The NEW refresh token. For a rotating provider this differs every time. */
   refreshToken: string;
   tenantId?: string | null;
+  /**
+   * A failure the provider chose NOT to throw, because throwing it would have
+   * happened inside the window where a throw is unrecoverable — after a
+   * rotating provider has spent the old refresh token and before the
+   * replacement is written down. It is raised below, once the rotation is
+   * durable, so the caller still fails just as loudly at no cost to the
+   * connection.
+   */
+  deferredError?: unknown;
 }
 
 interface TokenRow {
@@ -170,6 +179,12 @@ export async function getLedgerAccessToken(
           `The integration will need re-authorising.`,
       );
     }
+    // Only now that the rotation is durable. Raising it any earlier would have
+    // cost the connection the very token this write just saved; raising it at
+    // all is what keeps the provider's refusal (a multi-org grant) a refusal
+    // rather than a silent degrade. The next pass self-heals off the access
+    // token written above without spending another rotation.
+    if (next.deferredError !== undefined) throw next.deferredError;
     return { accessToken: next.accessToken, tenantId: next.tenantId ?? won.tenant_id };
   } catch (err) {
     // Release the lease so the next attempt is not blocked for the full TTL.

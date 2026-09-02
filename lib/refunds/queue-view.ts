@@ -105,6 +105,20 @@ const RAIL_SET = new Set<string>(PAYMENT_RAILS);
  * Parse a refund_queue.held jsonb snapshot defensively. Malformed entries and
  * non-positive amounts are skipped (they can't be executed and must never
  * distort the maths); order is normalised chronological (first money in first).
+ *
+ * An entry carrying an invoice id with NO stamp at all is read as Zoho's,
+ * because this jsonb is the one store 0109's contract lives in as a column
+ * COMMENT and nothing else: 0110 backfilled and CHECK-constrained every sibling
+ * column under exactly that rule (an id predating the stamp can only have been
+ * minted by the only ledger that existed then), and it names `refund_queue`
+ * nowhere. Nothing re-stamps an existing snapshot either — the queue supersedes
+ * rows rather than rewriting them — so every row frozen before this deploy holds
+ * a real id with the key missing. Left null it resolves to the CONFIGURED
+ * provider, and after the flip the multi-payment branch of the VAT reversal
+ * hands that id to the wrong ledger: it throws into its fail-soft catch AFTER
+ * the money has left the bank, so no credit note is raised and the reversal
+ * degrades to a manual reminder. The rule is applied here because the jsonb has
+ * no constraint to apply it in.
  */
 export function parseHeld(value: unknown): HeldPayment[] {
   if (!Array.isArray(value)) return [];
@@ -116,17 +130,23 @@ export function parseHeld(value: unknown): HeldPayment[] {
     const amount = Number(p.amount);
     const at = typeof p.at === "string" && p.at ? p.at : null;
     if (!rail || !at || !Number.isFinite(amount) || amount <= 0) continue;
+    const invoiceId = typeof p.zoho_invoice_id === "string" ? p.zoho_invoice_id : null;
+    // The 0109 stamp: which ledger minted zoho_invoice_id. A stamp that is
+    // PRESENT but not a string normalises to null (→ the configured-provider
+    // convention) rather than surviving to be mis-read as a provider
+    // downstream — the writer copies a CHECK-constrained column, so such a
+    // value is corruption and corruption is not evidence of a provider. An
+    // ABSENT stamp beside a real id is a different thing: it is the pre-0109
+    // shape, and the header above says why it reads as Zoho's.
+    const stamp = typeof p.ledger_provider === "string" ? p.ledger_provider : null;
     out.push({
       rail,
       amount,
       at,
       label: typeof p.label === "string" ? p.label : undefined,
       card_payment_id: typeof p.card_payment_id === "string" ? p.card_payment_id : null,
-      zoho_invoice_id: typeof p.zoho_invoice_id === "string" ? p.zoho_invoice_id : null,
-      // The 0109 stamp: which ledger minted zoho_invoice_id. A malformed value
-      // normalises to null (→ the configured-provider convention) rather than
-      // surviving to be mis-read as a provider downstream.
-      ledger_provider: typeof p.ledger_provider === "string" ? p.ledger_provider : null,
+      zoho_invoice_id: invoiceId,
+      ledger_provider: stamp ?? (invoiceId && p.ledger_provider == null ? "zoho" : null),
     });
   }
   out.sort((a, b) => a.at.localeCompare(b.at));

@@ -71,13 +71,17 @@ export function DeclineOption({ token, phone }: { token: string; phone: string }
               reason === r.value ? "border-mm-red bg-white text-ink" : "border-mist-200 bg-white text-mist-500"
             }`}
           >
+            {/* accent-mm-red is the TOKEN, never a literal: the /q shell
+                re-points --color-mm-red per brand, and an arbitrary Tailwind
+                colour compiles to a fixed hex the override cannot reach — so
+                a second brand's page rendered one default-red dot. */}
             <input
               type="radio"
               name="decline-reason"
               value={r.value}
               checked={reason === r.value}
               onChange={() => setReason(r.value)}
-              className="size-4 accent-[#C03838]"
+              className="size-4 accent-mm-red"
             />
             {r.label}
           </label>

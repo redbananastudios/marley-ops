@@ -225,6 +225,10 @@ export async function GET(req: Request) {
     closedStaleFollowUps: 0,
     skippedOutsideWindow: 0,
     suppressedLeadsFlagged: 0,
+    /** 1 when the driving scan hit its read ceiling with the run's window
+     *  still unfilled — there is more chaseable work behind it than this run
+     *  could look through, so zero counters do NOT mean nothing was due. */
+    chaseScanTruncated: 0,
     /** Commercial credit control (PRD §3.10). Counted, never emailed to the
      *  customer — see the sweep at the end of this handler. -1 means the sweep
      *  could not read, which must not render as zero. */
@@ -350,84 +354,144 @@ export async function GET(req: Request) {
   // today" for EVERY customer — no quote chases, no deposit reminders — while
   // the run records status 'ok' with all counters at zero, indistinguishable
   // from a quiet Sunday. Throwing lets runCron mark the run failed and open the
-  // cron:chase operational issue. Oldest-neglected first so that if the 200-row
-  // cap is ever reached, the same leads aren't starved every single day.
-  const { data: leads, error: leadsError } = await sb
-    .from("leads")
-    .select("id, client_id, estimator_id, name, email, status, chase_paused, quote_chase_step, deposit_chase_step")
-    .in("status", ["quoted", "provisional"])
-    .eq("chase_paused", false)
-    .order("quote_chase_at", { ascending: true, nullsFirst: true })
-    .limit(200);
-  if (leadsError) {
-    log.error("cron.chase.leads_query_failed", { error: leadsError.message });
-    throw new Error(`chase: leads query failed — ${leadsError.message}`);
-  }
-  if (!leads?.length) return summary;
+  // cron:chase operational issue. Oldest-neglected first so that if the cap is
+  // ever reached, the same leads aren't starved every single day.
+  //
+  // SCANNED IN WINDOWS rather than read as one capped head. Commercial is
+  // excluded from the chase engine below (PRD §3.10), and nothing ever removes
+  // an excluded lead from this population: it stays 'quoted'/'provisional'
+  // (the only automatic write of 'confirmed' is inside markDepositPaid, which
+  // commercial never reaches, and the 30-day lapse is excluded for the same
+  // reason), and quote_chase_at is stamped only after a send it never gets. So
+  // every one of them parks permanently at the FRONT of this nullsFirst
+  // ordering and the set only grows. A single capped read therefore fills with
+  // rows this run cannot act on, and the leads behind them stop being chased
+  // entirely while the run still reports 'ok' with zero counters — the exact
+  // failure the paragraph above says must never happen, by a route that
+  // paragraph did not anticipate. Windows are taken until CHASE_LIMIT
+  // ACTIONABLE leads are in hand, so a parked lead costs a read, never a
+  // customer.
+  const CHASE_LIMIT = 200;
+  const CHASE_SCAN_PAGE = 200;
+  /** Windows one run will read before it stops looking. A ceiling that is HIT
+   *  is a fact about the backlog, not a clean run — see the report below. */
+  const CHASE_MAX_SCANS = 25;
 
-  const { data: quotes, error: quotesError } = await sb
-    .from("quotes")
-    .select("id, lead_id, client_id, quote_ref, status, brand, payment_policy, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
-    .in("lead_id", leads.map((l) => l.id))
-    .in("status", ["sent", "accepted"]);
-  if (quotesError) {
-    log.error("cron.chase.quotes_query_failed", { error: quotesError.message });
-    throw new Error(`chase: quotes query failed — ${quotesError.message}`);
-  }
-  // COMMERCIAL IS EXCLUDED FROM THE CHASE ENGINE ENTIRELY (PRD §3.10).
-  // Filtered once, here, because this one array feeds BOTH the quote chase
-  // and the deposit chase below - excluding at each loop instead would be two
-  // places to forget, and the second would be silent.
-  //
-  // Filtered in code rather than as .neq("payment_policy","commercial") on the
-  // query: in Postgres a NOT-EQUAL also drops NULLs, and payment_policy is
-  // NULL on every UNACCEPTED quote - which is exactly the population the quote
-  // chase exists to chase. That filter would have silently stopped chasing
-  // every unaccepted residential quote.
-  //
-  // And that same NULL is why the snapshot ALONE cannot carry the exclusion:
-  // payment_policy is written AT ACCEPTANCE, so on every 'sent' quote it reads
-  // residential — which is exactly backwards for the one stage that operates
-  // exclusively on unaccepted quotes. Pre-acceptance the policy resolves LIVE
-  // from clients.is_company (quote's own client first, the lead's as fallback
-  // — snapshotPaymentPolicy's order; /q's review gate documents the same
-  // split). Post-acceptance the snapshot governs, so a client-type change can
-  // never alter an in-flight booking's schedule. The decision itself is pure
-  // and test-locked in chaseableQuotes (lib/quote/chase.ts).
-  const clientIdOfLead = new Map<string, string | null>(
-    (leads as LeadRow[]).map((l) => [l.id, l.client_id]),
-  );
-  const liveResolveClientIds = [
-    ...new Set(
-      (quotes ?? [])
-        .filter((q) => q.status !== "accepted")
-        .map((q) => q.client_id ?? (q.lead_id ? clientIdOfLead.get(q.lead_id) : null) ?? null)
-        .filter((id): id is string => !!id),
-    ),
-  ];
-  const commercialClients = new Set<string>();
-  if (liveResolveClientIds.length) {
-    // Error-checked and THROWN like the two driving queries above: a failed
-    // clients read silently resolving every commercial client to residential
-    // would email the exact chases this filter exists to stop. "I could not
-    // check" must not act as "residential".
-    const { data: clientRows, error: clientsError } = await sb
-      .from("clients")
-      .select("id, is_company")
-      .in("id", liveResolveClientIds);
-    if (clientsError) {
-      log.error("cron.chase.clients_query_failed", { error: clientsError.message });
-      throw new Error(`chase: clients query failed — ${clientsError.message}`);
+  const leads: LeadRow[] = [];
+  const allQuotes: QuoteRow[] = [];
+  let scans = 0;
+  let scanExhausted = false;
+  while (leads.length < CHASE_LIMIT && scans < CHASE_MAX_SCANS) {
+    const from = scans * CHASE_SCAN_PAGE;
+    const { data: page, error: leadsError } = await sb
+      .from("leads")
+      .select("id, client_id, estimator_id, name, email, status, chase_paused, quote_chase_step, deposit_chase_step")
+      .in("status", ["quoted", "provisional"])
+      .eq("chase_paused", false)
+      .order("quote_chase_at", { ascending: true, nullsFirst: true })
+      // A total order, so successive windows tile the population exactly once.
+      // quote_chase_at is NULL across the whole parked block, so on its own it
+      // is not an order there at all: ties would let one row arrive twice and
+      // another never.
+      .order("id", { ascending: true })
+      .range(from, from + CHASE_SCAN_PAGE - 1);
+    if (leadsError) {
+      log.error("cron.chase.leads_query_failed", { error: leadsError.message });
+      throw new Error(`chase: leads query failed — ${leadsError.message}`);
     }
-    for (const c of clientRows ?? []) {
-      if (resolvePaymentPolicy(c) === "commercial") commercialClients.add(c.id as string);
+    scans += 1;
+    const pageLeads = (page ?? []) as LeadRow[];
+    if (!pageLeads.length) {
+      scanExhausted = true;
+      break;
+    }
+
+    const { data: quotes, error: quotesError } = await sb
+      .from("quotes")
+      .select("id, lead_id, client_id, quote_ref, status, brand, payment_policy, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
+      .in("lead_id", pageLeads.map((l) => l.id))
+      .in("status", ["sent", "accepted"]);
+    if (quotesError) {
+      log.error("cron.chase.quotes_query_failed", { error: quotesError.message });
+      throw new Error(`chase: quotes query failed — ${quotesError.message}`);
+    }
+    // COMMERCIAL IS EXCLUDED FROM THE CHASE ENGINE ENTIRELY (PRD §3.10).
+    // Filtered once, here, because this one array feeds BOTH the quote chase
+    // and the deposit chase below - excluding at each loop instead would be two
+    // places to forget, and the second would be silent.
+    //
+    // Filtered in code rather than as .neq("payment_policy","commercial") on the
+    // query: in Postgres a NOT-EQUAL also drops NULLs, and payment_policy is
+    // NULL on every UNACCEPTED quote - which is exactly the population the quote
+    // chase exists to chase. That filter would have silently stopped chasing
+    // every unaccepted residential quote.
+    //
+    // And that same NULL is why the snapshot ALONE cannot carry the exclusion:
+    // payment_policy is written AT ACCEPTANCE, so on every 'sent' quote it reads
+    // residential — which is exactly backwards for the one stage that operates
+    // exclusively on unaccepted quotes. Pre-acceptance the policy resolves LIVE
+    // from clients.is_company (quote's own client first, the lead's as fallback
+    // — snapshotPaymentPolicy's order; /q's review gate documents the same
+    // split). Post-acceptance the snapshot governs, so a client-type change can
+    // never alter an in-flight booking's schedule. The decision itself is pure
+    // and test-locked in chaseableQuotes (lib/quote/chase.ts).
+    const clientIdOfLead = new Map<string, string | null>(
+      pageLeads.map((l) => [l.id, l.client_id]),
+    );
+    const liveResolveClientIds = [
+      ...new Set(
+        (quotes ?? [])
+          .filter((q) => q.status !== "accepted")
+          .map((q) => q.client_id ?? (q.lead_id ? clientIdOfLead.get(q.lead_id) : null) ?? null)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    const commercialClients = new Set<string>();
+    if (liveResolveClientIds.length) {
+      // Error-checked and THROWN like the two driving queries above: a failed
+      // clients read silently resolving every commercial client to residential
+      // would email the exact chases this filter exists to stop. "I could not
+      // check" must not act as "residential".
+      const { data: clientRows, error: clientsError } = await sb
+        .from("clients")
+        .select("id, is_company")
+        .in("id", liveResolveClientIds);
+      if (clientsError) {
+        log.error("cron.chase.clients_query_failed", { error: clientsError.message });
+        throw new Error(`chase: clients query failed — ${clientsError.message}`);
+      }
+      for (const c of clientRows ?? []) {
+        if (resolvePaymentPolicy(c) === "commercial") commercialClients.add(c.id as string);
+      }
+    }
+    const chaseable = chaseableQuotes(
+      (quotes ?? []) as QuoteRow[],
+      commercialClients,
+      clientIdOfLead,
+    );
+    allQuotes.push(...chaseable);
+
+    // A lead with no surviving quote is a no-op for both stages below —
+    // pickQuote returns null and the loop continues before touching anything —
+    // so it must not consume one of this run's slots.
+    const chaseableLeadIds = new Set(chaseable.map((q) => q.lead_id));
+    for (const lead of pageLeads) {
+      if (leads.length >= CHASE_LIMIT) break;
+      if (chaseableLeadIds.has(lead.id)) leads.push(lead);
+    }
+    if (pageLeads.length < CHASE_SCAN_PAGE) {
+      scanExhausted = true;
+      break;
     }
   }
-  const allQuotes = chaseableQuotes(
-    (quotes ?? []) as QuoteRow[],
-    commercialClients,
-    clientIdOfLead,
-  );
+  if (!scanExhausted && leads.length < CHASE_LIMIT) {
+    // The scan stopped before the population ran out, so this run cannot claim
+    // to have looked at everything due. "I could not check" is a different
+    // answer from "nothing to report" and must not share a rendering with it.
+    summary.chaseScanTruncated = 1;
+    log.error("cron.chase.scan_ceiling_hit", { scans, actionable: leads.length });
+  }
+  if (!leads.length) return summary;
 
   // Survey-derived owner fallback: a lead with no explicit estimator_id is
   // owned by whoever is assigned its booked survey — the SAME rule as the
@@ -523,7 +587,7 @@ export async function GET(req: Request) {
     });
   }
 
-  for (const lead of leads as LeadRow[]) {
+  for (const lead of leads) {
     try {
       /* ---------------- QUOTED: chase the acceptance ---------------- */
       if (lead.status === "quoted") {

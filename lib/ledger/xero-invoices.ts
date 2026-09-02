@@ -647,6 +647,16 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<LedgerIn
   // decision that card fees are too high at balance values is what this
   // protects, so config must fail closed rather than fall back to the default
   // theme when suppression is asked for and no suppressed theme exists.
+  //
+  // That theme is ORG-WIDE, not per-brand, and deliberately so for now: a
+  // BrandingThemeID carries two orthogonal axes — which brand, and whether card
+  // is offered — while gate 1 gave each brand a single `ledger_branding_id`
+  // column, which is why `docs/ledger-adapter-design.md` §2 records it as
+  // structurally insufficient and refuses to quietly widen it. Reading that
+  // column in here would be the remedy that doc rejected; the two-ids-per-brand
+  // migration behind it is item 1 of the decisions gate 18 still needs. Said
+  // here because the call site otherwise reads as though the brand axis were
+  // handled, and it is not.
   const brandingThemeId = xeroBrandingThemeId({
     disableOnlinePayments: input.disableOnlinePayments === true,
   });

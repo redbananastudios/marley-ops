@@ -99,25 +99,66 @@ export function mapBrand(data: Record<string, unknown>): Brand {
   };
 }
 
-/** One brand by slug. Throw-free: null on a miss — callers decide what a
- *  missing brand means (getBrandOrDefault below is the safe default). */
+/**
+ * One brand by slug. THROWS on a query error; null means a genuine MISS.
+ *
+ * The two are different answers and must not share a rendering. Every resolver
+ * above this one decides a record's IDENTITY from it — logo, name, phone, ref
+ * prefix, terms link — and each of them treats "no such brand" as licence to
+ * fall through to the default. Collapse the two and one transient read failure
+ * hands a second brand's customer the default brand's identity, on the default
+ * brand's phone number, with nothing logged and no later run to correct it.
+ * Same rule and same reason as `listActiveBrands` below.
+ *
+ * A caller that genuinely must not fail hard catches this itself and states
+ * which way it degrades — `lib/payments/card-availability.ts` does exactly
+ * that, and degrades CLOSED (no card rail rather than an unbacked one).
+ */
 export async function getBrand(sb: SupabaseClient, slug: string): Promise<Brand | null> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("brands")
     .select(BRAND_COLUMNS)
     .eq("slug", slug)
     .maybeSingle();
+  if (error) throw new Error(`brand read failed (${slug}): ${error.message}`);
   return data ? mapBrand(data as Record<string, unknown>) : null;
 }
 
-/** One brand by slug, falling back to the Marley row on a miss — the right
- *  resolver for display surfaces, where a bad slug must degrade to today's
- *  branding rather than a blank page. The final mapBrand({}) arm only exists
- *  for an unmigrated database and yields an inert Marley-slugged shell. */
+/**
+ * The default brand's row, degrading to null on a failed read — logged, never
+ * silent. Safe precisely because the fallback that follows carries the DEFAULT
+ * brand's own identity: standing in for a brand with itself claims nothing
+ * untrue, so the single-brand surfaces still render through a read blip rather
+ * than erroring, exactly as they do today.
+ */
+async function defaultBrandRow(sb: SupabaseClient): Promise<Brand | null> {
+  try {
+    return await getBrand(sb, DEFAULT_BRAND);
+  } catch (err) {
+    console.error("[brand] default-brand read failed — the literal default identity stands in for this render:", err);
+    return null;
+  }
+}
+
+/**
+ * One brand by slug, falling back to the default brand's row on a genuine MISS
+ * — the right resolver for display surfaces, where a bad slug must degrade to
+ * today's branding rather than a blank page. The final mapBrand({}) arm only
+ * exists for an unmigrated database and yields an inert default-slugged shell.
+ *
+ * A FAILED read is not a miss and does NOT degrade: it propagates, because
+ * answering a question about one brand with a different brand's logo, phone
+ * and terms is the leak this whole layer exists to prevent. The refusal is
+ * loud and lands on the request that caused it; the fall-through was silent
+ * and permanent.
+ */
 export async function getBrandOrDefault(sb: SupabaseClient, slug: string): Promise<Brand> {
+  if (slug !== DEFAULT_BRAND) {
+    const brand = await getBrand(sb, slug); // throws on a failed read
+    if (brand) return brand;
+  }
   return (
-    (await getBrand(sb, slug)) ??
-    (await getBrand(sb, DEFAULT_BRAND)) ??
+    (await defaultBrandRow(sb)) ??
     mapBrand({ slug: DEFAULT_BRAND, name: "Marley Moves", short_name: "Marley" })
   );
 }
@@ -126,12 +167,42 @@ export async function getBrandOrDefault(sb: SupabaseClient, slug: string): Promi
  *  Settings › Brands card reader: a config surface shows what exists, not just
  *  what's live (an inactive row is exactly the one an admin needs to see, and
  *  the group pseudo-brand's details are edited here too). Customer-facing
- *  resolution keeps using listActiveBrands/getBrand. */
+ *  resolution keeps using listActiveBrands/getBrand.
+ *
+ *  Alone in this file it degrades to [] on a failed read, and that is a
+ *  DELIBERATE second caller's contract, not an oversight: the inbound-email
+ *  webhook widens own-domain recognition with it and states that an empty list
+ *  falls back to the always-present default set. Anything resolving a record's
+ *  IDENTITY from every row wants `listBrandIdentities` below, which refuses. */
 export async function listAllBrands(sb: SupabaseClient): Promise<Brand[]> {
   const { data } = await sb
     .from("brands")
     .select(BRAND_COLUMNS)
     .order("sort_order", { ascending: true });
+  return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
+}
+
+/**
+ * EVERY brands row, for IDENTITY resolution — the map a surface uses to answer
+ * "which brand is this existing record, and how does it speak?".
+ *
+ * Two properties, both load-bearing, and neither is `listAllBrands`':
+ *
+ *   - It THROWS on a query error, for the reason `getBrand` does. A caller
+ *     holding no identity for a row falls back to the default brand's name and
+ *     number, so an unreadable table must refuse rather than answer "no such
+ *     brand" for brands that plainly exist.
+ *   - It deliberately ignores `active`. Deactivating a brand stops it taking
+ *     NEW work; it does not rewrite the identity of the jobs already on the
+ *     books. A map built from the ACTIVE list reports those rows as unknown —
+ *     which needs no failure at all to happen, just an admin tidying up.
+ */
+export async function listBrandIdentities(sb: SupabaseClient): Promise<Brand[]> {
+  const { data, error } = await sb
+    .from("brands")
+    .select(BRAND_COLUMNS)
+    .order("sort_order", { ascending: true });
+  if (error) throw new Error(`brands read failed: ${error.message}`);
   return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
 }
 
