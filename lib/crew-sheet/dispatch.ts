@@ -299,8 +299,20 @@ export async function dispatchCrewJobSheets(admin: Admin, now: Date = new Date()
             const photos = await loadPhotoDataUris(admin as never, job.surveyId, Math.min(PHOTOS_PER_JOB, budget));
             job.sheet.photos = photos;
             budget -= photos.length;
-          } catch {
-            job.sheet.photos = []; // a photo store hiccup never blocks the sheet
+          } catch (err) {
+            // A photo-store hiccup never BLOCKS the sheet — the crew still need
+            // the address, the time and the access notes on paper. But it must
+            // not pass as a clean run either: this used to swallow the error
+            // entirely, so a sheet that went out with the parking and driveway
+            // shots missing reported exactly the same as one that didn't.
+            // Record it, then carry on and send the rest.
+            job.sheet.photos = [];
+            summary.failures.push({
+              staff: day.crew.fullName,
+              date: workDate,
+              channel: "photos",
+              error: err instanceof Error ? err.message : "survey photo read failed",
+            });
           }
         }
       }

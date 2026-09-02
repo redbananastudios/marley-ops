@@ -8,9 +8,10 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { log } from "@/lib/log";
 import { likeEscape } from "@/lib/util/like";
 import { createMediaStore } from "@/lib/storage/media-store";
-import { SURVEY_PHOTOS_BUCKET } from "@/lib/survey-photos";
+import { SURVEY_PHOTOS_BUCKET, sniffSurveyPhotoImage } from "@/lib/survey-photos";
 import { assembleJobSheetData, type SheetLead, type SheetQuote } from "@/lib/job-sheet-data";
 import { importedBooking } from "@/lib/legacy";
 import {
@@ -27,6 +28,118 @@ import type { JobSheetData, JobSheetPhoto } from "@/lib/job-sheet-docdef";
 
 const MAX_PHOTOS = 6;
 const MAX_PHOTO_BYTES = 1_500_000;
+
+/**
+ * Object-key extensions the crew's browsers can actually render.
+ *
+ * `loadPhotoDataUris` decides this from the object's own BYTES, which it has to
+ * fetch anyway for pdfmake. `loadPhotoSignedUrls` never fetches the bytes — that
+ * is the whole point of handing a phone in a van a signed URL instead of a
+ * megabyte of base64 — so the extension is the only evidence available to it,
+ * and the two readers were left disagreeing: one dropped what it could not
+ * render, the other served it and left a broken tile on the sheet a crew opens
+ * on the morning of a move.
+ *
+ * THE QUESTION THIS SET ANSWERS IS "will the crew's browser render it?" — which
+ * is deliberately NOT the same question sniffSurveyPhotoImage answers ("can
+ * pdfmake embed it?"). Narrowing this to that function's `{jpg, jpeg, png}`
+ * looked like making the two readers agree and was in fact a way of dropping
+ * real photographs:
+ *
+ *  - the OFFICE upload path builds the object key from `file.name`
+ *    (components/quote/survey-photos.tsx) and isValidSurveyPhotoPath accepts any
+ *    alphanumeric extension, so the key carries whatever the estimator's file
+ *    was called;
+ *  - Chrome and Edge on Windows save a downloaded JPEG as `.jfif`, so an
+ *    estimator dragging a floor plan or an agent's photo out of their downloads
+ *    stores `<uuid>.jfif` — real JPEG bytes, rendered fine by every browser,
+ *    embedded fine by pdfmake, and silently dropped by a three-entry allowlist.
+ *    `.jpe`, `.jif` and `.jfi` are the same story, rarer.
+ *
+ * So the set is every INERT RASTER format a crew browser renders. What it still
+ * refuses is what matters: `heic`/`heif` (undecodable in desktop Chrome, Firefox
+ * and Edge — the broken tile this filter exists to prevent), `svg` (an image the
+ * browser EXECUTES, and a signed GET URL serves it as its own document), and
+ * anything that is not an image at all.
+ *
+ * The residual disagreement with the PDF sibling is therefore one-directional
+ * and benign: a `.webp`/`.gif`/`.avif` office upload is served here and dropped
+ * by pdfmake, so the crew see it on their phone and not on paper. The opposite
+ * mistake — dropping it on both — costs them the photograph outright. Neither
+ * reader can close the remaining gap without downloading every object: an
+ * extension is a claim about bytes, not the bytes, so a HEIC misnamed `.jpg`
+ * still signs here and still drops from the PDF. Closing THAT needs the office
+ * upload to name the object from its own bytes, as the customer /cv path already
+ * does (sniffSurveyPhotoImage); until then this is the strongest evidence a
+ * key-only reader has.
+ */
+const RENDERABLE_PHOTO_EXTENSIONS = new Set([
+  // JPEG, in every spelling a real upload path produces.
+  "jpg",
+  "jpeg",
+  "jpe",
+  "jif",
+  "jfif",
+  "jfi",
+  "png",
+  // Renderable everywhere a crew opens the sheet; pdfmake cannot embed them, so
+  // the PDF drops them and this reader does not. See the note above.
+  "webp",
+  "gif",
+  "avif",
+  "bmp",
+]);
+
+/** The `.ext` of a storage key, lower-cased; "" when there isn't one. */
+function photoExtension(storagePath: string): string {
+  const file = storagePath.slice(storagePath.lastIndexOf("/") + 1);
+  const dot = file.lastIndexOf(".");
+  return dot > 0 ? file.slice(dot + 1).toLowerCase() : "";
+}
+
+/**
+ * A survey-photo read that FAILED is not a survey with no photos.
+ *
+ * Both readers used to be `const { data: rows } = await admin…`, and supabase-js
+ * RESOLVES with `{ data: null, error }` rather than throwing — so a rejected
+ * select arrived as `rows ?? []`, an empty photo set, indistinguishable from a
+ * survey nobody photographed. `lib/crew-sheet/dispatch.ts` then built and SENT
+ * the crew day sheet with no photos and nothing anywhere saying a read had
+ * failed: the access and parking shots simply were not on the paper the crew
+ * carried on the morning of the move.
+ *
+ * That is not hypothetical. Both selects filter `.eq("customer_uploaded",
+ * false)`, and that column does not exist until migration 0117 has been applied
+ * AND PostgREST has reloaded its schema cache. PostgREST rejects a select naming
+ * a column its cache has never seen (PGRST204/PGRST202), so a container that
+ * restarts ahead of the migration fails EVERY one of these reads at once —
+ * exactly the deploy-order failure docs/pitmans-prod-migration-runbook.md puts
+ * 0117 above the deploy row to prevent, and exactly the shape this codebase has
+ * been bitten by repeatedly: the surface that would have shown the problem is
+ * the one the failure just cleared.
+ *
+ * So the read throws. That is the house answer (`fetchAllRows`'s `strict`
+ * option, `loadBookingRows`'s `failIfStrict`): turn a database error back into a
+ * thrown error a caller can actually see. The log line is what a cron leaves
+ * behind, since a caller may still choose to degrade — and two of them do, which
+ * is a decision visible at THEIR call site rather than hidden in this one.
+ */
+function assertPhotoRead(
+  reader: "loadPhotoDataUris" | "loadPhotoSignedUrls",
+  surveyId: string,
+  error: { message: string; code?: string } | null,
+): void {
+  if (!error) return;
+  log.error("job-sheet.survey_photos.read_failed", {
+    reader,
+    surveyId,
+    code: error.code ?? null,
+    error: error.message,
+  });
+  throw new Error(
+    `Could not read this survey's photos (${error.code ?? "read failed"}): ${error.message}`,
+  );
+}
 
 const CATEGORY_LABEL: Record<string, string> = {
   access: "Access",
@@ -258,16 +371,26 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
 
 /** Survey photos as data URIs for pdfmake — capped, oversized files skipped.
  *  `max` caps how many are embedded (default MAX_PHOTOS; the multi-job crew day
- *  sheet passes a smaller cap so N jobs of photos don't bloat one PDF). */
+ *  sheet passes a smaller cap so N jobs of photos don't bloat one PDF).
+ *
+ *  CUSTOMER photos are excluded (`customer_uploaded = false`). They are read
+ *  `order by created_at asc limit cap*2`, and the /cv link goes to the customer
+ *  BEFORE the survey visit — so up to twenty customer photos are older than
+ *  every estimator photo, and without this filter the crew's driveway/parking
+ *  ACCESS shots would silently stop reaching the sheet and would never even be
+ *  fetched. The office survey gallery still shows everything; only the crew's
+ *  narrow, oldest-first window is protected. */
 export async function loadPhotoDataUris(admin: Admin, surveyId: string, max = MAX_PHOTOS): Promise<JobSheetPhoto[]> {
   const cap = Math.max(0, Math.min(max, MAX_PHOTOS));
   if (cap === 0) return [];
-  const { data: rows } = await admin
+  const { data: rows, error } = await admin
     .from("survey_photos")
     .select("category, storage_path, caption")
     .eq("survey_id", surveyId)
+    .eq("customer_uploaded", false)
     .order("created_at", { ascending: true })
     .limit(cap * 2);
+  assertPhotoRead("loadPhotoDataUris", surveyId, error);
 
   // Route through the media-store seam so photos follow the active driver (R2
   // in prod). getObject returns raw bytes; pdfmake needs a base64 data URI.
@@ -278,9 +401,19 @@ export async function loadPhotoDataUris(admin: Admin, surveyId: string, max = MA
     try {
       const bytes = await store.getObject(row.storage_path);
       if (bytes.byteLength === 0 || bytes.byteLength > MAX_PHOTO_BYTES) continue;
-      const mime = row.storage_path.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+      // The content type comes from the OBJECT'S OWN BYTES, and an object whose
+      // bytes are not JPEG or PNG is DROPPED rather than mislabelled. This used
+      // to be `endsWith(".png") ? png : jpeg`, which declares every other
+      // format — a WebP, a HEIC — to be a JPEG. pdfmake dispatches on the magic
+      // bytes, throws "Unknown image format", and lib/crew-sheet/dispatch.ts
+      // catches that with pdfBase64 left null, so the guarded send never fires:
+      // ONE bad object meant every crew member rostered that day got no sheet
+      // at all, for all of their jobs, on every retry. A dropped tile is the
+      // correct blast radius for one unreadable photo.
+      const sniffed = sniffSurveyPhotoImage(bytes);
+      if (!sniffed) continue;
       out.push({
-        dataUri: `data:${mime};base64,${Buffer.from(bytes).toString("base64")}`,
+        dataUri: `data:${sniffed.mime};base64,${Buffer.from(bytes).toString("base64")}`,
         label: CATEGORY_LABEL[row.category] ?? row.category,
         caption: (row.caption as string | null) ?? "",
       });
@@ -297,18 +430,47 @@ export interface WebPhoto {
   caption: string;
 }
 
-/** Survey photos as short-lived signed URLs for the /my-jobs/[id] web view —
- *  lighter than data URIs on a phone in a van. */
+/** Survey photos as short-lived signed URLs for the /my-jobs/[id] web view and
+ *  the /sheet/[token] day sheet — lighter than data URIs on a phone in a van.
+ *
+ *  Customer photos are excluded for the same reason as loadPhotoDataUris: both
+ *  crew surfaces read oldest-first under a cap, and customer photos predate
+ *  every estimator photo on the same survey, so they would push the access
+ *  shots the crew actually need off the end.
+ *
+ *  Objects the crew's BROWSER cannot render are dropped — a HEIC, which every
+ *  desktop browser refuses, would otherwise be a blank tile on the sheet a crew
+ *  opens on a move morning. The PDF sibling drops on the BYTES; this one only
+ *  ever sees the key, so it drops on the EXTENSION, which is the strongest
+ *  evidence available without downloading every photo — the cost the signed-URL
+ *  path exists to avoid.
+ *
+ *  The two readers therefore do NOT agree, and RENDERABLE_PHOTO_EXTENSIONS says
+ *  why that is right rather than a gap being papered over: they answer different
+ *  questions, the disagreement runs one way (this reader is the more generous),
+ *  and an extension is a claim about bytes rather than the bytes. The gap that
+ *  remains is upstream of both: the office upload names the object from
+ *  `file.name` and stores the browser's declared mime on trust, so a mislabelled
+ *  file is mislabelled for every reader downstream. */
 export async function loadPhotoSignedUrls(admin: Admin, surveyId: string, max = 12): Promise<WebPhoto[]> {
   const cap = Math.max(0, max);
   if (cap === 0) return [];
-  const { data: rows } = await admin
+  // Over-read then filter then cap, exactly as loadPhotoDataUris does, so a
+  // couple of unrenderable objects shrink the crew's window rather than
+  // silently costing them two of their access shots. The slice happens BEFORE
+  // signing, so the extra rows cost one wider read and no extra signatures.
+  const { data: allRows, error } = await admin
     .from("survey_photos")
     .select("category, storage_path, caption")
     .eq("survey_id", surveyId)
+    .eq("customer_uploaded", false)
     .order("created_at", { ascending: true })
-    .limit(cap);
-  if (!rows?.length) return [];
+    .limit(cap * 2);
+  assertPhotoRead("loadPhotoSignedUrls", surveyId, error);
+  const rows = (allRows ?? [])
+    .filter((r) => RENDERABLE_PHOTO_EXTENSIONS.has(photoExtension(r.storage_path)))
+    .slice(0, cap);
+  if (!rows.length) return [];
 
   // Sign through the seam (active driver — R2 in prod). One key at a time so a
   // failed sign drops that photo rather than the whole set (matches the survey

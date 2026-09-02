@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   COMMITMENT_CHASE_TEMPLATE_ENV,
-  COMMITMENT_CHASE_WARNING,
+  commitmentChaseWarning,
   commitmentDueLabel,
   composeCommitmentChaseEmail,
   buildCommitmentChaseEmailHtml,
   type CommitmentChaseMeta,
 } from "@/lib/comms/commitment-chase-email";
 import { DATE_CONFIRM_ACKS } from "@/lib/signatures";
+import { pitmans } from "./brand-fixture";
 
 /**
  * Commitment chase copy (Payments Policy v2 template B). The hard rules:
@@ -56,7 +57,7 @@ describe("composeCommitmentChaseEmail — copy invariants", () => {
   });
 
   it("quotes the DATE_CONFIRM_ACK promise VERBATIM (imported, single source)", () => {
-    expect(COMMITMENT_CHASE_WARNING).toBe(DATE_CONFIRM_ACKS[0].label);
+    expect(commitmentChaseWarning()).toBe(DATE_CONFIRM_ACKS[0].label);
     expect(email.text).toContain(`"${DATE_CONFIRM_ACKS[0].label}"`);
     // The template variable is the same string, HTML-escaped only.
     expect(email.variables.DATE_CONFIRM_ACK).toContain("refunded in full if the day is re-booked");
@@ -77,7 +78,7 @@ describe("composeCommitmentChaseEmail — copy invariants", () => {
 
   it("no em-dashes outside the verbatim acknowledgment quote", () => {
     expect(email.subject).not.toMatch(/—/);
-    expect(email.text.split(COMMITMENT_CHASE_WARNING).join("")).not.toMatch(/—/);
+    expect(email.text.split(commitmentChaseWarning()).join("")).not.toMatch(/—/);
   });
 
   it("carries the bank details with the quote ref as the transfer reference", () => {
@@ -123,5 +124,63 @@ describe("composeCommitmentChaseEmail — copy invariants", () => {
 
   it("names the template env the registry must publish under", () => {
     expect(COMMITMENT_CHASE_TEMPLATE_ENV).toBe("RESEND_TEMPLATE_COMMITMENT_CHASE");
+  });
+});
+
+describe("the quoted acknowledgment names the SENDING brand", () => {
+  /**
+   * The warning was `export const COMMITMENT_CHASE_WARNING =
+   * DATE_CONFIRM_ACKS[0].label` — a module constant evaluated once at import,
+   * so a second brand's customer was chased with the DEFAULT company's name
+   * quoted back at them, inside a sentence that begins "A quick reminder of
+   * what you agreed when you confirmed your date".
+   *
+   * Unchanged Marley output would be equally consistent with the brand never
+   * being read at all, so both halves are asserted: absent/null renders TODAY'S
+   * EXACT BYTES, and a non-default brand actually substitutes, all the way into
+   * the text body, the fallback HTML and the hosted-template variable.
+   */
+  const PITMANS_WARNING = DATE_CONFIRM_ACKS[0].label.replace(
+    "Marley Moves",
+    "Pitmans Removals & Storage",
+  );
+
+  it("byte parity: absent and null quote exactly what they quoted before", () => {
+    expect(commitmentChaseWarning()).toBe(DATE_CONFIRM_ACKS[0].label);
+    expect(commitmentChaseWarning(null)).toBe(DATE_CONFIRM_ACKS[0].label);
+    expect(composeCommitmentChaseEmail({ ...meta, brand: null }).text).toBe(
+      composeCommitmentChaseEmail(meta).text,
+    );
+  });
+
+  it("a second brand's chase quotes ITS name — the switch is not inert", () => {
+    expect(commitmentChaseWarning(pitmans)).toBe(PITMANS_WARNING);
+    // Everything either side of the company name is untouched: the clause is
+    // the promise the customer signed, not copy to be rewritten per brand.
+    expect(PITMANS_WARNING).toContain("and Pitmans Removals & Storage cannot re-book the day");
+    expect(commitmentChaseWarning(pitmans)).not.toContain("Marley Moves cannot re-book");
+  });
+
+  it("the substituted clause reaches the text, the fallback HTML and the template variable", () => {
+    const email = composeCommitmentChaseEmail({ ...meta, brand: pitmans });
+    expect(email.text).toContain(`"${PITMANS_WARNING}"`);
+    // The default-branded clause is nowhere in this brand's send.
+    expect(email.text).not.toContain(DATE_CONFIRM_ACKS[0].label);
+    expect(email.html).not.toContain(DATE_CONFIRM_ACKS[0].label);
+    // The composer HTML-escapes; "&" in the brand name is the only difference.
+    expect(email.variables.DATE_CONFIRM_ACK).toBe(PITMANS_WARNING.replace(/&/g, "&amp;"));
+    expect(email.html).toContain("Pitmans Removals &amp; Storage cannot re-book the day");
+    // The hosted-template path and the fallback quote the same string.
+    expect(buildCommitmentChaseEmailHtml({ ...meta, brand: pitmans })).toContain(
+      "Pitmans Removals &amp; Storage cannot re-book the day",
+    );
+  });
+
+  it("the word 'penalty' stays absent for a non-default brand too", () => {
+    const email = composeCommitmentChaseEmail({ ...meta, brand: pitmans });
+    const everything = [email.subject, email.text, email.html, JSON.stringify(email.variables)]
+      .join("\n")
+      .toLowerCase();
+    expect(everything).not.toContain("penalty");
   });
 });

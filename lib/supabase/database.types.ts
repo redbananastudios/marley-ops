@@ -4376,6 +4376,7 @@ export type Database = {
           caption: string | null
           category: Database["public"]["Enums"]["photo_category"]
           created_at: string
+          customer_uploaded: boolean
           id: string
           storage_path: string
           survey_id: string
@@ -4385,6 +4386,7 @@ export type Database = {
           caption?: string | null
           category: Database["public"]["Enums"]["photo_category"]
           created_at?: string
+          customer_uploaded?: boolean
           id?: string
           storage_path: string
           survey_id: string
@@ -4394,6 +4396,7 @@ export type Database = {
           caption?: string | null
           category?: Database["public"]["Enums"]["photo_category"]
           created_at?: string
+          customer_uploaded?: boolean
           id?: string
           storage_path?: string
           survey_id?: string
@@ -4420,6 +4423,7 @@ export type Database = {
         Row: {
           client_id: string | null
           created_at: string
+          customer_photos_noted_at: string | null
           estimator_id: string | null
           id: string
           lead_id: string | null
@@ -4430,6 +4434,7 @@ export type Database = {
         Insert: {
           client_id?: string | null
           created_at?: string
+          customer_photos_noted_at?: string | null
           estimator_id?: string | null
           id?: string
           lead_id?: string | null
@@ -4440,6 +4445,7 @@ export type Database = {
         Update: {
           client_id?: string | null
           created_at?: string
+          customer_photos_noted_at?: string | null
           estimator_id?: string | null
           id?: string
           lead_id?: string | null
@@ -4722,6 +4728,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_customer_survey_photo: {
+        Args: { p_max: number; p_storage_path: string; p_survey_id: string }
+        Returns: {
+          capped: boolean
+          is_first: boolean
+          photo_id: string | null
+          remaining: number
+        }[]
+      }
       assign_ai_segment: {
         Args: {
           p_action: string
@@ -4945,6 +4960,10 @@ export type Database = {
       crew_can_access_survey_object: {
         Args: { p_object_name: string }
         Returns: boolean
+      }
+      ensure_customer_survey_row: {
+        Args: { p_client_id: string | null; p_lead_id: string }
+        Returns: string
       }
       fail_ai_job: {
         Args: { p_error: string; p_job_id: string; p_worker: string }

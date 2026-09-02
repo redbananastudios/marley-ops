@@ -699,7 +699,14 @@ export default async function AcceptPage({
           <div className="mt-6">
             <Card>
               <div className="p-6 sm:p-8">
-                <DateConfirmCard token={token} moveDateLabel={moveLbl!} />
+                {/* The ack names the company that may retain up to 25% of what
+                    they have paid — this brand's, resolved from the quote, not
+                    the default's on a page that is this brand's throughout. */}
+                <DateConfirmCard
+                  token={token}
+                  moveDateLabel={moveLbl!}
+                  companyName={theme.name}
+                />
               </div>
             </Card>
           </div>

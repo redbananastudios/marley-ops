@@ -101,6 +101,9 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 | /cv customer cubic survey self-fill (render + search + bad-token 404) | ✅ | public/cubic.spec.ts |
 | /sheet crew day sheet, no login (render + price-free + bad-token 404) | ✅ | public/day-sheet.spec.ts |
 | /join crew sign-up (submit → success state + bad-token dead-link card) | ✅ | public/join.spec.ts |
+| **Brand-leak scan — the RENDERED half (PRD §6.4 / §10).** Seeds a second-brand quote, storage let and cubic survey, opens `/q`, `/s`, `/cv` and scans the post-hydration DOM (visible text + markup, `<script>`/`<style>` stripped — the RSC flight payload splits literals at arbitrary byte boundaries and would produce both false negatives and false positives) for every `brand: 'marley'` literal, then the reverse over the default-brand records for every `brand: 'pitmans'` literal. Closes the half `scripts/brand-leak-scan.mjs` says in its own header it cannot do: a literal arriving through a brands-table value, a helper outside the manifest, or a re-pointed `mm-red` token is invisible to a source grep by construction | 🟡 | public/brand-leak-rendered.spec.ts — 🟡 until its first green CI run, per the standing rule that an audit-written spec is done when CI proves it (four in a row broke on first run in Aug 2026). Written 2026-09-02 and **still has never executed** — this env has no `NEXT_PUBLIC_SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, so `E2E_DB_READY` is false. Verified here only that it loads (`playwright test --list` → 4 tests under `public`) and lints. Everything it asserts was derived by reading `app/{q,s,cv,sheet,join}/[token]/page.tsx`, `lib/brand-page-theme.ts`, `lib/brand.ts` and `0104_brands.sql`, not observed. Repaired the same day, before any run: the did-it-render precondition summed text **and markup** length (thousands of chars on any response, so it could not fire), and the fixtures used hardcoded values on four UNIQUE columns with a teardown that bailed on a partial seed — now per-run ids, `E2E `-prefixed so `scripts/seed-e2e.mjs`'s existing sweep reclaims anything a killed process leaves, and the ids accumulate as they land so a partial seed is still torn down and still read back |
+| Brand-leak (rendered), the colour half: a second-brand page's computed `--color-mm-red` is **the one colour the data rule says it must be** — not merely one of the brand's two colours. `brandCtaColour` rejects `colour_accent` when white text on it is illegible (Pitmans' yellow), so the expectation is re-derived from the brands row inside the spec rather than imported: deleting that legibility rule turns this red instead of moving with it. A **default-brand** page emits no inline override at all (the §1 byte-parity invariant, observed rather than argued) | 🟡 | public/brand-leak-rendered.spec.ts — same first-run caveat |
+| Group surfaces `/sheet` + `/join` are coloured as **neither** brand (`GROUP_PAGE_THEME`'s neutral charcoal), asserted **on the real rendered surface**: each has an expected-state regex (the day sheet's "This link opens without signing in", the sign-up form's "Fill in your details below") plus named refusals for the three error cards these routes serve at HTTP 200 through the same charcoal shell — an expired day sheet (`work_date` older than `STALE_DAYS=3`, so a stale seed fails LOUDLY naming the staleness), a twice-failed day assembly, and `/join`'s dead-link card. Without those, status + colour alone could not tell a rendered sheet from a dead link, and the pass greened over two error screens. No literal assertion runs on them, deliberately: the group's identity IS the operating company, and PRD §4 puts a per-job brand chip on a mixed-brand day sheet, so literals in either direction are the page's own content | 🟡 | public/brand-leak-rendered.spec.ts — same first-run caveat |
 
 ## Single-brand parity (multi-brand PRD §6.1 / §11.10 — `parity` project, runs LAST)
 | Flow | Status | Spec |
@@ -121,3 +124,38 @@ route lists in `fixtures/routes.ts`; helpers in `fixtures/ui.ts` + `fixtures/zoh
 - Seed states live in scripts/seed-e2e.mjs + fixtures/seed-data.ts; extend there
   as feature specs need new fixtures (a lead per stage, a submitted statement, a
   storage let, etc.).
+- **Second-brand fixtures are seeded by the spec, not by the shared seed.**
+  `public/brand-leak-rendered.spec.ts` and `office/quote-brand-ref.spec.ts` both
+  create and tear down their own Pitmans rows. Deliberate: a permanent
+  second-brand record in `scripts/seed-e2e.mjs` would show up in every list,
+  count and bucket the other specs assert against, and would still be sitting
+  there when the `parity` project deactivates Pitmans at the end of the run.
+  Both teardowns are FK-ordered and THROW — a swallowed `23503` leaking a marker
+  set into staging while the report said "clean" is the `#71` lesson. A
+  spec-owned fixture is named `E2E …` so `scripts/seed-e2e.mjs`'s `ilike('E2E %')`
+  sweep can reclaim it, AND carries a per-run suffix on every UNIQUE column
+  (`quotes.quote_ref`, `quotes.accept_token`, `storage_lets.sign_token`,
+  `cubic_surveys.share_token`) so one leaked row cannot duplicate-key every
+  later run. Record the ids as each insert lands rather than returning them at
+  the end: a fixture assigned only after the last insert leaves a partial seed
+  untorn-down and skips the read-back that is the evidence of a clean exit.
+- **A teardown must not delete a PARENT whose child delete failed.** Recording
+  every error and carrying on is not enough, because two of these FKs are
+  `on delete set null` rather than restrict: `cubic_surveys.lead_id` (0029) and
+  `signatures.storage_let_id` (0027). Deleting the parent after a failed child
+  delete therefore SUCCEEDS and nulls the only column that could find the child
+  again — the survey falls outside `scripts/seed-e2e.mjs`'s sweep (which reaches
+  surveys through their `E2E ` leads), and an orphaned signature is beyond every
+  sweep there is, `signatures` having no `notes` column and no name. The report
+  read as "one delete failed, the rest cleaned"; it had in fact made one row
+  permanently unreclaimable. `public/brand-leak-rendered.spec.ts` now runs each
+  chain in FK LEVELS and stops at the first level that failed, leaving the
+  parents attached and saying so by name in the thrown message. Same shape as
+  the `#71` lesson one step further out: proving a delete happened is not the
+  same as not making things worse when it did not.
+- **The brand-leak literal list has one home.** `scripts/brand-leak-literals.mjs`
+  holds `FORBIDDEN` and the detector; `scripts/brand-leak-scan.mjs` (the source
+  grep and its vitest twin) and `public/brand-leak-rendered.spec.ts` both import
+  it. The split exists because Playwright transpiles specs to CommonJS and the
+  scan script's `import.meta.url` cannot survive that — a spec importing the scan
+  directly fails at load. Do not restate the list in either half.

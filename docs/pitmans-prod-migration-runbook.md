@@ -30,11 +30,12 @@ Every gate that adds a migration appends its row here in the same commit. The ru
 | 10 | `supabase/migrations/0114_pitmans_import.sql` | `quotes.legacy_ref`, `import_batch` on the five tables the importers write, four partial indexes, and the `quotes_source_check` **widened** (never narrowed) to accept `'pitmans'` | No — additive and inert; nothing reads these columns until the importers run in the 21–28 September window. Placed before the deploy for one reason only: it keeps the whole batch in one pre-deploy block, so there is no second `psql` session to remember after the restart |
 | 11 | `supabase/migrations/0115_crate_calendar_month_minimum.sql` | `storage_lets.min_kind text not null default 'days'` (check `days`/`calendar_month`) — freezes HOW a crate let's minimum window is measured, per the 0075 pattern; plus a triple-guarded backfill flipping only crate lets with no arrears grid in motion, no v1 (28-day) signature, and no `import_batch` to `calendar_month` (storage-terms v2, 2026-08-31) | **Same ordering rule as 0111–0113 — before the deploy.** The deployed code names `min_kind` in explicit storage-billing select lists; missing, crate billing fails on every run. Every existing row defaults to `'days'` = bit-identical billing |
 | 12 | `supabase/migrations/0116_crate_minimum_pre_v2_signatures.sql` | takes back the crate lets 0115 flipped whose storage signature predates the calendar-month terms. 0115 recognised a v1 signature by `terms_version like 'storage-terms-v1%'`, which is false or NULL for every signature taken before the first published storage terms — so the cohort its guard names as "keeps exactly the schedule they signed" is the cohort it flipped. Reverts only lets already on `calendar_month` whose storage signature is not demonstrably v2-or-later; a let with no storage signature is left alone, as 0115 intended | No — one UPDATE, narrower than 0115's, and a no-op when the class is empty. Must run immediately after 0115 |
-| 13 | **RELOAD THE SCHEMA CACHE** — `notify pgrst, 'reload schema';` | not a migration. 0109, 0113, 0114 and 0115 carry no reload of their own, so without this the container started on the next row queries a PostgREST whose cached schema has never seen `commercial_due_date`, `po_number`, `legacy_ref`, `import_batch` or `min_kind` — and PostgREST rejects a select naming a column it does not know about, which is exactly the empty-and-healthy failure described under 0113 below | — |
-| 14 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 and 0113 (which the new code writes to and selects on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
-| 15 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
+| 13 | `supabase/migrations/0117_customer_survey_photos.sql` | `survey_photos.customer_uploaded boolean not null default false` (+ a partial index), `surveys.customer_photos_noted_at timestamptz`, and two `security definer` functions: `add_customer_survey_photo(uuid, text, integer)` — the count-guarded, `for update`-serialised insert that enforces the per-survey ceiling on customer /cv photos in the database rather than in the route, and reports "has the office been told yet?" from the new stamp rather than from a live count — and `ensure_customer_survey_row(uuid, uuid)`, the per-lead advisory-locked find-or-create for the `surveys` row those photos hang off. No backfill by design: every existing photo row stays `false` = "an office photo", and every existing survey's stamp stays null = "no customer photo has ever arrived", which is exactly today's behaviour on every reader | **Same ordering rule as 0111–0116 — before the deploy.** The deployed crew photo readers name `customer_uploaded` in an `eq` filter, so a missing column means PostgREST rejects the select. The readers now throw and log rather than swallowing it, but `crew-sheet/dispatch.ts` and `/my-jobs/[id]` deliberately absorb that so the crew still get their sheet and their job — so a deploy-before-migrate ships crews to customers with the access shots missing, not an obvious outage. The /cv upload route calls BOTH functions, so either one missing 503s every customer photo. Carries its own `notify pgrst` |
+| 14 | **RELOAD THE SCHEMA CACHE** — `notify pgrst, 'reload schema';` | not a migration. 0109, 0113, 0114 and 0115 carry no reload of their own, so without this the container started on the next row queries a PostgREST whose cached schema has never seen `commercial_due_date`, `po_number`, `legacy_ref`, `import_batch` or `min_kind` — and PostgREST rejects a select naming a column it does not know about, which is exactly the empty-and-healthy failure described under 0113 below | — |
+| 15 | **DEPLOY THE CODE** | not a migration — the promotion's container restart. It must happen HERE: after 0111 and 0113 (which the new code writes to and selects on every acceptance) and before 0110 (whose constraints the new code is what satisfies) | — |
+| 16 | `supabase/migrations/0110_ledger_provider_checks.sql` | the CHECK constraints that make the stamp mandatory: a write that sets an id without its provider FAILS instead of silently claiming the wrong system | **YES, and in the opposite direction to everything above** — see the note below |
 
-### 0111, 0112, 0113, 0115 and 0116 must run BEFORE the deploy — and therefore before 0110
+### 0111, 0112, 0113, 0115, 0116 and 0117 must run BEFORE the deploy — and therefore before 0110
 
 This is the mirror image of 0110's rule, so read both before running either.
 
@@ -73,6 +74,28 @@ migration set is one pre-deploy block with no second session to remember.
 0116 inherits 0115's position for a different reason: it corrects rows 0115 has just
 written, so the two belong in the same breath. Leaving it for later would mean crate
 billing runs, and the /s page renders, against a minimum the customer did not sign.
+
+0117 sits above the deploy row for the 0113 reason in its purest form. The deployed
+crew photo readers (`loadPhotoDataUris`, `loadPhotoSignedUrls`) add
+`.eq("customer_uploaded", false)`, so against a database that has not run 0117
+PostgREST rejects the select outright.
+
+Both readers now inspect `error` and THROW (`assertPhotoRead`), rather than the
+earlier destructure that dropped it — so the failure is logged rather than silent.
+Do not read that as "safe to deploy first", because the throw is deliberately
+absorbed at two of the four call sites: `lib/crew-sheet/dispatch.ts` still sends the
+day sheet without photos (it now also records a `photos` entry in `summary.failures`,
+so the run no longer reports clean) and `app/my-jobs/[id]` still renders the job
+without its photo strip. Both are the right call for a crew member who needs the
+address at the door — but they mean a deploy-before-migrate still puts crews in front
+of customers with the access and parking shots missing, and now with a burst of
+errors in the log. `app/sheet/[token]` degrades the same way. The upload half fails
+outright (either of `add_customer_survey_photo` and `ensure_customer_survey_row`
+missing → every `/cv` photo 503s).
+
+**So the ordering is unchanged and still mandatory: 0117 before the deploy.** It
+carries its own `notify pgrst`; the reload row below is still correct for the batch
+members that do not.
 
 **And the reload row exists for the same reason 0113 does.** Applying a column is not
 the same as PostgREST knowing about it: the cache reloads on `notify pgrst`, and 0109,
@@ -593,6 +616,171 @@ App-side, after the deploy: start one crate let on staging-shaped test data and
 confirm its `/s` signing page reads "one calendar month minimum", while an
 existing let that kept `'days'` still reads its own day count. Those two surfaces
 disagreeing with the invoices is the failure this pair exists to prevent.
+
+---
+
+## `0117_customer_survey_photos.sql` — the customer /cv photo discriminator, the atomic ceiling, and the atomic anchor row
+
+Four things land together because each needs one of the others' columns or
+locks:
+
+1. `survey_photos.customer_uploaded` — a boolean that says "a customer sent
+   this", so the crew's oldest-first photo window is not starved by photos that
+   arrived before the survey visit;
+2. `surveys.customer_photos_noted_at` — a stamp recording that the lead's
+   timeline has been told, so deleting and re-uploading a blurry photo cannot
+   write the same line again on every cycle;
+3. `add_customer_survey_photo(uuid, text, integer)` — a `security definer`
+   function that inserts one customer photo under a per-survey ceiling
+   **atomically**, and reports whether the office has yet been told;
+4. `ensure_customer_survey_row(uuid, uuid)` — the per-lead advisory-locked
+   find-or-create for the `surveys` row those photos hang off. Without it two
+   concurrent first uploads created two rows, and since every reader on both
+   sides takes only the lead's NEWEST survey, whichever photo landed on the
+   loser was invisible to the customer and the office forever.
+
+First prove the photo column exists, is `not null default false`, and that
+nothing was silently reclassified:
+
+```sql
+select column_name, data_type, is_nullable, column_default
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'survey_photos'
+   and column_name = 'customer_uploaded';
+
+select count(*) filter (where customer_uploaded)       as customer_rows,
+       count(*) filter (where not customer_uploaded)   as office_rows,
+       count(*)                                        as total
+  from public.survey_photos;
+```
+
+Expected: one column row, `boolean` / `NO` / `false`. And **`customer_rows` = 0**
+— 0117 deliberately backfills nothing. Every pre-existing row must read as an
+office photo, because that is bit-for-bit what every reader did before this
+migration. A non-zero `customer_rows` on the FIRST run means something other
+than this migration wrote the flag, and it needs explaining before the deploy:
+a historic office ACCESS photo mis-stamped `true` silently disappears from the
+crew day sheet, which is the exact failure the column exists to prevent.
+
+Then the timeline stamp. It is nullable with no default and no backfill, and
+that is correct rather than a gap: no survey has ever carried a customer photo,
+so the first one to arrive genuinely is the first.
+
+```sql
+select column_name, data_type, is_nullable, column_default
+  from information_schema.columns
+ where table_schema = 'public' and table_name = 'surveys'
+   and column_name = 'customer_photos_noted_at';
+
+select count(*) filter (where customer_photos_noted_at is not null) as noted_rows,
+       count(*)                                                     as total
+  from public.surveys;
+```
+
+Expected: one column row, `timestamp with time zone` / `YES` / null default, and
+**`noted_rows` = 0** on the first run.
+
+Then prove BOTH functions are there and locked down. `/cv` is an unauthenticated
+surface and both of these write rows, so `anon` or `authenticated` in
+`can_execute` is a finding, not a detail:
+
+```sql
+select p.proname, p.prosecdef, pg_get_function_result(p.oid) as returns,
+       array(select rolname from pg_roles r
+              where has_function_privilege(r.oid, p.oid, 'execute')
+                and r.rolname in ('anon','authenticated','service_role','public')) as can_execute
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public'
+   and p.proname in ('add_customer_survey_photo', 'ensure_customer_survey_row')
+ order by p.proname;
+```
+
+Expected: two rows, each with `prosecdef = t` and `can_execute` containing
+**`service_role` only**.
+
+```sql
+-- Does the ceiling actually bite, and does the timeline marker survive a
+-- delete? Rolls back either way; touches no real data.
+begin;
+  insert into public.surveys (lead_id, client_id, status)
+       values (null, null, 'scheduled') returning id as probe_survey \gset
+  select * from public.add_customer_survey_photo(:'probe_survey', 'probe/cubic/1.jpg', 2);
+  select * from public.add_customer_survey_photo(:'probe_survey', 'probe/cubic/2.jpg', 2);
+  select * from public.add_customer_survey_photo(:'probe_survey', 'probe/cubic/3.jpg', 2);
+  -- The customer deletes everything and starts again. `is_first` must STAY false.
+  delete from public.survey_photos where survey_id = :'probe_survey';
+  select * from public.add_customer_survey_photo(:'probe_survey', 'probe/cubic/4.jpg', 2);
+rollback;
+```
+
+Expected, in order:
+
+| call | photo_id | capped | is_first | remaining |
+|---|---|---|---|---|
+| 1 | a uuid | `f` | **`t`** | 1 |
+| 2 | a uuid | `f` | `f` | 0 |
+| 3 | **null** | **`t`** | `f` | 0 |
+| 4 (after the delete) | a uuid | `f` | **`f`** | 1 |
+
+If the third call returns an id the ceiling is not enforced and the migration has
+not done its job. Call 4 is the other half: `is_first` must come back **false**
+even though the survey now holds zero photos again. `true` there means the marker
+is still being derived from a live count, and a customer retaking one blurry shot
+five times will write five identical "customer added photos" rows on the lead's
+timeline.
+
+Then the anchor row. Pick a lead that has no survey yet, so the CREATE half is
+the half being exercised:
+
+```sql
+begin;
+  select l.id as probe_lead
+    from public.leads l
+   where not exists (select 1 from public.surveys s where s.lead_id = l.id)
+   order by l.created_at desc
+   limit 1 \gset
+  select public.ensure_customer_survey_row(:'probe_lead', null) as first_call \gset
+  select public.ensure_customer_survey_row(:'probe_lead', null) as second_call \gset
+  select :'first_call' = :'second_call'                                  as same_row,
+         (select count(*) from public.surveys where lead_id = :'probe_lead') as survey_rows;
+rollback;
+```
+
+Expected: `same_row = t` and `survey_rows = 1`. Two rows there would mean the
+function is creating rather than finding on the second call, which is the defect
+this replaced.
+
+**What that probe does NOT prove**, and it matters: an advisory lock is
+re-entrant within one session, so two calls down one psql connection both take it
+and neither waits. The probe shows find-or-create is idempotent, not that it
+serialises. For the serialisation itself, confirm the lock is actually in the
+shipped body — it is the only line standing between two devices and two rows:
+
+```sql
+select pg_get_functiondef(p.oid) ilike '%pg_advisory_xact_lock%' as takes_the_lock
+  from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+ where n.nspname = 'public' and p.proname = 'ensure_customer_survey_row';
+```
+
+Expected: `t`.
+
+App-side, after the deploy: send one photo through a real `/cv/<token>` link and
+confirm (a) it appears in the customer's own gallery on that page, (b) it appears
+in the office survey gallery on the lead's Survey tab, and (c) it does **not**
+appear on that job's crew day sheet, while an estimator photo on the same survey
+still does. (c) is the finding — the crew sheet reads oldest-first under a cap of
+three, and the /cv link goes out before the survey visit, so customer photos
+would otherwise push the crew's access shots off the sheet entirely.
+
+**Staging note.** Any `/cv` photos uploaded to STAGING before this migration have
+`customer_uploaded = false`, so they read as office photos and drop out of the
+customer's gallery. That surface has never run in production, so the whole cost
+is re-uploading a test photo; do not "fix" it with an `uploaded_by is null`
+backfill, which is precisely the inference this migration refuses to make. For
+the same reason those surveys' `customer_photos_noted_at` is null, so the next
+staging upload writes one more "customer added photos" timeline row on a lead
+that already had one. That is a staging artefact of the no-backfill rule, not a
+regression; prod has no such rows.
 
 ---
 

@@ -15,12 +15,20 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
+import { errorContext, log } from "@/lib/log";
+import { CUSTOMER_SURVEY_PHOTO_CATEGORY } from "@/lib/survey-photos";
 import {
   computeCubicTotals,
   reconcileCubicLineProvenance,
   sanitizeCubicLines,
   type CubicLine,
 } from "@/lib/cubic-survey";
+import {
+  customerPhotoStore,
+  cvAdminClient,
+  findSurveyRowId,
+  resolveCvSurvey,
+} from "./photo-store";
 
 const TOKEN_RE = /^[\w-]{10,64}$/;
 
@@ -100,4 +108,67 @@ export async function submitCubicCustomerAction(
     }
   }
   return { ok: true, totalFt3: totals.totalFt3, updatedAt: updated.updated_at };
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Remove one photo the customer added through this link (QA-20260827-04's
+ * counterpart to the upload route — a wrong photo must be removable, or the
+ * only recourse is a phone call).
+ *
+ * `photoId` is the ONLY thing taken from the client, and it is not trusted: the
+ * survey is re-resolved from the token and the delete is filtered to that
+ * survey's own row set. `customer_uploaded` (migration 0117) and
+ * `uploaded_by is null` each narrow it further to photos the CUSTOMER added, so
+ * a share token can never delete evidence an estimator took inside the house —
+ * and `customer_uploaded` is the one that holds even for a historic office row
+ * that happens to carry a null uploader. A photo id that does not clear every
+ * filter is simply "not found" — the reply says nothing about whether it exists
+ * elsewhere.
+ */
+export async function deleteCubicCustomerPhotoAction(
+  token: string,
+  photoId: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!UUID_RE.test(photoId)) return { ok: false, error: "That photo could not be found." };
+
+  const admin = cvAdminClient();
+  const resolved = await resolveCvSurvey(token, admin);
+  if (!resolved.ok) return { ok: false, error: resolved.error };
+
+  const surveyRow = await findSurveyRowId(admin, resolved.survey.leadId);
+  if (!surveyRow.ok) return { ok: false, error: "We couldn't remove that just now. Please try again shortly." };
+  if (!surveyRow.id) return { ok: false, error: "That photo could not be found." };
+
+  const { data: photo, error: readError } = await admin
+    .from("survey_photos")
+    .select("id, storage_path")
+    .eq("id", photoId)
+    .eq("survey_id", surveyRow.id)
+    .eq("category", CUSTOMER_SURVEY_PHOTO_CATEGORY)
+    .eq("customer_uploaded", true)
+    .is("uploaded_by", null)
+    .maybeSingle();
+  if (readError) return { ok: false, error: "We couldn't remove that just now. Please try again shortly." };
+  if (!photo?.storage_path) return { ok: false, error: "That photo could not be found." };
+
+  // Object first, row second, and KEEP the row if the object survives — the
+  // same ordering (and reason) as the office deleteSurveyPhoto: a pointerless
+  // object holding interior-of-home imagery is the worse of the two failures.
+  try {
+    await customerPhotoStore().deleteObjects([photo.storage_path]);
+  } catch (error) {
+    log.error("cv.photo.delete_object_failed", { photoId: photo.id, ...errorContext(error) });
+    return { ok: false, error: "We couldn't remove that photo. Please try again shortly." };
+  }
+  const { error: deleteError } = await admin
+    .from("survey_photos")
+    .delete()
+    .eq("id", photo.id)
+    .eq("survey_id", surveyRow.id)
+    .eq("customer_uploaded", true)
+    .is("uploaded_by", null);
+  if (deleteError) return { ok: false, error: "We couldn't remove that photo. Please try again shortly." };
+  return { ok: true };
 }

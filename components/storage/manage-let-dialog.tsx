@@ -21,7 +21,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
-import { crateMinimumLabel, crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { crateMinimumLabel, crateStorageAcks, storageAcks } from "@/lib/signatures";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { gbpInc, type StorageRates } from "@/lib/storage-rates";
 import type { BrandChipData } from "@/components/brand/brand-chip";
 import {
@@ -72,6 +73,29 @@ export function ManageLetDialog({
 }) {
   const router = useRouter();
   const isCrate = let_.billing_model === "crate_daily";
+
+  /* The company the lien tick-box names — the party the customer is granting
+     the right to dispose of or sell their stored goods to. This is the storage
+     path most agreements actually take, and it named the DEFAULT brand for
+     every brand: a second brand's customer signing in front of the crew was
+     granting the DEFAULT brand rights over their belongings.
+
+     Read from `let_.brand` — the PERSISTED stamp — and deliberately NOT from
+     the `brand` selector state below: the server re-derives the recorded
+     wording from the stored column, so reading an unsaved dropdown here would
+     render one company and record another. */
+  const letBrandSlug = (let_.brand ?? "").trim();
+  const letBrandRow = brands.find((b) => b.slug === letBrandSlug);
+  /* Blank or the default slug resolves to the literal default company, which is
+     exactly what getBrandOrDefault → pageTheme returns server-side. Anything
+     else needs the row, and `brands` is empty BOTH in single-brand mode and on
+     a failed brands read (the storage page uses listActiveBrandsOrEmpty) — so a
+     missing row is "I could not check", not "it must be the default", while the
+     server would go on to record the real name. Refuse to open the signing
+     panel rather than let the two disagree. */
+  const companyKnown = !letBrandSlug || letBrandSlug === DEFAULT_BRAND || !!letBrandRow;
+  const signingCompanyName = letBrandRow?.name ?? null;
+
   // The ack set follows the product: crates sign the billing schedule (the
   // let's frozen minimum + handling figure rendered live from the rate card),
   // containers keep the original rate ack (standing policy 2026-07-22).
@@ -81,9 +105,10 @@ export function ManageLetDialog({
         ? crateStorageAcks(
             { kind: let_.min_kind, days: let_.min_days ?? rates.crateMinDays },
             gbpInc(rates.handlingEventInc),
+            signingCompanyName,
           )
-        : [...STORAGE_ACKS],
-    [isCrate, let_.min_kind, let_.min_days, rates],
+        : [...storageAcks(signingCompanyName)],
+    [isCrate, let_.min_kind, let_.min_days, rates, signingCompanyName],
   );
   const [signing, setSigning] = useState(false);
   const [acks, setAcks] = useState<Record<string, boolean>>({});
@@ -98,7 +123,8 @@ export function ManageLetDialog({
   const [notes, setNotes] = useState(let_.notes ?? "");
   const [pending, start] = useTransition();
 
-  const signReady = ackList.every((a) => acks[a.key]) && !!sig && signerName.trim().length >= 2;
+  const signReady =
+    companyKnown && ackList.every((a) => acks[a.key]) && !!sig && signerName.trim().length >= 2;
 
   // Guard every transition against a rejected server action (dropped signal,
   // stale action id after a deploy): without the catch the rejection escapes
@@ -244,11 +270,26 @@ export function ManageLetDialog({
               </div>
             </div>
           ) : (
+            <>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-pill border border-warn-border bg-warn-bg px-2.5 py-1 text-[11px] font-semibold text-warn">
                 Not signed yet
               </span>
-              <Button size="sm" onClick={() => setSigning(true)} className="bg-mm-red text-white hover:bg-mm-red-deep">
+              <Button
+                size="sm"
+                onClick={() => setSigning(true)}
+                // Fail closed: the agreement names a company, and if this let's
+                // brand cannot be resolved we would show one name and record
+                // another. Copying or emailing the signing link still works —
+                // /s resolves the brand server-side.
+                disabled={!companyKnown}
+                title={
+                  companyKnown
+                    ? undefined
+                    : "This let's brand could not be read, so the agreement wording cannot be shown"
+                }
+                className="bg-mm-red text-white hover:bg-mm-red-deep"
+              >
                 <PenLine className="size-4" strokeWidth={1.75} />
                 Sign now
               </Button>
@@ -267,6 +308,14 @@ export function ManageLetDialog({
                 Email signing link
               </Button>
             </div>
+            {!companyKnown ? (
+              <p className="mt-2 text-xs text-warn">
+                This let&apos;s brand could not be read, so the agreement wording cannot be shown
+                here. Refresh the page and try again, or send the customer the signing link, which
+                resolves the brand on the page itself.
+              </p>
+            ) : null}
+            </>
           )}
         </section>
 
