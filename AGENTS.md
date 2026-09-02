@@ -75,7 +75,7 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-02 late - third QA pass closed + 4 more waves; PR #214; migrations now 0104-0117; 3 findings open, none closeable by us)
+## Current State (2026-09-03 - staging e2e FULLY GREEN, 190/190; the Zoho quota finding closed on a live re-probe; 2 findings open, both external)
 
 Last touched: 2026-09-02 on i9. Two blocks of work today. **(1)** A third adversarial pass
 (Opus 5) read the whole un-promoted payload - `master...staging` @ 79f5a98, 473 files - as
@@ -131,31 +131,48 @@ functions, **0 rows backfilled**), and in the runbook ABOVE the deploy row. Prod
 **0104-0117**. Gates on the merged tree: lint / typecheck / **3446 tests** (from 3350) /
 build / leak scan 90 files 0 leaks - all green.
 
-**Three findings open, and NONE of them is ours to close:**
-- **QA-20260902-06 (Zoho quota).** Now three independent observations agree - a raw
-  read-only probe at 19:52Z and two role-agents at 20:23Z, all seeing a **200 token refresh
-  over a 429 org**. **Correcting the earlier record: "re-run tomorrow to confirm" was too
-  confident.** Every observation is equally consistent with a plain UTC-midnight reset that
-  OUR OWN CI re-exhausts by lunchtime (~32 merges/2 days, each running an invoice-creating
-  e2e suite). Both readings predict the same thing: **it recurs every day CI volume stays
-  where it is**, so waiting is a coin flip, not a remedy. Reduce the burn or raise the
-  allowance - **prod runs against the same 1,000/day cap on the live org.** Close only on a
-  live re-probe, never on a calendar date.
+**STAGING IS FULLY GREEN — 190 passed, 0 failed** (run `33691854348`, commit `94ee5f9`,
+2026-09-03). First clean e2e run in this whole sequence, and it settles two things at once.
+
+**QA-20260902-06 is CLOSED on the live re-probe it demanded.** The four money specs went
+green **with no code change** — the same job, re-run; the only variable was the clock. The
+reset boundary is now measured to 42 seconds: the job finished `23:00:46Z` with every
+invoice call 429, a read-only probe at `23:01:28Z` returned HTTP 200. **The window rolls at
+00:00 in the ORG'S timezone (Europe/London), not UTC** — 23:00 UTC in summer, 00:00 UTC in
+winter. That also dissolves the apparent contradiction: the rota's 20:23Z observation, read
+as falsifying "resets daily", was simply 2h37m before the boundary. Every observation fits
+one story. Recorded in `O:\RBS-OS\references\zoho-api.md`. **PR #205 is definitively
+cleared.** Nothing is fixed by this, though — the cap is unchanged and our own CI spent
+1,000 calls before lunch on 2 Sept. Reduce the burn or raise the allowance; **prod runs
+against the same cap on the live org.**
+
+**The rendered brand-leak spec has now gone green TWICE** (both the `94ee5f9` run and its
+re-run), so it clears the standing "green in CI at least twice" bar. It earned its keep
+first: on its FIRST run it caught a real defect (an inherited `meta description` naming the
+default brand on a second brand's `/q` — `generateMetadata` MERGES with the root layout, so
+a page setting only `title` inherits it; **no source grep could ever see this**, the literal
+lives in `app/layout.tsx` where it is correct). On its second it caught the installed-PWA
+name, which is the documented PRD §4 app-chrome decision and is now exempted VISIBLY —
+exact `content="…"` string, PRD clause as its reason, `mustOccur` so a dead exemption fails
+loudly (#216).
+
+**Two findings remain open and BOTH are external to the code:**
 - **QA-20260902-04 (takepayments).** Merchant 292749's sandbox rejects takepayments' OWN
   published test cards (`65566 Disallowed cardnumber`). `e2e/fixtures/sandbox-cards.ts` is
-  empty and **nothing consumes it**, so the card capture path has ZERO e2e coverage. Needs
-  the right PANs from Peter's account manager.
-- **QA-20260827-04.** Implemented in #214 but **deliberately left open**: its Verify clause
-  (control usable on `/cv`, object readable back, photo loadable on the admin page) has not
-  been executed. Unit tests and four gates are not a browser.
+  empty and **nothing consumes it**, so card capture has ZERO e2e coverage. Needs the right
+  PANs from Peter's account manager.
+- **QA-20260827-04.** Implemented in #214 and deliberately NOT closed: its Verify clause
+  (control usable on `/cv`, object readable back from the bucket, photo loadable on the
+  admin page) needs a browser, and unit tests plus four gates are not one.
 
-**Still Peter's:** the 3 ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3); finding 36's
-two-theme-per-brand call; the takepayments PANs; and the Zoho burn-rate decision above.
-**Gate 15 is unchanged and NOT addressed** - the published `storage-terms/v2-2026-08-31.md`
-carries the same lien sentence and is hash-locked immutable, so it can only be superseded;
-#214 fixed the RENDERED wording only. Named but not fixed: `lib/quote/chase.ts`'s
-default-brand signature block, and `collect-contract-button.tsx`, which links the default
-brand's terms URL for every brand and takes no brand at all. **Next:** gate 15 (Mark's doc),
-QA-20260827-04's live verification, then the 18 September promotion.
+**Still Peter's:** the takepayments PANs; the **Zoho burn rate** before 18 September; gate
+15's superseding terms document plus a legal read on the brand-resolved lien wording (the
+published `storage-terms/v2-2026-08-31.md` carries the same sentence and is hash-locked
+immutable, so it can only be superseded — #214 fixed the RENDERED wording only); the 3
+ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3); and finding 36's two-theme call. Named
+but not fixed: `lib/quote/chase.ts`'s default-brand signature block, and
+`collect-contract-button.tsx`, which links the default brand's terms URL for every brand.
+**Next:** gate 15, QA-20260827-04's live verification, then the 18 September promotion
+(migrations **0104-0117**, Peter runs over SSH, then `notify pgrst`, then deploy).
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
