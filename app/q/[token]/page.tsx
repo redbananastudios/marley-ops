@@ -18,7 +18,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { cardPaymentsAvailable } from "@/lib/payments/card-payments";
 import { BANK_DETAILS } from "@/lib/comms/payment-email";
 import { getBrandOrDefault } from "@/lib/brand";
-import { pageTheme, pageTitle, type PageTheme } from "@/lib/brand-page-theme";
+import { pageDescription, pageTheme, pageTitle, type PageTheme } from "@/lib/brand-page-theme";
 import { DateConfirmCard } from "@/components/quote/date-confirm-card";
 import { CommitmentChoice } from "@/components/quote/commitment-choice";
 import { AcceptForm } from "./accept-form";
@@ -64,6 +64,7 @@ export async function generateMetadata({
   const theme = pageTheme(quote ? await getBrandOrDefault(sb, quote.brand) : null);
   return {
     title: pageTitle(theme, "Your quote"),
+    description: pageDescription(theme, "Your removal quote"),
     robots: { index: false, follow: false },
   };
 }

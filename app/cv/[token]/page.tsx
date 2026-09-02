@@ -5,7 +5,7 @@ import { getBusinessSettings } from "@/lib/settings";
 import { sanitizeCubicLines, type CubicLine } from "@/lib/cubic-survey";
 import { CubicBuilder } from "@/components/cubic/cubic-builder";
 import { getBrandOrDefault } from "@/lib/brand";
-import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
+import { pageDescription, pageTheme, pageTitle } from "@/lib/brand-page-theme";
 import { MAX_CUSTOMER_SURVEY_PHOTOS } from "@/lib/survey-photos";
 import { deleteCubicCustomerPhotoAction, submitCubicCustomerAction } from "./actions";
 import { CustomerSurveyPhotos, type CustomerPhoto } from "./customer-photos";
@@ -34,7 +34,11 @@ export async function generateMetadata({
     .maybeSingle();
   const brandSlug = (row?.leads as { brand?: string } | null)?.brand ?? null;
   const theme = pageTheme(brandSlug ? await getBrandOrDefault(admin, brandSlug) : null);
-  return { title: pageTitle(theme, "Your survey"), robots: { index: false, follow: false } };
+  return {
+    title: pageTitle(theme, "Your survey"),
+    description: pageDescription(theme, "Your volume survey"),
+    robots: { index: false, follow: false },
+  };
 }
 
 export default async function CustomerCubicPage({ params }: { params: Promise<{ token: string }> }) {

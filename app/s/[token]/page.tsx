@@ -11,7 +11,7 @@ import {
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { getBrandOrDefault } from "@/lib/brand";
 import { cardPaymentsAvailable } from "@/lib/payments/card-availability";
-import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
+import { pageDescription, pageTheme, pageTitle } from "@/lib/brand-page-theme";
 import { UK_TZ } from "@/lib/uk-time";
 import { StorageAgreementForm } from "./agreement-form";
 
@@ -40,7 +40,11 @@ export async function generateMetadata({
     .eq("sign_token", token)
     .maybeSingle();
   const theme = pageTheme(row ? await getBrandOrDefault(admin, row.brand) : null);
-  return { title: pageTitle(theme, "Storage agreement"), robots: { index: false, follow: false } };
+  return {
+    title: pageTitle(theme, "Storage agreement"),
+    description: pageDescription(theme, "Your storage agreement"),
+    robots: { index: false, follow: false },
+  };
 }
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\.00$/, "");
