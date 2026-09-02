@@ -1463,3 +1463,7 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Test shipped: `tests/config/e2e-accept-sentinel.test.ts` — vitest tripwire over every accept-driving e2e spec (submitUntil required, ambiguous sentinel forbidden, post-accept copy required). Proven RED on the pre-fix spec, green after.
 - Gates on the branch: lint 0 errors · tsc clean · vitest 2962 passed · build green. PR **#188** to staging, label `qa-repair`. Finding flipped to `fixed-pending-verify` in the same branch; spec half stays unverified until green twice in real CI e2e (AGENTS.md rule).
 - Escalations: none. `master` never touched. Time spent: ~30 min.
+
+## 2026-09-02T00:33Z (scheduled sweep) — escalation repair: nothing escalated
+
+- Tier: escalation (Opus), cron-fired on `origin/staging` `a118c89`. Eligible findings carrying `escalate: opus-5`: **none** (open queue = `QA-20260827-04` and `QA-20260901-02`, both `class: risky` — never this tier's; `QA-20260902-01` already `fixed-pending-verify` via PR #188). No branch, no PR, no finding touched; `master` never touched. Time spent: ~5 min.
