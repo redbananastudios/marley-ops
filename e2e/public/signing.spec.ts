@@ -33,12 +33,17 @@ test.describe("Customer — storage agreement (/s)", () => {
   // QA-20260901-01: the page's payment sentence is STORAGE_PAYMENT_SENTENCE
   // from lib/legal/documents.ts, which a unit test pins verbatim to the
   // current storage-terms body — this spec guards the rendered page itself.
+  // The card mention is now conditional on the LET's brand's live §11.10 card
+  // verdict (STORAGE_PAYMENT_SENTENCE_NO_CARD otherwise), so this pins the
+  // invariant part of the shared constant rather than the word "card", which
+  // legitimately differs between card-live and card-off environments.
   test("payment-method copy matches the current storage terms (QA-20260901-01)", async ({ page }) => {
     await page.goto(`/s/${SEED.storageAgreement.signToken}`);
     await page.waitForLoadState("networkidle");
     const body = (await page.textContent("body")) ?? "";
     expect(body).not.toContain("Invoices are payable by bank transfer on receipt.");
-    expect(body.toLowerCase()).toContain("card");
+    expect(body).toContain("Storage charges can be paid by bank transfer");
+    expect(body).toContain("Bank transfer is preferred.");
     expect(body.toLowerCase()).toContain("cash");
   });
 });

@@ -98,6 +98,17 @@ export interface DateConfirmationMeta {
    * Absent/0 renders today's exact bytes.
    */
   balanceRemaining?: number | null;
+  /**
+   * Gate 9a small jobs: the caller's verdict that the frozen figures cover the
+   * whole job — the acceptance ask was the gross, the commitment clamped to 0
+   * and NO balance will ever be invoiced. Only meaningful alongside
+   * `commitmentAmount: 0`; the zero-commitment copy then stops promising "your
+   * remaining balance is due in full before move day" and a "final invoice
+   * nearer the time" that will never exist.
+   *
+   * Absent/false renders today's exact bytes (jobs that DO carry a balance).
+   */
+  paidInFull?: boolean;
   /** Where the customer takes the choice — their own /q page. */
   payUrl?: string | null;
   /** Sending brand — absent/marley renders today's exact bytes. */
@@ -156,6 +167,15 @@ function commitmentBlockHtml(m: DateConfirmationMeta, t: EmailTheme): string {
       .filter(Boolean)
       .join("\n");
   }
+  // Gate 9a: `paidInFull` is the caller's frozen-figures verdict that the
+  // payment WAS the whole job — no balance will ever be invoiced, so the
+  // with-balance sentence below would promise a document and a debit that
+  // never come. Jobs that do carry a balance keep today's exact bytes.
+  if (m.paidInFull) {
+    return subline(
+      `Your payment already covers your booking in full, so there is nothing more to pay.`,
+    );
+  }
   return subline(
     `Your deposit already covers the commitment for your booking, so there is nothing more to pay right now. Your remaining balance is due in full before move day and we will send the final invoice nearer the time.`,
   );
@@ -199,7 +219,9 @@ export function buildDateConfirmationEmailHtml(m: DateConfirmationMeta): string 
       ? `Your move date is confirmed. Your ${gbp(m.commitmentAmount)} commitment payment is ${
           m.commitmentDueLabel ? `due by ${m.commitmentDueLabel}` : "due now"
         }.`
-      : `Your move date is confirmed. Nothing more to pay right now.`,
+      : m.paidInFull
+        ? `Your move date is confirmed. Nothing more to pay.`
+        : `Your move date is confirmed. Nothing more to pay right now.`,
     inner,
     t,
   );

@@ -165,6 +165,48 @@ describe("commitment-received email", () => {
   });
 });
 
+describe("date-confirmation email — paid-in-full small job (gate 9a)", () => {
+  // A small job's acceptance ask IS the gross: the commitment clamps to 0 AND
+  // no balance will ever be invoiced. The plain zero-commitment copy ("the
+  // balance is due before move day", "final invoice nearer the time") promises
+  // that customer money movements that will never happen — `paidInFull` is the
+  // caller's verdict that the frozen figures cover the whole job, mirroring
+  // /q's paidInFull gate from the small-job settled-copy fix.
+  const paidMeta: DateConfirmationMeta = {
+    ...zeroMeta,
+    depositAmount: 480,
+    paidInFull: true,
+  };
+
+  it("says the booking is covered in full and promises no balance or later invoice", () => {
+    const html = buildDateConfirmationEmailHtml(paidMeta);
+    expect(html).toContain("covers your booking in full");
+    expect(html).toContain("nothing more to pay");
+    expect(html).not.toContain("nothing more to pay right now"); // no "right now" hedge — nothing is coming
+    expect(html).not.toContain("balance");
+    expect(html).not.toContain("final invoice nearer the time");
+    expect(html).not.toContain(BANK_DETAILS.account);
+    expect(html).toContain("non-refundable"); // confirmation still flips the held position
+    NO_PENALTY(html);
+    NO_EM_DASH(html);
+  });
+
+  it("the template-var rail carries the same paid-in-full copy", () => {
+    const vars = dateConfirmationTemplateVars(paidMeta);
+    expect(vars.COMMITMENT_BLOCK).toContain("covers your booking in full");
+    expect(vars.COMMITMENT_BLOCK).not.toContain("balance");
+    expect(vars.COMMITMENT_BLOCK).not.toContain(BANK_DETAILS.account);
+    for (const v of Object.values(vars)) NO_PENALTY(v);
+  });
+
+  it("absent flag keeps today's exact zero-commitment copy for jobs that DO carry a balance", () => {
+    const zero = buildDateConfirmationEmailHtml(zeroMeta);
+    expect(zero).toContain("nothing more to pay right now");
+    expect(zero).toContain("Your remaining balance is due in full before move day");
+    expect(zero).not.toContain("covers your booking in full");
+  });
+});
+
 describe("date-confirmation ack wording", () => {
   it("the signed ack carries the held/refunded position without penalty language", () => {
     for (const ack of DATE_CONFIRM_ACKS) {

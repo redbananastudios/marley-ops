@@ -179,6 +179,19 @@ export function quotePdfFilename(quoteRef: string, brand?: DocBrand | null): str
   return `${brand ? brand.shortName : "MarleyMoves"}-Quote-${quoteRef}.pdf`;
 }
 
+/** The invoice-email twin of `quotePdfFilename` — the same §10 shape for the
+ *  VAT invoice PDFs the commitment and balance emails attach. Pure and
+ *  bundle-safe (no pdfmake), so the server-side accept flow imports it
+ *  directly; callers resolve the brand via docBrandFrom, exactly as the quote
+ *  PDF does. A blank shortName degrades to the default shape rather than
+ *  minting a nameless `-Invoice-*.pdf`. */
+export function invoicePdfFilename(
+  invoiceNumber: string,
+  brand?: Pick<DocBrand, "shortName"> | null,
+): string {
+  return `${brand?.shortName ? brand.shortName : "MarleyMoves"}-Invoice-${invoiceNumber}.pdf`;
+}
+
 /** "https://www.example.co.uk/" → "www.example.co.uk" for the header row. */
 const displayUrl = (u: string): string => u.replace(/^https?:\/\//i, "").replace(/\/$/, "");
 

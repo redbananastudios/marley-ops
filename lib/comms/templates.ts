@@ -6,7 +6,9 @@
  * Multi-brand (docs/multi-brand-prd.md §3.5): where the copy names the brand or
  * its phone number, `brandName`/`brandPhone` in the context drive it. Both
  * default to the Marley literals, so a context without them (every existing
- * call site) produces byte-identical copy to today.
+ * call site) produces byte-identical copy to today. The phone fallback is
+ * default-brand ONLY: a named non-default brand with a blank phone degrades to
+ * reply-first copy that names no number (see `phone` below).
  */
 
 export interface TemplateContext {
@@ -16,7 +18,8 @@ export interface TemplateContext {
   moveDate?: string | null; // already formatted, e.g. "14 Jul"
   /** Brand display name for sign-offs and "it's X" lines; default Marley Moves. */
   brandName?: string | null;
-  /** Brand phone for callback lines; default Marley's number. */
+  /** Brand phone for callback lines; default Marley's number for the default
+   *  brand only — a named non-default brand with no phone gets no number. */
   brandPhone?: string | null;
 }
 
@@ -35,7 +38,17 @@ const first = (c: TemplateContext): string => (c.firstName ?? "").trim().split(/
 
 const brand = (c: TemplateContext): string => (c.brandName ?? "").trim() || "Marley Moves";
 
-const phone = (c: TemplateContext): string => (c.brandPhone ?? "").trim() || "01747 637070";
+/**
+ * The Marley office number is the DEFAULT-BRAND fallback only. A context that
+ * names another brand but carries no phone returns null, and the copy degrades
+ * to reply-first contact — a Pitmans follow-up must never hand the customer
+ * Marley's number under a Pitmans sign-off, and a made-up number is worse.
+ */
+const phone = (c: TemplateContext): string | null => {
+  const tel = (c.brandPhone ?? "").trim();
+  if (tel) return tel;
+  return brand(c) === "Marley Moves" ? "01747 637070" : null;
+};
 
 export function missedCallTemplate(c: TemplateContext): MessageTemplate {
   const name = first(c);
@@ -49,11 +62,11 @@ export function missedCallTemplate(c: TemplateContext): MessageTemplate {
 
 We tried to give you a call about your move enquiry but couldn't get hold of you.
 
-We'd love to help. Reply to this email or call us back on ${tel} and we'll pick it straight up.
+We'd love to help. ${tel ? `Reply to this email or call us back on ${tel}` : `Reply to this email`} and we'll pick it straight up.
 
 Thanks,
 ${co}`,
-    sms: `Hi ${name}, it's ${co}. We tried calling about your move enquiry. Call us back on ${tel} or reply here and we'll sort it. Thanks!`,
+    sms: `Hi ${name}, it's ${co}. We tried calling about your move enquiry. ${tel ? `Call us back on ${tel} or reply here` : `Reply here`} and we'll sort it. Thanks!`,
   };
 }
 
@@ -72,11 +85,11 @@ export function depositReminderTemplate(c: TemplateContext): MessageTemplate {
 
 Just a gentle reminder that the ${amt} deposit${ref}${when} is still outstanding. Once it's in, your booking is secured and confirming your date is the next quick step.
 
-If you've already sent it, please ignore this. Any questions, call ${tel}.
+If you've already sent it, please ignore this. ${tel ? `Any questions, call ${tel}.` : `Any questions, just reply to this email.`}
 
 Thanks,
 ${co}`,
-    sms: `Hi ${name}, ${co} here. A quick reminder the ${amt} deposit${when} is still outstanding. Once paid your booking is secured. Questions? ${tel}.`,
+    sms: `Hi ${name}, ${co} here. A quick reminder the ${amt} deposit${when} is still outstanding. Once paid your booking is secured. Questions? ${tel ? `${tel}.` : "Just reply."}`,
   };
 }
 
@@ -94,11 +107,11 @@ export function balanceReminderTemplate(c: TemplateContext): MessageTemplate {
 
 A quick reminder that the remaining balance of ${amt}${when} is now due.
 
-If you've already paid, please ignore this. Any questions at all, call us on ${tel}.
+If you've already paid, please ignore this. ${tel ? `Any questions at all, call us on ${tel}.` : `Any questions at all, just reply to this email.`}
 
 Thanks,
 ${co}`,
-    sms: `Hi ${name}, ${co} here. The remaining balance of ${amt}${when} is now due. Already paid? Please ignore this. Questions? ${tel}.`,
+    sms: `Hi ${name}, ${co} here. The remaining balance of ${amt}${when} is now due. Already paid? Please ignore this. Questions? ${tel ? `${tel}.` : "Just reply."}`,
   };
 }
 

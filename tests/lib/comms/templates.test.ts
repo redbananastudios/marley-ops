@@ -102,4 +102,33 @@ describe("brand-aware copy", () => {
     expect(t.email).toContain("Marley Moves");
     expect(t.email).toContain("01747 637070");
   });
+
+  it("a named non-default brand with a blank phone never inherits Marley's number", () => {
+    // The Marley office number is the DEFAULT-BRAND fallback only. A Pitmans
+    // lead whose brands row carries no phone must degrade to copy that names
+    // no number at all — reply-first contact — never to Marley's number under
+    // a Pitmans sign-off.
+    for (const reason of ["missed_call", "deposit", "balance"]) {
+      for (const blank of [null, "", "  "]) {
+        const t = templateForReason(reason, { ...pitmansCtx, brandPhone: blank });
+        for (const body of [t.email, t.sms]) {
+          expect(body).toContain("Pitmans Removals & Storage");
+          expect(body).not.toContain("01747");
+          expect(body).not.toContain("637070");
+          expect(body).not.toContain("Marley");
+          // Degraded contact route: the customer is still told how to reach us.
+          expect(body.toLowerCase()).toContain("reply");
+        }
+      }
+    }
+  });
+
+  it("a non-default brand WITH a phone keeps the full call-us copy", () => {
+    for (const reason of ["missed_call", "deposit", "balance"]) {
+      const t = templateForReason(reason, pitmansCtx);
+      for (const body of [t.email, t.sms]) {
+        expect(body).toContain("01258 858564");
+      }
+    }
+  });
 });

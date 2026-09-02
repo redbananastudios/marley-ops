@@ -99,6 +99,17 @@ export function snapshotOf(version: LegalVersion): TermsSnapshot {
 export const STORAGE_PAYMENT_SENTENCE =
   "Storage charges can be paid by bank transfer, card or cash. Bank transfer is preferred. We do not add a card fee.";
 
+/**
+ * The same sentence for a brand whose card channel is NOT live (the §11.10
+ * two-switch verdict — `cardPaymentsAvailable`). The signing page must never
+ * put the word "card" in front of a customer whose payment rails would refuse
+ * one, so this variant names only the methods that actually work. Deliberately
+ * NOT pinned to the terms body: the terms name every method the group accepts;
+ * this is the per-brand degrade of the page's summary of them.
+ */
+export const STORAGE_PAYMENT_SENTENCE_NO_CARD =
+  "Storage charges can be paid by bank transfer or cash. Bank transfer is preferred.";
+
 /** Public URL of a document, for linking customers to what they are signing. */
 export function publicUrlFor(document: LegalDocument): string {
   return document === "storage-terms"
