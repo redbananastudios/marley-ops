@@ -27,6 +27,7 @@ import {
   loadSurveyVideoSignedUrls,
 } from "@/lib/job-sheet-load";
 import { loadJobNotesForAppointment } from "@/lib/job-notes";
+import { jobDetailCompletion } from "@/lib/my-jobs/job-card";
 import { JobNotes } from "@/components/crew/job-notes";
 import type { JobSheetAddress } from "@/lib/job-sheet-docdef";
 import { JobSheetButton } from "@/components/job-sheet-button";
@@ -94,7 +95,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
 
   const loaded = await loadJobSheet(admin, id);
   if (!loaded) notFound();
-  const { data: d, apptType, surveyId, cubicSurveyId } = loaded;
+  const { data: d, apptType, apptStatus, surveyId, cubicSurveyId } = loaded;
   const [photos, videos, crewNotes, { data: completion }, { data: myStaff }] = await Promise.all([
     surveyId ? loadPhotoSignedUrls(admin, surveyId) : Promise.resolve([]),
     cubicSurveyId ? loadSurveyVideoSignedUrls(admin, cubicSurveyId) : Promise.resolve([]),
@@ -107,6 +108,11 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
     admin.from("staff").select("full_name").eq("profile_id", profile.id).eq("is_active", true).maybeSingle(),
   ]);
   const isRemoval = apptType === "removal";
+  // Completion keys on appointments.status FIRST — the same authority the
+  // /my-jobs list uses — so an auto-completed job (no job_completions row)
+  // reads as done here too instead of inviting a second sign-off.
+  const completionState = jobDetailCompletion(apptStatus, !!completion);
+  const jobClosed = completionState !== "none";
   const fromLine = [d.from.address, d.from.postcode].filter(Boolean).join(", ");
   const toLine = [d.to.address, d.to.postcode].filter(Boolean).join(", ");
 
@@ -165,7 +171,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         </div>
 
         {/* contract flag — never gates the move, but the crew can't miss it */}
-        {isRemoval && !completion && d.contractSigned === false ? (
+        {isRemoval && !jobClosed && d.contractSigned === false ? (
           <div className="mt-4 rounded-md border border-warn-border bg-warn-bg p-4">
             <p className="flex items-center gap-2 text-sm font-semibold text-warn">
               <PenLine className="size-4 shrink-0" strokeWidth={2} />
@@ -193,6 +199,14 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
                 : "Nothing to report."}
               {completion.certificate_emailed_at ? " Certificate emailed to the customer." : ""}
             </p>
+          </div>
+        ) : completionState === "auto" ? (
+          <div className="mt-4 rounded-md border border-success-border bg-success-bg p-4">
+            <p className="flex items-center gap-2 text-sm font-semibold text-success">
+              <CheckCircle2 className="size-4 shrink-0" strokeWidth={2} />
+              Job completed — closed out by the office.
+            </p>
+            <p className="mt-1 text-xs text-success/80">Nothing left to do here — no crew sign-off needed.</p>
           </div>
         ) : null}
 
@@ -423,7 +437,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
         firstName={d.customerName.split(" ")[0]}
         directionsTo={fromLine || toLine || null}
       >
-        {isRemoval && !completion ? (
+        {isRemoval && !jobClosed ? (
           <CompleteJobButton
             job={{
               appointmentId: id,

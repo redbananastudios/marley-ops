@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { jobCardLook } from "@/lib/my-jobs/job-card";
+import { jobCardLook, jobDetailCompletion } from "@/lib/my-jobs/job-card";
 
 /**
  * Regression guard for QA-20260820-06: a completed removal stayed on the crew's
@@ -69,5 +69,49 @@ describe("/my-jobs carries status through to the card", () => {
   it("the card render keys its look off jobCardLook", () => {
     const src = read("app/my-jobs/page.tsx");
     expect(src).toMatch(/jobCardLook\(\s*j\.appt_type,\s*j\.status\s*\)/);
+  });
+});
+
+/**
+ * Regression guard for QA-20260902-03: the DETAIL page decided "is this job
+ * completed" from whether a `job_completions` row exists, while the list keys
+ * on `appointments.status` — so a job the balance-settled cron auto-completed
+ * (status flipped directly, no sign-off row) showed "Done" on the list yet
+ * still offered a live "Complete job" button on its own page.
+ */
+describe("jobDetailCompletion", () => {
+  it("a crew sign-off row renders the signed banner, whatever the status says", () => {
+    expect(jobDetailCompletion("completed", true)).toBe("signed");
+    expect(jobDetailCompletion("scheduled", true)).toBe("signed");
+    expect(jobDetailCompletion(null, true)).toBe("signed");
+  });
+
+  it("status=completed with no sign-off row is still completed (the cron's shape)", () => {
+    expect(jobDetailCompletion("completed", false)).toBe("auto");
+  });
+
+  it("an open job stays open", () => {
+    expect(jobDetailCompletion("scheduled", false)).toBe("none");
+    expect(jobDetailCompletion(null, false)).toBe("none");
+    expect(jobDetailCompletion(undefined, false)).toBe("none");
+  });
+});
+
+describe("/my-jobs/[id] agrees with the list on completion", () => {
+  it("loadJobSheet carries appointments.status through to the page", () => {
+    const src = read("lib/job-sheet-load.ts");
+    expect(src, "loadJobSheet's appointment select must include status").toMatch(
+      /\.select\("[^"]*appt_type[^"]*\bstatus\b[^"]*"\)/,
+    );
+    expect(src, "the load result must expose apptStatus").toMatch(/apptStatus:\s*appt\.status/);
+  });
+
+  it("the detail page keys completion off jobDetailCompletion, not the sign-off row alone", () => {
+    const src = read("app/my-jobs/[id]/page.tsx");
+    expect(src).toMatch(/jobDetailCompletion\(\s*apptStatus,\s*!!completion\s*\)/);
+    expect(
+      src,
+      "the Complete-job / contract gates must not key on the job_completions row alone",
+    ).not.toMatch(/isRemoval && !completion\b/);
   });
 });

@@ -46,6 +46,9 @@ type Admin = ReturnType<typeof createAdminClient>;
 export interface JobSheetLoad {
   data: JobSheetData;
   apptType: string;
+  /** appointments.status — the completion authority (the auto-complete cron
+   *  flips it without writing job_completions, QA-20260902-03). */
+  apptStatus: string | null;
   surveyId: string | null;
   /** cubic_surveys.id — anchors the AI walkthrough videos (survey-media bucket). */
   cubicSurveyId: string | null;
@@ -106,7 +109,7 @@ export async function crewAssignedToAppointment(
 export async function loadJobSheet(admin: Admin, appointmentId: string): Promise<JobSheetLoad | null> {
   const { data: appt } = await admin
     .from("appointments")
-    .select("id, title, starts_at, ends_at, all_day, appt_type, lead_id, brand")
+    .select("id, title, starts_at, ends_at, all_day, appt_type, status, lead_id, brand")
     .eq("id", appointmentId)
     .single();
   if (!appt) return null;
@@ -245,6 +248,7 @@ export async function loadJobSheet(admin: Admin, appointmentId: string): Promise
   return {
     data,
     apptType: appt.appt_type,
+    apptStatus: appt.status ?? null,
     surveyId: survey?.id ?? null,
     cubicSurveyId,
     quoteId,
