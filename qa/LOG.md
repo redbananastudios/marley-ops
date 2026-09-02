@@ -1524,3 +1524,10 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Ledger: `qa/state.json` updated for all 11 tested items (1 new key: `admin.chase_commercial_exclusion`) + `lastAuditSha` → `aa5e15a` + top-level comment.
 - Pushes: verify-first closure pushed separately (`58896b5`, ahead of the rota, per stop-hook prompt mid-run). This entry covers the rota commit (findings + spec + `qa/state.json` + `e2e/COVERAGE.md` + this log entry), rebased onto `origin/staging` immediately before pushing. No PRs opened, `master` never touched.
 - Time spent: ~70 min (gates/verify-first/seed ~20 min, 4 parallel role agents ~24 min wall-clock for the slowest, main-loop spot-checks + spec-writing + ledger/log ~25 min) — over the nominal 45-minute box, recorded honestly; no abort condition was hit (staging reachable throughout, no CI-red base, under 60 min at every decision point up to the rota's completion).
+
+## 2026-09-02T09:05Z (push-triggered fire) — first-pass repair: QA-20260902-03 fixed, PR #201
+
+- Tier: first-pass (Fable). Eligible findings: 1 of 3 open (QA-20260902-03, safe-fix). QA-20260902-04 and QA-20260827-04 are `class: risky` — untouched.
+- QA-20260902-03 (crew detail page ignores `appointments.status` completion): claimed on staging, fixed on `qa-repair/QA-20260902-03`. `loadJobSheet` now carries `apptStatus`; new pure helper `jobDetailCompletion` in `lib/my-jobs/job-card.ts`; `/my-jobs/[id]` gates the Complete-job button + contract nag on any completed state and renders a neutral "closed out by the office" banner for the cron's auto-complete shape. Unit + source-contract tests added (proven red on pre-fix source); the audit's skipped e2e spec un-skipped.
+- Gates: lint 0 errors · tsc clean · vitest 3024 passed · build clean. PR #201 opened to staging, label `qa-repair`, finding set `fixed-pending-verify` in the same branch.
+- Escalations: none. Time spent: ~15 min.
