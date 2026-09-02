@@ -75,38 +75,60 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-02 - full-PRD second QA pass CLOSED OUT; 15 more PRs; staging green; zero open)
+## Current State (2026-09-02 - THIRD QA pass closed out; 35 findings; 2 PRs; staging green; zero open)
 
-Last touched: 2026-09-02 on i9. A 23-reviewer adversarial second pass over the ENTIRE master->staging
-promotion payload (78 substantive commits, gate 1 -> #186), every finding judged against HEAD and
-attacked by two refuters: 16 confirmed / 0 refuted-of-verified / 19 LOW. ALL fixed same-day across
-15 PRs (#191-#198, #202-#205 + docs), every one gate-certified on a stacked merged tree before
-merging, every staging run green. The suite grew 2807 -> 3166 tests.
+Last touched: 2026-09-02 on i9. A third adversarial pass (Opus 5) over the whole un-promoted
+payload - `master...staging` @ 79f5a98, 473 files - reviewed as ONE TREE rather than per-PR diffs,
+which is why it found what two earlier per-PR passes did not. 14 subsystem reviewers -> dedup ->
+two refuters per finding (refute-by-default) -> completeness critic; 96 agents, 0 failures.
+**35 confirmed / 4 contested / 2 refuted / 8 coverage gaps.** All closed in 2 PRs: **#210** (the
+5 HIGHs) and **#211** (the other 30 + a live-diagnosed defect). 33 fixed, 2 judged
+NO_CHANGE_NEEDED on their merits. Suite 3166 -> 3350.
 
-Highlights (full detail in each PR body):
-- **#191** the chase cron read the ACCEPTANCE-time policy snapshot on unaccepted quotes (NULL ->
-  residential), so commercial clients got "pay the £100 deposit" chases and 30-day auto-lapse.
-  Pre-acceptance stages now resolve LIVE from clients.is_company; commercial excluded from lapse.
-- **#192** settle-in-full's covering transfer could never reconcile (whole-quote wants the sum of
-  ALL recorded payments, deposit included). New office-picked commitment+balance pair suggestion:
-  exact pennies, server-side re-derive, CAS claim, truthful under-claim staging, never auto.
-- **#194** crate billing matched the SIGNED terms: one calendar month minimum (migration 0115,
-  min_kind frozen per let, triple-guarded backfill; runbook row 11, applied to staging).
-- **#195/#193/#198** brand honesty: a failed brands read REFUSES instead of mis-filing a lead;
-  13 error strings + PDF names + Reply-To + card copy all brand-resolved; accept-flow joined the
-  leak scan.
-- **#196/#197** ledger cutover safety: per-payment provider stamps on refunds, void-aware Xero
-  idempotency keys, the watchdog probes the CONFIGURED provider and a green Zoho can no longer
-  clear a Xero lock-out.
-- **#203/#204/#205/#202** the 19 LOWs: typo-proof ref families, brand-stamped WP ingest, honest
-  unaccounted counts, UK-pinned dialogs, fail-soft directions corrected, e2e teardowns that throw.
+The five HIGHs (#210):
+- **commercial credit control went silent exactly when it broke** - `loadBookingRows` is fail-soft
+  (`fetchAllRows` logs-and-breaks; secondary reads never inspected `error`), so a DB failure reached
+  `sweepCommercialOverdue` as an EMPTY LEDGER, which RESOLVED both alarms and reported 0 rather than
+  the -1 reserved for an unread sweep. Commercial is never chased by email, so nothing else notices.
+  The loader now takes `{ strict }`; the old guarantee test mocked a rejection the real loader
+  cannot produce, so it proved nothing.
+- **a late booking's date-confirm email said "nothing more to pay"** over a balance invoice already
+  in the customer's inbox, days before the move.
+- **a settle-in-full transfer left one half unclaimed** - two payments recorded, one `match_kind`
+  stamped, so a later genuine transfer for the other half AUTO-RECONCILED as explained, hiding a
+  refund we owe. What a row claims is now re-derived from the ledger.
+- **"Xero was never authorised" classified as transient**, so the watchdog stayed green through a
+  lock-out while every invoice raise failed.
+- **the storage invoice sweep swallowed its let read** and sent under the DEFAULT brand, stamping
+  `emailed_at` so the mis-branded copy is the only one that customer ever gets.
 
-**Routed to Peter (ClickUp), not patched:** card kill-switch scope asymmetry (869ett5wy),
-payments-card invoiced inference (869ett5y8), terms-promise-card wording pre-activation (869eu70v3).
-`publicUrlFor()` serving Marley-domain terms URLs to every brand lands with gate 15's per-brand
-terms_url. **Blockers:** staging Zoho refresh token still dead (re-mint per
-scripts/zoho-staging-token.mjs). **Next:** gate 15 (Mark's terms doc), gate 16's rendered-page leak
-check, QA-20260827-04, then the 18 September promotion - the runbook now carries 0104-0115 with
-0115 in the before-deploy block.
+The 30 (#211): the biggest cluster is SEVEN more instances of the swallowed-read family (#195 fixed
+it for `listActiveBrands` only) - `getBrand`, `createDraftQuote`, `createAppointment`, the
+follow-ups page, and two blank-phone borrows. Plus: a commercial booking that never got a diary
+slot; the Pitmans hosted-template key scheme that would have made EVERY Pitmans template silently
+inert; two lead rails that could skip the other brand's enquiries; Xero's tenant lookup discarding a
+freshly rotated refresh token; `/sheet`'s missing brand chip (and its 500 on a brands read);
+migration **0116** correcting 0115's backfill guard (applied to staging, runbook updated). And the
+leak scan, which reported "0 leaks" while covering ZERO files under `lib/comms/` - now 82 files,
+with the gap note saying plainly that anything off the manifest is UNSCANNED, not clean.
+
+**Diagnosed live, correcting the record:** the four red money e2e specs (QA-20260902-06, filed as a
+suspected #205 regression) are **neither a regression nor flake - the staging Zoho org spent its
+1,000-call DAILY QUOTA**, burned by our own CI volume. `POST /oauth/v2/token` -> 200 with a valid
+token while `GET /invoice/v3/invoices` -> 429 code=45: a green auth layer over a dead integration,
+the same trap as the 2026-08-27 lock-out. **PR #205 is cleared, and the previously recorded blocker
+"staging Zoho refresh token dead" was WRONG - the token is fine.** Nothing classified a 429, so a
+spent quota raised no alarm at all; #211 adds `reportLedgerRateLimited` on its own key with its own
+remedy copy (a quota resets at midnight - it must never borrow the lock-out's "re-enable the user").
+Prod runs against the same cap on the live org.
+
+**Still Peter's:** the 3 ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3); finding 36's
+two-theme-per-brand call (`brands.ledger_branding_id` has zero consumers, but the obvious remedy is
+the one `docs/ledger-adapter-design.md` rejected); and the critic's gap that **qa-auto-merge.yml's
+risky-path guard never grew to cover the new money rails** - `lib/ledger/**`, `lib/bank-feed/**`,
+`lib/storage/raise-storage-invoices.ts` and `lib/brand.ts` all sit OUTSIDE it, so a `pitmans-gate`
+PR touching only those robot-merges unreviewed. **Next:** gate 15 (Mark's terms doc), gate 16's
+rendered-page leak check, QA-20260827-04, then the 18 September promotion - the runbook now carries
+0104-0116 with 0115+0116 in the before-deploy block and a verification query for each.
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
