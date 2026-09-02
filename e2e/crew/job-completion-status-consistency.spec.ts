@@ -34,7 +34,7 @@ test.describe("Crew — job completion status consistency", () => {
 
     const { data: client, error: clientErr } = await sb
       .from("clients")
-      .insert({ name: `${E2E_MARKER} completion-status client`, notes: E2E_MARKER })
+      .insert({ display_name: `${E2E_MARKER} completion-status client`, notes: E2E_MARKER })
       .select("id")
       .single();
     if (clientErr || !client) throw new Error(`Seeding marker client failed: ${clientErr?.message}`);
