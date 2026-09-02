@@ -6,8 +6,11 @@
  *
  * Two selectable amount cards above a single bank-transfer block whose Amount
  * line follows the selection while the REFERENCE never changes. One reference,
- * two invoices: a single transfer covering both is the case the office's
- * whole-quote link already settles (#73, exact pennies, human-picked).
+ * two invoices: a single transfer covering both is settled by the office's
+ * covering-pair confirm on /payments (coveringPairLinks + recordCoveringPairAction
+ * — exact pennies against the OPEN commitment + balance pair, human-picked,
+ * records both payments). NOT the whole-quote link: that works on SETTLED sums,
+ * and the recorded deposit means the settled sum never equals this transfer.
  *
  * Choosing "settle in full" raises the T-7 balance invoice early, so it is a
  * real server action rather than a display toggle. Three consequences shape

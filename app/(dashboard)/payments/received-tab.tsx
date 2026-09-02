@@ -20,7 +20,8 @@ import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import { BrandFilter } from "@/components/brand/brand-filter";
 import { Card } from "@/components/ui/card";
 import { bankFeedConfigured, loadLedgerItems } from "@/lib/bank-feed/sync";
-import { suggestSettledLink, type SettledItem } from "@/lib/bank-feed/match";
+import { suggestSettledLink, type OpenItem, type SettledItem } from "@/lib/bank-feed/match";
+import { coveringPairLinks, type CoveringPairLink } from "@/lib/bank-feed/whole-quote";
 import { isAcquirerSettlement } from "@/lib/bank-feed/parse";
 import { BankFeedSection, type BankFeedTx } from "@/components/payments/bank-feed-section";
 import { dayHeading, money, timeOf, ukDayOf } from "./format";
@@ -540,17 +541,19 @@ export async function ReceivedTab({
     // £1,100 "DINGLEY" while Emma Dingley's balance is on the books). Display
     // layer only — auto-reconcile stays reference-only; the office taps Link.
     const unmatchedRows = unmatchedRes.data ?? [];
+    const mismatchRows = misRes.data ?? [];
     const hintByTxId = new Map<string, SettledItem>();
-    if (unmatchedRows.length) {
+    const pairHintByTxId = new Map<string, CoveringPairLink>();
+    if (unmatchedRows.length || mismatchRows.length) {
       // Fail SOFT. loadLedgerItems reads strictly (it throws rather than hand
       // back half a ledger), which is right for the matcher — but here it only
       // decorates rows with a "looks already recorded" hint. Losing the hint
       // is a lost convenience; losing the money page is a lost money page.
-      const settled = await loadLedgerItems(sb).then(
-        (l) => l.settled,
+      const ledger = await loadLedgerItems(sb).then(
+        (l) => l,
         (e) => {
           log.error("payments.link-hints.failed", { ...errorContext(e) });
-          return [] as SettledItem[];
+          return { open: [] as OpenItem[], settled: [] as SettledItem[] };
         },
       );
       for (const r of unmatchedRows) {
@@ -561,9 +564,22 @@ export async function ReceivedTab({
             description: (r.description as string | null) ?? null,
             counterparty: (r.counterparty as string | null) ?? null,
           },
-          settled,
+          ledger.settled,
         );
         if (hint) hintByTxId.set(r.id as string, hint);
+      }
+      // Covering-pair hints for the mismatch queue: the gate-9c settle-in-full
+      // transfer names its quote but equals no single open item — it equals the
+      // open commitment + balance SUM to the penny. Display layer only, on the
+      // quote the transfer itself names; the office confirms and BOTH payments
+      // are recorded (app/actions/bank-feed.ts recordCoveringPairAction). Rows
+      // parked as possible duplicates are money we may owe back — never hinted.
+      for (const r of mismatchRows) {
+        if (!r.matched_quote_id || r.match_confidence === "duplicate") continue;
+        const pair = coveringPairLinks(ledger.open, Math.round(Number(r.amount) * 100)).find(
+          (p) => p.quoteId === r.matched_quote_id,
+        );
+        if (pair) pairHintByTxId.set(r.id as string, pair);
       }
     }
     // Real activity for the range, plus the acquirer payouts from the separate
@@ -625,7 +641,15 @@ export async function ReceivedTab({
     const lastSync = syncAgeLabel(last?.finished_at as string | null, last?.status === "ok");
     bank = {
       suggested: (sugRes.data ?? []).map(toTx),
-      mismatches: (misRes.data ?? []).map(toTx),
+      mismatches: mismatchRows.map((r) => {
+        const pair = pairHintByTxId.get(r.id as string);
+        return {
+          ...toTx(r),
+          coveringPairHint: pair
+            ? { commitmentAmount: pair.commitmentAmount, balanceAmount: pair.balanceAmount }
+            : null,
+        };
+      }),
       feedRows: feedData.map(toTx),
       unmatched: unmatchedRows.map((r) => {
         const hint = hintByTxId.get(r.id as string);

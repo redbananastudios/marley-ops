@@ -85,3 +85,92 @@ export function wholeQuoteLinks(
 export function describeKinds(kinds: readonly SettledKind[]): string {
   return kinds.join(" + ");
 }
+
+/**
+ * The OPEN-side sibling of `wholeQuoteLinks`, for the settle-in-full transfer.
+ *
+ * Gate 9c ("settle in full" at the commitment step) tells the customer to send
+ * ONE transfer covering commitment + balance — e.g. £1,900 = £400 + £1,500 —
+ * under the quote ref. No existing path can explain that transfer:
+ * `wholeQuoteLinks` works on SETTLED items and needs the sum of ALL recorded
+ * payments (settle-in-full always has a prior recorded deposit, so that sum is
+ * deposit + commitment + balance — never what the customer sent), and the
+ * per-item matcher/attach are strictly single-item exact-amount. The money
+ * landed as a permanent mismatch row while the customer kept being chased for
+ * the commitment they had paid.
+ *
+ * This offers exactly one extra shape — the open commitment + open balance
+ * PAIR on one quote, when the transfer equals their sum **to the penny**. It is
+ * deliberately NOT a general "any subset of open items" search: the pair is the
+ * only sum the product ever asks a customer to send in one transfer, subsets
+ * would multiply coincidental sums, and two candidate subsets on a quote would
+ * have to yield nothing anyway (ambiguity never guesses). Display-layer only,
+ * like `suggestSettledLink`: the office confirms with a tap and BOTH payments
+ * are recorded through the normal paid pipelines — nothing is ever automatic.
+ */
+export interface OpenLike {
+  quoteId: string;
+  quoteRef: string;
+  customer: string | null;
+  kind: SettledKind;
+  amount: number;
+}
+
+export interface CoveringPairLink {
+  quoteId: string;
+  quoteRef: string;
+  customer: string | null;
+  /** Always the settle-in-full pair, in ledger order. */
+  kinds: ["commitment", "balance"];
+  commitmentAmount: number;
+  balanceAmount: number;
+  /** The summed amount — equals the transfer exactly. */
+  amount: number;
+}
+
+/**
+ * Quotes whose open commitment + open balance, summed, come to exactly
+ * `txPennies`. A quote with anything other than exactly ONE open commitment and
+ * exactly ONE open balance yields nothing (two candidate pairs is ambiguity;
+ * a lone item is the per-item path's territory), and a zero-amount half is a
+ * disguised single item, so it never forms a pair either. Two QUOTES that both
+ * sum are both returned — a human picks between labelled options; the
+ * mismatch-row hint filters to the quote the transfer itself names.
+ */
+export function coveringPairLinks(
+  open: readonly OpenLike[],
+  txPennies: number,
+): CoveringPairLink[] {
+  if (!Number.isFinite(txPennies) || txPennies <= 0) return [];
+
+  const byQuote = new Map<string, OpenLike[]>();
+  for (const o of open) {
+    const list = byQuote.get(o.quoteId);
+    if (list) list.push(o);
+    else byQuote.set(o.quoteId, [o]);
+  }
+
+  const out: CoveringPairLink[] = [];
+  for (const items of byQuote.values()) {
+    const commitments = items.filter((i) => i.kind === "commitment");
+    const balances = items.filter((i) => i.kind === "balance");
+    if (commitments.length !== 1 || balances.length !== 1) continue;
+    const commitment = commitments[0];
+    const balance = balances[0];
+    const comPennies = pennies(commitment.amount);
+    const balPennies = pennies(balance.amount);
+    if (comPennies <= 0 || balPennies <= 0) continue;
+    // Pennies, never pounds — same floating-point rule as wholeQuoteLinks.
+    if (comPennies + balPennies !== txPennies) continue;
+    out.push({
+      quoteId: commitment.quoteId,
+      quoteRef: commitment.quoteRef,
+      customer: commitment.customer,
+      kinds: ["commitment", "balance"],
+      commitmentAmount: commitment.amount,
+      balanceAmount: balance.amount,
+      amount: (comPennies + balPennies) / 100,
+    });
+  }
+  return out.sort((a, b) => a.quoteRef.localeCompare(b.quoteRef));
+}

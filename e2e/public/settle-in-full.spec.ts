@@ -47,8 +47,9 @@ test.describe("Customer — settle in full at the commitment step (/q)", () => {
       const bank = page.getByText("Pay by bank transfer").locator("..");
       await expect(bank.getByText(gbp(C.commitment), { exact: true })).toBeVisible();
       // The reference is the quote ref whichever amount is chosen — one
-      // reference, two invoices, settled together by the office's whole-quote
-      // link (#73) when a single transfer covers both.
+      // reference, two invoices, settled together by the office's covering-pair
+      // confirm on /payments (recordCoveringPairAction — exact pennies against
+      // the OPEN commitment + balance pair) when a single transfer covers both.
       await expect(bank.getByText(C.quoteRef, { exact: true })).toBeVisible();
     });
   });
