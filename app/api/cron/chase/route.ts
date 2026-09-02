@@ -8,6 +8,7 @@ import { sendReviewRequest } from "@/lib/comms/review-request";
 import { acceptUrlFor, createBalanceInvoiceFlow, ensureAcceptToken } from "@/lib/quote/accept-flow";
 import {
   chaseTextToHtml,
+  chaseableQuotes,
   depositChaseEmail,
   depositLabel,
   dueChaseStep,
@@ -28,7 +29,7 @@ import {
 import { ukTimeAt } from "@/lib/uk-time";
 import { legacyLocked } from "@/lib/legacy";
 import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
-import { policyOfQuote, requestedDeposit } from "@/lib/payments-policy";
+import { policyOfQuote, requestedDeposit, resolvePaymentPolicy } from "@/lib/payments-policy";
 import { getBusinessSettings } from "@/lib/settings";
 import { accountsFromFor, ownerIdentity, type OwnerIdentity } from "@/lib/comms/sender";
 import { type Brand } from "@/lib/brand";
@@ -95,6 +96,8 @@ interface LeadRow {
 interface QuoteRow {
   id: string;
   lead_id: string;
+  /** The quote's own client — outranks the lead's for the live policy resolve. */
+  client_id: string | null;
   quote_ref: string;
   status: string;
   /** Brand slug — resolves the chase's copy, From and template set (§3.5). */
@@ -364,7 +367,7 @@ export async function GET(req: Request) {
 
   const { data: quotes, error: quotesError } = await sb
     .from("quotes")
-    .select("id, lead_id, quote_ref, status, brand, payment_policy, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
+    .select("id, lead_id, client_id, quote_ref, status, brand, payment_policy, accept_token, email_sent_at, accepted_at, deposit_paid_at, moving_date, created_at, deposit_amount, agreed_price, grand_total")
     .in("lead_id", leads.map((l) => l.id))
     .in("status", ["sent", "accepted"]);
   if (quotesError) {
@@ -381,9 +384,50 @@ export async function GET(req: Request) {
   // NULL on every UNACCEPTED quote - which is exactly the population the quote
   // chase exists to chase. That filter would have silently stopped chasing
   // every unaccepted residential quote.
-  const allQuotes = (quotes ?? []).filter(
-    (q) => policyOfQuote(q as { payment_policy?: string | null }) !== "commercial",
-  ) as QuoteRow[];
+  //
+  // And that same NULL is why the snapshot ALONE cannot carry the exclusion:
+  // payment_policy is written AT ACCEPTANCE, so on every 'sent' quote it reads
+  // residential — which is exactly backwards for the one stage that operates
+  // exclusively on unaccepted quotes. Pre-acceptance the policy resolves LIVE
+  // from clients.is_company (quote's own client first, the lead's as fallback
+  // — snapshotPaymentPolicy's order; /q's review gate documents the same
+  // split). Post-acceptance the snapshot governs, so a client-type change can
+  // never alter an in-flight booking's schedule. The decision itself is pure
+  // and test-locked in chaseableQuotes (lib/quote/chase.ts).
+  const clientIdOfLead = new Map<string, string | null>(
+    (leads as LeadRow[]).map((l) => [l.id, l.client_id]),
+  );
+  const liveResolveClientIds = [
+    ...new Set(
+      (quotes ?? [])
+        .filter((q) => q.status !== "accepted")
+        .map((q) => q.client_id ?? (q.lead_id ? clientIdOfLead.get(q.lead_id) : null) ?? null)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const commercialClients = new Set<string>();
+  if (liveResolveClientIds.length) {
+    // Error-checked and THROWN like the two driving queries above: a failed
+    // clients read silently resolving every commercial client to residential
+    // would email the exact chases this filter exists to stop. "I could not
+    // check" must not act as "residential".
+    const { data: clientRows, error: clientsError } = await sb
+      .from("clients")
+      .select("id, is_company")
+      .in("id", liveResolveClientIds);
+    if (clientsError) {
+      log.error("cron.chase.clients_query_failed", { error: clientsError.message });
+      throw new Error(`chase: clients query failed — ${clientsError.message}`);
+    }
+    for (const c of clientRows ?? []) {
+      if (resolvePaymentPolicy(c) === "commercial") commercialClients.add(c.id as string);
+    }
+  }
+  const allQuotes = chaseableQuotes(
+    (quotes ?? []) as QuoteRow[],
+    commercialClients,
+    clientIdOfLead,
+  );
 
   // Survey-derived owner fallback: a lead with no explicit estimator_id is
   // owned by whoever is assigned its booked survey — the SAME rule as the

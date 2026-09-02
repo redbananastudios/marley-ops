@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { balanceInvoiceDue } from "@/lib/payments/balance-invoice-due";
+import { chaseableQuotes } from "@/lib/quote/chase";
 
 /**
  * "Commercial is excluded from the chase engine entirely" (PRD §3.10), and
@@ -27,8 +28,25 @@ const CODE = CRON.split("\n")
 describe("every chase stage excludes commercial", () => {
   it("the shared quote array is filtered once, covering quote + deposit chases", () => {
     // Both stages read allQuotes via pickQuote, so one filter is the whole
-    // exclusion for two of the five.
-    expect(CRON).toContain('policyOfQuote(q as { payment_policy?: string | null }) !== "commercial"');
+    // exclusion for two of the five. It must be the policy-aware helper, not a
+    // bare snapshot read: payment_policy is snapshotted AT ACCEPTANCE, so it is
+    // NULL on every sent quote — and the quote chase is the one stage operating
+    // exclusively on unaccepted quotes. A snapshot-only filter excluded
+    // commercial from every stage EXCEPT the only one that could reach an
+    // unaccepted commercial client (day-2 "accept it online", day-5 "pay the
+    // £100 deposit" — to a client on account terms whose /q page has no accept
+    // action and says "Nothing to pay now").
+    expect(CRON).toContain("chaseableQuotes(");
+  });
+
+  it("the cron resolves the live client policy for pre-acceptance quotes", () => {
+    // The same lookup /q's review gate uses (clients.is_company via
+    // resolvePaymentPolicy) — and a failed clients read must THROW like the
+    // other two driving queries, never silently classify every commercial
+    // client as residential and email them.
+    expect(CODE).toMatch(/from\("clients"\)/);
+    expect(CODE).toMatch(/select\("id, is_company"\)/);
+    expect(CODE).toMatch(/clients query failed/);
   });
 
   it("filters in CODE, never as a .neq on the query", () => {
@@ -103,5 +121,102 @@ describe("the T-7 balance raise refuses commercial", () => {
     expect(balanceInvoiceDue({ ...quote, payment_policy: "residential" }, lead, TODAY, T7)).toBe(
       true,
     );
+  });
+});
+
+describe("chaseableQuotes — the QUOTED stage excludes commercial by the LIVE client", () => {
+  /**
+   * payment_policy is snapshotted AT ACCEPTANCE (snapshotPaymentPolicy), so on
+   * every 'sent' quote the column is NULL and policyOfQuote(null) reads
+   * residential — exactly backwards for the one stage that operates exclusively
+   * on unaccepted quotes. Pre-acceptance the policy resolves LIVE from
+   * clients.is_company via the quote's client (lead's client as fallback), the
+   * same pattern /q's review gate documents. Post-acceptance the snapshot
+   * governs: a client-type change must never alter an in-flight booking's
+   * schedule — that is the whole point of snapshotting at acceptance.
+   *
+   * Exclusion from this one array is the WHOLE of the QUOTED stage for a lead:
+   * pickQuote(allQuotes, lead.id, "sent") returns null, so no day-2/5/10 chase
+   * email, no 30-day auto-lapse to lost, and no hand-to-human task. A
+   * commercial quote is office-confirmed, not self-accepted (PRD §3.10 — no
+   * accept action on /q), so a silent lapse would cancel a booking the office
+   * may be mid-negotiation on; "excluded from the chase engine entirely"
+   * covers the lapse too.
+   */
+  const commercialClients = new Set(["client-commercial"]);
+  const leadClients = new Map<string, string | null>([
+    ["lead-commercial", "client-commercial"],
+    ["lead-residential", "client-residential"],
+    ["lead-clientless", null],
+  ]);
+
+  const sentCommercial = {
+    id: "q-comm",
+    status: "sent",
+    lead_id: "lead-commercial",
+    payment_policy: null as string | null,
+    client_id: null as string | null,
+  };
+  const sentResidential = {
+    id: "q-resi",
+    status: "sent",
+    lead_id: "lead-residential",
+    payment_policy: null as string | null,
+    client_id: null as string | null,
+  };
+
+  it("a commercial client's sent quote is excluded — no chase email, no auto-lapse", () => {
+    expect(chaseableQuotes([sentCommercial], commercialClients, leadClients)).toEqual([]);
+  });
+
+  it("residential control: a sent quote passes through untouched", () => {
+    // Residential behaviour must be byte-identical before and after the live
+    // resolve — the filter may only ever REMOVE commercial rows.
+    expect(chaseableQuotes([sentResidential], commercialClients, leadClients)).toEqual([
+      sentResidential,
+    ]);
+  });
+
+  it("the quote's own client outranks the lead's — same order as snapshotPaymentPolicy", () => {
+    const ownClient = { ...sentResidential, id: "q-own", client_id: "client-commercial" };
+    expect(chaseableQuotes([ownClient], commercialClients, leadClients)).toEqual([]);
+    const ownResidential = { ...sentCommercial, id: "q-own-r", client_id: "client-residential" };
+    expect(chaseableQuotes([ownResidential], commercialClients, leadClients)).toEqual([
+      ownResidential,
+    ]);
+  });
+
+  it("no client anywhere resolves residential — the direction that chases", () => {
+    // Guessing "commercial" for an unclassified lead would silently switch the
+    // chase off — and the surface that would show the mistake is the chase
+    // queue the guess just emptied (resolvePaymentPolicy's documented rule).
+    const clientless = { ...sentCommercial, id: "q-none", lead_id: "lead-clientless" };
+    expect(chaseableQuotes([clientless], commercialClients, leadClients)).toEqual([clientless]);
+  });
+
+  it("accepted quotes stay governed by the snapshot, never the live client", () => {
+    // A client flipped to commercial AFTER acceptance must not pull an
+    // in-flight residential booking out of its ladder mid-chase.
+    const accepted = { ...sentCommercial, id: "q-acc", status: "accepted" };
+    expect(chaseableQuotes([accepted], commercialClients, leadClients)).toEqual([accepted]);
+  });
+
+  it("an accepted commercial snapshot is still excluded", () => {
+    const acceptedCommercial = {
+      ...sentResidential,
+      id: "q-acc-c",
+      status: "accepted",
+      payment_policy: "commercial" as string | null,
+    };
+    expect(chaseableQuotes([acceptedCommercial], commercialClients, leadClients)).toEqual([]);
+  });
+
+  it("a stray pre-acceptance snapshot saying commercial also excludes", () => {
+    // Belt and braces: the snapshot should not exist on a sent quote, but if
+    // one ever does say commercial, believing it fails in the safe direction
+    // (a missed chase is recoverable by the office; a chase emailed to an
+    // account-terms client is the defect).
+    const stray = { ...sentResidential, id: "q-stray", payment_policy: "commercial" as string | null };
+    expect(chaseableQuotes([stray], commercialClients, leadClients)).toEqual([]);
   });
 });
