@@ -22,6 +22,7 @@ import {
   COMMITMENT_DUE_DAYS_BEFORE,
   COMMITMENT_FLAG_GRACE_HOURS,
   CONFIRM_CALL_DAYS_BEFORE,
+  policyOfQuote,
 } from "@/lib/payments-policy";
 import { ukDayOf } from "@/lib/sales-report";
 
@@ -57,6 +58,69 @@ export function isQuoteLapsed(sentIso: string | null, now: Date = new Date()): b
   if (!sentIso) return false;
   const t = new Date(sentIso).getTime();
   return !Number.isNaN(t) && now.getTime() >= t + QUOTE_LAPSE_DAYS * DAY_MS;
+}
+
+/* ------------------------------------------- commercial exclusion (PRD §3.10) */
+
+/** The fields `chaseableQuotes` decides from. */
+export interface ChasePolicyQuote {
+  status: string;
+  lead_id: string;
+  payment_policy?: string | null;
+  client_id?: string | null;
+}
+
+/**
+ * The chase engine's commercial exclusion (PRD §3.10: "Commercial is excluded
+ * from the chase engine entirely"), applied to the ONE array that feeds both
+ * the quote chase and the deposit chase. Pure so it is testable; the cron does
+ * the IO (the clients read that builds `commercialClients`).
+ *
+ * Two sources of truth, chosen by acceptance state — the same split
+ * app/q/[token]/page.tsx documents:
+ *
+ *  - ACCEPTED → the snapshot governs (`policyOfQuote`). Both accept paths
+ *    stamp `payment_policy` at acceptance, and a client-type change afterwards
+ *    must never alter an in-flight booking's schedule — that is the whole
+ *    point of snapshotting AT acceptance.
+ *  - PRE-ACCEPTANCE → resolve LIVE from the client (`commercialClients` is the
+ *    set of client ids whose `is_company` resolves commercial; quote's own
+ *    client first, the lead's as fallback — snapshotPaymentPolicy's order).
+ *    The snapshot cannot carry the exclusion here because it does not exist
+ *    yet: `payment_policy` is NULL on every sent quote, so a snapshot-only
+ *    filter read every unaccepted commercial quote as residential and chased
+ *    it — "accept it online", "pay the £100 deposit" — at a client on account
+ *    terms whose /q page has no accept action and says "Nothing to pay now".
+ *
+ * Exclusion from this array is the WHOLE of the QUOTED stage for a lead — no
+ * chase emails, no hand-to-human task, and no 30-day auto-lapse. The lapse is
+ * deliberately covered too: a commercial quote is office-confirmed, not
+ * self-accepted (PRD §3.10 — no accept action on /q), so auto-lapsing one to
+ * "lost — no response" would silently cancel a booking the office may be
+ * mid-negotiation on. The lapse's own rationale (the accept link expires at 30
+ * days) does not apply to a quote that never had an accept button. Commercial
+ * quotes are the office's to close or lose, by hand.
+ *
+ * A stray commercial snapshot on a pre-acceptance quote (should not exist) is
+ * still honoured: believing it fails in the safe direction — a missed chase is
+ * recoverable by the office, a chase emailed to an account-terms client is the
+ * defect. An unknown client resolves residential, `resolvePaymentPolicy`'s
+ * documented default: guessing commercial would switch the chase off, and the
+ * surface that would show the mistake is the queue the guess just emptied.
+ */
+export function chaseableQuotes<T extends ChasePolicyQuote>(
+  quotes: T[],
+  commercialClients: ReadonlySet<string>,
+  clientIdOfLead: ReadonlyMap<string, string | null | undefined>,
+): T[] {
+  return quotes.filter((q) => {
+    if (policyOfQuote(q) === "commercial") return false;
+    if (q.status !== "accepted") {
+      const clientId = q.client_id ?? clientIdOfLead.get(q.lead_id) ?? null;
+      if (clientId && commercialClients.has(clientId)) return false;
+    }
+    return true;
+  });
 }
 
 /* ------------------------------------------------------------- loss reasons */
