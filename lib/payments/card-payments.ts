@@ -349,6 +349,10 @@ async function runPaidPipeline(
       amountPence: row.amount_pence,
       // Last 4 for the receipt (masked PAN → digits only → last four).
       cardLast4: mask ? String(mask).replace(/\D/g, "").slice(-4) || null : null,
+      // The charge's own row id salts the ledger payment's idempotency key —
+      // money truth follows the charge, and two distinct same-amount charges
+      // must never collide inside Xero's replay window.
+      paymentIdentity: row.id,
     });
     if (paid.already) {
       // Deposit was ALSO marked paid another way (BACS tap, or the two-tab

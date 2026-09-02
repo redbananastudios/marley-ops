@@ -100,8 +100,19 @@ const REF_PATTERNS = [
   // is deliberately STATIC — this matcher is pure/sync (no DB read), so it
   // cannot consult brands.ref_prefix, which remains the source of truth.
   // Extend the alternation by hand when brand 3 lands (gate 6).
-  /(?:MM|PM)[RC]\d{3,}/gi,
-  /MM-\d{6}-\d{3}/gi, // legacy MM-YYMMDD-NNN
+  //
+  // The extraction stays UNANCHORED on purpose (bank refs glue words together:
+  // "XMMR123" is Marley's MMR123 behind a stray character) — EXCEPT when the
+  // character before the prefix is the OTHER family's leading letter. "PMMR017"
+  // reads two ways: Pitmans' PMR017 with a doubled M, or Marley's MMR017 behind
+  // a stray P — and resolving it (the unanchored regex read it as MMR017) lets
+  // a mistyped ref name the other brand's quote, which reconcileSettled then
+  // acts on with NO human tap. Cross-family ambiguity yields nothing; the row
+  // stays in "Unmatched inbound" for a human. A same-family double letter
+  // ("MMMR017", "PPMR017") names the same ref under both readings, so it still
+  // extracts. Extend the lookbehinds alongside the alternation for brand 3.
+  /(?:(?<!P)MM|(?<!M)PM)[RC]\d{3,}/gi,
+  /MM-\d{6}-\d{3}/gi, // legacy MM-YYMMDD-NNN (Marley-only; no PM counterpart exists)
 ];
 const STORAGE_REF = /MMS-[A-Za-z0-9]{6,}/i;
 
@@ -138,6 +149,11 @@ const GENERIC_NAME_TOKENS = new Set([
   "PAYMENT", "PAYMENTS", "PAID", "INVOICE", "TRANSFER", "BANK", "ACCOUNT",
   "DEPOSIT", "BALANCE", "COMMITMENT", "MOVE", "MOVES", "MOVING", "REMOVAL",
   "REMOVALS", "MARLEY", "THANKS", "THANK",
+  // Pitmans' own vocabulary, for exactly the reason MARLEY is here: brand
+  // words ride in the free text of that brand's transfers, so sharing one
+  // with a (commercial) customer's display name proves nothing about WHO
+  // paid. "PITMAN" singular is deliberately absent — it is a real surname.
+  "PITMANS", "STORAGE",
 ]);
 
 /** Identity-bearing name tokens ≥3 chars, uppercased — "E Dingley" → ["DINGLEY"]. */

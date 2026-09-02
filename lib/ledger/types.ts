@@ -204,6 +204,18 @@ export interface RecordPaymentInput {
   reference?: string;
   /** yyyy-mm-dd (UK day); defaults to today. */
   date?: string;
+  /**
+   * A caller-held identity that tells THIS payment apart from another genuine
+   * payment of the same amount on the same invoice on the same day — a bank
+   * transaction id, a card_payments row id. Xero folds it into the write's
+   * Idempotency-Key: without it the key is invoice|amount|date, so two
+   * distinct same-shaped payments inside Xero's ~6-minute replay window
+   * collide and the second is silently swallowed; with it they carry distinct
+   * keys, while a timeout retry of the SAME payment (same identity) still
+   * deduplicates. Pass it whenever you have one. Zoho ignores it (no
+   * idempotency header exists there).
+   */
+  paymentIdentity?: string;
 }
 
 export interface RefundCreditNoteInput {

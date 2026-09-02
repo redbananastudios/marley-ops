@@ -224,6 +224,14 @@ const wpPullResponseSchema = z.object({
    *  window that cannot advance shows up as `unaccounted` the moment it costs
    *  a row. */
   min_id: z.number().int().positive().nullable().optional(),
+  /** Rows past the last id this page reached — the plugin counts them itself,
+   *  so the accounting below can reason about rows that still EXIST rather
+   *  than about our own held set, which quietly diverges from the table the
+   *  moment a WordPress row is deleted (GDPR erasure, install-test cleanup).
+   *  Optional in SHAPE only: an endpoint that omits it falls back to the
+   *  total-based arithmetic, which can only OVER-state what is accounted for
+   *  by rows we hold that no longer exist — never under-state it. */
+  remaining: z.number().int().nonnegative().optional(),
   submissions: z.array(z.unknown()),
 });
 
@@ -496,17 +504,48 @@ export async function syncWpLeads(
   // unlandable submission cannot page every 15 minutes as a dead rail — but a
   // submission we have seen and cannot land is a customer waiting, so it must
   // sit visibly open until it lands or a human deals with it.
+  //
   // Prove nothing is missing, rather than inferring it from a window that by
-  // construction cannot show what it excluded. `total` is the plugin's whole
-  // table; what we can account for is what we already hold, plus what this
-  // poll landed, plus what this poll saw and could not land. Anything left
-  // over is a submission this rail has never been offered.
+  // construction cannot show what it excluded — and count only what the
+  // ENDPOINT can vouch still exists. The old arithmetic set every held row
+  // against `total`, but a held row DELETED on the WordPress side (GDPR
+  // erasure, install-test cleanup) is not in `total` any more, so each one
+  // silently vouched for a live row this rail has never been offered — with
+  // enough of them, `unaccounted` read 0 while real submissions sat unreached
+  // beyond a pinned cursor. So the accounting decomposes over what this poll
+  // PROVED instead: every existing row at or below the cursor is held (the
+  // cursor is by construction the contiguous-held walk), every page row was
+  // seen (landed, adopted, or counted as a standing failure), and the plugin's
+  // own `remaining` counts the existing rows past the page. Of those, only the
+  // ones we hold are accounted for; a held id past the page whose row was
+  // meanwhile deleted can still vouch wrongly, but that window is a page-and-
+  // later deletion race, not the whole held set.
   const unlandedSeen = failedIds.filter(
     (id) => typeof id !== "number" || !held.has(id),
   ).length;
-  const accountedFor = held.size + inserted + unlandedSeen;
-  const unaccounted =
-    parsed.total === undefined ? null : Math.max(0, parsed.total - accountedFor);
+  // The last row id this page reached, read from the rows themselves (they
+  // arrive oldest-first). Falls back to the cursor when the page is empty.
+  let lastSeenId = sinceId;
+  for (const raw of rows) {
+    const id = (raw as { id?: unknown })?.id;
+    if (typeof id === "number" && Number.isFinite(id) && id > lastSeenId) lastSeenId = id;
+  }
+  let unaccounted: number | null;
+  if (parsed.remaining !== undefined) {
+    const heldBeyondPage = [...held].filter((id) => id > lastSeenId).length;
+    unaccounted = Math.max(0, parsed.remaining - heldBeyondPage);
+  } else if (parsed.total !== undefined) {
+    // No `remaining` (an older plugin): fall back to the total-based
+    // arithmetic, but subtract what min_id PROVES is deleted — a held id
+    // below the table's own floor cannot exist, so it must not vouch for a
+    // row that does. Mid-range deletions stay invisible to this path, which
+    // is why `remaining` is the primary one.
+    const heldStillPossible =
+      minId === null ? held.size : [...held].filter((id) => id >= minId).length;
+    unaccounted = Math.max(0, parsed.total - (heldStillPossible + inserted + unlandedSeen));
+  } else {
+    unaccounted = null;
+  }
 
   // The resolve is deliberately NOT gated on `failures === 0` alone. Under the
   // old newest-N window a lost row simply left the window, `failures` read 0,

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Pitmans Lead Bridge
  * Description: Persists every quote-form submission to a local table, pushes it to Marley Ops the moment it arrives, and exposes a signed read endpoint so Ops can poll for anything the push missed. Persist-first by design — the push is allowed to fail; the local row plus the Ops pull rail are what stop an enquiry being lost silently.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Requires PHP: 7.4
  * Author: Red Banana Studios
  * License: Proprietary
@@ -28,7 +28,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('PLB_VERSION', '1.0.0');
+define('PLB_VERSION', '1.1.0');
 define('PLB_DB_VERSION', '1');
 define('PLB_TABLE', 'plb_submissions');
 
@@ -349,6 +349,20 @@ function plb_push_row($row_id) {
         ? $payload['ingest']
         : array();
     $ingest['leadId'] = plb_external_lead_id($row['id']);
+    // Name the brand EXPLICITLY. Ops derives the brand from the secret, never
+    // from the payload — but a body that names one must AGREE with the secret's
+    // or the push 401s (payloadBrandMismatch in marley-ops lib/leads/ingest.ts).
+    // Without this field a swapped ingest secret files Pitmans customers under
+    // Marley silently, and the pull rail (which stamps 'pitmans' itself) then
+    // lands the same submission again under the right brand: one customer, two
+    // leads, two brands. Body field ONLY — the push authenticates by Bearer
+    // header, so this touches no signature; the pull endpoint's HMAC canonical
+    // string ("limit=<n>&since_id=<n>&ts=<unix>") is a separate contract and is
+    // deliberately untouched. Hardcoded, not config: this plugin IS the
+    // Pitmans bridge, and a configurable brand would reopen the misfiling this
+    // closes. Applied at push time (like leadId), so rows persisted before
+    // this version carry it too when the pull rail's counterpart re-pushes.
+    $ingest['brand'] = 'pitmans';
 
     $response = wp_remote_post($cfg['ops_ingest_url'], array(
         'timeout'  => 5,

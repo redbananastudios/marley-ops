@@ -810,6 +810,39 @@ describe("recordInvoicePayment", () => {
     expect(JSON.stringify(payment)).not.toContain("contact-guid-that-xero-ignores");
   });
 
+  /**
+   * The key derives from invoice|amount|date, so two GENUINELY DISTINCT
+   * payments of the same amount on the same invoice on the same day collided
+   * inside Xero's ~6-minute replay window: the second PUT replayed the first's
+   * cached response and the second payment was silently never recorded. A
+   * caller that can tell its payments apart (a bank transaction id, a
+   * card_payments row id) salts the key; a timeout retry of the SAME payment
+   * carries the same salt and still deduplicates. Same pattern as
+   * createInvoice's void-aware key: absent ⇒ byte-identical to the old key.
+   */
+  it("distinct same-shaped payments carry distinct idempotency keys; the same one replays", async () => {
+    const keyOf = async (paymentIdentity?: string) => {
+      state.calls.length = 0;
+      state.queue.push(json({ Payments: [{ PaymentID: "pay-x" }] }));
+      await recordInvoicePayment({
+        customerId: "c",
+        invoiceId: INVOICE_ID,
+        amount: 50,
+        mode: "banktransfer",
+        date: "2026-09-02",
+        ...(paymentIdentity ? { paymentIdentity } : {}),
+      });
+      return (state.calls[0].init!.headers as Record<string, string>)["Idempotency-Key"];
+    };
+    // No distinct identity → the key is byte-identical to what it always was.
+    expect(await keyOf()).toBe(idempotencyKey(`payment|${INVOICE_ID}|50|2026-09-02`));
+    // Two distinct payments must not collide…
+    expect(await keyOf("bank-tx-1")).not.toBe(await keyOf("bank-tx-2"));
+    expect(await keyOf("bank-tx-1")).not.toBe(await keyOf());
+    // …while a retry of the SAME payment still deduplicates.
+    expect(await keyOf("bank-tx-1")).toBe(await keyOf("bank-tx-1"));
+  });
+
   /** The Demo Company has no cash account at all, so this must fail closed. */
   it("refuses a rail with no configured account, naming the variable to set", async () => {
     await expect(
