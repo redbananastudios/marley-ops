@@ -767,3 +767,75 @@ describe("PM refs — extraction and suffix handling mirror MM exactly", () => {
     ).toMatchObject({ type: "duplicate", quoteRef: "PMR034" });
   });
 });
+
+/* --------------------------------------------- cross-brand safety (QA W3) */
+
+describe("cross-brand safety — a mistyped ref must not resolve into the other brand", () => {
+  // "PMMR017" is genuinely ambiguous: a Pitmans customer fat-fingering PMR017
+  // (doubled M), or Marley's MMR017 glued to a stray P. The unanchored
+  // extraction read it as MMR017 — and reconcileSettled acts on that with NO
+  // human tap, silently filing one brand's money against the other's quote.
+  // Ambiguity yields nothing; the row stays in "Unmatched inbound" for a human.
+  it("a token readable as the OTHER family's typo'd ref extracts nothing", () => {
+    expect(refsInText("PMMR017", null)).toEqual([]); // embedded MMR017 vs typo'd PMR017
+    expect(refsInText("MPMR017", null)).toEqual([]); // embedded PMR017 vs typo'd MMR017
+    expect(refsInText(null, "PAID PMMR017 THANKS")).toEqual([]);
+    expect(refsInText("XPMMR017", null)).toEqual([]); // glued prefix doesn't launder it
+  });
+
+  it("the ambiguous token can neither suggest (human tap) nor reconcile (automatic)", () => {
+    const marley = open({ quoteRef: "MMR017", amount: 100 });
+    expect(
+      matchTransaction({ amount: 100, reference: "PMMR017", description: null }, [marley]),
+    ).toBeNull();
+    // The automatic path is the dangerous one — no human checks its outcome:
+    const settledMarley = settledItem({ quoteId: "qM", quoteRef: "MMR017", amount: 100 });
+    expect(
+      reconcileSettled({ amount: 100, reference: "PMMR017", description: null }, [settledMarley]),
+    ).toBeNull();
+  });
+
+  it("SAME-family embeds still extract — the guard is family-scoped, not blanket", () => {
+    // A doubled prefix letter reads as the same ref under both interpretations,
+    // so there is nothing to get wrong. The glued-word tolerance the extraction
+    // exists for (bank refs concatenate) is pinned above ("XMMR123") and here.
+    expect(refsInText("MMMR017", null)).toEqual(["MMR017"]);
+    expect(refsInText("PPMR017", null)).toEqual(["PMR017"]);
+    expect(refsInText("XMMR123", null)).toEqual(["MMR123"]);
+    expect(refsInText("XPMR123", null)).toEqual(["PMR123"]);
+  });
+});
+
+describe("brand words are not identity — Pitmans vocabulary corroborates nothing", () => {
+  // Corroboration proves WHO paid. "PITMANS", "STORAGE", "REMOVALS" appear in
+  // the free text of any Pitmans-brand transfer, so overlapping one of them
+  // with a commercial customer's display name proves nothing about the payer.
+  it("suggestSettledLink: brand words in the transfer text must not hint a commercial customer", () => {
+    const company = settledItem({ quoteId: "qC", quoteRef: "PMC004", customer: "Blandford Storage Ltd", amount: 1100 });
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "PITMANS STORAGE", description: null, counterparty: null },
+        [company],
+      ),
+    ).toBeNull();
+  });
+
+  it("matchTransaction amount-only: a brand-named payer account corroborates nobody", () => {
+    expect(
+      matchTransaction(
+        { amount: 100, reference: null, description: null, counterparty: "PITMANS REMOVALS LTD" },
+        [open({ customer: "Pitmans Storage Ltd" })],
+      ),
+    ).toBeNull();
+  });
+
+  it("a real surname beside brand words still corroborates — the guard drops tokens, not rows", () => {
+    const dingleyBal = settledItem({ quoteId: "qD", quoteRef: "PMR018", customer: "Emma Dingley", amount: 1100 });
+    expect(
+      suggestSettledLink(
+        { amount: 1100, reference: "PITMANS STORAGE DINGLEY", description: null, counterparty: null },
+        [dingleyBal],
+      ),
+    ).toEqual(dingleyBal);
+  });
+});
