@@ -123,6 +123,10 @@ export function parseHeld(value: unknown): HeldPayment[] {
       label: typeof p.label === "string" ? p.label : undefined,
       card_payment_id: typeof p.card_payment_id === "string" ? p.card_payment_id : null,
       zoho_invoice_id: typeof p.zoho_invoice_id === "string" ? p.zoho_invoice_id : null,
+      // The 0109 stamp: which ledger minted zoho_invoice_id. A malformed value
+      // normalises to null (→ the configured-provider convention) rather than
+      // surviving to be mis-read as a provider downstream.
+      ledger_provider: typeof p.ledger_provider === "string" ? p.ledger_provider : null,
     });
   }
   out.sort((a, b) => a.at.localeCompare(b.at));
@@ -269,6 +273,9 @@ export interface PaymentView {
   executed: boolean;
   cardPaymentId: string | null;
   zohoInvoiceId: string | null;
+  /** Which ledger minted `zohoInvoiceId` (0109) — the reversal loop routes
+   *  each step by THIS, never by a sibling payment's stamp. */
+  ledgerProvider: string | null;
 }
 
 export interface RailView {
@@ -337,6 +344,7 @@ export function executionForPlan(
         executed: executedPence >= p.refundDuePence,
         cardPaymentId: p.payment.card_payment_id ?? null,
         zohoInvoiceId: p.payment.zoho_invoice_id ?? null,
+        ledgerProvider: p.payment.ledger_provider ?? null,
       };
     });
     const executedPence = payments.reduce((s, p) => s + p.executedPence, 0);

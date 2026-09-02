@@ -68,6 +68,11 @@ export interface SnapshotQuote {
   zoho_deposit_invoice_id: string | null;
   zoho_commitment_invoice_id: string | null;
   zoho_balance_invoice_id: string | null;
+  /** Which ledger minted each invoice id above (0109) — frozen into the held
+   *  snapshot beside its id, per the contract on refund_queue.held. */
+  deposit_invoice_provider: string | null;
+  commitment_invoice_provider: string | null;
+  balance_invoice_provider: string | null;
 }
 
 export interface SnapshotLead {
@@ -80,6 +85,12 @@ export interface SnapshotLead {
 /** 'pending' is the in-flight claim marker, never a real Zoho id. */
 const realZohoId = (v: string | null | undefined): string | null =>
   v && v !== "pending" ? v : null;
+
+/** The 0109 stamp for a slot — carried ONLY beside a real id, so the stamp can
+ *  never outlive (or precede) the id it describes. The 'pending' claim writes
+ *  its provider early; that claim is not an id and must not export a stamp. */
+const providerForId = (id: string | null, provider: string | null | undefined): string | null =>
+  id ? (provider ?? null) : null;
 
 /** Recorded (non-card) payment method → refund rail. Balance sends carry no
  *  persisted method today, so they default to bank_transfer (balance is never
@@ -128,24 +139,28 @@ export function buildHeldFromSources(input: {
     if (quote.deposit_paid_at && quote.deposit_paid_method !== "card") {
       const amount = Number(quote.deposit_amount ?? 0);
       if (amount > 0) {
+        const invoiceId = realZohoId(quote.zoho_deposit_invoice_id);
         held.push({
           rail: railForMethod(quote.deposit_paid_method),
           amount,
           at: quote.deposit_paid_at,
           label: "deposit",
-          zoho_invoice_id: realZohoId(quote.zoho_deposit_invoice_id),
+          zoho_invoice_id: invoiceId,
+          ledger_provider: providerForId(invoiceId, quote.deposit_invoice_provider),
         });
       }
     }
     if (quote.commitment_paid_at && quote.commitment_paid_method !== "card") {
       const amount = Number(quote.commitment_invoice_amount ?? 0);
       if (amount > 0) {
+        const invoiceId = realZohoId(quote.zoho_commitment_invoice_id);
         held.push({
           rail: railForMethod(quote.commitment_paid_method),
           amount,
           at: quote.commitment_paid_at,
           label: "commitment",
-          zoho_invoice_id: realZohoId(quote.zoho_commitment_invoice_id),
+          zoho_invoice_id: invoiceId,
+          ledger_provider: providerForId(invoiceId, quote.commitment_invoice_provider),
         });
       }
     }
@@ -165,12 +180,14 @@ export function buildHeldFromSources(input: {
   if (lead?.balance_paid_at && !cardBalanceHeld) {
     const amount = Number(lead.balance_amount ?? quote?.balance_invoice_amount ?? 0);
     if (amount > 0) {
+      const invoiceId = realZohoId(quote?.zoho_balance_invoice_id);
       held.push({
         rail: "bank_transfer",
         amount,
         at: lead.balance_paid_at,
         label: "balance",
-        zoho_invoice_id: realZohoId(quote?.zoho_balance_invoice_id),
+        zoho_invoice_id: invoiceId,
+        ledger_provider: providerForId(invoiceId, quote?.balance_invoice_provider),
       });
     }
   }
@@ -241,7 +258,7 @@ export async function buildHeldSnapshot(sb: Sb, leadId: string): Promise<HeldSna
     sb
       .from("quotes")
       .select(
-        "id, quote_ref, client_id, customer_name, agreed_price, grand_total, deposit_amount, deposit_paid_at, deposit_paid_method, commitment_invoice_amount, commitment_paid_at, commitment_paid_method, balance_invoice_amount, zoho_deposit_invoice_id, zoho_commitment_invoice_id, zoho_balance_invoice_id",
+        "id, quote_ref, client_id, customer_name, agreed_price, grand_total, deposit_amount, deposit_paid_at, deposit_paid_method, commitment_invoice_amount, commitment_paid_at, commitment_paid_method, balance_invoice_amount, zoho_deposit_invoice_id, zoho_commitment_invoice_id, zoho_balance_invoice_id, deposit_invoice_provider, commitment_invoice_provider, balance_invoice_provider",
       )
       .eq("lead_id", leadId)
       .eq("status", "accepted")

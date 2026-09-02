@@ -570,6 +570,43 @@ export async function findInvoiceByReference(
 }
 
 /**
+ * The DEAD documents (voided/deleted) Xero holds under one of our references —
+ * part of a create's idempotency identity, and the reason is subtle enough to
+ * spell out.
+ *
+ * The Idempotency-Key used to hash the reference ALONE, and the reference is
+ * stable per slot (`MMR001-DEP` forever). Xero's ~6-minute replay window keys
+ * on nothing but that header: raise at T0, void by mistake at T+2min (a lead
+ * marked lost voids its unpaid invoices), reopen at T+3min (which clears the
+ * slot ids precisely so the raisers mint fresh documents), re-raise at T+4min —
+ * and Xero replays the CACHED T0 response. No new invoice exists, the cached
+ * body still reads AUTHORISED (so the post-create status assertion passes on
+ * stale data), and the app persists the VOIDED document's id. The customer is
+ * then emailed a payment link to an invoice carrying no journals.
+ * `findInvoiceByReference`'s dead-status filter cannot help: the replay happens
+ * inside Xero's HTTP layer, below every code path we control.
+ *
+ * Folding the dead ids into the identity gives each void-re-raise cycle a
+ * fresh key while keeping the header's actual job intact: a genuine retry of
+ * the SAME attempt sees the same dead set and carries the same key, so it
+ * still deduplicates. Ids rather than a count, so ANY change in the dead set —
+ * including a void done by hand in Xero's own UI — changes the key. With no
+ * dead documents the identity is byte-identical to what it always was.
+ *
+ * A failed read here throws rather than guessing an empty set: the raise
+ * paths already treat a thrown create as retryable, whereas a guessed empty
+ * set silently re-arms the replay this exists to prevent.
+ */
+async function deadInvoiceIdsUnder(reference: string): Promise<string[]> {
+  const res = await xeroFetch(`/Invoices?where=${encodeURIComponent(whereClause(reference))}`);
+  const json = await xeroJson<XeroInvoicesResponse>(res, `dead-invoice check for ${reference}`);
+  return (json.Invoices ?? [])
+    .filter((inv) => DEAD_STATUSES.has(inv.Status ?? "") && inv.InvoiceID)
+    .map((inv) => inv.InvoiceID!)
+    .sort();
+}
+
+/**
  * Raise an invoice, approved and payable in one call.
  *
  * Four things that are easy to get wrong and cost real money:
@@ -657,7 +694,18 @@ export async function createInvoice(input: CreateInvoiceInput): Promise<LedgerIn
     ],
   };
 
-  const res = await xeroFetch("/Invoices", writeInit(body, `invoice-create|${reference}`));
+  // The write's identity carries the DEAD documents under this reference — see
+  // deadInvoiceIdsUnder for why. Same live state ⇒ same key (a timeout retry
+  // of this attempt still deduplicates inside Xero's ~6-minute window); a void
+  // in between ⇒ a new key, so a re-raise can never replay the cached create
+  // of the voided document and adopt it. With no dead documents the identity —
+  // and therefore the key — is byte-identical to what it has always been.
+  const deadIds = await deadInvoiceIdsUnder(reference);
+  const identity = deadIds.length
+    ? `invoice-create|${reference}|voided:${deadIds.join(",")}`
+    : `invoice-create|${reference}`;
+
+  const res = await xeroFetch("/Invoices", writeInit(body, identity));
   const json = await xeroJson<XeroInvoicesResponse>(res, `invoice create for ${input.reference}`);
   const created = json.Invoices?.[0];
   assertWriteAccepted(created, `invoice create for ${input.reference}`, created?.InvoiceID);

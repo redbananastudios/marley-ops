@@ -98,6 +98,20 @@ describe("parseHeld", () => {
     expect(parseHeld(null)).toEqual([]);
     expect(parseHeld({})).toEqual([]);
   });
+
+  /**
+   * The 0109 stamp must survive the round trip through the jsonb snapshot —
+   * a parse that drops it silently reverts every reversal step to the
+   * configured-provider guess the stamp exists to prevent.
+   */
+  it("carries the ledger_provider stamp through, and normalises a malformed one to null", () => {
+    const out = parseHeld([
+      { ...held(), zoho_invoice_id: "zoho-1", ledger_provider: "zoho" },
+      { ...held({ at: "2026-07-05T10:00:00Z", label: "commitment" }), zoho_invoice_id: "xero-1", ledger_provider: "xero" },
+      { ...held({ at: "2026-07-09T10:00:00Z", label: "balance" }), zoho_invoice_id: "z-2", ledger_provider: 7 },
+    ]);
+    expect(out.map((h) => h.ledger_provider ?? null)).toEqual(["zoho", "xero", null]);
+  });
 });
 
 /* ------------------------------------------------- effective determination */
@@ -260,6 +274,19 @@ describe("executionForPlan", () => {
     const views = executionForPlan(rails, new Map(), new Set());
     expect(views[0]).toMatchObject({ refundDuePence: 0, executed: true });
     expect(outstandingSummary(views)).toBe("");
+  });
+
+  it("exposes each payment's ledger_provider stamp so the reversal loop can route per step (0109)", () => {
+    const straddling: HeldPayment[] = [
+      held({ rail: "bank_transfer", amount: 100, at: "a", label: "deposit", zoho_invoice_id: "zoho-1", ledger_provider: "zoho" }),
+      held({ rail: "bank_transfer", amount: 350, at: "b", label: "commitment", zoho_invoice_id: "xero-1", ledger_provider: "xero" }),
+    ];
+    const { rails } = planForRow(straddling, 0, "filled");
+    const views = executionForPlan(rails, new Map(), new Set());
+    expect(views[0].payments.map((p) => [p.zohoInvoiceId, p.ledgerProvider])).toEqual([
+      ["zoho-1", "zoho"],
+      ["xero-1", "xero"],
+    ]);
   });
 });
 

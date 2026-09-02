@@ -547,11 +547,13 @@ export async function markRailRefundedAction(
       fullAmountPence: amount,
       payments: railView.payments.map((p) => ({
         zohoInvoiceId: p.zohoInvoiceId,
+        ledgerProvider: p.ledgerProvider,
         at: p.at,
         refundDuePence: p.refundDuePence,
       })),
       quoteDepositInvoiceId: quote.zoho_deposit_invoice_id,
       quoteDepositInvoiceNumber: quote.zoho_deposit_invoice_number,
+      quoteDepositInvoiceProvider: quote.deposit_invoice_provider,
     });
     for (const step of steps) {
       await reverseDepositVatInZoho(admin, {
@@ -559,7 +561,13 @@ export async function markRailRefundedAction(
         quoteRef: quote.quote_ref,
         zohoContactId: quote.zoho_contact_id,
         zohoDepositInvoiceId: step.invoiceId,
-        depositInvoiceProvider: quote.deposit_invoice_provider,
+        // THIS step's invoice, THIS step's stamp (0109) — a rail straddling
+        // the Zoho→Xero flip reverses a Zoho deposit and a Xero commitment in
+        // the same loop, so the deposit slot's stamp is wrong for every step
+        // but its own. A null stamp resolves to the configured provider inside
+        // reverseDepositVatInZoho (asProvider), the same convention as every
+        // other stamp reader.
+        depositInvoiceProvider: step.invoiceProvider,
         contactProvider: quote.contact_provider,
         zohoDepositInvoiceNumber: step.invoiceNumber,
         customerName: quote.customer_name,

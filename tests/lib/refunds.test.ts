@@ -44,6 +44,9 @@ const quote = (over: Partial<SnapshotQuote> = {}): SnapshotQuote => ({
   zoho_deposit_invoice_id: null,
   zoho_commitment_invoice_id: null,
   zoho_balance_invoice_id: null,
+  deposit_invoice_provider: null,
+  commitment_invoice_provider: null,
+  balance_invoice_provider: null,
   ...over,
 });
 
@@ -305,5 +308,71 @@ describe("netExecutedRefunds — executed payouts never re-snapshot as held", ()
   it("zero executed totals return the held list unchanged", () => {
     const heldList = [bank(100, "2026-07-01T09:00:00Z")];
     expect(netExecutedRefunds(heldList, { bank_transfer: 0, cash: 0 })).toEqual(heldList);
+  });
+});
+
+/* -------------------------------------- ledger-provider stamp (0109) */
+
+/**
+ * Migration 0109's comment on refund_queue.held declares the contract: every
+ * held entry carrying a zoho_invoice_id MUST also carry ledger_provider,
+ * copied from the quote's matching *_invoice_provider column — the id alone
+ * does not say which system minted it. The snapshot is FROZEN at trigger
+ * time precisely because ground truth moves (a reopen clears the quote's
+ * slot ids entirely), so the stamp must freeze WITH the id it describes.
+ * Without it, a refund reversing a commitment minted under Xero is resolved
+ * against Zoho (or vice versa) for any quote whose rungs straddle the flip.
+ */
+describe("buildHeldFromSources — provider stamp rides beside its own id (0109)", () => {
+  it("each rung copies ITS OWN slot's provider, so straddling rungs never share one", () => {
+    const held = buildHeldFromSources({
+      cardRows: [],
+      quote: quote({
+        deposit_paid_at: "2026-07-02T09:00:00Z",
+        deposit_paid_method: "bank_transfer",
+        zoho_deposit_invoice_id: "zoho-123",
+        deposit_invoice_provider: "zoho",
+        commitment_invoice_amount: 500,
+        commitment_paid_at: "2026-09-20T09:00:00Z",
+        commitment_paid_method: "bank_transfer",
+        zoho_commitment_invoice_id: "xero-guid-1",
+        commitment_invoice_provider: "xero",
+      }),
+      lead: lead(),
+    });
+    expect(held).toEqual([
+      expect.objectContaining({ label: "deposit", zoho_invoice_id: "zoho-123", ledger_provider: "zoho" }),
+      expect.objectContaining({ label: "commitment", zoho_invoice_id: "xero-guid-1", ledger_provider: "xero" }),
+    ]);
+  });
+
+  it("the balance rung takes the balance slot's provider", () => {
+    const held = buildHeldFromSources({
+      cardRows: [],
+      quote: quote({
+        balance_invoice_amount: 2300,
+        zoho_balance_invoice_id: "xero-guid-2",
+        balance_invoice_provider: "xero",
+      }),
+      lead: lead({ balance_paid_at: "2026-07-10T09:00:00Z" }),
+    });
+    expect(held).toEqual([
+      expect.objectContaining({ label: "balance", zoho_invoice_id: "xero-guid-2", ledger_provider: "xero" }),
+    ]);
+  });
+
+  it("no real invoice id ⇒ no stamp — the stamp never outlives the id it describes", () => {
+    const held = buildHeldFromSources({
+      cardRows: [],
+      quote: quote({
+        deposit_paid_at: "2026-07-02T09:00:00Z",
+        deposit_paid_method: "cash",
+        zoho_deposit_invoice_id: "pending",
+        deposit_invoice_provider: "zoho", // the creation CLAIM stamps early
+      }),
+      lead: lead(),
+    });
+    expect(held[0].zoho_invoice_id).toBeNull();
+    expect(held[0].ledger_provider ?? null).toBeNull();
   });
 });

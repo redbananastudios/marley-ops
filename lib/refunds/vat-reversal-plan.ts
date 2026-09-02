@@ -17,6 +17,11 @@
 
 export interface RailPaymentForReversal {
   zohoInvoiceId: string | null;
+  /** Which ledger minted `zohoInvoiceId` (0109) — the payment's OWN stamp,
+   *  frozen into the held snapshot. Null resolves downstream to the configured
+   *  provider (the codebase's `asProvider` convention), never to a sibling
+   *  payment's stamp. Required so a call site cannot forget it. */
+  ledgerProvider: string | null;
   /** Stable, unique-per-payment timestamp — anchors the idempotency key. */
   at: string;
   refundDuePence: number;
@@ -26,6 +31,11 @@ export interface VatReversalStep {
   /** null ⇒ reverseDepositVatInZoho falls back to a human (no wrong-invoice risk). */
   invoiceId: string | null;
   invoiceNumber: string | null;
+  /** Which ledger minted `invoiceId` (0109). Travels beside its own id so the
+   *  two can never be mismatched — a rail straddling the Zoho→Xero flip holds
+   *  a Zoho deposit beside a Xero commitment, and reading either id against
+   *  the other's system misroutes a VAT reversal on money already returned. */
+  invoiceProvider: string | null;
   amountPence: number;
   /** Stable-per-refund-event key for the credit-note reference (idempotency). */
   idemKey: string;
@@ -39,6 +49,9 @@ export function planRailVatReversals(input: {
   payments: RailPaymentForReversal[];
   quoteDepositInvoiceId: string | null;
   quoteDepositInvoiceNumber: string | null;
+  /** The DEPOSIT slot's 0109 stamp — paired with quoteDepositInvoiceId, which
+   *  is the invoice the single-payment collapse reverses against. */
+  quoteDepositInvoiceProvider: string | null;
 }): VatReversalStep[] {
   const due = input.payments.filter((p) => p.refundDuePence > 0);
 
@@ -49,16 +62,19 @@ export function planRailVatReversals(input: {
       {
         invoiceId: input.quoteDepositInvoiceId,
         invoiceNumber: input.quoteDepositInvoiceNumber,
+        invoiceProvider: input.quoteDepositInvoiceProvider,
         amountPence: input.fullAmountPence,
         idemKey: `${input.rowId}-${input.rail}`,
       },
     ];
   }
 
-  // Multi-payment rail — one reversal per payment against its own invoice.
+  // Multi-payment rail — one reversal per payment against its own invoice,
+  // routed to the ledger that minted THAT invoice.
   return due.map((p) => ({
     invoiceId: p.zohoInvoiceId,
     invoiceNumber: null,
+    invoiceProvider: p.ledgerProvider,
     amountPence: p.refundDuePence,
     idemKey: `${input.rowId}-${input.rail}-${p.at}`,
   }));
