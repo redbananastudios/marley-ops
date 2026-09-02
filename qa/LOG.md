@@ -1548,3 +1548,10 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - QA-20260902-03 (crew detail page ignores `appointments.status` completion): claimed on staging, fixed on `qa-repair/QA-20260902-03`. `loadJobSheet` now carries `apptStatus`; new pure helper `jobDetailCompletion` in `lib/my-jobs/job-card.ts`; `/my-jobs/[id]` gates the Complete-job button + contract nag on any completed state and renders a neutral "closed out by the office" banner for the cron's auto-complete shape. Unit + source-contract tests added (proven red on pre-fix source); the audit's skipped e2e spec un-skipped.
 - Gates: lint 0 errors · tsc clean · vitest 3024 passed · build clean. PR #201 opened to staging, label `qa-repair`, finding set `fixed-pending-verify` in the same branch.
 - Escalations: none. Time spent: ~15 min.
+
+## 2026-09-02T12:20Z (push-triggered fire) — first-pass repair: QA-20260902-05 fixed, PR #209
+
+- Tier: first-pass (Fable). Eligible: 1 of 5 open (QA-20260902-05, safe-fix/open). QA-20260902-04, QA-20260902-06 and QA-20260827-04 are `class: risky` — untouched. QA-20260902-03 is `reopened` pending verification only: its code fix already merged in #201 and the blocker is exactly QA-20260902-05's spec going green, so it was left for the next audit to re-verify (per its own reopen note), not re-claimed.
+- QA-20260902-05 (crew e2e spec seeds non-existent `clients.name`): claimed on staging, fixed on `qa-repair/QA-20260902-05` — `name:` → `display_name:` at spec line 37 (all other seeded columns verified against migrations), plus a new vitest source-contract scan `tests/config/e2e-clients-seed-columns.test.ts` over every `clients` insert in `e2e/` (proven red on the pre-fix spec, green after) so seed/schema mismatches fail at vitest time instead of only in the ungated e2e job.
+- Gates: lint 0 errors · tsc clean · vitest 3183 passed · build clean. PR #209 opened to staging, label `qa-repair`, finding set `fixed-pending-verify` in the same branch.
+- Escalations: none. Time spent: ~12 min.
