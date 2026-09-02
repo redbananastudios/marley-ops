@@ -4,7 +4,7 @@ import { Camera, FileDown, FileText, NotebookPen, PenLine, ShieldCheck } from "l
 import { createClient } from "@/lib/supabase/server";
 import { createMediaStore } from "@/lib/storage/media-store";
 import { JOB_DOCS_BUCKET } from "@/lib/signatures";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip } from "@/components/brand/brand-chip";
 import { Card } from "@/components/ui/card";
@@ -148,7 +148,7 @@ export default async function ClaimPage({ params }: { params: Promise<{ id: stri
         .maybeSingle(),
       // Brand layer (multi-brand PRD §4): the detail-page chip renders only in
       // multi-brand mode (the single-brand invariant, PRD §1).
-      listActiveBrands(sb),
+      listActiveBrandsOrEmpty(sb),
     ]);
 
   const chipBrand =

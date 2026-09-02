@@ -21,6 +21,8 @@
  * switch.
  */
 
+import { DEFAULT_BRAND } from "@/lib/brand";
+
 /** The camelCase payload the Settings › Brands form submits. */
 export type BrandUpdateInput = {
   phone?: string | null;
@@ -33,7 +35,9 @@ export type BrandUpdateInput = {
   cardPaymentsEnabled?: boolean;
 };
 
-/** The whitelisted `brands` update — snake_case column keys, nothing else. */
+/** The whitelisted `brands` update — snake_case column keys, nothing else.
+ *  `card_payments_enabled` is absent for the DEFAULT brand (see
+ *  sanitizeBrandUpdate): the column is never touched there. */
 export type SafeBrandUpdate = {
   phone: string | null;
   address: string | null;
@@ -42,7 +46,7 @@ export type SafeBrandUpdate = {
   colour_primary: string | null;
   colour_accent: string | null;
   logo_url: string | null;
-  card_payments_enabled: boolean;
+  card_payments_enabled?: boolean;
 };
 
 export type SanitizeBrandResult =
@@ -90,8 +94,18 @@ function optHttpsUrl(v: unknown, label: string): FieldResult {
  * The card-payments switch must be an explicit boolean — a missing value could
  * only come from a broken client, and defaulting it either way would silently
  * flip a live payment channel.
+ *
+ * `slug` is the row this update is for. For the DEFAULT brand the per-brand
+ * card flag is deliberately dead end-to-end (the QA-20260826-07 remainder:
+ * cardPaymentsAvailable short-circuits `slug === DEFAULT_BRAND → true`,
+ * cardEnabledBrands seeds the default unconditionally, emailTheme themes
+ * Marley regardless) — so the field is IGNORED here, never validated and
+ * never persisted: a stored value the runtime will never read is exactly the
+ * false state the Settings toggle used to assert. Omitting `slug` keeps the
+ * non-default behaviour (legacy callers/tests); the Settings action always
+ * passes it, pinned by tests/lib/brand-update.test.ts.
  */
-export function sanitizeBrandUpdate(input: Record<string, unknown>): SanitizeBrandResult {
+export function sanitizeBrandUpdate(input: Record<string, unknown>, slug?: string): SanitizeBrandResult {
   const phone = optText(input.phone, "Phone", 50);
   if (!phone.ok) return phone;
   const address = optText(input.address, "Address", 500);
@@ -106,21 +120,24 @@ export function sanitizeBrandUpdate(input: Record<string, unknown>): SanitizeBra
   if (!colourAccent.ok) return colourAccent;
   const logoUrl = optHttpsUrl(input.logoUrl, "Logo URL");
   if (!logoUrl.ok) return logoUrl;
-  if (typeof input.cardPaymentsEnabled !== "boolean") {
-    return { ok: false, error: "Card payments must be explicitly on or off." };
-  }
 
-  return {
-    ok: true,
-    update: {
-      phone: phone.value,
-      address: address.value,
-      review_url: reviewUrl.value,
-      terms_url: termsUrl.value,
-      colour_primary: colourPrimary.value,
-      colour_accent: colourAccent.value,
-      logo_url: logoUrl.value,
-      card_payments_enabled: input.cardPaymentsEnabled,
-    },
+  const update: SafeBrandUpdate = {
+    phone: phone.value,
+    address: address.value,
+    review_url: reviewUrl.value,
+    terms_url: termsUrl.value,
+    colour_primary: colourPrimary.value,
+    colour_accent: colourAccent.value,
+    logo_url: logoUrl.value,
   };
+
+  if (slug !== DEFAULT_BRAND) {
+    if (typeof input.cardPaymentsEnabled !== "boolean") {
+      return { ok: false, error: "Card payments must be explicitly on or off." };
+    }
+    update.card_payments_enabled = input.cardPaymentsEnabled;
+  }
+  // DEFAULT brand: the field never reaches the row — see the doc comment.
+
+  return { ok: true, update };
 }

@@ -25,7 +25,7 @@ import {
   type NewLeadInput,
 } from "@/lib/leads/schema";
 import { cleanApproxWindow, normaliseApproxMonth } from "@/lib/bookings/booking-details";
-import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, listActiveBrandsForWrite } from "@/lib/brand";
 
 async function actor() {
   const sb = await createClient();
@@ -112,9 +112,13 @@ export async function createLeadAction(input: NewLeadInput) {
   // arrived is ignored and DEFAULT_BRAND is written. Multi-brand mode: the
   // value must name an ACTIVE brand slug — required with NO default, because
   // both phone lines ring the same office so nothing can be inferred.
-  // Validated against listActiveBrands (data, not a constant list), so a
-  // third brand needs no code change here.
-  const activeBrands = await listActiveBrands(sb);
+  // Validated against the ACTIVE brands (data, not a constant list), so a
+  // third brand needs no code change here. A failed brands read REFUSES —
+  // it used to swallow to [], read as single-brand mode, and silently file
+  // an office-picked Pitmans enquiry as Marley (fixed 2026-09-02).
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   let brand: string = DEFAULT_BRAND;
   if (activeBrands.length > 1) {
     const picked = v.brand && activeBrands.some((b) => b.slug === v.brand) ? v.brand : null;
@@ -236,8 +240,11 @@ export async function updateLeadBrandAction(leadId: string, brandSlug: string) {
 
   // Only meaningful in multi-brand mode, and only to an ACTIVE brand slug —
   // the control never renders otherwise, so anything else is a stale tab or a
-  // forged call. Reject rather than guess.
-  const activeBrands = await listActiveBrands(sb);
+  // forged call. Reject rather than guess — a failed brands read refuses with
+  // ITS error, not the misleading single-brand message.
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   if (activeBrands.length < 2) {
     return { ok: false as const, error: "Brand changes need more than one active brand." };
   }

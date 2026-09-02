@@ -45,6 +45,9 @@ export default async function NewQuotePage({
   // GATE 5: the reused AddLeadForm carries the same required brand selector
   // as /leads/new when no ?leadId= is present (PRD §4 /quotes/new). Empty in
   // single-brand mode — the invariant keeps this page byte-identical.
+  // Deliberately the THROWING reader, not listActiveBrandsOrEmpty: a failed
+  // brands read must yield an error page, never a picker-less form inviting
+  // a mis-filed brand.
   const activeBrands = await listActiveBrands(sb);
   const brandOptions: AddLeadBrandOption[] =
     activeBrands.length > 1

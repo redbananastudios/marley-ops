@@ -18,7 +18,7 @@ import {
   STORAGE_ACKS,
 } from "@/lib/signatures";
 import { termsSnapshot } from "@/lib/legal/documents";
-import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrandsForWrite } from "@/lib/brand";
 import { helloFromFor } from "@/lib/comms/sender";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { raiseDueStorageInvoices, repairPendingStorageClaims } from "@/lib/storage/raise-storage-invoices";
@@ -73,8 +73,12 @@ export async function saveSiteAction(input: SiteInput) {
   // ignored and the column stays untouched — inserts take the DB default
   // (DEFAULT_BRAND), edits keep their stored value: today's behaviour.
   // Multi-brand: a provided slug must be active; absent defaults new sites
-  // to DEFAULT_BRAND and leaves an edited site's brand alone.
-  const activeBrands = await listActiveBrands(sb);
+  // to DEFAULT_BRAND and leaves an edited site's brand alone. A failed brands
+  // read refuses — swallowed to [], an office-picked brand would be silently
+  // discarded and the insert would take the DB default.
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   if (activeBrands.length > 1) {
     if (v.brand) {
       if (!activeBrands.some((b) => b.slug === v.brand)) {
@@ -259,7 +263,11 @@ export async function startLetAction(input: StartLetInput) {
   // silently, today's behaviour. Attribution only this gate (PRD §11.10):
   // rates, billing model and invoicing carry no brand.
   let letBrand: string | null = null;
-  const activeBrands = await listActiveBrands(sb);
+  // A failed brands read refuses (never reads as single-brand mode) — the
+  // let's attribution stamp lives for the whole let.
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   if (activeBrands.length > 1) {
     if (v.brand) {
       if (!activeBrands.some((b) => b.slug === v.brand)) {
@@ -664,7 +672,11 @@ export async function editLetAction(letId: string, input: EditLetInput) {
   // mode: the selector never rendered, whatever arrived is ignored and the
   // column stays untouched. Multi-brand: validated against active brands.
   if (v.brand) {
-    const activeBrands = await listActiveBrands(sb);
+    // A failed brands read refuses rather than silently dropping the office's
+    // brand override on the floor (swallowed [], the patch just omitted it).
+    const brandsRes = await listActiveBrandsForWrite(sb);
+    if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+    const activeBrands = brandsRes.brands;
     if (activeBrands.length > 1) {
       if (!activeBrands.some((b) => b.slug === v.brand)) {
         return { ok: false as const, error: "Choose which brand this let belongs to." };

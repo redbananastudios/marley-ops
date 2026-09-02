@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
 import { BrandFilter } from "@/components/brand/brand-filter";
-import { listActiveBrands, type Brand } from "@/lib/brand";
+import { listActiveBrandsOrEmpty, type Brand } from "@/lib/brand";
 import { parseBrandParam, type BrandFilterValue } from "@/lib/brand-filter";
 import { Card } from "@/components/ui/card";
 import { segmentedItemClass, segmentedTrackClass } from "@/components/ui/segmented";
@@ -127,7 +127,7 @@ async function StorageTabPage({ sp }: { sp: SearchParams }) {
   // no brand UI renders and the tab is byte-identical (the single-brand
   // invariant, PRD §1). Lets are the brand carrier (storage_lets.brand);
   // sites and units are shared physical infrastructure and never narrow.
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 
@@ -268,7 +268,7 @@ async function SalesTabPage({ sp }: { sp: SearchParams }) {
   // Brand layer (multi-brand PRD §4 /performance): quotes and leads each carry
   // their own brand; the report slices in plain TypeScript, so the reads stay
   // identical and single-brand renders byte-identical (PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
   // Under a named ?brand= a partially-fetched window would render a
@@ -358,7 +358,7 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   // each carry their own brand, so the month's figures slice in plain
   // TypeScript below — the queries stay identical. Single brand → no brand UI
   // and a byte-identical page (the single-brand invariant, PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
   // Chip hidden when the segmented control already names one brand

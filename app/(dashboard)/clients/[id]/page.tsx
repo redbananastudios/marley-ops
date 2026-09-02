@@ -12,7 +12,7 @@ import { ClientEditControls } from "@/components/clients/edit-client-dialog";
 import { EmailComposeButton } from "@/components/comms/email-compose-dialog";
 import { LeadStatusBadge } from "@/components/lead-status-badge";
 import { BrandChip } from "@/components/brand/brand-chip";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { quoteStatusDate } from "@/lib/quote/status-date";
 import { UK_TZ } from "@/lib/uk-time";
 import { ukPhone } from "@/lib/phone";
@@ -63,7 +63,7 @@ export default async function ClientDetailPage({ params }: { params: Promise<{ i
   // shared-spine rule, PRD §3.2), brand rides each lead/quote row. No filter
   // on this page. With a single active brand no chip renders and the page is
   // unchanged (the single-brand invariant, PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const chipBySlug = new Map(activeBrands.map((b) => [b.slug, b]));
   // GATE 11: "Book survey" opens an enquiry, so in multi-brand mode its dialog

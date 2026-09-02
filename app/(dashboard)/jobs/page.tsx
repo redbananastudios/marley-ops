@@ -13,7 +13,7 @@ import {
   type CompletedRemovalAppt,
 } from "@/lib/completed-jobs";
 import { CompletedJobsView, type CompletedJobRowView } from "@/components/jobs/completed-jobs-view";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 /**
@@ -47,7 +47,7 @@ export default async function CompletedJobsPage({
   // brand no brand UI renders and the page is unchanged (the single-brand
   // invariant, PRD §1). The ?brand= filter narrows the base leads query, so
   // the enrichment batches and the count all follow it for free.
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 

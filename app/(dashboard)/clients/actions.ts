@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { findExistingClient } from "@/lib/leads/resolver";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
-import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, listActiveBrandsForWrite } from "@/lib/brand";
 import { normalizeEmail, normalizePhone } from "@/lib/leads/phone";
 import { formatPersonNameOrNull, formatUkPostcodeOrNull } from "@/lib/leads/format";
 import { paymentTermsDays } from "@/lib/payments-policy";
@@ -294,9 +294,12 @@ export async function createLeadForClientAction(clientId: string, entryChannel: 
   // mode: the callers' pickers never rendered, so whatever arrived is ignored
   // and DEFAULT_BRAND is written — today's behaviour. Multi-brand mode:
   // required with NO default — nothing can be inferred about which brand a
-  // phone customer rang. Validated against listActiveBrands (data, not a
-  // constant list).
-  const activeBrands = await listActiveBrands(sb);
+  // phone customer rang. Validated against the ACTIVE brands (data, not a
+  // constant list). A failed brands read refuses — swallowed to [], it reads
+  // as single-brand mode and silently files the enquiry as DEFAULT_BRAND.
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   let leadBrand: string = DEFAULT_BRAND;
   if (activeBrands.length > 1) {
     const picked = brand && activeBrands.some((b) => b.slug === brand) ? brand : null;

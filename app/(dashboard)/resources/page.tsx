@@ -1,6 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -60,7 +60,7 @@ export default async function ResourcesPage({ searchParams }: { searchParams: Pr
       // Brand layer (multi-brand PRD §4 /resources): livery chips on vehicle
       // cards + the form's livery selector. Single active brand → no brand UI
       // renders (the single-brand invariant, PRD §1).
-      listActiveBrands(supabase),
+      listActiveBrandsOrEmpty(supabase),
     ]);
 
   // Minimal serialisable brand shape for the client component — chip + livery

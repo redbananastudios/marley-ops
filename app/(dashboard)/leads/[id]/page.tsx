@@ -43,7 +43,7 @@ import type { ClaimChannel, ClaimStatus } from "@/lib/claims";
 import { JobMediaList } from "@/components/content/job-media-list";
 import { loadJobMedia } from "@/lib/content/job-media-load";
 import { getBusinessSettings } from "@/lib/settings";
-import { brandCtaColour, brandCtaColourDeep, hexWithAlpha, listActiveBrands } from "@/lib/brand";
+import { brandCtaColour, brandCtaColourDeep, hexWithAlpha, listActiveBrandsOrEmpty } from "@/lib/brand";
 import { UK_TZ } from "@/lib/uk-time";
 import { leadContact } from "@/lib/leads/shared-client";
 import { ukPhone } from "@/lib/phone";
@@ -281,7 +281,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
   // read in single-brand mode because it drives the AI-survey promo card's
   // accent — where it resolves to the Marley row and the card renders exactly
   // as today.
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multiBrand = activeBrands.length > 1;
   const leadBrandRow = activeBrands.find((b) => b.slug === lead.brand);
   // A quote REFERENCE fixes the brand — its prefix is minted from it. Refs

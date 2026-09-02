@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getBusinessSettings } from "@/lib/settings";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandFilter } from "@/components/brand/brand-filter";
@@ -29,7 +29,7 @@ export default async function RemovalsSchedulePage({
   // appointments read in the DB, so it must resolve before the fetch. With a
   // single active brand parseBrandParam always yields 'all' and no brand UI
   // renders — the single-brand invariant (PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 

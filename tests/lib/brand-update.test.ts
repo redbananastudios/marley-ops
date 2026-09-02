@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { sanitizeBrandUpdate, type SafeBrandUpdate } from "@/lib/brand-update";
 
 /** The whole point of the helper: this is the ONLY set of keys that can ever
@@ -164,5 +167,46 @@ describe("sanitizeBrandUpdate — the server-side safe-field whitelist", () => {
     expect(
       sanitizeBrandUpdate({ ...valid, logoUrl: `https://x.example/${"a".repeat(500)}` }).ok,
     ).toBe(false);
+  });
+});
+
+describe("sanitizeBrandUpdate and the DEFAULT brand's dead card toggle (QA-20260826-07 remainder)", () => {
+  // For the default brand the per-brand card flag is deliberately ignored
+  // end-to-end (cardPaymentsAvailable short-circuits it, cardEnabledBrands
+  // seeds it, emailTheme themes Marley regardless) — so persisting a value the
+  // runtime will never read only manufactures a false state for the Settings
+  // UI to assert. The sanitizer must never let it reach the row.
+
+  it(`never includes card_payments_enabled in a ${DEFAULT_BRAND} update — whatever the client sends`, () => {
+    for (const sent of [true, false]) {
+      const res = sanitizeBrandUpdate({ ...valid, cardPaymentsEnabled: sent }, DEFAULT_BRAND);
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect("card_payments_enabled" in res.update).toBe(false);
+        expect(res.update.phone).toBe(valid.phone); // the safe fields still save
+      }
+    }
+  });
+
+  it("ignores a missing or garbage card field for the default brand instead of blocking the save", () => {
+    const withoutToggle: Record<string, unknown> = { ...valid };
+    delete withoutToggle.cardPaymentsEnabled;
+    expect(sanitizeBrandUpdate(withoutToggle, DEFAULT_BRAND).ok).toBe(true);
+    expect(sanitizeBrandUpdate({ ...valid, cardPaymentsEnabled: "true" }, DEFAULT_BRAND).ok).toBe(true);
+  });
+
+  it("non-default brands keep the live toggle exactly as-is", () => {
+    const res = sanitizeBrandUpdate({ ...valid, cardPaymentsEnabled: true }, "pitmans");
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.update.card_payments_enabled).toBe(true);
+    expect(sanitizeBrandUpdate({ ...valid, cardPaymentsEnabled: "true" }, "pitmans").ok).toBe(false);
+  });
+
+  it("the Settings action passes the row's slug in, so the guard actually applies", () => {
+    const src = readFileSync(
+      join(process.cwd(), "app/(dashboard)/settings/brand-actions.ts"),
+      "utf8",
+    );
+    expect(src).toContain("sanitizeBrandUpdate(input, slug)");
   });
 });

@@ -10,7 +10,7 @@ import { syncSanityLeads } from "@/lib/sync/sanity-leads";
 import { ownerEstimatorId } from "@/lib/leads/ownership";
 import { startOfUkDay } from "@/lib/uk-time";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,7 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
 
   // Brand layer (multi-brand PRD §4): with a single active brand no brand UI
   // renders and the page is unchanged (the single-brand invariant, PRD §1).
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 

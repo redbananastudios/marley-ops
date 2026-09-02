@@ -5,7 +5,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsForWrite } from "@/lib/brand";
 import { normalizeWorkingDays } from "@/lib/staff/availability";
 import { normalisePhone, staffFieldsFromSubmission } from "@/lib/staff/onboarding";
 
@@ -86,8 +86,12 @@ export async function saveVehicleAction(input: VehicleInput) {
   // Livery brand (multi-brand PRD §4 /resources): a supplied slug must name an
   // active brand — a named-brand write fails LOUD, never silently degrades.
   // Single-brand mode always writes null, so nothing changes today (the
-  // single-brand invariant, PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  // single-brand invariant, PRD §1). A failed brands read refuses too — the
+  // row below writes `brand` unconditionally, so a swallowed [] would NULL an
+  // existing livery brand on edit.
+  const brandsRes = await listActiveBrandsForWrite(sb);
+  if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+  const activeBrands = brandsRes.brands;
   let liveryBrand: string | null = null;
   if (activeBrands.length > 1 && v.brand) {
     if (!activeBrands.some((b) => b.slug === v.brand)) {

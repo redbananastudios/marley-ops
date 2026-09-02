@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { parseBrandParam, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandFilter } from "@/components/brand/brand-filter";
@@ -46,7 +46,7 @@ export default async function ContentPage({
   // which is brand-specific): with a single active brand no brand UI renders
   // and the page is unchanged (the single-brand invariant, PRD §1).
   const sb = await createClient();
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 

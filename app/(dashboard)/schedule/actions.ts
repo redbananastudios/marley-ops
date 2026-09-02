@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { ensureLeadForClient } from "@/lib/leads/for-client";
-import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, getBrandOrDefault, listActiveBrandsForWrite } from "@/lib/brand";
 import { balanceDueDateForMove, commitmentDueDate } from "@/lib/payments-policy";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
 import { ukInstant } from "@/lib/uk-time";
@@ -232,8 +232,12 @@ export async function createAppointment(input: CreateAppointmentInput) {
     // dialog's picker never rendered, so whatever arrived is ignored and
     // DEFAULT_BRAND is written. Multi-brand mode: required with NO default —
     // nothing can be inferred about which brand a phone customer rang.
-    // Validated against listActiveBrands (data, not a constant list).
-    const activeBrands = await listActiveBrands(sb);
+    // Validated against the ACTIVE brands (data, not a constant list). A
+    // failed brands read refuses — swallowed to [], it reads as single-brand
+    // mode and silently files the enquiry as DEFAULT_BRAND.
+    const brandsRes = await listActiveBrandsForWrite(sb);
+    if (!brandsRes.ok) return { ok: false as const, error: brandsRes.error };
+    const activeBrands = brandsRes.brands;
     let brand: string = DEFAULT_BRAND;
     if (activeBrands.length > 1) {
       const picked = input.brand && activeBrands.some((b) => b.slug === input.brand) ? input.brand : null;
