@@ -75,64 +75,87 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-02 - THIRD QA pass closed out; 35 findings; 3 PRs; staging 182 pass / 4 red on the Zoho quota ONLY; zero open findings)
+## Current State (2026-09-02 late - third QA pass closed + 4 more waves; PR #214; migrations now 0104-0117; 3 findings open, none closeable by us)
 
-Last touched: 2026-09-02 on i9. A third adversarial pass (Opus 5) over the whole un-promoted
-payload - `master...staging` @ 79f5a98, 473 files - reviewed as ONE TREE rather than per-PR diffs,
-which is why it found what two earlier per-PR passes did not. 14 subsystem reviewers -> dedup ->
-two refuters per finding (refute-by-default) -> completeness critic; 96 agents, 0 failures.
-**35 confirmed / 4 contested / 2 refuted / 8 coverage gaps.** All closed in 2 PRs: **#210** (the
-5 HIGHs) and **#211** (the other 30 + a live-diagnosed defect). 33 fixed, 2 judged
-NO_CHANGE_NEEDED on their merits. Suite 3166 -> 3350.
+Last touched: 2026-09-02 on i9. Two blocks of work today. **(1)** A third adversarial pass
+(Opus 5) read the whole un-promoted payload - `master...staging` @ 79f5a98, 473 files - as
+ONE TREE rather than per-PR diffs: 14 subsystem reviewers -> dedup -> two refuters per
+finding -> completeness critic; 96 agents. **35 confirmed / 4 contested / 2 refuted**, all
+closed in **#210** (5 HIGHs) and **#211** (the other 30 + a live-diagnosed defect). The
+biggest cluster was SEVEN more instances of the swallowed-Supabase-read family that #195
+had fixed in exactly one function. **(2)** Four more waves closing the last two "Next"
+items, landed as **#214** - and they found more than they were sent for.
 
-The five HIGHs (#210):
-- **commercial credit control went silent exactly when it broke** - `loadBookingRows` is fail-soft
-  (`fetchAllRows` logs-and-breaks; secondary reads never inspected `error`), so a DB failure reached
-  `sweepCommercialOverdue` as an EMPTY LEDGER, which RESOLVED both alarms and reported 0 rather than
-  the -1 reserved for an unread sweep. Commercial is never chased by email, so nothing else notices.
-  The loader now takes `{ strict }`; the old guarantee test mocked a rejection the real loader
-  cannot produce, so it proved nothing.
-- **a late booking's date-confirm email said "nothing more to pay"** over a balance invoice already
-  in the customer's inbox, days before the move.
-- **a settle-in-full transfer left one half unclaimed** - two payments recorded, one `match_kind`
-  stamped, so a later genuine transfer for the other half AUTO-RECONCILED as explained, hiding a
-  refund we owe. What a row claims is now re-derived from the ledger.
-- **"Xero was never authorised" classified as transient**, so the watchdog stayed green through a
-  lock-out while every invoice raise failed.
-- **the storage invoice sweep swallowed its let read** and sent under the DEFAULT brand, stamping
-  `emailed_at` so the mis-branded copy is the only one that customer ever gets.
+**The two that mattered in #214, neither of which was the thing we set out to fix:**
+- **A second brand's storage customer was ticking a lien clause naming the DEFAULT company**
+  as the party who may sell their goods. Hardcoded in `lib/signatures.ts`; BOTH signing
+  paths (remote `/s` and the in-person crew dialog) rendered AND recorded it into
+  `signatures.ack_labels`, the sole record of what was agreed. Same clause reached customers
+  three more ways: the `/q` date-confirm tick-box (the 25%-retention one), its office
+  renderer, and the commitment-chase email. All five now resolve from the brand; ack KEYS
+  untouched so stored signatures still resolve; default wording byte-identical **proved by
+  mutation** (`tests/lib/ack-company-wiring.test.ts` deletes each wiring and fails if the
+  test stays green - it caught one of its OWN assertions being inert, matching
+  generateMetadata's copy of the theme resolve rather than the page body's).
+- **`/cv`'s submit button said "Send to Marley Moves"** under a Pitmans wordmark. Both leaks
+  were **invisible to the source scan** - neither file was in its MANIFEST, so it reported
+  "0 leaks" while its own header said an unlisted file is UNSCANNED, not clean. True, and
+  unreadable. That is the argument for the rendered half, which #214 ships
+  (`e2e/public/brand-leak-rendered.spec.ts`) along with a manifest walk of the five public
+  routes' import graph that cannot rot.
+- **The rendered spec then made that argument itself, on its FIRST CI run.** Staging
+  `7eb1849`: **185 passed** (up from 182), 5 failed = the 4 known Zoho-quota specs **plus
+  this one**, and it failed because it found a real leak. A second brand's `/q` served
+  `<meta name="description" content="Marley Moves internal operations panel">` under a
+  correctly-branded `<title>`: `generateMetadata` MERGES with the root layout rather than
+  replacing it, so a page setting only `title` inherits `app/layout.tsx`'s description -
+  the wrong company, plus the words "internal operations panel", on a page a customer opens
+  from a link and forwards. **The source grep could never see it** - the literal lives in
+  `app/layout.tsx` where it is CORRECT; the INHERITANCE is the defect, and only a rendered
+  page shows that. Fixed with a new `pageDescription()` beside `pageTitle()` on `/q`, `/s`
+  and `/cv`. The spec is still NOT "done" per the standing rule: it needs a second green CI
+  run, and this was its first.
 
-The 30 (#211): the biggest cluster is SEVEN more instances of the swallowed-read family (#195 fixed
-it for `listActiveBrands` only) - `getBrand`, `createDraftQuote`, `createAppointment`, the
-follow-ups page, and two blank-phone borrows. Plus: a commercial booking that never got a diary
-slot; the Pitmans hosted-template key scheme that would have made EVERY Pitmans template silently
-inert; two lead rails that could skip the other brand's enquiries; Xero's tenant lookup discarding a
-freshly rotated refresh token; `/sheet`'s missing brand chip (and its 500 on a brands read);
-migration **0116** correcting 0115's backfill guard (applied to staging, runbook updated). And the
-leak scan, which reported "0 leaks" while covering ZERO files under `lib/comms/` - now 82 files,
-with the gap note saying plainly that anything off the manifest is UNSCANNED, not clean.
+Also in #214: **QA-20260827-04** built (token-auth `/cv` upload, JPEG/PNG sniff, DB-enforced
+ceilings, server-generated keys); WebP/HEIC refused **deliberately** - one customer WebP
+would have sent the crew NO day sheet for every job that day; the crew sheet no longer
+reports a clean run while sending photo-less; customer photos cannot starve the estimator's
+access shots; the office gallery caps per category and says "showing N of M"; card refund
+emails no longer borrow the default office's phone for a brand with none. **And the
+`qa-auto-merge.yml` risky-path guard is widened** - measured against #210/#211, **14 changed
+files sat outside the old list** (`lib/ledger/**`, `lib/bank-feed/**`, `lib/brand.ts`), plus
+`lib/payments-policy.ts`, which the `lib/payments/**` folder pattern never matched.
 
-**Diagnosed live, correcting the record:** the four red money e2e specs (QA-20260902-06, filed as a
-suspected #205 regression) are **neither a regression nor flake - the staging Zoho org spent its
-1,000-call DAILY QUOTA**, burned by our own CI volume. `POST /oauth/v2/token` -> 200 with a valid
-token while `GET /invoice/v3/invoices` -> 429 code=45: a green auth layer over a dead integration,
-the same trap as the 2026-08-27 lock-out. **PR #205 is cleared, and the previously recorded blocker
-"staging Zoho refresh token dead" was WRONG - the token is fine.** Those four specs are STILL RED and
-will stay red until the quota resets: three consecutive staging runs (`aaecea3` before this session,
-then `5f03c3a` and `7279ed4`) each returned **182 passed / the same 4 failed**, identical assertions,
-which is exactly the evidence that 35 findings' worth of changes introduced nothing. Re-run the
-workflow once the quota resets to confirm - and do NOT read "4 red" as this payload's doing. Nothing classified a 429, so a
-spent quota raised no alarm at all; #211 adds `reportLedgerRateLimited` on its own key with its own
-remedy copy (a quota resets at midnight - it must never borrow the lock-out's "re-enable the user").
-Prod runs against the same cap on the live org.
+**Migration 0117** applied to staging + verified (both columns, both `security definer`
+functions, **0 rows backfilled**), and in the runbook ABOVE the deploy row. Prod batch is now
+**0104-0117**. Gates on the merged tree: lint / typecheck / **3446 tests** (from 3350) /
+build / leak scan 90 files 0 leaks - all green.
+
+**Three findings open, and NONE of them is ours to close:**
+- **QA-20260902-06 (Zoho quota).** Now three independent observations agree - a raw
+  read-only probe at 19:52Z and two role-agents at 20:23Z, all seeing a **200 token refresh
+  over a 429 org**. **Correcting the earlier record: "re-run tomorrow to confirm" was too
+  confident.** Every observation is equally consistent with a plain UTC-midnight reset that
+  OUR OWN CI re-exhausts by lunchtime (~32 merges/2 days, each running an invoice-creating
+  e2e suite). Both readings predict the same thing: **it recurs every day CI volume stays
+  where it is**, so waiting is a coin flip, not a remedy. Reduce the burn or raise the
+  allowance - **prod runs against the same 1,000/day cap on the live org.** Close only on a
+  live re-probe, never on a calendar date.
+- **QA-20260902-04 (takepayments).** Merchant 292749's sandbox rejects takepayments' OWN
+  published test cards (`65566 Disallowed cardnumber`). `e2e/fixtures/sandbox-cards.ts` is
+  empty and **nothing consumes it**, so the card capture path has ZERO e2e coverage. Needs
+  the right PANs from Peter's account manager.
+- **QA-20260827-04.** Implemented in #214 but **deliberately left open**: its Verify clause
+  (control usable on `/cv`, object readable back, photo loadable on the admin page) has not
+  been executed. Unit tests and four gates are not a browser.
 
 **Still Peter's:** the 3 ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3); finding 36's
-two-theme-per-brand call (`brands.ledger_branding_id` has zero consumers, but the obvious remedy is
-the one `docs/ledger-adapter-design.md` rejected); and the critic's gap that **qa-auto-merge.yml's
-risky-path guard never grew to cover the new money rails** - `lib/ledger/**`, `lib/bank-feed/**`,
-`lib/storage/raise-storage-invoices.ts` and `lib/brand.ts` all sit OUTSIDE it, so a `pitmans-gate`
-PR touching only those robot-merges unreviewed. **Next:** gate 15 (Mark's terms doc), gate 16's
-rendered-page leak check, QA-20260827-04, then the 18 September promotion - the runbook now carries
-0104-0116 with 0115+0116 in the before-deploy block and a verification query for each.
+two-theme-per-brand call; the takepayments PANs; and the Zoho burn-rate decision above.
+**Gate 15 is unchanged and NOT addressed** - the published `storage-terms/v2-2026-08-31.md`
+carries the same lien sentence and is hash-locked immutable, so it can only be superseded;
+#214 fixed the RENDERED wording only. Named but not fixed: `lib/quote/chase.ts`'s
+default-brand signature block, and `collect-contract-button.tsx`, which links the default
+brand's terms URL for every brand and takes no brand at all. **Next:** gate 15 (Mark's doc),
+QA-20260827-04's live verification, then the 18 September promotion.
 
 _Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._

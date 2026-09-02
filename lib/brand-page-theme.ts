@@ -229,3 +229,22 @@ export const GROUP_PAGE_THEME: PageTheme = pageTheme({
 export function pageTitle(theme: PageTheme, what: string): string {
   return `${what} — ${theme.name}`;
 }
+
+/**
+ * The `description` meta for a customer-facing token page.
+ *
+ * `generateMetadata` MERGES with the root layout rather than replacing it, so a
+ * page that sets only `title` silently inherits `app/layout.tsx`'s description —
+ * which describes the internal ops panel and names the DEFAULT brand. On a
+ * second brand's /q that put the wrong company, plus the words "internal
+ * operations panel", into the markup of a page a customer opens from a link
+ * (and into any unfurl when they forward it).
+ *
+ * Caught by e2e/public/brand-leak-rendered.spec.ts on its first CI run, 2026-09-02.
+ * The source grep could never see it: the literal lives in app/layout.tsx, where
+ * it is correct — it is the INHERITANCE that is wrong, and only a rendered page
+ * shows that. Every brand-resolved token page must set this.
+ */
+export function pageDescription(theme: PageTheme, what: string): string {
+  return `${what} from ${theme.name}.`;
+}
