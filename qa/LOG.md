@@ -1455,3 +1455,11 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Pushes: verify-first closures pushed separately (`48b58e6`, `05188ea`) ahead of the rota. This commit adds `qa/state.json` + this log entry for the rota's results. No PRs opened, `master` never touched. Rebased onto `origin/staging` immediately before pushing.
 - Cleanup verification (final independent sweep, all marker-bearing tables + `auth.users`, by query): **0 everywhere**.
 - Time spent: ~50 min total (gates+sweep+verify-first ~25 min incl. `npm ci`, seed+dispatch ~2 min, 4 parallel role agents ~6 min wall-clock for the slowest, main-loop spot-check ~2 min, ledger/log write-up + push ~10 min) — close to the nominal 45-minute box, recorded honestly.
+
+## 2026-09-02T00:xxZ (push-triggered fire) — first-pass repair: QA-20260902-01 fixed, PR #188
+
+- Tier: first-pass (Fable), webhook fire on staging push `8c90c2c`. Eligible: **QA-20260902-01** (safe-fix/high, the handoff-spec defects behind the QA-20260901-02 red-CI streak). QA-20260901-02 and QA-20260827-04 are `class: risky` — untouched.
+- Claimed on staging (`a6f6dfb`), fixed on `qa-repair/QA-20260902-01`: accept click now via `submitUntil` onto the post-accept-only sentinel `/deposit to secure your date/i` (the #181 card-off copy made `/Pay by bank transfer/i` match PRE-accept); accept button asserted gone before the DB read; teardown retries its FK-ordered delete pass once so an in-flight accept can't strand the marker set. Diagnosis independently re-verified in source (`app/q/[token]/page.tsx:440` vs `:901`) before editing.
+- Test shipped: `tests/config/e2e-accept-sentinel.test.ts` — vitest tripwire over every accept-driving e2e spec (submitUntil required, ambiguous sentinel forbidden, post-accept copy required). Proven RED on the pre-fix spec, green after.
+- Gates on the branch: lint 0 errors · tsc clean · vitest 2962 passed · build green. PR **#188** to staging, label `qa-repair`. Finding flipped to `fixed-pending-verify` in the same branch; spec half stays unverified until green twice in real CI e2e (AGENTS.md rule).
+- Escalations: none. `master` never touched. Time spent: ~30 min.
