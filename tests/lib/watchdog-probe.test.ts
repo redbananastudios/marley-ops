@@ -32,7 +32,12 @@ const access = vi.hoisted(() => ({
   resolveLedgerAccessDenied: vi.fn<(sb: unknown, provider: string) => Promise<void>>(
     async () => {},
   ),
+  reportLedgerRateLimited: vi.fn<
+    (sb: unknown, input: { provider: string; message: string; while: string }) => Promise<void>
+  >(async () => {}),
+  resolveLedgerRateLimited: vi.fn<(sb: unknown, provider: string) => Promise<void>>(async () => {}),
   ledgerAccessIssueKey: (p: string) => `${p}:access-denied`,
+  ledgerRateLimitIssueKey: (p: string) => `${p}:rate-limited`,
   ZOHO_ACCESS_ISSUE_KEY: "zoho:access-denied",
 }));
 const issues = vi.hoisted(() => ({
@@ -203,6 +208,61 @@ describe("runHealthWatchdog — auto-resolve is scoped to the probed provider", 
 
     expect(access.resolveLedgerAccessDenied).not.toHaveBeenCalled();
     expect(summary.alerts).toEqual([]); // transient: clears itself next pass
+  });
+});
+
+/**
+ * The gap this closes: under a spent quota the probe answers
+ * `{ok: false, accessDenied: false}`, which every rule in this file reads as a
+ * transient blip. So the 15-minute watchdog said NOTHING for a whole day of
+ * failed invoicing — an absence of findings that proved only that nothing could
+ * classify what it saw.
+ */
+describe("runHealthWatchdog — a spent quota is reported, not read as a blip", () => {
+  it("alerts under the quota's own key rather than falling through as transient", async () => {
+    process.env.LEDGER_PROVIDER = "zoho";
+    seam.checkLedgerAccess.mockResolvedValue({
+      ok: false,
+      accessDenied: false,
+      rateLimited: true,
+      message: "The API call for this organisation has exceeded the maximum call rate limit of 1,000",
+    });
+
+    const summary = await runHealthWatchdog(fakeSb());
+
+    const alert = summary.alerts.find((a) => a.key === "zoho-rate-limit");
+    expect(alert).toBeDefined();
+    expect(summary.alerts.find((a) => a.key === "zoho-access")).toBeUndefined();
+  });
+
+  it("resolves nothing while the quota is spent — neither alarm has gone green", async () => {
+    process.env.LEDGER_PROVIDER = "zoho";
+    seam.checkLedgerAccess.mockResolvedValue({
+      ok: false,
+      accessDenied: false,
+      rateLimited: true,
+      message: "rate limit",
+    });
+
+    await runHealthWatchdog(fakeSb());
+
+    expect(access.resolveLedgerAccessDenied).not.toHaveBeenCalled();
+    expect(access.resolveLedgerRateLimited).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The reset is the only thing that clears this, and the probe is the only
+   * thing that sees it: no invoice raise is guaranteed to run afterwards, so
+   * without this the issue would sit open on the ops board forever.
+   */
+  it("a green probe clears the quota alarm as well as the lock-out one", async () => {
+    process.env.LEDGER_PROVIDER = "zoho";
+    seam.checkLedgerAccess.mockResolvedValue({ ok: true });
+
+    await runHealthWatchdog(fakeSb());
+
+    expect(access.resolveLedgerRateLimited).toHaveBeenCalledTimes(1);
+    expect(access.resolveLedgerRateLimited.mock.calls[0][1]).toBe("zoho");
   });
 });
 

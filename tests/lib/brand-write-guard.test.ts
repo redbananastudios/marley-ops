@@ -56,6 +56,23 @@ describe("no WRITE decides a brand off a swallowed brands read", () => {
     }
   });
 
+  /**
+   * The follow-ups queue is not a write, but it PREFILLS a customer message —
+   * a name and a callback number the operator then sends. Built from the
+   * ACTIVE list it has two ways to hold no identity for a row that plainly has
+   * one (a failed read, or a brand deactivated while its follow-ups were still
+   * open), and `lib/comms/templates.ts` answers a missing identity with the
+   * default brand's name and office number. So the map comes from the identity
+   * reader, which refuses on a failed read and keeps inactive rows.
+   */
+  it("the follow-ups canned copy resolves its brand map from the identity reader", () => {
+    const src = read("app/(dashboard)/follow-ups/page.tsx");
+    expect(src).toContain("listBrandIdentities(sb)");
+    expect(src).not.toContain("listActiveBrandsOrEmpty(");
+    // The map must not be narrowed back to the active subset.
+    expect(src).not.toMatch(/brandComms=\{Object\.fromEntries\(activeBrands/);
+  });
+
   it("the brand-deciding form pages fail LOUD rather than rendering picker-less", () => {
     for (const file of ["app/(dashboard)/leads/new/page.tsx", "app/(dashboard)/quotes/new/page.tsx"]) {
       const src = read(file);

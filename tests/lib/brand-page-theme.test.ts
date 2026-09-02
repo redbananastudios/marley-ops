@@ -126,6 +126,26 @@ describe("a non-default brand replaces every piece of identity", () => {
     }
   });
 
+  it("REFUSES a blank phone rather than borrowing the default brand's number", () => {
+    // The Phone field is admin-editable free text with no non-empty rule
+    // (lib/brand-update.ts optText maps "" → null), so one Settings save is
+    // enough. Falling back would put a live tel: link to an office that has
+    // never heard of this customer on ~30 render sites across /q, /s and /cv —
+    // silently, permanently, and invisible to the source-level leak scan
+    // because it arrives through a token. Refusing lands on the request that
+    // caused it and names the fix. Same call as the logo above, and the only
+    // one this type allows: `phone` is a required string every page prints.
+    for (const blank of [null, "", "   "]) {
+      expect(() => pageTheme(brand({ phone: blank }))).toThrow(/Settings › Brands/);
+    }
+    // The DEFAULT brand is untouched: its theme is the literal, read before
+    // any row is consulted, so a blank Marley row cannot break today's pages.
+    expect(pageTheme(brand({ slug: DEFAULT_BRAND, phone: null })).phone).toBe("01747 637070");
+    // Group surfaces (/sheet, /join) carry the operating company's identity
+    // and never reach the row's phone either.
+    expect(pageTheme(brand({ slug: GROUP_BRAND, phone: null })).phone).toBe("01747 637070");
+  });
+
   it("renders its NAME rather than borrowing Marley's logo", () => {
     // A brand whose logo asset has not landed yet (Phase 0) must not fall back
     // to /logo.png — the one wrong answer worse than showing no logo.

@@ -69,6 +69,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
 import {
+  contactKey,
   fetchAllRows,
   headerReader,
   isoDate,
@@ -410,6 +411,21 @@ const counterByKind = new Map((counters ?? []).map((c) => [c.kind, Number(c.n)])
 console.log(`\nbatch '${batch}' — ${jobs.length} rows:\n`);
 const plan = [];
 const previewNext = new Map(counterByKind);
+// The customers EARLIER rows of this same sheet will create, keyed the way
+// findClient matches. Planning resolves every row against the state as it was
+// BEFORE the batch, so one customer with two forward bookings misses the lookup
+// twice: the plan prints NEW for both, and both client-scoped VERIFY lines below
+// are skipped — while the write path re-resolves and attaches the second booking
+// to the client the first row created, keeping the terms that row wrote. A plan
+// a human approves before a live-money import must not be wrong about either.
+//
+// contactKey rather than a hand-rolled `email ?? phone`: `??` only falls through
+// on null/undefined, so a row with neither returns the EMPTY STRING and every
+// contactless row would share one key — the plan would then claim a dedupe the
+// write path will never perform. A null key is neither stored nor looked up.
+// It errs toward NEW, which is the safe direction here.
+const plannedClients = new Map();
+let newCustomers = 0;
 for (const job of jobs) {
   const priorImports = importedCountByRef.get(job.pitmansRef) ?? 0;
   if (priorImports > 0) {
@@ -421,6 +437,11 @@ for (const job of jobs) {
     continue;
   }
   const client = findClient(job);
+  const key = contactKey(job.email, job.phone);
+  // The client record this booking will actually attach to: a stored one, or
+  // the one an earlier row of this sheet creates. `.line` is what tells the two
+  // apart, and where to send whoever is reading the warning.
+  const known = client ?? (key != null ? (plannedClients.get(key) ?? null) : null);
   const kind = job.isCompany ? "C" : "R";
   const policy = job.isCompany ? "commercial" : "residential";
   // Preview only — the real ref is minted at write time by the DB.
@@ -436,32 +457,61 @@ for (const job of jobs) {
   if ((refCounts.get(job.pitmansRef) ?? 0) > 1)
     warnings.push(`pitmans_ref appears ${refCounts.get(job.pitmansRef)}x in this CSV`);
   if (!job.email && !job.phone) warnings.push("no email OR phone — client matching/contact impossible");
-  if (client && client.is_company !== job.isCompany)
-    warnings.push(
-      `existing client '${client.display_name}' is ${client.is_company ? "COMMERCIAL" : "residential"} but this row says ${job.isCompany ? "commercial" : "residential"} — the client record is left as it is`,
-    );
-  // Terms follow the is_company idiom above: an existing client's stored terms
-  // are what every raised invoice will use, and this importer must never
-  // silently rewrite them off a CSV cell (the sheet may be stale, the client
-  // record may have been renegotiated). A difference is a VERIFY line for the
-  // human approving the plan; the write path deliberately does not touch it.
-  if (client && job.isCompany && job.termsDays && (client.payment_terms_days ?? 30) !== job.termsDays)
-    warnings.push(
-      `VERIFY payment terms: existing client '${client.display_name}' is on ${client.payment_terms_days ?? 30}-day terms but this row says ${job.termsDays} — the client record is left as it is (change it in the ops UI if the CSV is right)`,
-    );
+  // The two checks that decide which payment ladder this customer gets. They
+  // run against `known`, so a repeat customer inside one sheet is checked
+  // against the record the EARLIER row will create rather than against a
+  // pre-batch state both rows miss.
+  if (known) {
+    // Name the record and say where it came from: the fix differs. A stored
+    // client is changed in the ops UI; one this sheet creates is fixed in the
+    // sheet, before committing.
+    const subject = known.line
+      ? `'${known.display_name}', created by line ${known.line} of this sheet,`
+      : `existing client '${known.display_name}'`;
+    const tail = known.line
+      ? `the client is created once, from line ${known.line} (fix the sheet if this row is right)`
+      : "the client record is left as it is";
+    if (known.is_company !== job.isCompany)
+      warnings.push(
+        `${subject} is ${known.is_company ? "COMMERCIAL" : "residential"} but this row says ${job.isCompany ? "commercial" : "residential"} — ${tail}`,
+      );
+    // Terms follow the is_company idiom above: the client's stored terms are
+    // what every raised invoice will use, and this importer must never silently
+    // rewrite them off a CSV cell (the sheet may be stale, the client record may
+    // have been renegotiated). A difference is a VERIFY line for the human
+    // approving the plan; the write path deliberately does not touch it.
+    if (job.isCompany && job.termsDays && (known.payment_terms_days ?? 30) !== job.termsDays)
+      warnings.push(
+        `VERIFY payment terms: ${subject} is on ${known.payment_terms_days ?? 30}-day terms but this row says ${job.termsDays} — ${known.line ? tail : "the client record is left as it is (change it in the ops UI if the CSV is right)"}`,
+      );
+  }
   if (job.balancePaid && !job.depositPaid && job.deposit > 0)
     warnings.push(
       "balance_paid without deposit_paid — a settled job implies the deposit landed, importing both as paid" +
         (job.depositPaidDate ? "" : " (deposit stamped from balance_paid_date)"),
     );
   plan.push({ job, client, kind, policy, depositSettled });
+  if (!known) {
+    newCustomers++;
+    // First row wins: it is the one whose values the write path inserts, so a
+    // later row must never overwrite what the plan says will be created.
+    if (key != null)
+      plannedClients.set(key, {
+        line: job.line,
+        display_name: job.name,
+        is_company: job.isCompany,
+        // Mirror the insert below, which leaves the DB default of 30 in place
+        // for anything but a commercial row carrying explicit terms.
+        payment_terms_days: job.isCompany && job.termsDays ? job.termsDays : 30,
+      });
+  }
   console.log(
-    `  ${client ? "MATCH" : "NEW  "} ${job.pitmansRef.padEnd(12)} ${job.name.padEnd(24)} ` +
+    `  ${known ? "MATCH" : "NEW  "} ${job.pitmansRef.padEnd(12)} ${job.name.padEnd(24)} ` +
       `→ ${previewRef}  ${policy === "commercial" ? "COMMERCIAL" : "residential"}  ` +
       `move ${job.movingDate}  £${job.agreed.toFixed(2)}` +
       (job.deposit ? `  dep £${job.deposit.toFixed(2)} ${job.depositPaid ? "PAID" : "unpaid"}` : "  no deposit") +
       (job.balancePaid ? "  SETTLED" : `  balance £${balance.toFixed(2)}`) +
-      (client ? `  → client ${client.display_name}` : "") +
+      (known ? `  → client ${known.display_name}${known.line ? ` (line ${known.line})` : ""}` : "") +
       (job.poNumber ? `  PO ${job.poNumber}` : "") +
       (warnings.length ? `\n         ⚠ ${warnings.join(" · ")}` : ""),
   );
@@ -469,7 +519,7 @@ for (const job of jobs) {
 if (!plan.length) { console.log("\nNothing to do."); process.exit(0); }
 if (!commit) {
   console.log(
-    `\nDry run — ${plan.length} bookings would import as brand '${BRAND}'.` +
+    `\nDry run — ${plan.length} bookings would import as brand '${BRAND}', creating ${newCustomers} customer record(s).` +
       `\nRefs shown are a PREVIEW from brand_ref_counters (R=${counterByKind.get("R") ?? 0}, C=${counterByKind.get("C") ?? 0});` +
       `\nthe real ones are minted by the DB at write time. Add --commit to write.`,
   );

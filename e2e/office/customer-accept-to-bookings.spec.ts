@@ -74,7 +74,17 @@ async function seed(): Promise<Fixture> {
     .single();
   if (lErr || !lead) throw new Error(`seed lead: ${lErr?.message ?? "no row returned"}`);
 
-  const quoteRef = `QA-${MARKER}`;
+  // The ref is the marker UNPREFIXED, and that is load-bearing. This accept is
+  // a real one: it raises a real staging ledger invoice under
+  // depositReference(quote_ref) = "<ref>-DEP". globalTeardown's only ledger
+  // cleanup is purgeStagingInvoices("E2E-"), which matches on startsWith — so
+  // a "QA-"-prefixed ref (as this was until 2026-09-02) escapes the purge and
+  // leaves one invoice in the shared staging org on EVERY CI run. That
+  // accretion is not cosmetic: stagingInvoicesByRefPrefix reads a single
+  // unpaginated page, so once the org outgrows it the money specs' NEGATIVE
+  // assertions ("no balance invoice exists at acceptance") start passing
+  // because the lookup truncated, not because nothing was raised.
+  const quoteRef = MARKER;
   const movingDate = new Date(Date.now() + 21 * 86_400_000).toISOString().slice(0, 10);
   const { data: quote, error: qErr } = await sb
     .from("quotes")

@@ -58,6 +58,12 @@ export function BrandFilter({
     const params = new URLSearchParams(searchParams.toString());
     if (slug === "all") params.delete(BRAND_FILTER_PARAM);
     else params.set(BRAND_FILTER_PARAM, slug);
+    // Every param survives a brand switch EXCEPT the page offset: narrowing to
+    // one brand can shrink a paginated list below the page you were on, and a
+    // list sliced past its end renders "nothing here" beneath a non-zero count
+    // with the pager gone — no way back and nothing saying why. The tab and
+    // preset links beside this control already drop it for the same reason.
+    params.delete("page");
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };

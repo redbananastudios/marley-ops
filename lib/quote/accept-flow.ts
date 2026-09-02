@@ -124,8 +124,13 @@ import {
 // Provider-neutral, and NOT `isZohoAccessDenied` from @/lib/zoho: since gate 17
 // this file's errors arrive as LedgerError, and that function opens by
 // rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
-import { isLedgerAccessDenied } from "@/lib/ledger/access";
-import { reportLedgerAccessDenied, resolveLedgerAccessDenied } from "@/lib/ops/zoho-access";
+import { isLedgerAccessDenied, isLedgerRateLimited } from "@/lib/ledger/access";
+import {
+  reportLedgerAccessDenied,
+  reportLedgerRateLimited,
+  resolveLedgerAccessDenied,
+  resolveLedgerRateLimited,
+} from "@/lib/ops/zoho-access";
 import { reportInvoiceRaiseFailed, resolveInvoiceRaiseFailed } from "@/lib/ops/invoice-raise";
 
 type Sb = SupabaseClient<Database>;
@@ -687,7 +692,7 @@ export async function acceptQuoteOnline(
       .limit(1)
       .maybeSingle();
     if (!signature) {
-      return { ok: false, error: `We couldn't verify the acceptance record — please call ${await errorPhone(sb, quote.brand)}.` };
+      return { ok: false, error: `We couldn't verify the acceptance record — please ${(await errorContact(sb, quote.brand)).call}.` };
     }
     await ensureDepositInvoice(sb, quote.id); // self-heal, then treat as success
     await ensureLateBookingBalanceInvoice(sb, quote.id, null);
@@ -695,7 +700,7 @@ export async function acceptQuoteOnline(
   }
   if (quote.status !== "sent") return { ok: false, error: "This quote link is no longer valid." };
   if (isAcceptExpired(quote.email_sent_at, quote.created_at)) {
-    return { ok: false, error: `This quote has expired. Call us on ${await errorPhone(sb, quote.brand)} for an updated price.` };
+    return { ok: false, error: `This quote has expired. ${(await errorContact(sb, quote.brand)).callUsSentence} for an updated price.` };
   }
   const name = fullName.trim().slice(0, 120);
   if (name.length < 2) return { ok: false, error: "Type your full name to accept the quote." };
@@ -750,7 +755,7 @@ export async function acceptQuoteOnline(
     .eq("id", quote.id)
     .eq("status", "sent") // double-submit / accept-vs-decline race: only one wins
     .select("id");
-  if (error) return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
+  if (error) return { ok: false, error: `Something went wrong — please ${(await errorContact(sb, quote.brand)).call}.` };
   if (!won?.length) {
     const current = await fetchQuoteById(sb, quote.id);
     if (current?.status === "accepted") {
@@ -808,7 +813,7 @@ export async function acceptQuoteOnline(
         `Do not request payment until the contract evidence is repaired.`,
       ], "system").catch(() => {});
     }
-    return { ok: false, error: `We couldn't save the acceptance — please try again or call ${await errorPhone(sb, quote.brand)}.` };
+    return { ok: false, error: `We couldn't save the acceptance — please try again or ${(await errorContact(sb, quote.brand)).call}.` };
   }
 
   // Retire sibling quotes (re-quote path): carries a paid deposit across,
@@ -930,6 +935,12 @@ export async function acceptQuoteByStaff(
   if (quote.status === "accepted") {
     await ensureDepositInvoice(sb, quote.id); // self-heal, then no-op
     await ensureLateBookingBalanceInvoice(sb, quote.id, actorId);
+    // The diary's self-heal, for the same reason. A commercial booking confirmed
+    // before the accept path booked its slot has no removal appointment at all,
+    // and re-running the office action is the one repair that needs no data
+    // surgery. Idempotent — the helper refuses a lead that already has a live
+    // removal, and never re-dates one.
+    if (policyOfQuote(quote) === "commercial") await ensureRemovalAppointment(sb, quote);
     return {
       ok: true,
       alreadyAccepted: true,
@@ -1073,6 +1084,18 @@ export async function acceptQuoteByStaff(
     });
   }
 
+  // COMMERCIAL: this accept IS the confirmation, so it is the only moment the
+  // diary slot can be booked. There is no deposit rung, so `markDepositPaid`
+  // never runs, and `confirmMoveDate` refuses while `deposit_paid_at` is null —
+  // the two callers that book a residential job's slot are both unreachable
+  // here. Without this a live job exists with no appointment row: absent from
+  // /schedule/removals, from the crew day sheet and from capacity, unable to be
+  // signed off or auto-completed (and completion is the sole trigger for its
+  // invoice), with the day still reading free to the next booking. Placed
+  // before the carried-deposit return so both accept tails reach it, and
+  // fail-soft by construction — see lib/schedule/ensure-removal-appointment.
+  if (commercial) await ensureRemovalAppointment(sb, quote);
+
   if (carriedDeposit) {
     // Fully paid deposit came across with the supersede — nothing to invoice or
     // chase; the caller reports "price revised" rather than "deposit requested".
@@ -1133,7 +1156,7 @@ export async function declineQuoteOnline(
   if (!quote) return { ok: false, error: "This quote link is no longer valid." };
   if (quote.status === "rejected") return { ok: true };
   if (quote.status !== "sent") {
-    return { ok: false, error: `This quote can't be declined online any more — call us on ${await errorPhone(sb, quote.brand)}.` };
+    return { ok: false, error: `This quote can't be declined online any more — ${(await errorContact(sb, quote.brand)).callUs}.` };
   }
   const lostReason = DECLINE_REASONS.has(reason) ? reason : "other";
 
@@ -1153,7 +1176,7 @@ export async function declineQuoteOnline(
     // won the race, never tell the customer that their quote was declined.
     const current = await fetchQuoteById(sb, quote.id);
     if (current?.status === "rejected") return { ok: true };
-    return { ok: false, error: `This quote can't be declined online any more — call us on ${await errorPhone(sb, quote.brand)}.` };
+    return { ok: false, error: `This quote can't be declined online any more — ${(await errorContact(sb, quote.brand)).callUs}.` };
   }
 
   if (quote.lead_id) {
@@ -1268,22 +1291,52 @@ export async function reportDepositSent(
 /* ------------------------------------------------------------- deposit invoice */
 
 /**
- * The brand-correct "call us" number for a customer-facing ERROR string
- * (multi-brand PRD §3.5). The happy paths were brand-resolved in gate 16; the
- * error returns were not — they hardcoded the default brand's office number,
- * and they render verbatim on /q via accept-form's `setError(res.error)`, so a
- * second-brand customer was handed the default brand's number at exactly the
- * moment they needed to ring someone.
+ * The brand-correct "how to reach us" fragment for a customer-facing ERROR
+ * string (multi-brand PRD §3.5). The happy paths were brand-resolved in gate
+ * 16; the error returns were not — they hardcoded the default brand's office
+ * number, and they render verbatim on /q via accept-form's
+ * `setError(res.error)`, so a second-brand customer was handed the default
+ * brand's number at exactly the moment they needed to ring someone.
  *
- * Resolved LAZILY — only when an error is actually being returned — so no
- * happy path pays an extra read; each error return is terminal, so a call
- * costs at most one resolve. Throw-free with the same fallback pattern as
- * `invoicePayClause` below: an unreadable brands row degrades to the default
- * brand's number rather than masking the error the caller is reporting.
+ * The office number is the DEFAULT-BRAND fallback ONLY, and the gate is the
+ * SLUG rather than the resolved row — so a brand whose row could not be read,
+ * or which carries no number at all (the Phone field is admin-editable free
+ * text that saves blank as null), degrades to reply-first contact instead of
+ * being handed a phone line that has never heard of its customer. Same rule
+ * lib/comms/templates.ts states for the follow-up copy.
+ *
+ * Three fragments rather than a bare number because the error strings differ
+ * only in how they introduce it, and each has to read correctly with the
+ * degraded form substituted in. Resolved LAZILY — only when an error is
+ * actually being returned — so no happy path pays an extra read; each error
+ * return is terminal, so a call costs at most one resolve. Throw-free: an
+ * unreadable brands row must not mask the error the caller is reporting.
  */
-async function errorPhone(sb: Sb, slug: string | null): Promise<string> {
+type ErrorContact = {
+  /** Mid-sentence, bare — "…please call 01747 637070." */
+  call: string;
+  /** Mid-sentence, with the invitation — "…call us on 01747 637070." */
+  callUs: string;
+  /** Sentence-initial form of `callUs`. */
+  callUsSentence: string;
+};
+
+/** What a brand with no reachable number offers instead. Never a number: a
+ *  borrowed one reaches the wrong company and a made-up one reaches nobody. */
+const REPLY_FIRST = "reply to your quote email";
+
+async function errorContact(sb: Sb, slug: string | null): Promise<ErrorContact> {
   const brand = await brandForComms(sb, slug).catch(() => null);
-  return (brand?.phone ?? "").trim() || "01747 637070";
+  const isDefault = (slug ?? DEFAULT_BRAND) === DEFAULT_BRAND;
+  const tel = (brand?.phone ?? "").trim() || (isDefault ? "01747 637070" : "");
+  if (!tel) {
+    return {
+      call: REPLY_FIRST,
+      callUs: REPLY_FIRST,
+      callUsSentence: REPLY_FIRST.charAt(0).toUpperCase() + REPLY_FIRST.slice(1),
+    };
+  }
+  return { call: `call ${tel}`, callUs: `call us on ${tel}`, callUsSentence: `Call us on ${tel}` };
 }
 
 /**
@@ -1303,13 +1356,20 @@ async function errorPhone(sb: Sb, slug: string | null): Promise<string> {
  * duplicating this logic.
  */
 export function invoicePayClause(brand: Brand, quoteRef: string, lead: string): string {
-  const phone = (brand.phone ?? "").trim() || "01747 637070";
+  // The default brand's office number is the DEFAULT-BRAND fallback ONLY —
+  // the rule lib/comms/templates.ts states for the sibling surface. The Phone
+  // field is admin-editable free text that saves blank as null, so without the
+  // slug gate one Settings save told another brand's customers to ring an
+  // office that cannot take a payment against their booking. A brand with no
+  // number of its own loses the card sentence (below) rather than borrowing
+  // one: bank transfer and cash are rails that actually work for them.
+  const phone = (brand.phone ?? "").trim() || (brand.slug === DEFAULT_BRAND ? "01747 637070" : "");
   // The default brand's wording is LITERAL, matching `emailTheme` — its own row
   // flag governs neither, so Marley's invoice note cannot change because a row
   // read went stale. Marley's Settings toggle therefore stays advisory: the
   // known remainder of QA-20260826-07, flagged for Peter rather than resolved by
   // quietly loosening the byte-lock in `email-brand.test.ts`.
-  const cardOn = brand.slug === DEFAULT_BRAND || brand.cardPaymentsEnabled;
+  const cardOn = (brand.slug === DEFAULT_BRAND || brand.cardPaymentsEnabled) && phone !== "";
   const card = cardOn ? `, by card over the phone on ${phone}` : "";
   const bank = card
     ? `${lead} bank transfer (reference ${quoteRef})${card}, or cash.`
@@ -1430,6 +1490,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       } as never)
       .eq("id", quoteId);
     await resolveLedgerAccessDenied(sb, ledger);
+    await resolveLedgerRateLimited(sb, ledger);
     await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
@@ -1443,6 +1504,10 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     // A lock-out is not this quote's problem — it is every quote's. Collapse it
     // into the one integration-level alert that names the actual remedy.
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "deposit invoice" });
+    // A spent quota has the same blast radius and a different remedy, so it
+    // collapses too — into its own alarm rather than the lock-out's, which would
+    // send the office to re-enable a user nobody disabled.
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "deposit invoice" });
     else {
       // The email alone left no trace anywhere a human looks: the ops board and
       // the daily digest read clean while the customer went unbilled.
@@ -1976,6 +2041,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "commitment invoice" });
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "commitment invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "commitment", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
@@ -2202,7 +2268,7 @@ export async function confirmMoveDate(
     return { ok: false, error: "The quote must be accepted before the move date is confirmed." };
   }
   if (quote.booking_cancelled_at) {
-    return { ok: false, error: `This booking has been cancelled — call ${await errorPhone(sb, quote.brand)} if you'd like to rebook.` };
+    return { ok: false, error: `This booking has been cancelled — ${(await errorContact(sb, quote.brand)).call} if you'd like to rebook.` };
   }
   if (!quote.deposit_paid_at) {
     return { ok: false, error: "The deposit must be paid before the move date is confirmed." };
@@ -2229,7 +2295,7 @@ export async function confirmMoveDate(
   // raise a fresh commitment invoice for a cancelled job — the pending refund
   // row and a signed non-refundability record would contradict each other.
   if (lead.status === "declined") {
-    return { ok: false, error: `This booking has been cancelled — call ${await errorPhone(sb, quote.brand)} if you'd like to rebook.` };
+    return { ok: false, error: `This booking has been cancelled — ${(await errorContact(sb, quote.brand)).call} if you'd like to rebook.` };
   }
   if (lead.date_confirmed_at) return { ok: true, already: true };
 
@@ -2241,7 +2307,7 @@ export async function confirmMoveDate(
     .eq("id", quote.lead_id)
     .is("date_confirmed_at", null)
     .select("id");
-  if (gateErr) return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
+  if (gateErr) return { ok: false, error: `Something went wrong — please ${(await errorContact(sb, quote.brand)).call}.` };
   if (!won?.length) {
     // Someone else won the race (two tabs, a replay) — that confirmation stands.
     const { data: again } = await sb
@@ -2250,7 +2316,7 @@ export async function confirmMoveDate(
       .eq("id", quote.lead_id)
       .maybeSingle();
     if (again?.date_confirmed_at) return { ok: true, already: true };
-    return { ok: false, error: `Something went wrong — please call ${await errorPhone(sb, quote.brand)}.` };
+    return { ok: false, error: `Something went wrong — please ${(await errorContact(sb, quote.brand)).call}.` };
   }
 
   // Evidence row. One per quote (partial unique index) — a 23505 means a
@@ -2299,7 +2365,7 @@ export async function confirmMoveDate(
         `Do not treat the deposit as non-refundable until the confirmation evidence is repaired.`,
       ], "system").catch(() => {});
     }
-    return { ok: false, error: `We couldn't save the confirmation — please try again or call ${await errorPhone(sb, quote.brand)}.` };
+    return { ok: false, error: `We couldn't save the confirmation — please try again or ${(await errorContact(sb, quote.brand)).call}.` };
   } else {
     signatureId = sigRow.id;
   }
@@ -3232,6 +3298,7 @@ export async function createBalanceInvoiceFlow(
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "balance invoice" });
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "balance invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "balance", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
@@ -3365,7 +3432,7 @@ export async function settleQuoteInFull(
   if (!payInFullAvailable(quote, lead)) {
     return {
       ok: false,
-      error: `This booking can't be settled in full from here — please call ${await errorPhone(sb, quote.brand)}.`,
+      error: `This booking can't be settled in full from here — please ${(await errorContact(sb, quote.brand)).call}.`,
     };
   }
 
@@ -3378,7 +3445,7 @@ export async function settleQuoteInFull(
     // stands, and the balance still raises at T-7 as it always would have.
     return {
       ok: false,
-      error: `We couldn't raise the final invoice just now — your commitment payment is unchanged. Please try again shortly or call ${await errorPhone(sb, quote.brand)}.`,
+      error: `We couldn't raise the final invoice just now — your commitment payment is unchanged. Please try again shortly or ${(await errorContact(sb, quote.brand)).call}.`,
     };
   }
 
@@ -3605,6 +3672,12 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
   // healthy-Zoho pass would clear.
   const readProviders = new Set<LedgerProvider>();
   const deniedProviders = new Set<LedgerProvider>();
+  // Tracked beside the denials rather than folded into them: a spent quota
+  // refuses every read exactly as a lock-out does, and is fixed by finding what
+  // is burning the calls rather than by re-enabling anyone. Its own set so its
+  // own alarm fires — and so `accessDenied` keeps meaning PERMANENT, which is
+  // what the caller's escalation reads.
+  const rateLimitedProviders = new Set<LedgerProvider>();
   // Memoised so a garbled LEDGER_PROVIDER throws inside the per-slot try (a
   // counted, noted failure) rather than out of the whole sweep.
   let configuredCache: LedgerProvider | undefined;
@@ -3616,6 +3689,7 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
     // "refusing to guess" errors, never the access-denied class, so a denial
     // always carries the provider that issued it.
     if (isLedgerAccessDenied(err) && provider) deniedProviders.add(provider);
+    else if (isLedgerRateLimited(err) && provider) rateLimitedProviders.add(provider);
     log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, provider, ...errorContext(err) });
   };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
@@ -3700,10 +3774,19 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
   for (const provider of deniedProviders) {
     await reportLedgerAccessDenied(sb, { provider, message: "invoice status unreadable", while: "payment watch" });
   }
+  // Same collapse, its own alarm. A quota refuses the whole sweep, so one
+  // per-quote escalation each would rebuild the very shape the deduped alert
+  // exists to replace.
+  for (const provider of rateLimitedProviders) {
+    await reportLedgerRateLimited(sb, { provider, message: "invoice status unreadable", while: "payment watch" });
+  }
   // The clean-sweep resolve clears only the providers this sweep actually
   // READ: a pass that never touched Xero has no evidence about Xero.
-  if (!deniedProviders.size && !unreadable && changed) {
-    for (const provider of readProviders) await resolveLedgerAccessDenied(sb, provider);
+  if (!deniedProviders.size && !rateLimitedProviders.size && !unreadable && changed) {
+    for (const provider of readProviders) {
+      await resolveLedgerAccessDenied(sb, provider);
+      await resolveLedgerRateLimited(sb, provider);
+    }
   }
   const accessDenied = deniedProviders.size > 0;
   const after = changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;

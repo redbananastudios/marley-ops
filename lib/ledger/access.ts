@@ -7,6 +7,10 @@
  * is exactly how Zoho's 2026-08-27 lock-out ran for hours behind a green
  * `{checked: 9, settled: 0}`.
  *
+ * There is a third class beneath those two — a provider RATE LIMIT, which is
+ * transient but integration-wide — and it gets its own test at the bottom of
+ * this file rather than being folded into either. See `isLedgerRateLimited`.
+ *
  * ## Why this is not just `isZohoAccessDenied`
  *
  * `lib/zoho.ts` exports that function and it is correct — but it opens with
@@ -89,7 +93,50 @@ export function isLedgerAccessDenied(err: unknown): boolean {
    * lease, the lease wait timing out — are genuinely retryable and wear very
    * similar words.
    */
-  return /credentials not configured|token refresh failed|not configured —|invalid_grant|invalid_client|no new refresh token|No Xero tenant is recorded|token row exists|need re-authorising/i.test(
+  return /credentials not configured|token refresh failed|not configured —|invalid_grant|invalid_client|no new refresh token|No Xero tenant is recorded|token row exists|need re-authorising|grant exactly one/i.test(
     err.message,
   );
+}
+
+/**
+ * True when a ledger failure is the provider's RATE LIMIT rather than either
+ * class above.
+ *
+ * A third class, because it matches neither. It is not a blip: Zoho meters
+ * 1,000 API calls per organisation per DAY, and once an org has spent them
+ * every raise, poll and read fails together until the counter resets — the same
+ * blast radius as a lock-out, and the same reason it needs one integration-level
+ * alarm instead of one "invoice FAILED" email per accepted quote. Unclassified,
+ * it produced exactly the per-entity shape the 2026-08-27 decision exists to
+ * prevent: five unrelated-looking incidents for one exhausted quota, none of
+ * them naming the cause.
+ *
+ * And it is emphatically not access denied. `isLedgerAccessDenied` must keep
+ * answering false here, because that alarm's remedy paragraphs are hardcoded
+ * per provider — re-enable the org user, or re-consent at /api/xero/connect —
+ * and neither is true of a quota. An alarm naming the wrong remedy is worse
+ * than the noise it replaced: it sends an office looking for a disabled user
+ * that was never disabled, and it clears itself at midnight regardless.
+ *
+ * Two independent signals, like the tests above:
+ *  - HTTP 429, which is what both providers answer with;
+ *  - the provider's own wording, because Zoho also returns a non-zero body
+ *    `code` under a 200 on some endpoints, and its message ("exceeded the
+ *    maximum call rate limit of 1,000") is then the only signal there is.
+ *
+ * The bare provider code is deliberately NOT a signal. Zoho's is 45, but a
+ * small integer means different things in each provider's namespace and this
+ * module is the shared seam — guessing across it is how a Xero validation error
+ * would classify as a quota.
+ *
+ * The escalation it feeds is `reportLedgerRateLimited` in
+ * `lib/ops/zoho-access.ts`, reached from the three raise paths and the payment
+ * watcher in `lib/quote/accept-flow.ts`. The watchdog's own probe classifies the
+ * same class through `checkAccess`'s `rateLimited`, so the 15-minute pass and
+ * the rails cannot disagree about what a refusal on volume is.
+ */
+export function isLedgerRateLimited(err: unknown): boolean {
+  if (!(err instanceof LedgerError)) return false;
+  if (err.httpStatus === 429) return true;
+  return /rate limit|too many requests/i.test(err.message);
 }

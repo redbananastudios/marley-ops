@@ -262,11 +262,27 @@ export async function createAppointment(input: CreateAppointmentInput) {
     brand: string;
   } | null = null;
   if (input.leadId) {
-    const { data } = await sb
+    const { data, error } = await sb
       .from("leads")
       .select("id, client_id, status, name, phone, email, from_address, from_postcode, brand")
       .eq("id", input.leadId)
       .single();
+    // Refuse rather than book blind. Everything below derives from this row
+    // EXCEPT `lead_id`, which comes from the input — so a discarded error put a
+    // real enquiry's appointment in the diary stamped with the default brand,
+    // with no client_id, no location and (for a survey) no linked survey row,
+    // under a clean "booked" toast. `appointments.brand` is denormalised with
+    // no trigger back to the parent lead (migration 0104) and the diary colours
+    // off it, so nothing downstream would ever correct the stamp.
+    if (error || !data) {
+      return {
+        ok: false as const,
+        error:
+          error?.code === "PGRST116"
+            ? "That lead no longer exists, so nothing was booked."
+            : `Could not read the lead, so nothing was booked: ${error?.message ?? "no row returned"}`,
+      };
+    }
     lead = data;
   }
 

@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { FollowUpsQueue, type FollowUpRow } from "@/components/followups/followups-queue";
 import { BrandFilter } from "@/components/brand/brand-filter";
-import { listActiveBrandsOrEmpty } from "@/lib/brand";
+import { GROUP_BRAND, listBrandIdentities } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +61,17 @@ export default async function FollowUpsPage({
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1). Follow-ups key on leads, so brand rides the page's existing lead
   // join below — no follow_ups column, no extra read.
-  const activeBrands = await listActiveBrandsOrEmpty(sb);
+  //
+  // One read, two jobs, and they need different rows. The chips and the filter
+  // show what is LIVE. The canned-copy map has to answer for the brand of every
+  // card on the page — including a brand deactivated while its follow-ups were
+  // still open — because a slug missing from that map is what lib/comms/
+  // templates.ts answers with the default brand's name and office number,
+  // prefilled into another brand's email under that brand's own From. So this
+  // read refuses on failure rather than degrading (listBrandIdentities throws):
+  // no brand UI for one render is honest, a wrong callback number is not.
+  const allBrands = await listBrandIdentities(sb);
+  const activeBrands = allBrands.filter((b) => b.active && b.slug !== GROUP_BRAND);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 
@@ -191,7 +201,11 @@ export default async function FollowUpsPage({
         rows={rows}
         brands={brandOptions}
         showBrandChips={multi && brandFilter === "all"}
-        brandComms={Object.fromEntries(activeBrands.map((b) => [b.slug, { name: b.name, phone: b.phone }]))}
+        brandComms={Object.fromEntries(
+          allBrands
+            .filter((b) => b.slug !== GROUP_BRAND)
+            .map((b) => [b.slug, { name: b.name, phone: b.phone }]),
+        )}
       />
     </main>
   );

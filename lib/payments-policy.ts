@@ -394,9 +394,11 @@ export interface HeldPayment {
    * quote's matching `*_invoice_provider` column when the snapshot freezes,
    * because the id alone does not say which system issued it and the quote's
    * slots move on after the trigger (a reopen clears them entirely). Null on
-   * entries with no invoice id, and on snapshots frozen before the stamp
-   * existed — readers resolve null to the configured provider, exactly like
-   * every other stamp reader (`asProvider`).
+   * entries carrying no invoice id at all. An entry that HAS an id but no stamp
+   * is the pre-0109 shape and `parseHeld` resolves it to Zoho, NOT to the
+   * configured provider the sibling columns fall back to: those are backed by
+   * 0110's backfill and CHECK and this jsonb is backed by neither, so the
+   * ordinary convention would hand a Zoho-minted id to Xero after the flip.
    */
   ledger_provider?: string | null;
 }

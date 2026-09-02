@@ -3,10 +3,13 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   DEFAULT_BRAND,
   GROUP_BRAND,
+  getBrand,
+  getBrandOrDefault,
   isMultiBrand,
   listActiveBrands,
   listActiveBrandsForWrite,
   listActiveBrandsOrEmpty,
+  listBrandIdentities,
   mapBrand,
 } from "@/lib/brand";
 
@@ -246,5 +249,112 @@ describe("a brands READ FAILURE is never mistaken for single-brand mode", () => 
     const res = await listActiveBrandsForWrite(sbReturning([marley, pitmans]));
     expect(res.ok).toBe(true);
     if (res.ok) expect(res.brands.map((b) => b.slug)).toEqual([DEFAULT_BRAND, "pitmans"]);
+  });
+});
+
+/* ------------------------------------------------ single-row (getBrand) reads */
+
+const MARLEY_ROW = {
+  slug: DEFAULT_BRAND,
+  name: "Marley Moves",
+  short_name: "Marley",
+  group_line: "",
+  legal_line: "MarleyMoves Ltd",
+  phone: "01747 637070",
+  active: true,
+  sort_order: 0,
+};
+
+const PITMANS_ROW = {
+  slug: "pitmans",
+  name: "Pitmans Removals & Storage",
+  short_name: "Pitmans",
+  group_line: "Part of the Marley Group",
+  legal_line: "Pitmans Removals & Storage is a trading name of MarleyMoves Ltd.",
+  phone: "01258 858564",
+  active: true,
+  sort_order: 1,
+};
+
+/**
+ * Keyed single-row stub: `resolve(slug)` returns the row, `null` for a genuine
+ * MISS, or throws a sentinel the stub converts into a PostgREST-shaped error —
+ * the two answers the defect under test collapsed into one.
+ */
+function sbBySlug(
+  resolve: (slug: string) => Record<string, unknown> | null | "error",
+): SupabaseClient {
+  let asked = "";
+  const answer = () => {
+    const row = resolve(asked);
+    return Promise.resolve(
+      row === "error"
+        ? { data: null, error: { message: "connection reset" } }
+        : { data: row, error: null },
+    );
+  };
+  const chain = {
+    select: () => chain,
+    eq: (_col: string, v: string) => ((asked = v), chain),
+    neq: () => chain,
+    order: () => answer(),
+    maybeSingle: () => answer(),
+  };
+  return { from: () => chain } as unknown as SupabaseClient;
+}
+
+describe("a single brand read distinguishes a FAILURE from a MISS", () => {
+  it("getBrand THROWS on a query error rather than reporting the brand absent", async () => {
+    await expect(getBrand(sbBySlug(() => "error"), "pitmans")).rejects.toThrow(
+      /brand read failed \(pitmans\): connection reset/,
+    );
+  });
+
+  it("getBrand still returns null for a genuine miss", async () => {
+    expect(await getBrand(sbBySlug(() => null), "nope")).toBeNull();
+  });
+
+  it("getBrandOrDefault REFUSES a failed read for a non-default slug — it never answers as another brand", async () => {
+    await expect(getBrandOrDefault(sbBySlug(() => "error"), "pitmans")).rejects.toThrow(
+      /brand read failed \(pitmans\)/,
+    );
+  });
+
+  it("getBrandOrDefault still degrades a genuine miss to the default row", async () => {
+    const brand = await getBrandOrDefault(
+      sbBySlug((slug) => (slug === DEFAULT_BRAND ? MARLEY_ROW : null)),
+      "gone",
+    );
+    expect(brand.slug).toBe(DEFAULT_BRAND);
+  });
+
+  it("getBrandOrDefault resolves a real non-default row unchanged", async () => {
+    const brand = await getBrandOrDefault(sbBySlug(() => PITMANS_ROW), "pitmans");
+    expect(brand).toMatchObject({ slug: "pitmans", phone: "01258 858564" });
+  });
+
+  it("a failed read for the DEFAULT slug degrades to the default identity — the fallback IS what was asked for", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const brand = await getBrandOrDefault(sbBySlug(() => "error"), DEFAULT_BRAND);
+      expect(brand.slug).toBe(DEFAULT_BRAND);
+      expect(spy).toHaveBeenCalled(); // degraded, but never silently
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("listBrandIdentities — the identity map for records already on the books", () => {
+  it("THROWS on a query error rather than answering 'no such brand' for live rows", async () => {
+    await expect(listBrandIdentities(sbFailing("boom"))).rejects.toThrow(/brands read failed: boom/);
+  });
+
+  it("includes INACTIVE brands — deactivation stops new work, it does not rewrite old jobs", async () => {
+    const brands = await listBrandIdentities(
+      sbReturning([MARLEY_ROW, { ...PITMANS_ROW, active: false }]),
+    );
+    expect(brands.map((b) => b.slug)).toEqual([DEFAULT_BRAND, "pitmans"]);
+    expect(brands[1]).toMatchObject({ active: false, phone: "01258 858564" });
   });
 });

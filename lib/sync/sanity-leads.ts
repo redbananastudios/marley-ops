@@ -48,6 +48,11 @@ interface SanityQuote {
 
 const FIELDS = `_id, _createdAt, leadId, name, phone, email, fromPostcode, toPostcode, propertySize, preferredDate, services, notes, submittedAt, status, source, referrer, campaign, variantKey, landingUrl, utmSource, utmMedium, utmCampaign, utmContent, utmTerm, "gclid":gclid, "gbraid":gbraid, "wbraid":wbraid, "fbclid":fbclid, "msclkid":msclkid`;
 
+/** The brand whose website this rail pulls (multi-brand PRD §10). Stamped on
+ *  every row it lands AND used to scope the incremental cutoff below, so the
+ *  window and the population it gates can never describe different brands. */
+const PULL_BRAND = "marley";
+
 /** Map a Sanity submission status onto our funnel enum. Only applied on INSERT. */
 function mapStatus(raw?: string | null): LeadStatus {
   switch ((raw ?? "").toLowerCase()) {
@@ -98,11 +103,20 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
   const admin = createAdminClient();
 
   // Resolve the incremental cutoff: latest synced submitted_at, minus a 2-day overlap.
+  //
+  // Scoped to THIS rail's brand. `source_system = 'website'` stopped being a
+  // marker for this rail alone the moment a second brand's ingest landed rows
+  // through the same shared lander — so an unscoped read lets another brand's
+  // newer enquiry advance this window past one of ours whose push failed,
+  // which is the exact loss this pull exists to recover. Cheap to get wrong
+  // and invisible when it is: the skipped document simply never appears until
+  // the next full-mode run.
   let since = opts.since;
   if (!since && opts.incremental) {
     const { data: latest } = await admin
       .from("leads")
       .select("submitted_at")
+      .eq("brand", PULL_BRAND)
       .eq("source_system", "website")
       .not("submitted_at", "is", null)
       .order("submitted_at", { ascending: false })
@@ -183,7 +197,7 @@ export async function syncSanityLeads(opts: { since?: string; incremental?: bool
         {
           // The pull rail is Marley's website only — the brand is stamped
           // explicitly, never inferred (multi-brand PRD §10).
-          brand: "marley",
+          brand: PULL_BRAND,
           externalLeadId: doc.leadId ?? null,
           sanityId: doc._id,
           name: doc.name,

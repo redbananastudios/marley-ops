@@ -54,9 +54,31 @@ export function isZohoAccessDenied(err: unknown): boolean {
   return /credentials not configured|token refresh failed/i.test(err.message);
 }
 
+/**
+ * Refused on VOLUME, not on identity — the org has spent its allowance and
+ * every call fails until it resets.
+ *
+ * Deliberately a sibling of `isZohoAccessDenied` rather than a call into
+ * `lib/ledger/access`'s `isLedgerRateLimited`: that one opens by rejecting
+ * anything that is not a `LedgerError`, and the probe below classifies raw
+ * `ZohoError`s straight off this module's own client. Same split, same reason,
+ * as the two access-denied tests either side of the seam.
+ *
+ * Two independent signals, because Zoho uses both: the 429, and its own wording
+ * — which is the only signal on the endpoints that return a non-zero body code
+ * under an HTTP 200. The bare code 45 is deliberately not one: a small integer
+ * means different things in different namespaces, and this classifier is
+ * duplicated across the seam where guessing would diverge.
+ */
+export function isZohoRateLimited(err: unknown): boolean {
+  if (!(err instanceof ZohoError)) return false;
+  if (err.httpStatus === 429) return true;
+  return /rate limit|too many requests/i.test(err.message);
+}
+
 export type ZohoAccessCheck =
   | { ok: true }
-  | { ok: false; accessDenied: boolean; message: string };
+  | { ok: false; accessDenied: boolean; rateLimited: boolean; message: string };
 
 /**
  * Cheap org-scoped read used by the health watchdog to prove the books
@@ -73,6 +95,7 @@ export async function checkZohoAccess(): Promise<ZohoAccessCheck> {
     return {
       ok: false,
       accessDenied: isZohoAccessDenied(err),
+      rateLimited: isZohoRateLimited(err),
       message: err instanceof Error ? err.message : String(err),
     };
   }

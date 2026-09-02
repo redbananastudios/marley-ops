@@ -30,8 +30,11 @@ vi.mock("@/lib/comms/dispatch", () => dispatch);
 
 import {
   ledgerAccessIssueKey,
+  ledgerRateLimitIssueKey,
   reportLedgerAccessDenied,
+  reportLedgerRateLimited,
   resolveLedgerAccessDenied,
+  resolveLedgerRateLimited,
 } from "@/lib/ops/zoho-access";
 
 const sb = {} as never;
@@ -141,5 +144,93 @@ describe("resolveLedgerAccessDenied — scoped to the provider that went green",
     await resolveLedgerAccessDenied(sb, "xero");
     expect(issues.resolveOperationalIssue).toHaveBeenCalledTimes(1);
     expect(issues.resolveOperationalIssue).toHaveBeenCalledWith(sb, "xero:access-denied");
+  });
+});
+
+/**
+ * Quota exhaustion gets its own alarm because it has its own remedy.
+ *
+ * The staging org spent Zoho's 1,000-calls-per-day allowance on 2026-09-02 and
+ * every invoice-touching call failed for the rest of the day. Nothing classified
+ * a 429 then, so each accepted quote emitted its own "invoice FAILED" — the
+ * per-entity shape the 2026-08-27 decision exists to prevent. Prod meters the
+ * same allowance on the live org.
+ *
+ * The trap this pins is the tempting shortcut of routing it into the lock-out
+ * alarm: the copy there names a disabled user and a re-consent, and neither has
+ * happened. An office sent hunting a user nobody disabled is worse off than an
+ * office told nothing, and it clears itself at the reset regardless.
+ */
+describe("ledgerRateLimitIssueKey", () => {
+  it("is a different key from the lock-out — the two clear on different evidence", () => {
+    expect(ledgerRateLimitIssueKey("zoho")).toBe("zoho:rate-limited");
+    expect(ledgerRateLimitIssueKey("xero")).toBe("xero:rate-limited");
+    expect(ledgerRateLimitIssueKey("zoho")).not.toBe(ledgerAccessIssueKey("zoho"));
+  });
+});
+
+describe("reportLedgerRateLimited — one alarm for the integration, with the quota's own remedy", () => {
+  it("raises a rate-limit issue against the provider that refused us", async () => {
+    await reportLedgerRateLimited(sb, {
+      provider: "zoho",
+      message: "The API call for this organisation has exceeded the maximum call rate limit of 1,000",
+      while: "deposit invoice",
+    });
+
+    expect(issues.reportOperationalIssue).toHaveBeenCalledTimes(1);
+    const issue = issues.reportOperationalIssue.mock.calls[0][1] as Record<string, unknown>;
+    expect(issue.key).toBe("zoho:rate-limited");
+    expect(issue.source).toBe("zoho");
+    expect(issue.event).toBe("zoho.rate_limited");
+    expect(issue.message).toMatch(/invoices/i);
+    expect((issue.context as Record<string, unknown>).provider).toBe("zoho");
+    expect((issue.context as Record<string, unknown>).failedWhile).toBe("deposit invoice");
+  });
+
+  /**
+   * The whole reason this is not the lock-out alert. Nothing in it may send a
+   * human to re-enable a user or re-authorise a connection, and it may not
+   * describe a quota as a lock-out — the books have not shut us out, they have
+   * counted us out until the reset.
+   */
+  it("never borrows the lock-out remedy, in either provider's copy", async () => {
+    for (const provider of ["zoho", "xero"] as const) {
+      dispatch.sendOpsAlert.mockClear();
+      await reportLedgerRateLimited(sb, { provider, message: "429", while: "balance invoice" });
+      const [subject, paragraphs, category] = dispatch.sendOpsAlert.mock.calls[0] as unknown as [
+        string,
+        string[],
+        string,
+      ];
+      const body = `${subject} ${paragraphs.join(" ")}`;
+      expect(body).not.toMatch(/re-enable|Users &amp; Roles|re-authoris|\/api\/xero\/connect/i);
+      expect(body).not.toMatch(/locked out|access denied/i);
+      // It still has to say what is actually happening and what to do about it.
+      expect(body).toMatch(/invoices/i);
+      expect(body).toMatch(/reset|resets/i);
+      expect(category).toBe("system");
+    }
+  });
+
+  it("names the provider that ran out, and only that one", async () => {
+    await reportLedgerRateLimited(sb, { provider: "xero", message: "429", while: "payment watch" });
+    const [subject, paragraphs] = dispatch.sendOpsAlert.mock.calls[0] as unknown as [string, string[]];
+    expect(subject).toMatch(/xero/i);
+    expect(`${subject} ${paragraphs.join(" ")}`).not.toMatch(/zoho/i);
+  });
+
+  it("keeps the email body input-independent so the provider-side content hash still dedups", async () => {
+    await reportLedgerRateLimited(sb, { provider: "zoho", message: "first quote", while: "deposit invoice" });
+    await reportLedgerRateLimited(sb, { provider: "zoho", message: "second quote", while: "payment watch" });
+    const [first, second] = dispatch.sendOpsAlert.mock.calls;
+    expect(second).toEqual(first);
+  });
+});
+
+describe("resolveLedgerRateLimited — the quota came back, the lock-out is a separate question", () => {
+  it("clears only the rate-limit key, never the lock-out one", async () => {
+    await resolveLedgerRateLimited(sb, "zoho");
+    expect(issues.resolveOperationalIssue).toHaveBeenCalledTimes(1);
+    expect(issues.resolveOperationalIssue).toHaveBeenCalledWith(sb, "zoho:rate-limited");
   });
 });

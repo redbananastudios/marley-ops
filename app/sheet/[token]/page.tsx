@@ -79,7 +79,42 @@ function DetailRow({ label, lines }: { label: string; lines: string[] }) {
   );
 }
 
-function JobCard({ job, index, total, photos }: { job: DailyJob; index: number; total: number; photos: WebPhoto[] }) {
+/** The two dead ends this page can serve — an expired link, and a day we could
+ *  not load. Both keep the crew member's next move on screen (the office
+ *  number, on a page that looks like ours) rather than the generic error shell,
+ *  whose only offered action is a dashboard they cannot sign in to. */
+function Notice({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <main
+      className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10"
+      style={theme.rootStyle as React.CSSProperties | undefined}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={theme.logoUrl ?? "/logo.png"} alt={theme.name} width={160} className="mx-auto mb-6" />
+      <div className="rounded-lg border border-border bg-card p-6 text-center">
+        <h1 className="font-brand text-2xl font-semibold text-ink">{title}</h1>
+        <p className="mt-3 text-sm text-mist-500">{children}</p>
+      </div>
+    </main>
+  );
+}
+
+function JobCard({
+  job,
+  index,
+  total,
+  photos,
+  brandMark,
+}: {
+  job: DailyJob;
+  index: number;
+  total: number;
+  photos: WebPhoto[];
+  /** The job's brand short name, or null on a single-brand day. Which company
+   *  name to give at the door is the one thing a crew member cannot work out
+   *  from the rest of the card. */
+  brandMark: string | null;
+}) {
   const s = job.sheet;
   const inventory = s.items.map((i) => `${i.label} × ${i.qty}`);
   const vehicles = s.vehicles.length ? s.vehicles : s.vehicleLabel ? [`Required: ${s.vehicleLabel}`] : [];
@@ -95,9 +130,18 @@ function JobCard({ job, index, total, photos }: { job: DailyJob; index: number; 
         <p className="text-base font-bold text-white">
           {job.window} <span className="text-sm font-normal text-mist-200">{kindLabel(job.apptType)}</span>
         </p>
-        <p className="text-xs text-mist-300">
-          Job {index + 1} of {total}
-        </p>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Neutral fill, not the brand's colour: this is a GROUP surface
+              (PRD §4) and the shell's accent is charcoal for either brand. */}
+          {brandMark ? (
+            <span className="rounded-sm bg-white/15 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+              {brandMark}
+            </span>
+          ) : null}
+          <p className="text-xs text-mist-300">
+            Job {index + 1} of {total}
+          </p>
+        </div>
       </div>
       <div className="px-4 py-4">
         <div className="flex items-start justify-between gap-3">
@@ -163,23 +207,13 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
   const workMs = new Date(`${row.work_date}T00:00:00Z`).getTime();
   if (nowMs() - workMs > STALE_DAYS * 86_400_000) {
     return (
-      <main
-        className="mx-auto min-h-screen max-w-xl bg-mist-50 px-5 py-10"
-        style={theme.rootStyle as React.CSSProperties | undefined}
-      >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={theme.logoUrl ?? "/logo.png"} alt={theme.name} width={160} className="mx-auto mb-6" />
-        <div className="rounded-lg border border-border bg-card p-6 text-center">
-          <h1 className="font-brand text-2xl font-semibold text-ink">This job sheet has expired</h1>
-          <p className="mt-3 text-sm text-mist-500">
-            Links stay live for a few days around the job. For anything you still need, call the office on{" "}
-            <a href={theme.telHref} className="font-semibold text-mm-red">
-              {theme.phone}
-            </a>
-            .
-          </p>
-        </div>
-      </main>
+      <Notice title="This job sheet has expired">
+        Links stay live for a few days around the job. For anything you still need, call the office on{" "}
+        <a href={theme.telHref} className="font-semibold text-mm-red">
+          {theme.phone}
+        </a>
+        .
+      </Notice>
     );
   }
 
@@ -188,13 +222,50 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
   const firstName = fullName.trim().split(/\s+/)[0] || fullName;
 
   // Live assembly — always the current plan.
-  const all = await assembleDaySheets(admin, row.work_date);
+  //
+  // assembleDaySheets REFUSES a mixed-brand day whose brands read failed, so
+  // markers are never silently absent. That refusal is written for the emailed
+  // PDF, where a missing sheet is visible and the cron retries; here it would
+  // hand a crew member the generic error page on move morning — no addresses,
+  // no access notes, no customer phone — over a marker. Nothing retries on
+  // their behalf, so retry once for them (the read it guards against fails
+  // transiently: a PostgREST blip, a schema cache still warming after a
+  // migration), then land on a branded call-the-office panel rather than let
+  // the throw escape into the generic error shell.
+  let all: CrewDaySheet[] | null = null;
+  try {
+    all = await assembleDaySheets(admin, row.work_date);
+  } catch (err) {
+    console.error("[crew-sheet] day assembly failed — retrying once for", row.work_date, err);
+    all = await assembleDaySheets(admin, row.work_date).catch((again) => {
+      console.error("[crew-sheet] day assembly failed twice — serving the call-the-office page:", again);
+      return null;
+    });
+  }
+  if (!all) {
+    return (
+      <Notice title={"We can't load your sheet right now"}>
+        Something went wrong at our end — try again in a minute. If it&apos;s nearly time to set off, call
+        the office on{" "}
+        <a href={theme.telHref} className="font-semibold text-mm-red">
+          {theme.phone}
+        </a>{" "}
+        and they&apos;ll read your jobs out.
+      </Notice>
+    );
+  }
+
   const day: CrewDaySheet = all.find((d) => d.crew.id === row.staff_id) ?? {
     crew: { id: row.staff_id, fullName, email: null, phone: null },
     workDate: row.work_date,
     jobs: [],
   };
   const total = day.jobs.length;
+  // The emailed PDF's gate, byte for byte (lib/crew-sheet/daily-docdef.ts), so
+  // the two documents for one day can never disagree about which jobs are
+  // marked: markers appear only when THIS crew member's day spans more than one
+  // distinct brand, and a single-brand day renders exactly as it always has.
+  const multiBrand = new Set(day.jobs.map((j) => j.brandShort ?? "")).size > 1;
 
   // Survey photos as short-lived signed URLs, per job (capped — a phone in a van).
   const photosByAppt: Record<string, WebPhoto[]> = {};
@@ -232,7 +303,14 @@ export default async function CrewSheetPage({ params }: { params: Promise<{ toke
       ) : (
         <div className="space-y-4">
           {day.jobs.map((job, i) => (
-            <JobCard key={job.appointmentId} job={job} index={i} total={total} photos={photosByAppt[job.appointmentId] ?? []} />
+            <JobCard
+              key={job.appointmentId}
+              job={job}
+              index={i}
+              total={total}
+              photos={photosByAppt[job.appointmentId] ?? []}
+              brandMark={multiBrand ? job.brandShort ?? null : null}
+            />
           ))}
         </div>
       )}

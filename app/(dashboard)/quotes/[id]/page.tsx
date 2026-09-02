@@ -29,6 +29,9 @@ import { loadJobNotesForLead, type JobNoteView } from "@/lib/job-notes";
 import { CrewNotesCard } from "@/components/crew-notes-card";
 import { QuoteHeaderActions } from "@/components/quote/quote-header-actions";
 import { policyOfQuote, requestedDeposit, type PaymentPolicy } from "@/lib/payments-policy";
+import { cardPaymentsAvailable } from "@/lib/payments/card-availability";
+import { paymentLinkFor } from "@/lib/payments/payment-link";
+import { SendPaymentLinkButton } from "@/components/leads/send-payment-link-button";
 import { QuoteStatusPill, QuoteMetaChip } from "@/components/quote/quote-status-pill";
 import { ChaseStatusLine } from "@/components/comms/chase-status-line";
 
@@ -62,7 +65,7 @@ export default async function QuoteDetailPage({
   const { data: quote } = await sb
     .from("quotes")
     .select(
-      "id, quote_ref, status, source, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand, payment_policy",
+      "id, quote_ref, status, source, standard_comms_at, imve_ref, imve_zoho_invoice_number, grand_total, agreed_price, accepted_at, email_sent_at, state_blob, lead_id, client_id, email_send_count, customer_name, deposit_amount, deposit_paid_at, booking_cancelled_at, subtotal, discount, additional_charges, additional_charges_reason, vat_enabled, vat_amount, moving_date, estimator_id, brand, payment_policy",
     )
     .eq("id", id)
     .maybeSingle();
@@ -275,6 +278,39 @@ export default async function QuoteDetailPage({
     estimatorOptions = (members ?? []).map((m) => ({ id: m.id, full_name: m.full_name ?? "Unnamed" }));
   }
 
+  // Gate 9d (PRD §3.10) puts the office "Send payment link" action on TWO
+  // surfaces — this page and /bookings — for the customer who phones in unable
+  // to do a bank transfer. It shipped on /bookings alone, so the office already
+  // looking at the quote they read the figure off had to go and hunt the
+  // booking row, or take the card number down the phone: the exact thing the
+  // action exists to replace.
+  //
+  // Same pure rule and same two-switch card verdict as /bookings (global kill
+  // switch AND the brand's own — PRD §11.10), so a card-off brand still sees
+  // nothing here, on a page whose every other rail says bank transfer.
+  // Only the accepted-and-unpaid residential state can ever be offered a link,
+  // so everything else short-circuits before the read rather than adding a
+  // round trip to every draft. Commercial is excluded outright: it has no
+  // deposit rung at all, which is why its header chip says "invoiced on
+  // completion" rather than a figure.
+  const depositOutstanding =
+    statusStr === "accepted" && !quote.deposit_paid_at && paymentPolicy !== "commercial";
+  const cardOk = depositOutstanding
+    ? await cardPaymentsAvailable(sb, quote.brand).catch(() => false)
+    : false;
+  const paymentLink = paymentLinkFor(
+    {
+      status: statusStr,
+      deposit_paid_at: quote.deposit_paid_at,
+      deposit_amount: quote.deposit_amount,
+      booking_cancelled_at: quote.booking_cancelled_at,
+      source: quote.source,
+      standard_comms_at: quote.standard_comms_at,
+    },
+    cardOk,
+    settings.defaultDeposit,
+  );
+
   const isLegacyImve = quote.source === "imve";
   const chipBrand =
     activeBrands.length > 1 ? activeBrands.find((b) => b.slug === quote.brand) : undefined;
@@ -309,9 +345,21 @@ export default async function QuoteDetailPage({
             Deposit paid
           </QuoteMetaChip>
         ) : (
-          <QuoteMetaChip tone="warn">
-            Awaiting {gbp(quote.deposit_amount ?? settings.defaultDeposit)} deposit
-          </QuoteMetaChip>
+          <>
+            <QuoteMetaChip tone="warn">
+              Awaiting {gbp(quote.deposit_amount ?? settings.defaultDeposit)} deposit
+            </QuoteMetaChip>
+            {/* Beside the figure, because that is what the office is reading
+                out to the customer on the phone. */}
+            {paymentLink.ok ? (
+              <SendPaymentLinkButton
+                quoteId={quote.id}
+                amount={paymentLink.amountPence / 100}
+                hasEmail={!!leadOption?.email}
+                hasPhone={!!leadOption?.phone}
+              />
+            ) : null}
+          </>
         )
       ) : null}
     </>

@@ -35,7 +35,7 @@
  */
 import "server-only";
 
-import { isLedgerAccessDenied } from "./access";
+import { isLedgerAccessDenied, isLedgerRateLimited } from "./access";
 import { xeroFetch } from "./xero-client";
 import type { LedgerAccessCheck } from "./types";
 import { LedgerError } from "./types";
@@ -53,6 +53,11 @@ export async function checkXeroAccess(): Promise<LedgerAccessCheck> {
     return {
       ok: false,
       accessDenied: isLedgerAccessDenied(err),
+      // Classified through the SAME test the invoice paths use, for the same
+      // reason `accessDenied` is: the probe and the raises must not disagree
+      // about what a refusal on volume is, or the watchdog prints a remedy the
+      // rails have already decided does not apply.
+      rateLimited: isLedgerRateLimited(err),
       message: err instanceof Error ? err.message : String(err),
     };
   }

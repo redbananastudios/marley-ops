@@ -12,6 +12,7 @@ import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { getBrandOrDefault } from "@/lib/brand";
 import { cardPaymentsAvailable } from "@/lib/payments/card-availability";
 import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
+import { UK_TZ } from "@/lib/uk-time";
 import { StorageAgreementForm } from "./agreement-form";
 
 /**
@@ -44,12 +45,27 @@ export async function generateMetadata({
 
 const gbp = (n: number): string => "£" + Number(n).toFixed(2).replace(/\.00$/, "");
 
+/** A `date` COLUMN's day. No instant is involved, so reading it as UTC midnight
+ *  is exact — and pinning a timezone here would shift it instead. */
 const prettyDay = (iso: string): string =>
   new Date(`${iso.slice(0, 10)}T00:00:00Z`).toLocaleDateString("en-GB", {
     day: "numeric",
     month: "long",
     year: "numeric",
     timeZone: "UTC",
+  });
+
+/** The UK calendar day an INSTANT falls on (a timestamptz). Through BST a
+ *  signature taken between 23:00 and midnight UK sits on the previous UTC day,
+ *  so slicing it would tell the customer they signed the day before they did —
+ *  on the page that is their receipt for a signed agreement, while every office
+ *  surface reading the same column pins UK_TZ and shows the real day. */
+const prettyInstant = (iso: string): string =>
+  new Date(iso).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: UK_TZ,
   });
 
 export default async function StorageSignPage({ params }: { params: Promise<{ token: string }> }) {
@@ -142,7 +158,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
         {existing ? (
           <p className="mt-4 text-sm leading-relaxed text-mist-500">
             This agreement was signed by <strong>{existing.signer_name}</strong> on{" "}
-            {prettyDay(existing.signed_at)}. Nothing more to do — any questions, call{" "}
+            {prettyInstant(existing.signed_at)}. Nothing more to do — any questions, call{" "}
             <a href={theme.telHref} className="font-semibold text-mm-red">
               {theme.phone}
             </a>

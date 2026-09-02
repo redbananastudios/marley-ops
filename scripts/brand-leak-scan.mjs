@@ -140,9 +140,6 @@ export const MANIFEST = [
   // filter and the site/let/manage dialogs' brand selects are all data-driven
   // (slim brands-table rows via props); only deliberate mm-red APP CHROME
   // remains per PRD §2 — everything else stays forbidden both directions.
-  // (app/(dashboard)/storage/actions.ts is deliberately NOT listed: its
-  // agreement email still hardcodes default-brand identity — that is gate 13
-  // comms work, and listing the file before then would just be a red scan.)
   {
     pattern: "components/resources/resources-view.tsx",
     allow: ["mm-red"],
@@ -166,6 +163,19 @@ export const MANIFEST = [
     allow: ["mm-red"],
     reason:
       "mm-red app chrome (PRD §2): sign-here checkbox accent and the sign/save/add action buttons",
+  },
+  // The storage-agreement sender. Excluded through gate 12 on the stated
+  // grounds that branding its email "is gate 13 comms work" — but gate 13
+  // landed and did exactly that conversion (the send resolves the LET's brand
+  // and goes out from that brand's own front door), so the exclusion's trigger
+  // had passed while the entry was never added. Under scan since 2026-09-02;
+  // what remains is the default-brand arm of the same isDefault ternaries the
+  // doc-defs allow, plus the app's own origin.
+  {
+    pattern: "app/(dashboard)/storage/actions.ts",
+    allow: ["Marley", "marleymoves.co.uk", "01747 637070"],
+    reason:
+      "default-brand constants (byte-parity): the From and the name/phone selected by `signIsDefault`, plus the phone fallback for a row with no phone; ops.marleymoves.co.uk is the app's own origin for the agreement link (app chrome per PRD §2, as lib/job-sheet-load.ts)",
   },
   // The storage billing run. Its customer-visible note used to be four
   // module-level strings carrying one office number and one card offer,
@@ -335,13 +345,105 @@ export const MANIFEST = [
     reason:
       "appears only in the legacy-iMVE contract-suppression comment (same rule lib/job-sheet-load.ts documents) — the unsigned-contracts tile logic, not rendered identity",
   },
+  // Gate 13 residual (2026-09-02): the comms tree. PRD §10 names lib/comms/
+  // FIRST among the paths the source grep covers and §3.5 makes it the
+  // highest-risk surface in the project — a leak there arrives in a customer's
+  // inbox under another brand's sign-off. The manifest nevertheless expanded to
+  // ZERO files beneath it until now, so every run printed an OK line having
+  // never opened one of them. The scan's header rule ("a file not listed is NOT
+  // clean — it is UNSCANNED") was true the whole time and invisible: nothing
+  // told the reader which side of it the comms tree fell on.
+  //
+  // The builders below take an optional `brand` and render the default brand's
+  // exact bytes when it is absent (PRD §3.5), so their remaining literals are
+  // the DEFAULT CONSTANTS of that parity contract plus the two cross-brand
+  // disclosures §3.5 mandates — the same shape the gate-14 doc-defs allow.
+  // Files with no forbidden literal at all ride as bare entries, per the
+  // gate-14 practice above, so a later edit can never quietly hardcode identity
+  // into one. tests/scripts/brand-leak-scan-comms.test.ts holds the coverage to
+  // this: every file under lib/comms/ must be either listed here or named in
+  // the exclusion note below, so a new comms module forces a decision rather
+  // than defaulting to unscanned.
+  "lib/comms/alt-recipient.ts",
+  "lib/comms/bounce.ts",
+  "lib/comms/brand-theme.ts",
+  "lib/comms/commitment-chase-email.ts",
+  "lib/comms/completion-email.ts",
+  "lib/comms/escape-html.ts",
+  "lib/comms/hash.ts",
+  "lib/comms/invalid-email.ts",
+  "lib/comms/permanent-failure.ts",
+  "lib/comms/refund-emails.ts",
+  "lib/comms/review-suppression.ts",
+  "lib/comms/send-window.ts",
+  "lib/comms/suppressions.ts",
+  "lib/comms/survey-send-report.ts",
+  {
+    pattern: "lib/comms/templates.ts",
+    allow: ["Marley", "Pitmans", "01747 637070"],
+    reason:
+      "the DEFAULT-BRAND fallback this whole scan exists to protect: brandName defaults to the default brand and the office number is returned ONLY for it, a non-default context degrading to reply-first contact instead; both brand names appear in the comment stating that rule",
+  },
+  {
+    pattern: "lib/comms/quote-email.ts",
+    allow: ["Marley"],
+    reason:
+      "comments only: the byte-lock notes recording that the default brand's arm is unchanged and why the live residential template must not be touched (PRD §11.7 trap 4)",
+  },
+  {
+    pattern: "lib/comms/payment-email.ts",
+    allow: ["Marley", "Connor"],
+    reason:
+      "default-brand constants + the §3.5 disclosures: the crew sign-off's `isDefault` arm names the default brand's owner, and the comments record the MarleyMoves Ltd bank disclosure and the crew-may-attend disclosure the other brands carry",
+  },
+  {
+    pattern: "lib/comms/date-confirm-email.ts",
+    allow: ["Marley"],
+    reason: "comments only: the two §3.5 disclosures a non-default brand adds to this pre-move copy",
+  },
+  {
+    pattern: "lib/comms/cancellation-emails.ts",
+    allow: ["Marley"],
+    reason:
+      "the marley-cancel builder's LEGACY SYMBOL NAMES (MarleyCancelMeta, buildMarleyCancelEmailHtml — the we-cancelled template's id since before the brand layer; the copy they render names no brand), plus the crew-may-attend disclosure comments",
+  },
+  {
+    pattern: "lib/comms/storage-invoice-email.ts",
+    allow: ["Marley", "Connor"],
+    reason:
+      "comments only: the note on who would want dashboard-editable copy, and the §3.5 bank disclosure the non-default bank block carries",
+  },
+  {
+    pattern: "lib/comms/review-request.ts",
+    allow: ["Marley", "Pitmans", "Connor"],
+    reason:
+      "default-brand constant + contract docs: the crew sign-off's `isDefault` arm, and the comments pinning the never-borrow-the-default-brand's-listing rule, the own-front-door From rule and the §11.7 trap-4 template-id rule",
+  },
+  {
+    pattern: "lib/comms/template-id.ts",
+    allow: ["Marley"],
+    reason:
+      "comments only: the key convention doc explaining that brands.resend_template_ids is keyed by the default brand's env-var names and that its live wiring changes by nothing",
+  },
+  {
+    pattern: "lib/comms/extract-reply.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "comments only: the worked example of a quoted-original header this parser has to survive (MMR015) — the parser itself matches on shape, never on a brand",
+  },
+  {
+    pattern: "lib/comms/retry-worker.ts",
+    allow: ["Marley", "marleymoves.co.uk"],
+    reason:
+      "an INTERNAL ops alert, not customer copy: the SMTP-fallback mailbox it tells staff to check, and ops.marleymoves.co.uk as the app's own origin behind the lead link labelled with the app name (app chrome per PRD §2)",
+  },
   // STILL-NOT-manifest, and this note is deliberately NOT self-clearing.
   //
-  // Written before gate 13 as "add both entries in gate 13's PR instead". Gate
-  // 13 has now landed and they are still absent, because the reason they were
-  // excluded has NOT gone away: both files retain default-brand identity that
-  // an allow list would have to exempt wholesale, which is exactly the masking
-  // the original note warned against.
+  // The first two were written before gate 13 as "add both entries in gate 13's
+  // PR instead". Gate 13 has now landed and they are still absent, because the
+  // reason they were excluded has NOT gone away: both files retain default-
+  // brand identity that an allow list would have to exempt wholesale, which is
+  // exactly the masking the original note warned against.
   //
   //   components/quote/send-quote-dialog.tsx — the subject line's default arm
   //     is the "Marley Moves" literal (brand.slug !== "marley" ? brand.name :
@@ -351,11 +453,36 @@ export const MANIFEST = [
   //   app/actions/crew-signatures.ts — two marleymoves.co.uk office-notification
   //     links survive brand resolution.
   //
-  // So these two remain unscanned, and that gap is stated here rather than
-  // being hidden behind a green run (this file's own evidence-discipline rule:
-  // "I could not check" must never render as "nothing to report"). Whoever
-  // de-brands those surfaces adds the entries in the SAME change and deletes
-  // this block — do not add them earlier to make the manifest look complete.
+  // The rest of lib/comms/ is excluded for a DIFFERENT reason: these files ARE
+  // the default identity, or one brand's own rail, so their literals are the
+  // content rather than a leak — and an allow list broad enough to cover them
+  // would suppress the whole file. Naming each here is what keeps the tree's
+  // coverage legible, since the seventeen entries above cannot be read as
+  // covering the folder.
+  //
+  //   lib/comms/email-brand.ts and lib/comms/branded-shell.ts — the DEFAULT
+  //     THEME and the shared shell. The parity contract is that the default
+  //     chrome IS today's literal strings, never values read back from the
+  //     brands table, so every one of them lives here by design (the shared
+  //     bank account and its §3.5 disclosure included).
+  //   lib/comms/sender.ts, lib/comms/send.ts and lib/comms/dispatch.ts — the
+  //     transport rails. The house From/reply/ops-alert addresses and the
+  //     reply-domain recognition set are the default brand's own mailboxes,
+  //     which a second brand's front door sits ALONGSIDE rather than replacing;
+  //     narrowing them would stop the default brand recognising its own replies.
+  //   lib/comms/survey-email.ts — an internal STAFF surface that stays on the
+  //     default identity deliberately (its own header says so); it is not a
+  //     customer-facing brand-resolved builder.
+  //   lib/comms/review-platform.ts — per-brand rail: the default brand's own
+  //     listing URLs. A non-default brand may only use ITS OWN listing, never
+  //     borrow this one, which is the rule review-request.ts enforces.
+  //
+  // So these remain unscanned, and that gap is stated here rather than being
+  // hidden behind a green run (this file's own evidence-discipline rule: "I
+  // could not check" must never render as "nothing to report"). Whoever
+  // de-brands one of those surfaces adds its entry in the SAME change and
+  // deletes its line here — do not add them earlier to make the manifest look
+  // complete.
 
   // Gate 16: the customer accept page. Identity now comes entirely from
   // `pageTheme` — logo, name, phone, terms link, legal line, the accent (one
@@ -633,6 +760,6 @@ if (isMain) {
     process.exit(1);
   }
   console.log(
-    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Source half only. The rendered-page half of PRD 6.4 is NOT implemented - gate 16 shipped the source conversion without it, so a clean run here does not mean the rendered pages were checked.)`,
+    `brand-leak-scan: OK — ${files.length} file(s) scanned, ${FORBIDDEN.length} literals checked, 0 leaks. (Only the ${MANIFEST.length} MANIFEST entries are read; anything else is UNSCANNED, not clean, and the deliberate exclusions are named one by one in the STILL-NOT-manifest note in this file. Source half only: the rendered-page half of PRD 6.4 is NOT implemented - gate 16 shipped the source conversion without it, so a clean run here does not mean the rendered pages were checked.)`,
   );
 }

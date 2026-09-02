@@ -12,7 +12,7 @@ import {
   type HealthAlert,
 } from "@/lib/watchdog-rules";
 import { checkLedgerAccess, configuredProvider } from "@/lib/ledger";
-import { resolveLedgerAccessDenied } from "@/lib/ops/zoho-access";
+import { resolveLedgerAccessDenied, resolveLedgerRateLimited } from "@/lib/ops/zoho-access";
 import {
   checkpointOperationalIssues,
   deliverDailyOperationalIssueDigest,
@@ -116,7 +116,14 @@ export async function runHealthWatchdog(
     const books = await checkLedgerAccess(provider);
     const booksAlert = ledgerAccessAlert(provider, books);
     if (booksAlert) alerts.push(booksAlert);
-    else if (books.ok) await resolveLedgerAccessDenied(sb, provider);
+    else if (books.ok) {
+      await resolveLedgerAccessDenied(sb, provider);
+      // This probe is the ONLY thing that observes a quota coming back. A
+      // lock-out ends when a human acts and the next raise proves it; an
+      // allowance resets unattended, possibly on a day with no acceptance at
+      // all, so nothing else would ever clear the alarm.
+      await resolveLedgerRateLimited(sb, provider);
+    }
   } catch (err) {
     // configuredProvider() fails closed on a garbled LEDGER_PROVIDER — the
     // exact state that also stops every raise. The watchdog must render that
