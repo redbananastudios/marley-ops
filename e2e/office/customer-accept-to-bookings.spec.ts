@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { step } from "../fixtures/artefacts";
 import { E2E_DB_READY, adminClient } from "../fixtures/db";
+import { submitUntil } from "../fixtures/ui";
 
 /**
  * Handoff h3 (QA audit ledger, qa/state.json handoffs): a customer accepts a
@@ -106,19 +107,30 @@ async function seed(): Promise<Fixture> {
 
 async function teardown(fx: Fixture) {
   const sb = adminClient();
-  const problems: string[] = [];
-  const check = (label: string, error: { message: string } | null) => {
-    if (error) problems.push(`${label}: ${error.message}`);
-  };
-  check("signatures", (await sb.from("signatures").delete().eq("quote_id", fx.quoteId)).error);
-  check("activities", (await sb.from("activities").delete().eq("lead_id", fx.leadId)).error);
-  check("follow_ups", (await sb.from("follow_ups").delete().eq("lead_id", fx.leadId)).error);
-  check("quotes", (await sb.from("quotes").delete().eq("id", fx.quoteId)).error);
-  check("leads", (await sb.from("leads").delete().eq("id", fx.leadId)).error);
-  check("clients", (await sb.from("clients").delete().eq("id", fx.clientId)).error);
-  const { count } = await sb.from("clients").select("*", { count: "exact", head: true }).eq("notes", MARKER);
-  if (count) problems.push(`clients: ${count} marker row(s) still present after delete`);
-  if (problems.length) throw new Error(`teardown left rows behind: ${problems.join("; ")}`);
+  // acceptQuoteOnline keeps writing child rows (activities, signatures,
+  // follow_ups) AFTER the status flip, so a teardown that starts while the
+  // action is still in flight can have children reappear between deletes and
+  // trip the leads/clients FKs, stranding the whole marker set
+  // (QA-20260902-01 left five behind exactly this way). Two attempts: the
+  // first is allowed to lose that race, the second is authoritative.
+  let problems: string[] = [];
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    problems = [];
+    const check = (label: string, error: { message: string } | null) => {
+      if (error) problems.push(`${label}: ${error.message}`);
+    };
+    check("signatures", (await sb.from("signatures").delete().eq("quote_id", fx.quoteId)).error);
+    check("activities", (await sb.from("activities").delete().eq("lead_id", fx.leadId)).error);
+    check("follow_ups", (await sb.from("follow_ups").delete().eq("lead_id", fx.leadId)).error);
+    check("quotes", (await sb.from("quotes").delete().eq("id", fx.quoteId)).error);
+    check("leads", (await sb.from("leads").delete().eq("id", fx.leadId)).error);
+    check("clients", (await sb.from("clients").delete().eq("id", fx.clientId)).error);
+    const { count } = await sb.from("clients").select("*", { count: "exact", head: true }).eq("notes", MARKER);
+    if (count) problems.push(`clients: ${count} marker row(s) still present after delete`);
+    if (!problems.length) return;
+    if (attempt === 1) await new Promise((r) => setTimeout(r, 2000));
+  }
+  throw new Error(`teardown left rows behind: ${problems.join("; ")}`);
 }
 
 let fx: Fixture | null = null;
@@ -146,12 +158,28 @@ test.describe.serial("Handoff — customer accepts /q → office sees it on /boo
       });
 
       await step("tick the acknowledgments, sign by name, accept", customerPage, async () => {
-        const boxes = customerPage.getByRole("checkbox");
-        const n = await boxes.count();
-        for (let i = 0; i < n; i++) await boxes.nth(i).check();
-        await customerPage.getByLabel("Your full name").fill("QA Sentinel Handoff Customer");
-        await customerPage.getByRole("button", { name: /Accept quote & pay/i }).click();
-        await expect(customerPage.getByText(/Pay by bank transfer/i)).toBeVisible({ timeout: 30_000 });
+        await customerPage.waitForLoadState("networkidle");
+        // submitUntil survives the pre-hydration native form submit (re-ticks +
+        // re-fills on a miss). The landed sentinel must be POST-accept-only
+        // copy: since #181 the card-off SENT page already says "pay by bank
+        // transfer on the next screen", so /Pay by bank transfer/i matches
+        // BEFORE the accept completes and the DB read below races the action
+        // (QA-20260902-01). "deposit to secure your date" renders only on the
+        // accepted pay screen.
+        await submitUntil(customerPage, {
+          prepare: async () => {
+            const boxes = customerPage.getByRole("checkbox");
+            const n = await boxes.count();
+            for (let i = 0; i < n; i++) await boxes.nth(i).check();
+            await customerPage.getByLabel("Your full name").fill("QA Sentinel Handoff Customer");
+          },
+          click: customerPage.getByRole("button", { name: /Accept quote & pay/i }),
+          expected: customerPage.getByText(/deposit to secure your date/i),
+        });
+        // Belt and braces: the accept form is gone and the BACS panel is up —
+        // this is the pay screen, not the SENT page's card-off sentence.
+        await expect(customerPage.getByRole("button", { name: /Accept quote & pay/i })).toHaveCount(0);
+        await expect(customerPage.getByText(/Pay by bank transfer/i)).toBeVisible();
       });
 
       await step("the DB shows the accept with the right money attached", customerPage, async () => {
