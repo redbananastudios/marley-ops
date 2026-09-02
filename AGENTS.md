@@ -103,6 +103,18 @@ items, landed as **#214** - and they found more than they were sent for.
   unreadable. That is the argument for the rendered half, which #214 ships
   (`e2e/public/brand-leak-rendered.spec.ts`) along with a manifest walk of the five public
   routes' import graph that cannot rot.
+- **The rendered spec then made that argument itself, on its FIRST CI run.** Staging
+  `7eb1849`: **185 passed** (up from 182), 5 failed = the 4 known Zoho-quota specs **plus
+  this one**, and it failed because it found a real leak. A second brand's `/q` served
+  `<meta name="description" content="Marley Moves internal operations panel">` under a
+  correctly-branded `<title>`: `generateMetadata` MERGES with the root layout rather than
+  replacing it, so a page setting only `title` inherits `app/layout.tsx`'s description -
+  the wrong company, plus the words "internal operations panel", on a page a customer opens
+  from a link and forwards. **The source grep could never see it** - the literal lives in
+  `app/layout.tsx` where it is CORRECT; the INHERITANCE is the defect, and only a rendered
+  page shows that. Fixed with a new `pageDescription()` beside `pageTitle()` on `/q`, `/s`
+  and `/cv`. The spec is still NOT "done" per the standing rule: it needs a second green CI
+  run, and this was its first.
 
 Also in #214: **QA-20260827-04** built (token-auth `/cv` upload, JPEG/PNG sniff, DB-enforced
 ceilings, server-generated keys); WebP/HEIC refused **deliberately** - one customer WebP
