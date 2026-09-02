@@ -389,6 +389,16 @@ export interface HeldPayment {
   label?: string;
   card_payment_id?: string | null;
   zoho_invoice_id?: string | null;
+  /**
+   * Which ledger minted `zoho_invoice_id` (migration 0109) — copied from the
+   * quote's matching `*_invoice_provider` column when the snapshot freezes,
+   * because the id alone does not say which system issued it and the quote's
+   * slots move on after the trigger (a reopen clears them entirely). Null on
+   * entries with no invoice id, and on snapshots frozen before the stamp
+   * existed — readers resolve null to the configured provider, exactly like
+   * every other stamp reader (`asProvider`).
+   */
+  ledger_provider?: string | null;
 }
 
 export interface HeldAllocation {

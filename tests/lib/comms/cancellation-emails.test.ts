@@ -111,6 +111,9 @@ describe("queueAmountsFor — retention only exists after date confirmation", ()
         zoho_deposit_invoice_id: null,
         zoho_commitment_invoice_id: "zoho-com-1",
         zoho_balance_invoice_id: null,
+        deposit_invoice_provider: null,
+        commitment_invoice_provider: "zoho",
+        balance_invoice_provider: null,
       },
       lead: { id: "l-1", name: "Freddy", balance_paid_at: null, balance_amount: null },
     });

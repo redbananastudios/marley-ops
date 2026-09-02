@@ -251,6 +251,11 @@ describe("createInvoice", () => {
   const THEME_DEFAULT = "aa1e5a76-1e1a-4a1e-9e5a-761e1a4a1e9e";
   const THEME_NO_CARD = "bb2f6b87-2f2b-5b2f-8f6b-872f2b5b2f8f";
 
+  /** Every create is preceded by the dead-invoice check (the idempotency salt
+   *  — see "idempotency across a void-then-re-raise"), so the PUT is call [1]
+   *  and its body is sentBody(1). This fixture answers "nothing dead". */
+  const noDead = () => json({ Invoices: [] });
+
   /**
    * The card-fee decision, proved end to end.
    *
@@ -270,7 +275,7 @@ describe("createInvoice", () => {
     process.env.XERO_CARD_ENABLED = "true";
     process.env.XERO_BRANDING_THEME_DEFAULT = THEME_DEFAULT;
     process.env.XERO_BRANDING_THEME_NO_CARD = THEME_NO_CARD;
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
 
     await createInvoice({
       customerId: "contact-guid",
@@ -280,7 +285,7 @@ describe("createInvoice", () => {
       disableOnlinePayments: true,
     });
 
-    const invoice = (sentBody() as { Invoices: Record<string, unknown>[] }).Invoices[0];
+    const invoice = (sentBody(1) as { Invoices: Record<string, unknown>[] }).Invoices[0];
     expect(invoice.BrandingThemeID).toBe(THEME_NO_CARD);
   });
 
@@ -288,7 +293,7 @@ describe("createInvoice", () => {
     process.env.XERO_CARD_ENABLED = "true";
     process.env.XERO_BRANDING_THEME_DEFAULT = THEME_DEFAULT;
     process.env.XERO_BRANDING_THEME_NO_CARD = THEME_NO_CARD;
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
 
     await createInvoice({
       customerId: "contact-guid",
@@ -297,7 +302,7 @@ describe("createInvoice", () => {
       amount: 120,
     });
 
-    const invoice = (sentBody() as { Invoices: Record<string, unknown>[] }).Invoices[0];
+    const invoice = (sentBody(1) as { Invoices: Record<string, unknown>[] }).Invoices[0];
     expect(invoice.BrandingThemeID).toBe(THEME_DEFAULT);
   });
 
@@ -309,14 +314,14 @@ describe("createInvoice", () => {
    * payment write is refused.
    */
   it("refuses to report a raise that came back unapproved", async () => {
-    state.queue.push(json({ Invoices: [invoiceRow({ Status: "DRAFT" })] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow({ Status: "DRAFT" })] }), onlineUrl());
     await expect(
       createInvoice({ customerId: "c", reference: "MMR001-DEP", description: "d", amount: 120 }),
     ).rejects.toThrow(/not AUTHORISED/);
   });
 
   it("raises an approved, VAT-inclusive invoice in one call", async () => {
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
     const ref = await createInvoice({
       customerId: "contact-guid",
       reference: "MMR001-DEP",
@@ -324,10 +329,10 @@ describe("createInvoice", () => {
       amount: 120,
     });
 
-    const body = sentBody() as { Invoices: Record<string, unknown>[] };
+    const body = sentBody(1) as { Invoices: Record<string, unknown>[] };
     const invoice = body.Invoices[0];
-    expect(state.calls[0].path).toBe("/Invoices");
-    expect(state.calls[0].init?.method).toBe("PUT"); // POST is create-or-update
+    expect(state.calls[1].path).toBe("/Invoices");
+    expect(state.calls[1].init?.method).toBe("PUT"); // POST is create-or-update
     expect(invoice.Type).toBe("ACCREC");
     // Omitting this adds 20% on top of a price the customer already agreed.
     expect(invoice.LineAmountTypes).toBe("Inclusive");
@@ -356,18 +361,82 @@ describe("createInvoice", () => {
   });
 
   /**
+   * Void-then-re-raise must never replay the voided create.
+   *
+   * The key used to derive from the reference ALONE, and the reference is
+   * stable per slot (MMR001-DEP forever). So: raise at T0, mark the lead lost
+   * by mistake at T+2min (voids the invoice), reopen at T+3min (clears the
+   * slot ids so the raisers mint fresh), re-raise at T+4min — inside Xero's
+   * 6-minute window the same key REPLAYS the cached T0 response: no new
+   * invoice is created, the cached body still reads AUTHORISED (so the
+   * post-create status assertion passes on stale data), and the app adopts
+   * the VOIDED document. The customer is then emailed a payment link to an
+   * invoice carrying no journals. `findInvoiceByReference`'s DEAD_STATUSES
+   * filter cannot help — the replay happens inside Xero's HTTP layer, below
+   * every code path we control. The dead documents under the reference are
+   * therefore part of the write's identity: same live state ⇒ same key (a
+   * timeout retry still deduplicates), a void in between ⇒ a new key.
+   */
+  describe("idempotency across a void-then-re-raise", () => {
+    const voided = (id: string) => invoiceRow({ InvoiceID: id, InvoiceNumber: `INV-DEAD-${id}`, Status: "VOIDED" });
+
+    /** The Idempotency-Key the create PUT carries, given what Xero already
+     *  holds under the reference. Tolerant of a throw — the header is on the
+     *  wire either way, and the wire is what Xero's replay keys on. */
+    async function captureCreateKey(existing: unknown[]): Promise<string> {
+      state.queue = [json({ Invoices: existing }), json({ Invoices: [invoiceRow()] }), onlineUrl()];
+      state.calls = [];
+      await createInvoice({ customerId: "c", reference: "MMR001-DEP", description: "d", amount: 120 }).catch(() => {});
+      const put = state.calls.find((c) => c.init?.method === "PUT");
+      expect(put, "no create PUT was sent").toBeTruthy();
+      return (put!.init!.headers as Record<string, string>)["Idempotency-Key"];
+    }
+
+    it("a re-raise after a void sends a DIFFERENT key — the cached voided create must not replay", async () => {
+      const fresh = await captureCreateKey([]);
+      const afterVoid = await captureCreateKey([voided("dead-1")]);
+      expect(afterVoid).not.toBe(fresh);
+      // And a second void-re-raise cycle is distinct again.
+      const afterSecondVoid = await captureCreateKey([voided("dead-1"), voided("dead-2")]);
+      expect(afterSecondVoid).not.toBe(afterVoid);
+      expect(afterSecondVoid).not.toBe(fresh);
+    });
+
+    it("a genuine retry of the SAME attempt keeps the same key — that is the entire point of the header", async () => {
+      expect(await captureCreateKey([])).toBe(await captureCreateKey([]));
+      expect(await captureCreateKey([voided("dead-1")])).toBe(await captureCreateKey([voided("dead-1")]));
+    });
+
+    it("control: an ordinary first raise sends the byte-identical key it always has", async () => {
+      expect(await captureCreateKey([])).toBe(idempotencyKey("invoice-create|MMR001-DEP"));
+    });
+
+    it("with a voided document under the reference, the re-raise creates and reports the NEW invoice", async () => {
+      state.queue = [
+        json({ Invoices: [voided("dead-1")] }),
+        json({ Invoices: [invoiceRow({ InvoiceID: "fresh-1", InvoiceNumber: "INV-0099" })] }),
+        onlineUrl(),
+      ];
+      state.calls = [];
+      const ref = await createInvoice({ customerId: "c", reference: "MMR001-DEP", description: "d", amount: 120 });
+      expect(ref.invoiceId).toBe("fresh-1");
+      expect(ref.invoiceNumber).toBe("INV-0099");
+    });
+  });
+
+  /**
    * The header is capped at 128 characters and Xero's own recommendation
    * (four concatenated UUIDs) is 144 with the hyphens, which would 400.
    */
   it("sends an idempotency key inside Xero's 128-character cap", async () => {
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
     await createInvoice({
       customerId: "c",
       reference: "MMR001-DEP",
       description: "Deposit",
       amount: 120,
     });
-    const headers = state.calls[0].init?.headers as Record<string, string>;
+    const headers = state.calls[1].init?.headers as Record<string, string>;
     expect(headers["Idempotency-Key"]).toBeTruthy();
     expect(headers["Idempotency-Key"].length).toBeLessThanOrEqual(128);
     // DERIVED, not random. A random key per attempt is the failure this header
@@ -413,7 +482,7 @@ describe("createInvoice", () => {
 
   /** Xero invoices have no notes field; the notes are customer-facing prose. */
   it("carries the notes into the line description rather than dropping them", async () => {
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
     await createInvoice({
       customerId: "c",
       reference: "MMR001-DEP",
@@ -421,7 +490,7 @@ describe("createInvoice", () => {
       amount: 120,
       notes: "Balance invoiced separately before move day.",
     });
-    const line = (sentBody().Invoices as Record<string, unknown>[])[0];
+    const line = (sentBody(1).Invoices as Record<string, unknown>[])[0];
     expect(String((line.LineItems as Record<string, unknown>[])[0].Description)).toContain(
       "Balance invoiced separately",
     );
@@ -430,7 +499,7 @@ describe("createInvoice", () => {
   /** Standing policy 2026-07-22: storage income never mixes with removals. */
   it("posts storage income to its own account when one is configured", async () => {
     process.env.XERO_ACCOUNT_STORAGE_INCOME = "260";
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
     await createInvoice({
       customerId: "c",
       reference: "MMS-001",
@@ -438,7 +507,7 @@ describe("createInvoice", () => {
       amount: 60,
       itemName: "Storage",
     });
-    const line = (sentBody().Invoices as Record<string, unknown>[])[0];
+    const line = (sentBody(1).Invoices as Record<string, unknown>[])[0];
     expect((line.LineItems as Record<string, unknown>[])[0].AccountCode).toBe("260");
   });
 
@@ -469,7 +538,7 @@ describe("createInvoice", () => {
 
   it("uses the storage account when it is configured", async () => {
     process.env.XERO_ACCOUNT_STORAGE_INCOME = "201";
-    state.queue.push(json({ Invoices: [invoiceRow()] }), onlineUrl());
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), onlineUrl());
     await createInvoice({
       customerId: "c",
       reference: "MMS-001",
@@ -477,7 +546,7 @@ describe("createInvoice", () => {
       amount: 60,
       itemName: "Storage",
     });
-    const line = (sentBody().Invoices as Record<string, unknown>[])[0];
+    const line = (sentBody(1).Invoices as Record<string, unknown>[])[0];
     expect((line.LineItems as Record<string, unknown>[])[0].AccountCode).toBe("201");
   });
 
@@ -487,6 +556,7 @@ describe("createInvoice", () => {
    */
   it("throws when the 200 carries a rejected element", async () => {
     state.queue.push(
+      noDead(),
       json({
         Invoices: [
           {
@@ -506,7 +576,7 @@ describe("createInvoice", () => {
    * discard a successful create over a missing email button.
    */
   it("still returns the invoice when the hosted URL cannot be fetched", async () => {
-    state.queue.push(json({ Invoices: [invoiceRow()] }), new Response("nope", { status: 500 }));
+    state.queue.push(noDead(), json({ Invoices: [invoiceRow()] }), new Response("nope", { status: 500 }));
     const ref = await createInvoice({
       customerId: "c",
       reference: "MMR001-DEP",
