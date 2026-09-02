@@ -253,7 +253,17 @@ describe("a commercial job stays visible until its money is settled", () => {
     // One classifier, three surfaces — the sweep's own doc comment. A second
     // definition of overdue is how the page and the alarm drift apart.
     const sweep = read("lib/ops/commercial-overdue.ts");
-    expect(sweep).toContain("loadBookingRows(sb)");
+    expect(sweep).toContain("loadBookingRows(sb, { strict: true })");
     expect(sweep).toContain('r.bucket === "commercial_overdue"');
+  });
+
+  it("reads it STRICTLY — a failed read must not arrive as an empty ledger", () => {
+    // The loader fail-softs by default (the pages want that). This sweep
+    // resolves both alarms on an empty list, so an unstrict read here means a
+    // broken query clears live credit control and reports itself clean. Pinned
+    // in the loader too, behaviourally, in load-signals.test.ts.
+    const loader = read("lib/bookings/load-signals.ts");
+    expect(loader).toContain("{ strict }");
+    expect(loader).toContain("failIfStrict(\"leads\", leadsError)");
   });
 });

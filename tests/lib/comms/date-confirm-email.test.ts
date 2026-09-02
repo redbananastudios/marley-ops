@@ -207,6 +207,71 @@ describe("date-confirmation email — paid-in-full small job (gate 9a)", () => {
   });
 });
 
+describe("date-confirmation email — an already-issued final balance (PRD §3.10 Addition 2)", () => {
+  // A late booking raises AND EMAILS the -BAL invoice at ACCEPTANCE, and
+  // ensureCommitmentInvoice then refuses to raise a commitment behind it — so
+  // `commitmentAmount` is 0 for a reason that has nothing to do with there
+  // being nothing to pay. The plain zero-commitment copy told a customer with
+  // an unpaid invoice already in their inbox that there was nothing to pay
+  // right now and that we would send the final invoice nearer the time, days
+  // before the move. /q gets this right (`showBalanceCard`); the email must
+  // agree with it.
+  const balanceMeta: DateConfirmationMeta = {
+    ...zeroMeta,
+    depositAmount: 500,
+    balanceInvoiced: 1500,
+    balanceInvoiceNumber: "INV-000243",
+  };
+
+  it("names the invoice that exists instead of promising one nearer the time", () => {
+    const html = buildDateConfirmationEmailHtml(balanceMeta);
+    const flat = html.toLowerCase();
+    expect(html).toContain("£1,500");
+    expect(html).toContain("INV-000243");
+    expect(html).toContain("due before move day");
+    expect(flat).not.toContain("nothing more to pay right now"); // preheader included
+    expect(flat).not.toContain("final invoice nearer the time");
+    expect(html).toContain("non-refundable"); // confirmation still flips the held position
+    NO_PENALTY(html);
+    NO_EM_DASH(html);
+  });
+
+  it("gives the outstanding ask a rail, not a figure with nowhere to send it", () => {
+    const html = buildDateConfirmationEmailHtml(balanceMeta);
+    expect(html).toContain(BANK_DETAILS.account);
+    expect(html).toContain(BANK_DETAILS.sortCode);
+    expect(html).toContain("MMR042"); // the transfer reference
+  });
+
+  it("a settled balance is reported settled, never asked for a second time", () => {
+    const html = buildDateConfirmationEmailHtml({ ...balanceMeta, balanceSettled: true });
+    const flat = html.toLowerCase();
+    expect(html).toContain("settled in full");
+    expect(html).toContain("nothing left to pay");
+    expect(html).not.toContain(BANK_DETAILS.account);
+    expect(flat).not.toContain("nothing more to pay right now");
+    expect(flat).not.toContain("final invoice nearer the time");
+    NO_PENALTY(html);
+    NO_EM_DASH(html);
+  });
+
+  it("the template-var rail carries the same copy", () => {
+    const vars = dateConfirmationTemplateVars(balanceMeta);
+    expect(vars.COMMITMENT_BLOCK).toContain("£1,500");
+    expect(vars.COMMITMENT_BLOCK).toContain("INV-000243");
+    expect(vars.COMMITMENT_BLOCK.toLowerCase()).not.toContain("nothing more to pay right now");
+    expect(vars.COMMITMENT_BLOCK.toLowerCase()).not.toContain("final invoice nearer the time");
+    for (const v of Object.values(vars)) NO_PENALTY(v);
+  });
+
+  it("absent field keeps today's exact bytes for a booking with no balance invoice yet", () => {
+    const zero = buildDateConfirmationEmailHtml(zeroMeta);
+    expect(zero).toContain("nothing more to pay right now");
+    expect(zero).toContain("we will send the final invoice nearer the time");
+    expect(zero).not.toContain(BANK_DETAILS.account);
+  });
+});
+
 describe("date-confirmation ack wording", () => {
   it("the signed ack carries the held/refunded position without penalty language", () => {
     for (const ack of DATE_CONFIRM_ACKS) {

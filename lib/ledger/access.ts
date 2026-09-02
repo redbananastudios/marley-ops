@@ -73,8 +73,23 @@ export function isLedgerAccessDenied(err: unknown): boolean {
    *
    * This file's doc comment promised Xero was covered because it raises the
    * same error TYPE. Sharing a type is not sharing a signal.
+   *
+   * The last two come from the token store, and both mean "there is no usable
+   * grant here, and no retry will make one". `ledger_tokens` is created empty
+   * — migration 0108 seeds nothing and the prod runbook says both tables land
+   * that way — so NEVER AUTHORISED is the first state the Zoho→Xero cutover
+   * passes through, not an exotic edge, and the row can be lost or rebuilt at
+   * any point afterwards. A rotation that Xero consumed but we failed to
+   * persist is the same dead end from the other side: the token we were using
+   * is spent and its replacement went nowhere. Both need the identical human
+   * click that a revoked grant needs, yet both carry no provider code and no
+   * HTTP status, so the wording is the only signal there is. Matched on the
+   * distinctive fragment rather than the whole sentence, because the sibling
+   * failures in that module — a blip reading the row, a blip claiming the
+   * lease, the lease wait timing out — are genuinely retryable and wear very
+   * similar words.
    */
-  return /credentials not configured|token refresh failed|not configured —|invalid_grant|invalid_client|no new refresh token|No Xero tenant is recorded/i.test(
+  return /credentials not configured|token refresh failed|not configured —|invalid_grant|invalid_client|no new refresh token|No Xero tenant is recorded|token row exists|need re-authorising/i.test(
     err.message,
   );
 }

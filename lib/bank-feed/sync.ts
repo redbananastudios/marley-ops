@@ -17,6 +17,7 @@ import {
   type OpenItem,
   type SettledItem,
 } from "@/lib/bank-feed/match";
+import { coveringPairPartner, type LedgerLike } from "@/lib/bank-feed/whole-quote";
 import { BANK_FEED_DIGEST_THRESHOLD, decideBankFeedPushes, type BankFeedArrival } from "@/lib/push/categories";
 import { sendPushForEvent } from "@/lib/push/send";
 import { errorContext, log } from "@/lib/log";
@@ -256,6 +257,83 @@ export async function loadOpenItems(sb: SupabaseClient): Promise<OpenItem[]> {
   return (await loadLedgerItems(sb)).open;
 }
 
+type PaidKind = "deposit" | "commitment" | "balance";
+const PAID_KINDS: readonly PaidKind[] = ["deposit", "commitment", "balance"];
+
+/** The bank_transactions columns the claim derivation reads. */
+export interface ClaimingRow {
+  status: string;
+  matchedQuoteId: string | null;
+  matchKind: string | null;
+  amount: number;
+}
+
+/**
+ * Every recorded payment ONE settled bank row is evidence for.
+ *
+ * A row's `match_kind` is a single value and two paths under-claim with it. A
+ * 'full' whole-job link explains EVERY recorded payment on the quote, not one —
+ * the same expansion `healMissingPaidMethods` and the received ledger already
+ * apply, and keying it `quote:full` matched no settled kind at all, so a
+ * whole-job-linked quote claimed nothing. A covering-pair row records two
+ * payments and can stamp only one; `coveringPairPartner` recovers the other
+ * from the ledger. A 'storage' row claims no quote payment.
+ */
+export function claimedKindsForRow(
+  row: { quoteId: string; kind: string | null; amount: number },
+  items: readonly LedgerLike[],
+): PaidKind[] {
+  if (!row.kind) return [];
+  if (row.kind === "full") return [...PAID_KINDS];
+  if (!PAID_KINDS.includes(row.kind as PaidKind)) return [];
+  const partner = coveringPairPartner(row, items);
+  return partner ? [row.kind as PaidKind, partner] : [row.kind as PaidKind];
+}
+
+/**
+ * The (quote,kind) pairs a bank row ALREADY explains — the set that turns a
+ * later transfer for the same payment into a `duplicate` a human looks at
+ * rather than a `reconciled` row nobody ever sees.
+ *
+ * Under-claiming is the dangerous direction here: an unclaimed recorded payment
+ * lets the automatic path file a second transfer for it as "explained", and it
+ * then leaves the queues, the exceptions strip and the received ledger at once,
+ * hiding a refund we owe with no human ever in the loop.
+ *
+ * An `unmatched` row can claim, in exactly one shape: the balance half of a
+ * pair confirm can FAIL after the commitment recorded, and that row is put back
+ * in the queue (the unexplained portion must stay visible) while its money
+ * really did buy the commitment. Such a row claims only the pair halves that
+ * are ALREADY RECORDED — never the one that failed, and never off its own
+ * stamp, since the next sync pass re-matches a queued row and rewrites that
+ * stamp. An ordinary mismatch row (right quote, wrong amount, nothing recorded
+ * off it) can never wear the pair's exact-sum shape, so the queue's routine
+ * rows still claim nothing.
+ */
+export function buildClaimedKeys(
+  rows: readonly ClaimingRow[],
+  ledger: { open: readonly LedgerLike[]; settled: readonly LedgerLike[] },
+): Set<string> {
+  const items = [...ledger.open, ...ledger.settled];
+  const settledKeys = new Set(ledger.settled.map((s) => claimKey(s.quoteId, s.kind)));
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!r.matchedQuoteId || !r.matchKind) continue;
+    const row = { quoteId: r.matchedQuoteId, kind: r.matchKind, amount: r.amount };
+    if (r.status === "confirmed" || r.status === "reconciled") {
+      for (const kind of claimedKindsForRow(row, items)) out.add(claimKey(row.quoteId, kind));
+      continue;
+    }
+    if (r.status !== "unmatched") continue;
+    if (!coveringPairPartner(row, items)) continue;
+    for (const kind of ["commitment", "balance"] as const) {
+      const key = claimKey(row.quoteId, kind);
+      if (settledKeys.has(key)) out.add(key);
+    }
+  }
+  return out;
+}
+
 /**
  * A reconcile (auto or office link) is PROOF the payment arrived by bank
  * transfer — so a recorded payment whose method was never captured (Zoho-poll
@@ -475,7 +553,7 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     (f, t) =>
       sb
         .from("bank_transactions")
-        .select("transaction_id, status, matched_quote_id, match_kind")
+        .select("transaction_id, status, matched_quote_id, match_kind, amount")
         .order("id")
         .range(f, t),
     // strict: a PARTIAL read silently shrinks `locked`, and the upsert below
@@ -490,17 +568,6 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
     existing
       .filter((r) => r.status === "confirmed" || r.status === "dismissed" || r.status === "reconciled")
       .map((r) => r.transaction_id as string),
-  );
-  // Settled payments a bank row ALREADY explains. A second transfer landing on
-  // one of these is a likely duplicate payment, not more evidence for the same
-  // money — it must surface for a human, never auto-reconcile.
-  const claimed = new Set(
-    existing
-      .filter(
-        (r) =>
-          (r.status === "confirmed" || r.status === "reconciled") && r.matched_quote_id && r.match_kind,
-      )
-      .map((r) => claimKey(r.matched_quote_id as string, r.match_kind as string)),
   );
 
   const cutoff = new Date(Date.now() - MUTABLE_WINDOW_DAYS * 86_400_000).toISOString().slice(0, 10);
@@ -534,6 +601,21 @@ export async function syncBankFeed(sb: SupabaseClient): Promise<BankFeedSyncSumm
   // transfer — but confirmed/dismissed rows are never touched, and every write
   // below is status-guarded so a concurrent Confirm/Dismiss always wins.
   const { open, settled } = await loadLedgerItems(sb);
+  // Settled payments a bank row ALREADY explains. A second transfer landing on
+  // one of these is a likely duplicate payment, not more evidence for the same
+  // money — it must surface for a human, never auto-reconcile. Built AFTER the
+  // ledger loads because a row's stamp alone under-claims what it paid: a
+  // covering pair records two payments under one `match_kind` and the ledger is
+  // what recovers the other half (see buildClaimedKeys).
+  const claimed = buildClaimedKeys(
+    existing.map((r) => ({
+      status: r.status as string,
+      matchedQuoteId: (r.matched_quote_id as string | null) ?? null,
+      matchKind: (r.match_kind as string | null) ?? null,
+      amount: Number(r.amount),
+    })),
+    { open, settled },
+  );
   const pending = await fetchAllRows((f, t) =>
     sb
       .from("bank_transactions")

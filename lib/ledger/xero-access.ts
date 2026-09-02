@@ -13,6 +13,9 @@
  *
  *  - **missing credentials** — `requireConfig` throws "Xero is not configured —"
  *    (the alarm must not depend on the config it watches);
+ *  - **never authorised** — the token store throws "No xero token row exists"
+ *    (`ledger_tokens` is created empty, so this is the state the cutover starts
+ *    in whenever the env flip lands before an admin runs /api/xero/connect);
  *  - **a dead or revoked refresh token** — `postToken` throws
  *    "Xero token request failed: invalid_grant" (the 60-day idle expiry, the
  *    live risk for an environment authorised early and left on zoho);

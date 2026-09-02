@@ -105,6 +105,64 @@ describe("isLedgerAccessDenied — the Xero lock-out shapes", () => {
       false,
     );
   });
+
+  /**
+   * Never authorised at all — the state every environment starts in.
+   *
+   * `ledger_tokens` is created empty (migration 0108 seeds nothing, and the
+   * prod runbook says "both tables land EMPTY"), so "LEDGER_PROVIDER flipped
+   * to xero before an admin went through /api/xero/connect" is not an exotic
+   * edge, it is the FIRST state the cutover passes through — and the row can
+   * be lost or rebuilt at any time afterwards. It is exactly as permanent as a
+   * revoked grant and fixed by exactly the same click, but it carries no
+   * provider code and no HTTP status, so the wording is the only signal there
+   * is. Classified transient, every invoice raise fails while the books probe
+   * reports `alerts: []` every fifteen minutes.
+   */
+  it("recognises a connection that was never authorised at all", () => {
+    expect(
+      isLedgerAccessDenied(
+        new LedgerError(
+          "No xero token row exists — re-authorise at /api/xero/connect (admin only) before using the xero adapter.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * A rotation consumed by Xero but lost before it could be persisted. The
+   * refresh token we held is now dead and the replacement went nowhere, so no
+   * retry can ever succeed — the store says so in as many words.
+   */
+  it("recognises a rotation that was consumed but never saved", () => {
+    expect(
+      isLedgerAccessDenied(
+        new LedgerError(
+          "The xero refresh token rotated but could not be saved (fetch failed). The integration will need re-authorising.",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  /**
+   * The other direction, in the same module and in very similar words. A
+   * database blip reading the row, a blip claiming the lease, and the lease
+   * wait timing out are all designed to be retried — the next pass claims and
+   * refreshes. Escalating them would page a human for a Supabase hiccup and
+   * teach the office to ignore the alert that means the books are shut.
+   */
+  it("still leaves the token store's transient failures alone", () => {
+    expect(isLedgerAccessDenied(new LedgerError("Could not read the xero token row: fetch failed"))).toBe(false);
+    expect(isLedgerAccessDenied(new LedgerError("Could not claim the xero refresh lease: fetch failed"))).toBe(false);
+    expect(
+      isLedgerAccessDenied(
+        new LedgerError(
+          "Timed out waiting for another process to refresh the xero token. " +
+            "If this persists, check ledger_tokens.refresh_lease_owner for a stuck lease.",
+        ),
+      ),
+    ).toBe(false);
+  });
 });
 
 /**

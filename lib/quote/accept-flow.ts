@@ -2491,6 +2491,7 @@ async function sendDateConfirmationEmail(
   // was raised moments ago and `quote` predates it, so the passed-in row would
   // fail the gate for the wrong reason.
   let balanceRemaining = 0;
+  let balanceSettled = false;
   const fresh = await fetchQuoteById(sb, quote.id);
   if (fresh?.lead_id) {
     const { data: payLead } = await sb
@@ -2498,10 +2499,26 @@ async function sendDateConfirmationEmail(
       .select("date_confirmed_at, balance_paid_at")
       .eq("id", fresh.lead_id)
       .maybeSingle();
+    balanceSettled = !!payLead?.balance_paid_at;
     if (payInFullAvailable(fresh, payLead)) {
       balanceRemaining = (await computeBalanceCredits(sb, fresh)).amount;
     }
   }
+  // A late booking (PRD §3.10 Addition 2) raises AND EMAILS the final balance
+  // at ACCEPTANCE, and ensureCommitmentInvoice then refuses to raise a
+  // commitment behind that invoice (a commitment after a balance is always a
+  // double-bill). So `c.commitmentAmount` arrives here as 0 for a reason that
+  // has nothing to do with there being nothing to pay, and the zero-commitment
+  // copy told a customer four days from their move that we would send the
+  // final invoice nearer the time, over the unpaid one already in their inbox.
+  // Read the invoice that EXISTS, exactly as /q does (`showBalanceCard`), so
+  // the page and the email can never tell them different things. The
+  // passed-in row is the fallback: fetchQuoteById answers null on a read
+  // ERROR, and a failed read must not render as "no invoice".
+  const balanceRow = fresh ?? quote;
+  const balanceInvoiced = isRealZohoId(balanceRow.zoho_balance_invoice_id)
+    ? Number(balanceRow.balance_invoice_amount ?? 0)
+    : 0;
   // Gate 9a: a small job's acceptance ask IS the gross — the commitment clamps
   // to 0 and no balance invoice will ever raise — so the zero-commitment copy's
   // "the balance is due before move day" would promise this customer a debit
@@ -2522,6 +2539,9 @@ async function sendDateConfirmationEmail(
     invoiceUrl: c.invoiceUrl,
     balanceRemaining,
     paidInFull,
+    balanceInvoiced,
+    balanceInvoiceNumber: balanceRow.zoho_balance_invoice_number,
+    balanceSettled,
     payUrl: quote.accept_token ? acceptUrlFor(quote.accept_token) : null,
     brand,
   };
@@ -2534,9 +2554,13 @@ async function sendDateConfirmationEmail(
     bodyText:
       c.commitmentAmount > 0
         ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${c.commitmentAmount.toFixed(2)} commitment payment is ${c.commitmentDueLabel ? `due by ${c.commitmentDueLabel}` : "due now"}.`
-        : paidInFull
-          ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your payment covers the whole job, so there is nothing more to pay.`
-          : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
+        : balanceInvoiced > 0
+          ? balanceSettled
+            ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your balance is settled in full, so there is nothing left to pay.`
+            : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${balanceInvoiced.toFixed(2)} final balance has already been invoiced and is due in full before move day.`
+          : paidInFull
+            ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your payment covers the whole job, so there is nothing more to pay.`
+            : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
     ...(templateId
       ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) }, bodyHtml: buildDateConfirmationEmailHtml(meta) }
       : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),

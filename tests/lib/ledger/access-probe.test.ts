@@ -61,6 +61,25 @@ describe("checkXeroAccess", () => {
     expect(check).toMatchObject({ ok: false, accessDenied: true });
   });
 
+  /**
+   * The link the probe reaches BEFORE any of the above: no stored token at
+   * all. `ledger_tokens` lands empty on every environment, so a
+   * `LEDGER_PROVIDER=xero` flip that runs ahead of /api/xero/connect — the
+   * ordering the cutover actually has — puts the integration here, and so does
+   * losing or rebuilding the row later. It needs the same human doing the same
+   * thing as a revoked grant, so it must go red the same way rather than
+   * retrying quietly behind a green probe.
+   */
+  it("a connection that was never authorised is a lock-out, not a blip", async () => {
+    client.xeroFetch.mockRejectedValue(
+      new LedgerError(
+        "No xero token row exists — re-authorise at /api/xero/connect (admin only) before using the xero adapter.",
+      ),
+    );
+    const check = await checkXeroAccess();
+    expect(check).toMatchObject({ ok: false, accessDenied: true });
+  });
+
   it("a disconnected organisation (401/403 on the read itself) is a lock-out", async () => {
     client.xeroFetch.mockResolvedValue(new Response("", { status: 403 }));
     const check = await checkXeroAccess();

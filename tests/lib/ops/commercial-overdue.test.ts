@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fakePostgrest } from "../bookings/fake-postgrest";
 
 /**
  * Commercial credit control (PRD §3.10) — the alarm that exists BECAUSE the
@@ -22,6 +23,12 @@ const resolveOperationalIssue = vi.fn();
 vi.mock("@/lib/bookings/load-signals", () => ({
   loadBookingRows: (...args: unknown[]) => loadBookingRows(...args),
 }));
+// The REAL loader, kept beside the mock: the last block below drives it with a
+// database error injected, which is the only shape that reproduces the defect
+// these tests are written against (see "the real loader" below).
+const realLoadSignals = await vi.importActual<typeof import("@/lib/bookings/load-signals")>(
+  "@/lib/bookings/load-signals",
+);
 vi.mock("@/lib/ops/issues", () => ({
   reportOperationalIssue: (...args: unknown[]) => reportOperationalIssue(...args),
   resolveOperationalIssue: (...args: unknown[]) => resolveOperationalIssue(...args),
@@ -141,6 +148,31 @@ describe("a failed read clears nothing", () => {
     loadBookingRows.mockRejectedValue(new Error("PostgREST unreachable"));
 
     const sweep = await sweepCommercialOverdue(sb);
+
+    expect(sweep).toEqual({ overdue: [], termsMissing: [], checked: false });
+    expect(resolveOperationalIssue).not.toHaveBeenCalled();
+    expect(reportOperationalIssue).not.toHaveBeenCalled();
+  });
+
+  it("the real loader, with a real database error, reaches the sweep as a failure", async () => {
+    // The two tests above use `mockRejectedValue`, and a rejection is the ONE
+    // failure the real loader cannot produce: supabase-js resolves with
+    // `{data:null,error}`, fetchAllRows logs the window and breaks, and the
+    // secondary reads destructure only `data`. So the guarantee they assert was
+    // never actually held — a broken read arrived here as `rows: []`, took both
+    // `else` branches, and resolved two live commercial alarms while reporting
+    // `checked: true`. This drives the loader itself, with the error injected
+    // where PostgREST puts it.
+    loadBookingRows.mockImplementation(realLoadSignals.loadBookingRows);
+    const broken = fakePostgrest({
+      business_settings: { data: null, error: null },
+      quotes: {
+        data: null,
+        error: { message: "column quotes.commercial_due_date does not exist" },
+      },
+    });
+
+    const sweep = await sweepCommercialOverdue(broken);
 
     expect(sweep).toEqual({ overdue: [], termsMissing: [], checked: false });
     expect(resolveOperationalIssue).not.toHaveBeenCalled();

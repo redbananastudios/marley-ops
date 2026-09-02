@@ -59,6 +59,15 @@ export interface CommercialOverdueSweep {
  * A FAILED read resolves nothing. Clearing an alarm on an answer we never got
  * is how a monitor reports good news about a check that did not run; the sweep
  * returns `checked: false` and the alarms stand until a read succeeds.
+ *
+ * That is why the loader is asked in STRICT mode. Its default is fail-soft, and
+ * rightly so for the pages: /bookings would rather render the newest rows than
+ * meet a 500. But supabase-js resolves with `{data:null,error}` rather than
+ * throwing, so a fail-soft read hands this sweep an empty ledger for a query
+ * that failed — indistinguishable from "no commercial invoice is overdue", and
+ * the `else` branches below would then clear both live alarms and report the
+ * sweep clean. Strict turns the database error back into a throw, which is the
+ * only thing the catch below can see.
  */
 export async function sweepCommercialOverdue(
   sb: SupabaseClient,
@@ -66,7 +75,7 @@ export async function sweepCommercialOverdue(
   let overdue: string[] = [];
   let termsMissing: string[] = [];
   try {
-    const { rows } = await loadBookingRows(sb);
+    const { rows } = await loadBookingRows(sb, { strict: true });
     overdue = rows.filter((r) => r.bucket === "commercial_overdue").map((r) => r.quoteRef);
     termsMissing = rows
       .filter((r) => r.bucket === "commercial_terms_unknown")

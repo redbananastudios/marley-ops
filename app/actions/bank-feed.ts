@@ -8,7 +8,7 @@ import {
   markQuoteCommitmentPaidAction,
   markQuoteDepositPaidAction,
 } from "@/app/(dashboard)/bookings/actions";
-import { backfillPaidMethod, loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
+import { backfillPaidMethod, claimedKindsForRow, loadLedgerItems, loadOpenItems } from "@/lib/bank-feed/sync";
 import { coveringPairLinks, wholeQuoteLinks } from "@/lib/bank-feed/whole-quote";
 import type { OpenItem } from "@/lib/bank-feed/match";
 import { sendOpsAlert } from "@/lib/comms/dispatch";
@@ -296,7 +296,10 @@ export async function linkRecordedBankTransactionAction(input: {
   // Server-side re-verify: the named payment must be SETTLED at exactly this
   // amount. (An open item here means the office picked the wrong row — the
   // attach path records open money, this one only explains recorded money.)
-  const { settled } = await loadLedgerItems(admin);
+  // The open half is loaded too: the collision check below re-derives what
+  // EXISTING rows claim, and a half-recorded covering pair still has one open
+  // item in its pair.
+  const { open, settled } = await loadLedgerItems(admin);
 
   // The set this link will settle. For a whole-quote link that is every recorded
   // payment on the quote, re-derived here and re-checked against the sum — the
@@ -333,22 +336,36 @@ export async function linkRecordedBankTransactionAction(input: {
   // this payment then THIS one is a second payment for it — linking would file
   // money we probably owe back as "explained" and it would leave every queue.
   // A whole-quote link claims EVERY payment on the quote, so any existing match
-  // on that quote collides with it; a single-kind link collides with its own kind
-  // AND with a whole-quote row that already covers it. Getting this wrong files a
-  // second payment as "explained" and it leaves every queue.
-  const collidesWith = wholeQuote
-    ? ["deposit", "commitment", "balance", WHOLE_QUOTE]
-    : [input.kind, WHOLE_QUOTE];
-  const { data: already, error: alreadyErr } = await admin
+  // on that quote collides with it; a single-kind link collides with its own
+  // kind.
+  //
+  // What an existing row claims is DERIVED, never read off its stamp: a 'full'
+  // row covers all three kinds and a covering-pair row covers two while
+  // stamping one, so comparing `match_kind` directly was blind to a
+  // 'balance'-stamped pair row when linking that quote's commitment — exactly
+  // the payment the pair already recorded.
+  // (`input.kind` is a PayKind on this branch — the guard above returned for
+  // anything that is neither WHOLE_QUOTE nor a pay kind.)
+  const wanted: PayKind[] = wholeQuote ? ["deposit", "commitment", "balance"] : [input.kind as PayKind];
+  const { data: rowsOnQuote, error: alreadyErr } = await admin
     .from("bank_transactions")
-    .select("id")
+    .select("id, match_kind, amount")
     .eq("matched_quote_id", input.quoteId)
-    .in("match_kind", collidesWith)
     .in("status", ["confirmed", "reconciled"])
-    .neq("id", input.txId)
-    .limit(1);
+    .neq("id", input.txId);
   if (alreadyErr) return { ok: false as const, error: alreadyErr.message };
-  if (already?.length) {
+  const ledgerItems = [...open, ...settled];
+  const already = (rowsOnQuote ?? []).filter((r) =>
+    claimedKindsForRow(
+      {
+        quoteId: input.quoteId,
+        kind: (r.match_kind as string | null) ?? null,
+        amount: Number(r.amount),
+      },
+      ledgerItems,
+    ).some((k) => wanted.includes(k)),
+  );
+  if (already.length) {
     const what = wholeQuote ? "this job" : `${item.quoteRef}'s ${input.kind}`;
     return {
       ok: false as const,
@@ -510,14 +527,19 @@ export async function attachBankTransactionAction(input: {
  * individual payments through the existing paid pipelines (commitment first,
  * ledger order). No new match_kind: the row is claimed as 'commitment' while
  * that half records, then re-stamped 'balance' once both are recorded (the
- * larger payment gets the row's duplicate/collision protection; either stamp
- * is an under-claim of what the transfer paid, never a false claim).
+ * ledger date follows the larger payment). The stamp is an under-claim of what
+ * the transfer paid — one column cannot say "two payments" — so what the row
+ * CLAIMS is re-derived from the ledger by `coveringPairPartner`, at both the
+ * automatic gate (the sync's `claimed` set) and the manual one (the link
+ * collision check). Without that, the unstamped half was recorded money no
+ * bank row claimed, and a second transfer for it auto-reconciled as explained.
  *
  * Partial failure is LOUD: if the commitment half fails nothing was recorded
  * and the row is put back exactly as it was; if the balance half fails after
- * the commitment recorded, the row is put back, the office is told exactly
- * what state the quote is in, and an ops alert is raised — a half-recorded
- * transfer must never silently read as "Recorded".
+ * the commitment recorded, the row is put back stamped with the commitment it
+ * did buy (so that claim survives), the office is told exactly what state the
+ * quote is in, and an ops alert is raised — a half-recorded transfer must never
+ * silently read as "Recorded".
  */
 export async function recordCoveringPairAction(input: { txId: string; quoteId: string }) {
   const userId = await officeActor();
@@ -613,7 +635,24 @@ export async function recordCoveringPairAction(input: { txId: string; quoteId: s
   //    office exactly what happened, and page ops.
   const bal = await runPaidPipeline("balance", input.quoteId);
   if (!bal.ok || bal.already) {
-    await revert("unmatched", "a covering-pair confirm (balance half)");
+    // Back in the queue, but NOT back to its prior stamp: the commitment is
+    // recorded and this transfer is what paid it, so `revert` would leave
+    // recorded money claimed by nothing and the customer's next standing-order
+    // £400 would auto-reconcile as "explained" with no human in the loop.
+    // Stamped 'commitment' at the pair-sum amount is the shape buildClaimedKeys
+    // reads as "this queued row already bought the recorded commitment".
+    const { error: parkErr } = await admin
+      .from("bank_transactions")
+      .update({
+        status: "unmatched",
+        matched_quote_id: input.quoteId,
+        match_kind: "commitment",
+        match_confidence: null,
+        confirmed_at: null,
+      } as never)
+      .eq("id", input.txId)
+      .eq("status", "confirmed");
+    if (parkErr) await alertStuckRow(input.txId, "a covering-pair confirm (balance half)", parkErr.message);
     const detail = bal.ok
       ? "the balance was ALREADY recorded elsewhere, so the balance portion of this transfer may be a duplicate — check the bank before clearing the row"
       : `recording the balance FAILED: ${bal.error}. Record the balance manually via Bookings/Zoho, then dismiss the row`;
@@ -634,9 +673,9 @@ export async function recordCoveringPairAction(input: { txId: string; quoteId: s
   }
 
   // Both recorded. Re-stamp the row as the balance — the larger payment — so
-  // the claimed/collision checks protect the bigger money and the ledger dates
-  // it to the day it really arrived. Best-effort: a failed re-stamp leaves the
-  // row truthfully (if less protectively) claiming the commitment.
+  // the received ledger dates it to the day it really arrived. Best-effort, and
+  // safe either way now: `coveringPairPartner` recovers the pair from EITHER
+  // stamp, so a failed re-stamp costs the ledger date, not the claim.
   const { error: stampErr } = await admin
     .from("bank_transactions")
     .update({ match_kind: "balance" } as never)

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { log, errorContext } from "@/lib/log";
+import { DEFAULT_BRAND } from "@/lib/brand";
 import { sendEmail } from "@/lib/comms/send";
 import { accountsAddress, accountsFromFor } from "@/lib/comms/sender";
 import { brandForComms } from "@/lib/comms/brand-theme";
@@ -162,8 +163,10 @@ function periodLabelFor(
 ): string {
   if (due.kind === "final" && due.days === 0) return "handling on release";
   const span = `${prettyDay(due.period_start)} – ${prettyDay(due.period_end)}`;
-  // Repair paths reconstruct from a stored claim with no let in hand — their
-  // day-count fallback is still accurate (the span pins the exact window).
+  // EVERY path passes minKind, because every path holds the let. The day-count
+  // fallback below is only right for a legacy 'days' let: on a storage-terms-v2
+  // let it would say "30-day minimum" in the body of an email whose attached
+  // PDF — and the agreement the customer signed — both say one calendar month.
   if (due.kind === "minimum") return `${crateMinimumLabel(minKind, due.days)}, ${span}`;
   if (due.kind === "arrears" || due.kind === "final")
     return `${due.days} day${due.days === 1 ? "" : "s"}, ${span}`;
@@ -179,6 +182,77 @@ function buildUnitLabel(
   return `${typeLabel.get(unit?.unit_type ?? "") ?? "Storage unit"}${unit?.code ? ` ${unit.code}` : ""}${
     unit?.site_id && siteName.get(unit.site_id) ? ` at ${siteName.get(unit.site_id)}` : ""
   }`;
+}
+
+interface LetContextRow {
+  id: string;
+  unit_id: string | null;
+  brand: string | null;
+  min_kind: string | null;
+}
+interface UnitContextRow {
+  id: string;
+  code: string | null;
+  unit_type: string | null;
+  site_id: string | null;
+}
+interface ClientContextRow {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+}
+
+type StorageEmailContext =
+  | {
+      ok: true;
+      letById: Map<string, LetContextRow>;
+      unitById: Map<string, UnitContextRow>;
+      siteName: Map<string, string>;
+      clientById: Map<string, ClientContextRow>;
+    }
+  | { ok: false; error: string };
+
+/**
+ * Everything the two sweeps need to WORD a customer invoice email: the let (its
+ * brand, its unit, its frozen minimum kind), the unit/site labels, and the
+ * client's address.
+ *
+ * Refuses as a whole rather than degrading to empty maps, because every value
+ * here is load-bearing on a send that stamps `emailed_at` on its way out and is
+ * therefore never re-attempted. The let is the dangerous one: absent, `letBrand`
+ * resolves to null and `emailStorageInvoice` words the mail as the DEFAULT
+ * brand — so a transient PostgREST blip puts the DEFAULT brand's logo, From
+ * address and phone number on another brand's storage bill, permanently, with
+ * that brand's VAT PDF attached. Not sending is recoverable (the row keeps
+ * `emailed_at is null`, so the un-emailed sweep retries it next run); a
+ * mis-branded send is not. A failed `clients` read is the same class more
+ * quietly: read as data it makes every row report "no customer email on file",
+ * a claim nothing checked.
+ */
+async function loadStorageEmailContext(
+  admin: SupabaseClient,
+  letIds: string[],
+  clientIds: string[],
+): Promise<StorageEmailContext> {
+  const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
+    admin.from("storage_lets").select("id, unit_id, brand, min_kind").in("id", letIds),
+    admin.from("storage_units").select("id, code, unit_type, site_id"),
+    admin.from("storage_sites").select("id, name"),
+    admin.from("clients").select("id, display_name, email").in("id", clientIds),
+  ]);
+  const ctxErr = letsRes.error ?? unitsRes.error ?? sitesRes.error ?? clientsRes.error;
+  if (ctxErr) return { ok: false, error: ctxErr.message };
+  return {
+    ok: true,
+    letById: new Map(((letsRes.data ?? []) as LetContextRow[]).map((l): [string, LetContextRow] => [l.id, l])),
+    unitById: new Map(((unitsRes.data ?? []) as UnitContextRow[]).map((u): [string, UnitContextRow] => [u.id, u])),
+    siteName: new Map(
+      ((sitesRes.data ?? []) as { id: string; name: string }[]).map((s): [string, string] => [s.id, s.name]),
+    ),
+    clientById: new Map(
+      ((clientsRes.data ?? []) as ClientContextRow[]).map((c): [string, ClientContextRow] => [c.id, c]),
+    ),
+  };
 }
 
 export interface RaiseSummary {
@@ -283,10 +357,18 @@ async function emailStorageInvoice(
     subject: storageInvoiceSubject(input),
     html: buildStorageInvoiceEmailHtml(input),
     attachments: pdf ? [{ filename: `${args.invoiceNumber}.pdf`, content: pdf }] : undefined,
-    // Money desk identity — storage bills have no quote token, so
-    // replies go straight to the accounts mailbox.
-    replyTo: accountsAddress(),
+    // Money desk identity — storage bills have no quote token, so replies go to
+    // an accounts mailbox rather than a per-quote relay. `accountsAddress()` is
+    // the DEFAULT brand's desk (and its ACCOUNTS_EMAIL override), so only the
+    // default brand may name it: a default-brand Reply-To beside another
+    // brand's From bounces that customer between two identities mid-thread, and
+    // lands their reply in an inbox with no record of them. Unset, the send
+    // path answers
+    // with the brand's own front door (`emailReplyToFor`) — the same rule the
+    // office ad-hoc compose follows.
+    replyTo: brand.slug === DEFAULT_BRAND ? accountsAddress() : undefined,
     from: accountsFromFor(brand),
+    brand,
   });
   if (!sent.ok) return { ok: false, error: sent.error ?? "send failed" };
   await admin
@@ -679,26 +761,23 @@ export async function repairPendingStorageClaims(
   if (!pending?.length) return result;
 
   // Context for the customer email (rare path — bounded by the pending set).
-  // Best-effort: a failed context read never blocks the write-back/marking,
-  // but it is surfaced because an adopted invoice may then miss its email.
+  // A failed context read never blocks the write-back/marking — that is the
+  // money half, and it does not need the customer's name. It DOES block the
+  // email: with no let row the mail would go out worded as the default brand.
+  // Holding it costs nothing, because the adopted row keeps `emailed_at is
+  // null` and the un-emailed sweep is that email's retry layer.
   const letIds = [...new Set(pending.map((c) => c.let_id))];
   const clientIds = [...new Set(pending.map((c) => c.client_id).filter((id): id is string => !!id))];
-  const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
-    admin.from("storage_lets").select("id, unit_id, brand").in("id", letIds),
-    admin.from("storage_units").select("id, code, unit_type, site_id"),
-    admin.from("storage_sites").select("id, name"),
-    admin.from("clients").select("id, display_name, email").in("id", clientIds),
-  ]);
-  const ctxErr = letsRes.error ?? unitsRes.error ?? sitesRes.error ?? clientsRes.error;
-  if (ctxErr) {
+  const ctx = await loadStorageEmailContext(admin, letIds, clientIds);
+  if (!ctx.ok) {
     result.alerts.push(
-      `Pending-claim repair: context read failed (${ctxErr.message}) — adopted invoices may miss their customer email this run`,
+      `Pending-claim repair: context read failed (${ctx.error}) — invoices adopted this run were NOT emailed rather than sent under the wrong brand; the un-emailed sweep re-sends them once the read recovers`,
     );
   }
-  const letById = new Map((letsRes.data ?? []).map((l) => [l.id, l]));
-  const unitById = new Map((unitsRes.data ?? []).map((u) => [u.id, u]));
-  const siteName = new Map<string, string>((sitesRes.data ?? []).map((s) => [s.id, s.name]));
-  const clientById = new Map((clientsRes.data ?? []).map((c) => [c.id, c]));
+  const letById = ctx.ok ? ctx.letById : new Map<string, LetContextRow>();
+  const unitById = ctx.ok ? ctx.unitById : new Map<string, UnitContextRow>();
+  const siteName = ctx.ok ? ctx.siteName : new Map<string, string>();
+  const clientById = ctx.ok ? ctx.clientById : new Map<string, ClientContextRow>();
 
   for (const claim of pending) {
     const reference = storageInvoiceReference(claim.let_id, claim.period_start);
@@ -766,10 +845,21 @@ export async function repairPendingStorageClaims(
       }
     }
 
-    // Customer email the crashed run never sent (deduped on emailed_at).
+    // Customer email the crashed run never sent (deduped on emailed_at). The
+    // let row is a PRECONDITION, not a nicety: it carries the brand this email
+    // speaks as, and guessing it wrong is a leak that cannot be taken back.
     const client = clientById.get(claim.client_id ?? "");
-    if (!claim.emailed_at && client?.email) {
-      const let_ = letById.get(claim.let_id);
+    const let_ = letById.get(claim.let_id);
+    if (ctx.ok && !claim.emailed_at && client?.email && !let_) {
+      // The read succeeded and this ONE row was missing — the let was deleted
+      // under us. A per-claim alert is right here, unlike the whole-read
+      // failure already alerted once above (five copies of one outage reads as
+      // five incidents and names no remedy).
+      result.alerts.push(
+        `Claim ${reference}: adopted, but storage let ${claim.let_id.slice(0, 8)} no longer exists, so the invoice email was held rather than sent under the wrong brand.`,
+      );
+    }
+    if (!claim.emailed_at && client?.email && let_) {
       const kind = claim.kind as DueInvoice["kind"];
       const usage = Number(claim.amount) - Number(claim.handling_amount ?? 0);
       const days = kind === "final" && usage <= 0 ? 0 : daysInclusive(claim.period_start, claim.period_end);
@@ -777,14 +867,17 @@ export async function repairPendingStorageClaims(
         claimId: claim.id,
         clientEmail: client.email,
         clientName: client.display_name,
-        unitLabel: buildUnitLabel(unitById.get(let_?.unit_id ?? ""), siteName),
-        periodLabel: periodLabelFor({ kind, period_start: claim.period_start, period_end: claim.period_end, days }),
+        unitLabel: buildUnitLabel(unitById.get(let_.unit_id ?? ""), siteName),
+        periodLabel: periodLabelFor(
+          { kind, period_start: claim.period_start, period_end: claim.period_end, days },
+          let_.min_kind,
+        ),
         amount: Number(claim.amount),
         kind,
         invoiceId: ref.invoiceId,
         invoiceNumber: ref.invoiceNumber,
         invoiceUrl: ref.invoiceUrl,
-        letBrand: (let_ as { brand?: string | null } | undefined)?.brand ?? null,
+        letBrand: let_.brand ?? null,
       });
       if (!sent.ok) result.alerts.push(`Claim ${reference}: adopted but the customer email failed (${sent.error})`);
     }
@@ -837,44 +930,61 @@ export async function resendUnemailedStorageInvoices(
 
   const letIds = [...new Set(rows.map((r) => r.let_id))];
   const clientIds = [...new Set(rows.map((r) => r.client_id).filter((id): id is string => !!id))];
-  const [letsRes, unitsRes, sitesRes, clientsRes] = await Promise.all([
-    admin.from("storage_lets").select("id, unit_id, brand").in("id", letIds),
-    admin.from("storage_units").select("id, code, unit_type, site_id"),
-    admin.from("storage_sites").select("id, name"),
-    admin.from("clients").select("id, display_name, email").in("id", clientIds),
-  ]);
-  const letById = new Map((letsRes.data ?? []).map((l) => [l.id, l]));
-  const unitById = new Map((unitsRes.data ?? []).map((u) => [u.id, u]));
-  const siteById = new Map((sitesRes.data ?? []).map((s) => [s.id, s.name as string]));
-  const clientById = new Map((clientsRes.data ?? []).map((c) => [c.id, c]));
+  const ctx = await loadStorageEmailContext(admin, letIds, clientIds);
+  if (!ctx.ok) {
+    // Send NOTHING on a failed context read. This sweep's whole job is a second
+    // attempt, so waiting for the next one costs a run; sending on empty maps
+    // costs a customer of another brand a bill in the wrong livery they cannot
+    // un-receive, and every row a "no customer email on file" claim nothing
+    // checked. One alert for one outage, naming what did not happen.
+    result.alerts.push(
+      `Un-emailed storage invoice sweep could not read the let/customer context (${ctx.error}) — ${rows.length} invoice${rows.length === 1 ? "" : "s"} were NOT emailed this run rather than sent under the wrong brand; the next run retries them.`,
+    );
+    return result;
+  }
+  const { letById, unitById, siteName, clientById } = ctx;
 
   for (const row of rows) {
     const client = clientById.get(row.client_id ?? "");
     if (!client?.email) {
       // No address to send to — surface once rather than sweeping it forever.
+      // Truthful only because the read above is checked: on a failed clients
+      // read this said the same thing about every row, having checked nothing.
       result.alerts.push(
         `Storage invoice ${row.zoho_invoice_number} has no customer email on file — send it by hand from Zoho.`,
       );
       continue;
     }
     const let_ = letById.get(row.let_id);
+    if (!let_) {
+      // The read succeeded, so this let has been deleted. Its brand is now
+      // unknowable, and an invoice email worded as the wrong company is worse
+      // than one sent by hand.
+      result.alerts.push(
+        `Storage invoice ${row.zoho_invoice_number}: storage let ${row.let_id.slice(0, 8)} no longer exists, so its brand cannot be resolved — not emailed. Send it by hand from Zoho.`,
+      );
+      continue;
+    }
     const kind = row.kind as DueInvoice["kind"];
     const usage = Number(row.amount) - Number(row.handling_amount ?? 0);
     const days = kind === "final" && usage <= 0 ? 0 : daysInclusive(row.period_start, row.period_end);
-    const unit = unitById.get(let_?.unit_id ?? "");
+    const unit = unitById.get(let_.unit_id ?? "");
     const sent = await emailStorageInvoice(admin, {
       claimId: row.id,
       clientEmail: client.email,
       clientName: client.display_name,
-      unitLabel: buildUnitLabel(unit, siteById),
-      periodLabel: periodLabelFor({ kind, period_start: row.period_start, period_end: row.period_end, days }),
+      unitLabel: buildUnitLabel(unit, siteName),
+      periodLabel: periodLabelFor(
+        { kind, period_start: row.period_start, period_end: row.period_end, days },
+        let_.min_kind,
+      ),
       amount: Number(row.amount),
       kind,
       invoiceId: row.zoho_invoice_id as string,
       invoiceProvider: row.invoice_provider as string | null,
       invoiceNumber: row.zoho_invoice_number as string,
       invoiceUrl: row.zoho_invoice_url as string | null,
-      letBrand: (let_ as { brand?: string | null } | undefined)?.brand ?? null,
+      letBrand: let_.brand ?? null,
     });
     if (sent.ok) result.resent++;
     else {
