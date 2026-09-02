@@ -98,6 +98,8 @@ import {
   moveDateLabel,
   round2,
 } from "@/lib/quote/payments";
+import { docBrandFrom } from "@/lib/pdf/doc-brand";
+import { invoicePdfFilename } from "@/lib/quote/pdf-client";
 import {
   chaseTextToHtml,
   depositChaseEmail,
@@ -2492,6 +2494,15 @@ async function sendDateConfirmationEmail(
       balanceRemaining = (await computeBalanceCredits(sb, fresh)).amount;
     }
   }
+  // Gate 9a: a small job's acceptance ask IS the gross — the commitment clamps
+  // to 0 and no balance invoice will ever raise — so the zero-commitment copy's
+  // "the balance is due before move day" would promise this customer a debit
+  // that never comes, forever. Same frozen-figures verdict as the deposit
+  // invoice note (`coversWholeJob`) and /q's `paidInFull` gate: the agreed
+  // price exists and the paid deposit covers it.
+  const agreedGross = quote.agreed_price ?? Number(quote.grand_total ?? 0);
+  const paidInFull =
+    c.commitmentAmount <= 0 && agreedGross > 0 && balanceDue(agreedGross, c.depositAmount) <= 0;
   const meta: DateConfirmationMeta = {
     firstName: quote.customer_name,
     quoteRef: quote.quote_ref,
@@ -2502,6 +2513,7 @@ async function sendDateConfirmationEmail(
     invoiceNumber: c.invoiceNumber,
     invoiceUrl: c.invoiceUrl,
     balanceRemaining,
+    paidInFull,
     payUrl: quote.accept_token ? acceptUrlFor(quote.accept_token) : null,
     brand,
   };
@@ -2514,13 +2526,15 @@ async function sendDateConfirmationEmail(
     bodyText:
       c.commitmentAmount > 0
         ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your £${c.commitmentAmount.toFixed(2)} commitment payment is ${c.commitmentDueLabel ? `due by ${c.commitmentDueLabel}` : "due now"}.`
-        : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
+        : paidInFull
+          ? `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Your payment covers the whole job, so there is nothing more to pay.`
+          : `Your move date is confirmed (quote ${quote.quote_ref}). Your deposit is now non-refundable and counts towards your final bill. Nothing more to pay right now; the balance is due before move day.`,
     ...(templateId
       ? { template: { id: templateId, variables: dateConfirmationTemplateVars(meta) }, bodyHtml: buildDateConfirmationEmailHtml(meta) }
       : { bodyHtml: buildDateConfirmationEmailHtml(meta) }),
     attachmentBase64: pdfBase64,
     attachmentName: pdfBase64
-      ? `MarleyMoves-Invoice-${c.invoiceNumber ?? "commitment"}.pdf`
+      ? invoicePdfFilename(c.invoiceNumber ?? "commitment", docBrandFrom(brand))
       : undefined,
     replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
     leadId: quote.lead_id ?? undefined,
@@ -2800,7 +2814,7 @@ async function sendBalanceInvoiceEmail(
       ? { template: { id: templateId, variables: templateVars }, bodyHtml: buildBalanceInvoiceEmailHtml(meta) }
       : { bodyHtml: buildBalanceInvoiceEmailHtml(meta) }),
     attachmentBase64: pdfBase64,
-    attachmentName: pdfBase64 ? `MarleyMoves-Invoice-${inv.invoiceNumber}.pdf` : undefined,
+    attachmentName: pdfBase64 ? invoicePdfFilename(inv.invoiceNumber, docBrandFrom(brand)) : undefined,
     replyTo: quote.accept_token ? replyAddressFor(quote.accept_token, brand.name) : undefined,
     leadId: quote.lead_id ?? undefined,
     quoteId: quote.id,

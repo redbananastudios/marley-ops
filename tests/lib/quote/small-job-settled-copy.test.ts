@@ -96,3 +96,38 @@ describe("deposit invoice note — no separate-balance promise when the ask IS t
     expect(body).toContain("nothing further will be invoiced");
   });
 });
+
+describe("date-confirmation email — the zero-commitment plain-text arm is paid-in-full aware", () => {
+  // Same gate-9a family: sendDateConfirmationEmail's zero-commitment bodyText
+  // promised "the balance is due before move day" to a customer whose payment
+  // already covered the whole job. The with-balance sentence must survive for
+  // jobs that DO carry one; the paid-in-full arm must exist beside it, gated
+  // on the same frozen-figures verdict the deposit note uses.
+  const emailBody = (): string => {
+    const start = at(FLOW, "async function sendDateConfirmationEmail(", "sendDateConfirmationEmail");
+    const end = FLOW.indexOf("export async function", start + 10);
+    return FLOW.slice(start, end === -1 ? FLOW.length : end);
+  };
+
+  it("derives paid-in-full from the frozen figures and passes it into the email meta", () => {
+    const body = emailBody();
+    const verdict = at(body, "paidInFull", "the paid-in-full verdict");
+    const metaStart = at(body, "const meta: DateConfirmationMeta", "the meta construction");
+    expect(verdict).toBeLessThan(metaStart);
+    const metaBlock = body.slice(metaStart, metaStart + 700);
+    expect(metaBlock, "the meta must carry the verdict to the HTML/template rails").toContain("paidInFull");
+  });
+
+  it("gates the balance-due sentence and keeps it for jobs with a real balance", () => {
+    const body = emailBody();
+    const gate = at(body, "paidInFull", "the paid-in-full verdict");
+    const oldCopy = at(
+      body,
+      "Nothing more to pay right now; the balance is due before move day.",
+      "the with-balance zero-commitment sentence (jobs WITH a balance must keep it)",
+    );
+    expect(gate).toBeLessThan(oldCopy);
+    // The paid-in-full arm exists and promises no balance.
+    expect(body).toContain("covers the whole job");
+  });
+});

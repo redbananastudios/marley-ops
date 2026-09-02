@@ -395,7 +395,7 @@ export const MANIFEST = [
     pattern: "lib/quote/accept-flow.ts",
     allow: ["Marley", "marleymoves.co.uk", "01747 637070", "Connor"],
     reason:
-      "default-brand constants + contract docs: the 01747 fallback inside the shared brand-phone pattern (errorPhone + invoicePayClause — reached only when a brands row carries no phone) and the comment byte-locking it; the §3.5 MarleyMoves Ltd disclosure in invoicePayClause; the MarleyMoves-Invoice attachment filename shape (the same §10 shape lib/quote/pdf-client.ts documents); ops.marleymoves.co.uk as the app's own origin fallback (app chrome per PRD §2, as lib/job-sheet-load.ts); Marley/Connor elsewhere appear only in comments documenting orphan adoption and BACS recording",
+      "default-brand constants + contract docs: the 01747 fallback inside the shared brand-phone pattern (errorPhone + invoicePayClause — reached only when a brands row carries no phone) and the comment byte-locking it; the §3.5 MarleyMoves Ltd disclosure in invoicePayClause; ops.marleymoves.co.uk as the app's own origin fallback (app chrome per PRD §2, as lib/job-sheet-load.ts); Marley/Connor elsewhere appear only in comments documenting orphan adoption and BACS recording. (The invoice attachment filenames now resolve through invoicePdfFilename in lib/quote/pdf-client.ts — no MarleyMoves-Invoice literal remains here.)",
   },
   // The settle-in-full bank block CommitmentChoice renders inside /q — the
   // same shared account as BankPanel, so the §3.5 disclosure arrives as data

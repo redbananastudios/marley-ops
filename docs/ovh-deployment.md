@@ -197,7 +197,7 @@ whole seam exists to make impossible.
 | `XERO_REDIRECT_URI` | must match the app's registered URI exactly | OAuth fails at consent |
 | `XERO_ACCOUNT_BANKTRANSFER` / `_CASH` / `_CREDITCARD` | the **AccountID (GUID)** each payment rail posts to. Not the Code — Code is user-editable in the Chart of Accounts UI, so a bookkeeper renumbering the chart would silently re-point a rail | that rail throws; the others keep working |
 | `XERO_ACCOUNT_INCOME` | the account **CODE** (e.g. `200`) that invoice lines post to. Deliberately the opposite form to the rails above — the two Xero APIs genuinely disagree, so the variables do too | every invoice raise throws |
-| `XERO_ACCOUNT_STORAGE_INCOME` | optional; keeps storage income separate from Removals Income | falls back to `XERO_ACCOUNT_INCOME` with a logged warning |
+| `XERO_ACCOUNT_STORAGE_INCOME` | the account **CODE** storage income posts to, keeping it out of Removals Income (standing policy 2026-07-22). To deliberately merge them, set it to the same code as `XERO_ACCOUNT_INCOME` — an explicit statement, not an absence | storage invoice raises **throw** naming the variable — there is no fallback to the general account (an unset variable is not a decision; the silent-fallback behaviour was removed) |
 | `XERO_TAX_TYPE_VAT` / `_NO_VAT` | UK 20% output VAT is **`OUTPUT2`** — `OUTPUT` is the legacy 17.5% rate and is DELETED | throws rather than guess a tax rate |
 | `XERO_CARD_ENABLED` | `"true"` or `"false"` — **a human attestation**, not a preference | a card-suppressed invoice **throws**. See below |
 | `XERO_BRANDING_THEME_DEFAULT` | optional; omit to use the org's own default theme | Xero applies the org default |

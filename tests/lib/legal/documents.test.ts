@@ -6,6 +6,7 @@ import {
   publicUrlFor,
   snapshotOf,
   STORAGE_PAYMENT_SENTENCE,
+  STORAGE_PAYMENT_SENTENCE_NO_CARD,
   termsSnapshot,
   versionById,
   versionEffectiveOn,
@@ -193,6 +194,18 @@ describe("STORAGE_PAYMENT_SENTENCE", () => {
     expect(STORAGE_PAYMENT_SENTENCE.toLowerCase()).toContain("card");
     expect(STORAGE_PAYMENT_SENTENCE.toLowerCase()).toContain("cash");
     expect(STORAGE_PAYMENT_SENTENCE).not.toContain("payable by bank transfer on receipt");
+  });
+});
+
+describe("STORAGE_PAYMENT_SENTENCE_NO_CARD", () => {
+  // The /s signing page's copy for a brand whose card channel is NOT live
+  // (the §11.10 two-switch verdict): it must never put the word "card" in
+  // front of a customer the payment rails would refuse.
+  it("names no card, keeps the bank-transfer-first framing", () => {
+    expect(STORAGE_PAYMENT_SENTENCE_NO_CARD.toLowerCase()).not.toContain("card");
+    expect(STORAGE_PAYMENT_SENTENCE_NO_CARD.toLowerCase()).toContain("bank transfer");
+    expect(STORAGE_PAYMENT_SENTENCE_NO_CARD).toContain("Bank transfer is preferred");
+    expect(STORAGE_PAYMENT_SENTENCE_NO_CARD).not.toMatch(/—/);
   });
 });
 

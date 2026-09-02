@@ -3,9 +3,14 @@ import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
 import { crateMinimumLabel, crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
-import { publicUrlFor, STORAGE_PAYMENT_SENTENCE } from "@/lib/legal/documents";
+import {
+  publicUrlFor,
+  STORAGE_PAYMENT_SENTENCE,
+  STORAGE_PAYMENT_SENTENCE_NO_CARD,
+} from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { getBrandOrDefault } from "@/lib/brand";
+import { cardPaymentsAvailable } from "@/lib/payments/card-availability";
 import { pageTheme, pageTitle } from "@/lib/brand-page-theme";
 import { StorageAgreementForm } from "./agreement-form";
 
@@ -98,6 +103,13 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   // resolved once before the render.
   const theme = pageTheme(await getBrandOrDefault(admin, let_.brand));
 
+  // The payment-method sentence names "card" only when this LET's brand has a
+  // LIVE card channel (the §11.10 two-switch verdict: global kill switch AND
+  // the brand's own switch). A brand with card off — every rail bank-only —
+  // must not have this page offer a method its invoices will refuse. Fails
+  // safe to the no-card copy, same direction as lib/comms/quote-email.ts.
+  const cardOk = await cardPaymentsAvailable(admin, let_.brand);
+
   return (
     // One CSS-variable override re-points every mm-red utility below to this
     // brand's accent — the same mechanism /q uses. Undefined for the default
@@ -171,7 +183,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
               >
                 storage agreement terms
               </a>
-              . {STORAGE_PAYMENT_SENTENCE}
+              . {cardOk ? STORAGE_PAYMENT_SENTENCE : STORAGE_PAYMENT_SENTENCE_NO_CARD}
             </p>
 
             <div className="mt-6">
