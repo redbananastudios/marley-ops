@@ -370,6 +370,11 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
   const prevHref = `/performance?month=${prev.getUTCFullYear()}-${pad(prev.getUTCMonth() + 1)}${brandQS}`;
   const nextHref = `/performance?month=${next.getUTCFullYear()}-${pad(next.getUTCMonth() + 1)}${brandQS}`;
 
+  // Under a named ?brand= a partially-fetched window would render a
+  // wrong-narrowed month that LOOKS complete — fail loud then, keep today's
+  // fail-soft on All (same flag the sales/storage tabs pass; mirrors /storage,
+  // gate 12).
+  const strict = { strict: brandFilter !== "all" };
   const [{ data: appts }, { data: profiles }, leads, quotes] =
     await Promise.all([
       sb
@@ -383,8 +388,8 @@ export default async function PerformancePage({ searchParams }: { searchParams: 
       // leads + quotes are full-table lookups (name/status maps, accepted-value
       // map) — order-independent → page through fetchAllRows so they aren't
       // truncated at PostgREST's 1000-row cap once the business grows.
-      fetchAllRows((f, t) => sb.from("leads").select("id, name, status, referral_commission").order("id").range(f, t)),
-      fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total, booking_cancelled_at").order("id").range(f, t)),
+      fetchAllRows((f, t) => sb.from("leads").select("id, name, status, referral_commission").order("id").range(f, t), strict),
+      fetchAllRows((f, t) => sb.from("quotes").select("lead_id, status, agreed_price, grand_total, booking_cancelled_at").order("id").range(f, t), strict),
     ]);
 
   // Accepted quotes in this month = the booked jobs we score margin on.

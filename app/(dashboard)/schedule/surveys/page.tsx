@@ -109,11 +109,18 @@ export default async function SurveysSchedulePage({
   // Bare clients (no enquiry yet — usually phone callers added via Clients) are
   // bookable too: picking one opens the enquiry server-side at booking time.
   const clientIdsWithLeads = new Set((leads ?? []).map((l) => (l as { client_id?: string | null }).client_id).filter(Boolean));
-  const { data: bareClients } = await sb
-    .from("clients")
-    .select("id, display_name, email, phone_raw, phone_e164, postcode_home, address_line1, town")
-    .is("merged_into_id", null)
-    .eq("is_active", true);
+  // Paged like every other clients picker (/storage): a plain select truncates
+  // silently at PostgREST's 1000-row cap, and a client the picker doesn't
+  // offer reads as "never added" — so the office creates a duplicate.
+  const bareClients = await fetchAllRows((f, t) =>
+    sb
+      .from("clients")
+      .select("id, display_name, email, phone_raw, phone_e164, postcode_home, address_line1, town")
+      .is("merged_into_id", null)
+      .eq("is_active", true)
+      .order("id")
+      .range(f, t),
+  );
   const clientOptions = (bareClients ?? [])
     .filter((c) => !clientIdsWithLeads.has(c.id))
     .map((c) => ({

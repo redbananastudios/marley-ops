@@ -273,8 +273,46 @@ export async function updateLeadBrandAction(leadId: string, brandSlug: string) {
     };
   }
 
-  const { error } = await sb.from("leads").update({ brand: target.slug }).eq("id", leadId);
+  // CLAIM the row with a CAS on the brand we just read (the accept-flow claim
+  // idiom): a concurrent brand change loses the swap outright instead of
+  // silently stacking on top of a state nobody re-checked. leads.brand is NOT
+  // NULL (migration 0104), so the equality filter always has a real value.
+  const { data: claimed, error } = await sb
+    .from("leads")
+    .update({ brand: target.slug })
+    .eq("id", leadId)
+    .eq("brand", lead.brand)
+    .select("id");
   if (error) return { ok: false as const, error: error.message };
+  if (!claimed?.length) {
+    return { ok: false as const, error: "This lead just changed elsewhere — reload and try again." };
+  }
+
+  // Re-verify AFTER the claim. The count above and the claim can interleave
+  // with createDraftQuote (read old brand → mint ref → insert), which strands
+  // an issued ref's prefix on the wrong brand — the exact state this gate
+  // forbids. A ref row whose own brand disagrees with the new slug is that
+  // interleaving caught in the act (createDraftQuote feeds ONE variable to
+  // both the ref mint and the row's brand, so they can never disagree with
+  // each other); a ref minted after the claim already carries the new brand
+  // and is correctly left alone. On a mismatch — or an unverifiable re-check,
+  // since "could not check" must never act as "no refs" (the evidence bar) —
+  // roll the claim back (CAS'd to our own write) and refuse.
+  const { count: racedRefs, error: recheckError } = await sb
+    .from("quotes")
+    .select("id", { count: "exact", head: true })
+    .eq("lead_id", leadId)
+    .not("quote_ref", "is", null)
+    .neq("brand", target.slug);
+  if (recheckError || (racedRefs ?? 0) > 0) {
+    await sb.from("leads").update({ brand: lead.brand }).eq("id", leadId).eq("brand", target.slug);
+    return {
+      ok: false as const,
+      error: recheckError
+        ? `Could not verify this lead's quotes: ${recheckError.message}`
+        : "A quote reference has already been issued for this lead — its brand (and the ref prefix) is fixed.",
+    };
+  }
 
   // Keep the denormalised copies in step (PRD §3.2: quotes.brand and
   // appointments.brand are set from the parent lead at insert). Pre-quote a

@@ -65,7 +65,7 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
   );
 }
 
-function InvoiceRow({ inv }: { inv: LedgerInvoiceListItem }) {
+function InvoiceRow({ inv, ledgerName }: { inv: LedgerInvoiceListItem; ledgerName: string }) {
   const pill = STATUS_PILL[inv.status] ?? { label: inv.status, cls: "bg-mist-100 text-mist-500" };
   const dead = inv.status === "void";
   const vat = invoiceVat(inv);
@@ -98,7 +98,7 @@ function InvoiceRow({ inv }: { inv: LedgerInvoiceListItem }) {
         href={invoiceAppUrl(inv.invoiceId)}
         target="_blank"
         rel="noopener noreferrer"
-        aria-label={`Open ${inv.invoiceNumber} in Zoho`}
+        aria-label={`Open ${inv.invoiceNumber} in ${ledgerName}`}
         className="focus-ring flex size-9 items-center justify-center rounded-md text-mist-400 transition-colors hover:bg-muted hover:text-foreground"
       >
         <ExternalLink className="size-4" strokeWidth={1.75} />
@@ -153,7 +153,12 @@ export default async function FinancePage({
    * follows it: nobody can recover a wrong number once it has been read off the
    * screen and filed.
    */
-  const historySplit = configuredProvider() !== "zoho";
+  const provider = configuredProvider();
+  const historySplit = provider !== "zoho";
+  // #197 rule for every error/degrade surface below: name the ledger the
+  // failure actually came from — a Xero outage reported as "Zoho" sends a
+  // human into the wrong system with a clear conscience.
+  const ledgerName = provider === "xero" ? "Xero" : "Zoho";
   let zohoError: string | null = null;
   try {
     const [dayL, mtdL, quarterL, unpaidL] = await Promise.all([
@@ -173,7 +178,7 @@ export default async function FinancePage({
     mtdTruncated = mtdL.truncated;
     quarterTruncated = quarterL.truncated;
   } catch (err) {
-    zohoError = err instanceof Error ? err.message : "Could not reach Zoho.";
+    zohoError = err instanceof Error ? err.message : `Could not reach ${ledgerName}.`;
   }
 
   const daySummary = summariseRaised(dayInvoices);
@@ -222,7 +227,7 @@ export default async function FinancePage({
 
       {zohoError ? (
         <Card className="border-warn-border bg-warn-bg px-5 py-4">
-          <p className="text-sm font-semibold text-warn">Couldn&apos;t load the books from Zoho</p>
+          <p className="text-sm font-semibold text-warn">Couldn&apos;t load the books from {ledgerName}</p>
           <p className="mt-0.5 text-sm text-warn">{zohoError} — refresh to retry.</p>
         </Card>
       ) : null}
@@ -246,8 +251,15 @@ export default async function FinancePage({
           label="Month so far"
           value={fmtGBP(mtdSummary.gross)}
           sub={
-            mtdTruncated
-              ? `first 2,000 invoices only — figure UNDERSTATES, check Zoho`
+            /* Same split-ledger declaration as the quarter tile (fd2df91): the
+               month window reads only the configured provider too, so a month
+               straddling the Zoho→Xero flip is a partial figure — and a
+               partial figure presented as complete looks plausible, which is
+               worse than an empty one. */
+            historySplit
+              ? `PARTIAL — only invoices raised in the current ledger. Anything raised before the switch is not counted here`
+              : mtdTruncated
+              ? `first 2,000 invoices only — figure UNDERSTATES, check ${ledgerName}`
               : `owed ${fmtGBP(mtdVat.owed)}${frs ? ` (FRS ${pct}%)` : " VAT"} · ${mtdSummary.count} invoice${mtdSummary.count === 1 ? "" : "s"} this month to date`
           }
         />
@@ -258,7 +270,7 @@ export default async function FinancePage({
             historySplit
               ? `PARTIAL — only invoices raised in the current ledger. Anything raised before the switch is not counted here`
               : quarterTruncated
-              ? `first 2,000 invoices only — VAT owed UNDERSTATES, check Zoho`
+              ? `first 2,000 invoices only — VAT owed UNDERSTATES, check ${ledgerName}`
               : `${vatQuarterLabel(quarter)} · invoiced ${fmtGBP(quarterSummary.gross)}${frs ? ` · FRS ${pct}%` : ""} · cycle in Settings`
           }
         />
@@ -267,7 +279,7 @@ export default async function FinancePage({
           value={fmtGBP(owed)}
           sub={
             unpaidTruncated
-              ? `first 2,000 unpaid only — figure UNDERSTATES, check Zoho`
+              ? `first 2,000 unpaid only — figure UNDERSTATES, check ${ledgerName}`
               : `${owedCount} unpaid invoice${owedCount === 1 ? "" : "s"} across all dates`
           }
         />
@@ -290,7 +302,7 @@ export default async function FinancePage({
         ) : (
           <div className="divide-y">
             {dayInvoices.map((inv) => (
-              <InvoiceRow key={inv.invoiceId} inv={inv} />
+              <InvoiceRow key={inv.invoiceId} inv={inv} ledgerName={ledgerName} />
             ))}
           </div>
         )}

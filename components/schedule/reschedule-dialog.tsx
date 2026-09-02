@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import { CalendarClock, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { reportSurveySend, duplicateWarning } from "@/lib/comms/survey-send-report";
+import { UK_TZ, ukCalendarDate } from "@/lib/uk-time";
 import {
   Dialog,
   DialogContent,
@@ -103,7 +104,11 @@ export function RescheduleDialog({
           e.id !== target.id &&
           e.status !== "cancelled" &&
           e.estimator_id === target.estimatorId &&
-          toLocalInput(new Date(e.starts_at)).slice(0, 10) === day,
+          // Day membership pinned to the UK calendar (lib/uk-time.ts header
+          // rule: rendered date text must pin UK_TZ) — a viewer an hour off
+          // otherwise sees the wrong day's bookings and double-books a slot
+          // this panel said was clear.
+          ukCalendarDate(e.starts_at) === day,
       )
       .sort((a, b) => new Date(a.starts_at).getTime() - new Date(b.starts_at).getTime());
   }, [events, target, when]);
@@ -145,7 +150,7 @@ export function RescheduleDialog({
   if (!target) return null;
 
   const fmtTime = (iso: string) =>
-    new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", timeZone: UK_TZ });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
