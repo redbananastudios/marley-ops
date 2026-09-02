@@ -86,9 +86,18 @@ export async function sendAdHocEmailAction(input: SendAdHocEmailInput): Promise<
       .maybeSingle();
     if (q?.accept_token) replyTo = replyAddressFor(q.accept_token, brand.name);
   }
-  // No relay token → replies go to the composer's own company mailbox (their
-  // From address), keeping the conversation with the person who wrote it.
-  if (!replyTo && office.email?.toLowerCase().endsWith("@marleymoves.co.uk")) {
+  // No relay token → a DEFAULT-brand compose keeps replies with the person who
+  // wrote it (their own company mailbox, their From above). A non-default
+  // brand's compose already fronts the brand's door rather than the composer
+  // (helloFromFor below, PRD §3.5), so its replies go to that same door:
+  // replyTo stays unset and the send path resolves the brand's hello identity
+  // (emailReplyToFor) — a marleymoves.co.uk Reply-To on a Pitmans email would
+  // bounce the customer between two identities mid-thread.
+  if (
+    !replyTo &&
+    brand.slug === DEFAULT_BRAND &&
+    office.email?.toLowerCase().endsWith("@marleymoves.co.uk")
+  ) {
     replyTo = office.email;
   }
 

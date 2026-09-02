@@ -1,7 +1,8 @@
 import { notFound } from "next/navigation";
 import { CheckCircle2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getBrandOrDefault, listActiveBrands } from "@/lib/brand";
+import { listActiveBrands } from "@/lib/brand";
+import { brandForComms } from "@/lib/comms/brand-theme";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip } from "@/components/brand/brand-chip";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
@@ -126,7 +127,12 @@ export default async function QuoteDetailPage({
     // the attachment name all resolve from it (multi-brand PRD §3.5). The PDF's
     // slim DocBrand is derived from this same row at the point of use
     // (docBrandFrom, null for Marley), so one read serves comms and documents.
-    getBrandOrDefault(sb, quote.brand),
+    // Resolved through brandForComms, NOT getBrandOrDefault: this row feeds
+    // customer COPY (the quote email's card wording via `offerCard`), so its
+    // cardPaymentsEnabled must be the EFFECTIVE two-switch verdict — global
+    // AND brand (PRD §11.10) — never the stored toggle alone. docBrandFrom
+    // reads no card field, so the PDF is untouched by the substitution.
+    brandForComms(sb, quote.brand),
     // Multi-brand only: the header chip renders when a second brand row is
     // active (the single-brand invariant, PRD §1).
     listActiveBrands(sb),

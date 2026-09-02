@@ -51,6 +51,32 @@ export interface SendEmailInput {
    *  fallback (which cannot render Resend templates) still has a body.
    *  NEVER part of the provider payload or its hash. */
   fallbackHtml?: string;
+  /** Sending brand — resolves the FALLBACK Reply-To when `replyTo` is absent
+   *  (emailReplyToFor below): a tokenless non-default-brand email must not
+   *  invite replies to Marley's front door. Only the two fields the resolver
+   *  reads, mirroring sendSms's snapshot shape. Never part of the provider
+   *  payload; absent = today's Marley fallback, byte-identical. */
+  brand?: Pick<Brand, "slug" | "helloFrom"> | null;
+}
+
+/**
+ * The fallback Reply-To fronting an email that has NO tokenized reply address
+ * (multi-brand PRD §3.5) — the email sibling of smsSenderFor below. A brand
+ * that is not the default answers for ITSELF: its hello_from front door,
+ * provided the value is a plain local@domain token (the same hardening
+ * sender.ts's plainAddress applies before an address becomes a live header —
+ * a Settings-editable value must never smuggle header syntax). The default
+ * brand, the group pseudo-brand (group comms keep the operating company's
+ * identity, §11.10) and a stub row without a usable address all resolve to
+ * today's literal hello@marleymoves.co.uk — a monitored Marley mailbox beats
+ * a dead header, and every pre-brand-layer send stays byte-identical.
+ */
+export function emailReplyToFor(brand?: Pick<Brand, "slug" | "helloFrom"> | null): string {
+  if (brand && brand.slug !== DEFAULT_BRAND && brand.slug !== GROUP_BRAND) {
+    const addr = (brand.helloFrom ?? "").trim().toLowerCase();
+    if (/^[a-z0-9._+-]+@[a-z0-9.-]+$/.test(addr)) return addr;
+  }
+  return "hello@marleymoves.co.uk";
 }
 
 /** Resend hard-rejects any template variable value over 2,000 characters
@@ -69,7 +95,7 @@ function emailRequestPayload(input: SendEmailInput) {
   return {
     from: input.from || process.env.RESEND_FROM_EMAIL || "Marley Moves <hello@marleymoves.co.uk>",
     to: [input.to],
-    reply_to: input.replyTo || "hello@marleymoves.co.uk",
+    reply_to: input.replyTo || emailReplyToFor(input.brand),
     subject: input.subject,
     ...(input.template ? { template: input.template } : { html: input.html }),
     attachments: input.attachments,
@@ -175,7 +201,7 @@ export async function sendEmailViaSmtpFallback(input: SendEmailInput): Promise<S
       // the q-<token> reply relay (chase pausing, logging) keeps working.
       from: process.env.SMTP_FALLBACK_FROM || `Marley Moves <${user}>`,
       to: input.to,
-      replyTo: input.replyTo || "hello@marleymoves.co.uk",
+      replyTo: input.replyTo || emailReplyToFor(input.brand),
       subject: input.subject,
       html,
       attachments: (input.attachments ?? []).map((a) => ({

@@ -29,7 +29,7 @@ import { docBrandFrom } from "@/lib/pdf/doc-brand";
 import { PdfLoader } from "@/components/quote/pdf-loader";
 import type { QuoteFormValues } from "@/lib/quote/form-types";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
-import type { Brand } from "@/lib/brand";
+import { DEFAULT_BRAND, type Brand } from "@/lib/brand";
 
 const gbp = (n: number | null | undefined): string =>
   n == null || isNaN(n as number)
@@ -169,7 +169,20 @@ export function SendQuoteDialog({
         }
       }
 
-      const emailMeta = { quoteRef, acceptUrl, depositAmount, brand, paymentPolicy };
+      const emailMeta = {
+        quoteRef,
+        acceptUrl,
+        depositAmount,
+        brand,
+        paymentPolicy,
+        // The two-switch card verdict for a NON-default brand's deposit-step
+        // copy (PRD §11.10). The page resolves `brand` through brandForComms,
+        // so cardPaymentsEnabled here is the EFFECTIVE flag — global AND brand
+        // — not the stored toggle. Marley never passes one: its literals stand
+        // and depositStepCopy ignores the slot for the default brand.
+        offerCard:
+          brand && brand.slug !== DEFAULT_BRAND ? brand.cardPaymentsEnabled : undefined,
+      };
       const bodyHtml = buildQuoteEmailHtml(values, breakdown, emailMeta);
       // Server prefers the published Resend template (dashboard-editable copy)
       // when its env id is set; bodyHtml stays as the fallback body.
