@@ -60,7 +60,7 @@ import {
   WP_RECONCILE_ISSUE_KEY,
   wpExternalLeadId,
 } from "@/lib/sync/wp-leads";
-import { websiteLeadIngestSchema } from "@/lib/leads/ingest";
+import { payloadBrandMismatch, websiteLeadIngestSchema } from "@/lib/leads/ingest";
 
 /**
  * The cursor is read from OUR leads table, so the stub answers from the same
@@ -132,9 +132,13 @@ function fakePlugin(
     const limit = Number(url.searchParams.get("limit"));
     polledFrom.push(sinceId);
     const page = sorted.filter((id) => id > sinceId).slice(0, limit);
+    // `remaining` exactly as plb_rest_submissions computes it: rows past the
+    // last id this page reached (or past since_id when the page is empty).
+    const lastId = page.length ? page[page.length - 1] : sinceId;
     const body = {
       ok: true,
       total: sorted.length,
+      remaining: sorted.filter((id) => id > lastId).length,
       ...(opts.reportMinId === false ? {} : { min_id: sorted.length ? sorted[0] : null }),
       since_id: sinceId,
       submissions: page.map((id) =>
@@ -254,6 +258,43 @@ describe("the signing contract is described identically wherever it is described
         /limit=<n>&ts=/,
       );
     }
+  });
+});
+
+/**
+ * The push payload names its brand (QA W3). The ingest route derives the brand
+ * from the SECRET, and `payloadBrandMismatch` 401s a body that claims a
+ * different one — but a body that claims nothing passes. The plugin used to
+ * send no `brand` field, so a swapped ingest secret (Pitmans' site configured
+ * with Marley's credential) filed Pitmans customers under Marley, and the pull
+ * rail — which stamps brand 'pitmans' itself — then landed the same submission
+ * AGAIN under the right brand: one customer, two leads, two brands. Sending
+ * `brand: 'pitmans'` explicitly arms the mismatch 401 for exactly that case.
+ * Body-field only: the push authenticates by Bearer header, so the field
+ * touches no signature; the pull rail's HMAC canonical string is untouched.
+ */
+describe("the push payload names its brand, arming the ingest mismatch 401", () => {
+  it("the plugin stamps brand 'pitmans' on every push, beside the derived leadId", () => {
+    const php = readRepo("wordpress/pitmans-lead-bridge/pitmans-lead-bridge.php");
+    expect(php).toContain("$ingest['brand'] = 'pitmans';");
+  });
+
+  it("the stamped payload still clears the shared ingest contract, and mis-brands are refused", () => {
+    // The exact shape plb_push_row sends: stored ingest fields + leadId + brand.
+    const pushed = {
+      name: "Pitmans Customer",
+      phone: "07572000001",
+      submittedAt: "2026-09-01T10:00:00Z",
+      leadId: wpExternalLeadId(42),
+      brand: "pitmans",
+    };
+    // Unknown-to-schema keys strip rather than refuse — the field must never
+    // cost a lead its landing.
+    const parsed = websiteLeadIngestSchema.safeParse(pushed);
+    expect(parsed.success).toBe(true);
+    // The defence this field arms: agreement passes, disagreement 401s.
+    expect(payloadBrandMismatch(pushed, "pitmans")).toBe(false);
+    expect(payloadBrandMismatch(pushed, "marley")).toBe(true);
   });
 });
 
@@ -582,6 +623,41 @@ describe("syncWpLeads — the loss cannot scroll out of the window", () => {
     expect(plugin.polledFrom).toEqual([0]);
     expect(summary.sinceId).toBe(0);
     expect(summary.minId).toBeNull();
+  });
+
+  it("rows DELETED on the WordPress side must not inflate what this rail accounts for", async () => {
+    // We hold 1..204; the plugin's table now starts at 5 (1..4 erased — GDPR,
+    // install-test cleanup). 500 rows exist (5..504): this poll reaches
+    // 205..404, and 405..504 sit beyond the page, offered to nobody yet. The
+    // old arithmetic counted all 204 held rows against `total`, so the 4
+    // deleted ones masked 4 genuinely-unreached submissions (96, not 100).
+    // With the endpoint's own `remaining`, the count is exact.
+    const ids = Array.from({ length: 500 }, (_, i) => i + 5); // 5..504
+    existingExternalIds = held(Array.from({ length: 204 }, (_, i) => i + 1)); // 1..204
+    const plugin = fakePlugin(ids);
+
+    const summary = await syncWpLeads(SB, { now: NOW, fetchImpl: plugin.fetchImpl });
+
+    expect(summary.inserted).toBe(200);
+    expect(summary.unaccounted).toBe(100);
+    expect(issueCalls.map((i) => i.key)).toContain(WP_RECONCILE_ISSUE_KEY);
+    expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
+  });
+
+  it("without `remaining`, held rows below the reported floor are still not counted as accounted", async () => {
+    // An endpoint that omits `remaining` (or an older plugin) forces the
+    // total-based fallback — but min_id still PROVES held ids below the floor
+    // no longer exist on the WordPress side, so they must not vouch for rows
+    // that do. Held 1..204 with a floor of 5: only 200 of ours still exist,
+    // so 50 of the 250-row table are unaccounted, not 46.
+    existingExternalIds = held(Array.from({ length: 204 }, (_, i) => i + 1)); // 1..204
+    const summary = await syncWpLeads(SB, {
+      now: NOW,
+      fetchImpl: fetchReturning({ ok: true, total: 250, min_id: 5, submissions: [] }),
+    });
+    expect(summary.unaccounted).toBe(50);
+    expect(issueCalls.map((i) => i.key)).toContain(WP_RECONCILE_ISSUE_KEY);
+    expect(resolveCalls).not.toContain(WP_RECONCILE_ISSUE_KEY);
   });
 
   it("an unreadable leads table is a FAILED run, never a poll from zero", async () => {
