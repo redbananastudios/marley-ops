@@ -2,7 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { PageHeader } from "@/components/page-header";
 import { FollowUpsQueue, type FollowUpRow } from "@/components/followups/followups-queue";
 import { BrandFilter } from "@/components/brand/brand-filter";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
@@ -61,7 +61,7 @@ export default async function FollowUpsPage({
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1). Follow-ups key on leads, so brand rides the page's existing lead
   // join below — no follow_ups column, no extra read.
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 

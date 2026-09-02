@@ -1,12 +1,35 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DEFAULT_BRAND, GROUP_BRAND, isMultiBrand, listActiveBrands, mapBrand } from "@/lib/brand";
+import {
+  DEFAULT_BRAND,
+  GROUP_BRAND,
+  isMultiBrand,
+  listActiveBrands,
+  listActiveBrandsForWrite,
+  listActiveBrandsOrEmpty,
+  mapBrand,
+} from "@/lib/brand";
 
 /** Minimal read-only stub: whatever rows the query "returns" — the filter chain
  *  itself is the DB's job, so tests hand it pre-filtered rows and assert the
  *  pure mapping + length logic on top. */
 function sbReturning(rows: Record<string, unknown>[]): SupabaseClient {
   const result = Promise.resolve({ data: rows, error: null });
+  const chain = {
+    select: () => chain,
+    eq: () => chain,
+    neq: () => chain,
+    order: () => result,
+  };
+  return { from: () => chain } as unknown as SupabaseClient;
+}
+
+/** The stub for the defect under test: the brands QUERY ERRORS — which must
+ *  never be indistinguishable from the legitimate empty list (single-brand
+ *  mode), because every `length > 1` gate downstream would silently collapse
+ *  to single-brand behaviour mid-failure. */
+function sbFailing(message: string): SupabaseClient {
+  const result = Promise.resolve({ data: null, error: { message } });
   const chain = {
     select: () => chain,
     eq: () => chain,
@@ -168,5 +191,60 @@ describe("isMultiBrand — the single-brand invariant switch", () => {
     // the group exclusion itself is a DB-side .neq(slug, GROUP_BRAND) filter;
     // assert the constant it filters on so a rename can't silently widen it.
     expect(GROUP_BRAND).toBe("group");
+  });
+});
+
+describe("a brands READ FAILURE is never mistaken for single-brand mode", () => {
+  const marley = {
+    slug: DEFAULT_BRAND,
+    name: "Marley Moves",
+    short_name: "Marley",
+    group_line: "Part of the Marley Group",
+    legal_line: "MarleyMoves Ltd",
+    active: true,
+    sort_order: 0,
+  };
+  const pitmans = {
+    slug: "pitmans",
+    name: "Pitmans Removals & Storage",
+    short_name: "Pitmans",
+    group_line: "Part of the Marley Group",
+    legal_line: "Pitmans Removals & Storage is a trading name of MarleyMoves Ltd.",
+    active: true,
+    sort_order: 1,
+  };
+
+  it("listActiveBrands THROWS on a query error — [] is reserved for the real empty table", async () => {
+    await expect(listActiveBrands(sbFailing("connection reset"))).rejects.toThrow(
+      /brands read failed: connection reset/,
+    );
+  });
+
+  it("isMultiBrand propagates the failure rather than reporting single-brand mode", async () => {
+    await expect(isMultiBrand(sbFailing("boom"))).rejects.toThrow(/brands read failed/);
+  });
+
+  it("listActiveBrandsOrEmpty is the EXPLICIT display-only degrade: [] on failure, rows otherwise", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await listActiveBrandsOrEmpty(sbFailing("boom"))).toEqual([]);
+      expect(spy).toHaveBeenCalled(); // degraded, but never silently
+    } finally {
+      spy.mockRestore();
+    }
+    const brands = await listActiveBrandsOrEmpty(sbReturning([marley, pitmans]));
+    expect(brands.map((b) => b.slug)).toEqual([DEFAULT_BRAND, "pitmans"]);
+  });
+
+  it("listActiveBrandsForWrite refuses on failure so no write can decide a brand off it", async () => {
+    const res = await listActiveBrandsForWrite(sbFailing("boom"));
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toMatch(/nothing was saved/i);
+  });
+
+  it("listActiveBrandsForWrite hands the mapped rows through on success", async () => {
+    const res = await listActiveBrandsForWrite(sbReturning([marley, pitmans]));
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.brands.map((b) => b.slug)).toEqual([DEFAULT_BRAND, "pitmans"]);
   });
 });

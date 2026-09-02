@@ -16,7 +16,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { BrandChip } from "@/components/brand/brand-chip";
 import { BrandFilter } from "@/components/brand/brand-filter";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { UK_TZ } from "@/lib/uk-time";
 
@@ -113,7 +113,7 @@ export default async function DocumentsPage({
   // applied IN the DB on those reads. The filter composes with all three tabs;
   // contractor agreements are a `group` surface (crew are engaged by the legal
   // entity, not a brand) so that tab is never chipped and never narrowed.
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
   const showBrandChips = multi && brandFilter === "all";

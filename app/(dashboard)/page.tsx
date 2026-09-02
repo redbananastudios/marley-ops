@@ -18,7 +18,7 @@ import {
   type PeriodStats,
   type ProgressSets,
 } from "@/lib/dashboard/compute";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { parseBrandParam } from "@/lib/brand-filter";
 import { moneyTileCounts } from "@/lib/bookings/queue";
 import { loadBookingRows } from "@/lib/bookings/load-signals";
@@ -249,7 +249,7 @@ async function DashboardContent({
       ),
       supabase.from("profiles").select("id, full_name"),
       getBusinessSettings(supabase),
-      listActiveBrands(supabase),
+      listActiveBrandsOrEmpty(supabase),
     ]);
   const profileName = new Map((profilesData ?? []).map((p) => [p.id, p.full_name as string]));
   const estimatorFee = settings.estimatorFee;

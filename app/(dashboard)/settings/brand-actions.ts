@@ -36,7 +36,11 @@ export async function updateBrandAction(slug: string, input: BrandUpdateInput) {
   if (typeof slug !== "string" || slug.trim() === "") {
     return { ok: false as const, error: "Invalid brand." };
   }
-  const sanitized = sanitizeBrandUpdate(input);
+  // The slug also tells the sanitizer WHICH row this is: for the default
+  // brand it drops card_payments_enabled entirely (the per-brand card flag is
+  // deliberately dead there — QA-20260826-07 remainder — so persisting it
+  // would only manufacture a false state for the Settings UI to assert).
+  const sanitized = sanitizeBrandUpdate(input, slug);
   if (!sanitized.ok) return { ok: false as const, error: sanitized.error };
 
   const { sb, error } = await requireAdmin();

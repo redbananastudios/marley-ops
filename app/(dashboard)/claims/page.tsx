@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip } from "@/components/brand/brand-chip";
@@ -64,7 +64,7 @@ export default async function ClaimsPage({
   // Brand layer (multi-brand PRD §4 Claims): with a single active brand no
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
   // Open-claim badge is the live-liability signal, so it must be the TRUE total,

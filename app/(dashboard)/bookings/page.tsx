@@ -12,7 +12,7 @@ import {
 } from "@/lib/bookings/sections";
 import { loadBookingRows, ukDayOfInstant as ukDayOf, type BookingRow as Row } from "@/lib/bookings/load-signals";
 import { windowTierLabel } from "@/lib/bookings/booking-details";
-import { DEFAULT_BRAND, listActiveBrands } from "@/lib/brand";
+import { DEFAULT_BRAND, listActiveBrandsOrEmpty } from "@/lib/brand";
 import { shortDate } from "@/app/(dashboard)/payments/format";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
@@ -189,7 +189,7 @@ export default async function BookingsPage({
   // applied in the DB on that read, and the row set filters to its result —
   // so all 8 money-lifecycle sections, their count pills and the summary
   // tiles follow the filter.
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 

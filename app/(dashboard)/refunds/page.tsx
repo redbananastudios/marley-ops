@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getSessionProfile } from "@/lib/auth";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukDayOf } from "@/lib/sales-report";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip, type BrandChipData } from "@/components/brand/brand-chip";
@@ -169,7 +169,7 @@ export default async function RefundsPage({
   // Brand layer (multi-brand PRD §4 Refunds): with a single active brand no
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
   const rows = await fetchAllRows<QueueRowIn>((from, to) =>

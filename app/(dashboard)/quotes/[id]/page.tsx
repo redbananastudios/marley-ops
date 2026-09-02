@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { CheckCircle2, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { getBrandOrDefault, listActiveBrands } from "@/lib/brand";
+import { getBrandOrDefault, listActiveBrandsOrEmpty } from "@/lib/brand";
 import { PageHeader } from "@/components/page-header";
 import { BrandChip } from "@/components/brand/brand-chip";
 import { normalizeQuoteValues } from "@/lib/quote/form-types";
@@ -129,7 +129,7 @@ export default async function QuoteDetailPage({
     getBrandOrDefault(sb, quote.brand),
     // Multi-brand only: the header chip renders when a second brand row is
     // active (the single-brand invariant, PRD §1).
-    listActiveBrands(sb),
+    listActiveBrandsOrEmpty(sb),
   ]);
   const emailedCount = quote.email_send_count ?? 0;
 

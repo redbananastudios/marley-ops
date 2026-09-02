@@ -7,7 +7,7 @@ import { classifySource, type SourceKey } from "@/lib/dashboard/compute";
 import { getBusinessSettings } from "@/lib/settings";
 import { ukPhone } from "@/lib/phone";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +27,7 @@ export default async function ClientsPage({
   // PRD §1). Clients carry NO brand column (the shared-spine rule, PRD §3.2) —
   // "which brands has this client dealt with" is DERIVED from their leads,
   // never stored.
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 

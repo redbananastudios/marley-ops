@@ -2,7 +2,7 @@ import Link from "next/link";
 import { AlertTriangle, CheckCircle2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { bankFeedConfigured } from "@/lib/bank-feed/sync";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { parseBrandParam, BRAND_FILTER_PARAM } from "@/lib/brand-filter";
 import { PageHeader } from "@/components/page-header";
 import { BrandFilter } from "@/components/brand/brand-filter";
@@ -146,7 +146,7 @@ export default async function PaymentsPage({
   // Brand layer (multi-brand PRD §4 Payments): with a single active brand no
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1).
-  const activeBrands = await listActiveBrands(sb);
+  const activeBrands = await listActiveBrandsOrEmpty(sb);
   const multi = activeBrands.length > 1;
   // Fresh literal, not `params`: ReceivedParams is an interface, so the
   // intersection has no implicit index signature and won't satisfy

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { QuotesView, type QuoteRow } from "@/components/quotes/quotes-view";
 import { fetchAllRows } from "@/lib/supabase/fetch-all";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { applyBrandFilter, parseBrandParam } from "@/lib/brand-filter";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +33,7 @@ export default async function QuotesPage({
   // PRD §1). The ?brand= filter narrows the quotes query itself, so the 4
   // summary tiles recompute for the filtered brand — "Win rate" means that
   // brand's win rate — not just the visible list.
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
 

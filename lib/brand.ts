@@ -135,15 +135,70 @@ export async function listAllBrands(sb: SupabaseClient): Promise<Brand[]> {
   return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
 }
 
-/** Active customer-facing brands ('group' excluded), in sort order. */
+/**
+ * Active customer-facing brands ('group' excluded), in sort order.
+ *
+ * THROWS on a query error instead of returning [] — the empty list is also the
+ * legitimate "unmigrated database" answer, and one row is single-brand mode,
+ * so a swallowed error is indistinguishable from both. Every `length > 1` gate
+ * downstream then silently collapses to single-brand behaviour mid-failure;
+ * the worst case was createLeadAction filing an office-picked Pitmans enquiry
+ * as Marley off exactly that swallow (fixed 2026-09-02). Pick a caller shape:
+ *
+ *   - WRITE paths that decide what gets persisted → `listActiveBrandsForWrite`
+ *     (refuses in the house `{ ok:false, error }` shape; never throws).
+ *   - read-only display surfaces (brand filter, chips, diary colours) that can
+ *     honestly degrade to no-brand-UI → `listActiveBrandsOrEmpty`.
+ *   - form pages whose whole purpose is a brand-deciding write (/leads/new,
+ *     /quotes/new) call this directly and fail LOUD — an error page beats a
+ *     picker-less form that invites the mis-file.
+ */
 export async function listActiveBrands(sb: SupabaseClient): Promise<Brand[]> {
-  const { data } = await sb
+  const { data, error } = await sb
     .from("brands")
     .select(BRAND_COLUMNS)
     .eq("active", true)
     .neq("slug", GROUP_BRAND)
     .order("sort_order", { ascending: true });
+  if (error) throw new Error(`brands read failed: ${error.message}`);
   return ((data ?? []) as Record<string, unknown>[]).map(mapBrand);
+}
+
+/**
+ * The EXPLICIT display-only degrade: [] on a failed read, logged — never
+ * silent. Correct for surfaces that merely render brand UI (filters, chips,
+ * pickers on detail pages) where no-brand-UI for one request is honest and
+ * harmless. NEVER use this where the result decides what gets WRITTEN — an
+ * empty list reads as single-brand mode and stamps DEFAULT_BRAND.
+ */
+export async function listActiveBrandsOrEmpty(sb: SupabaseClient): Promise<Brand[]> {
+  try {
+    return await listActiveBrands(sb);
+  } catch (err) {
+    console.error("[brand] active-brands read failed — brand UI degrades to single-brand display for this render:", err);
+    return [];
+  }
+}
+
+export type ActiveBrandsResult =
+  | { ok: true; brands: Brand[] }
+  | { ok: false; error: string };
+
+/**
+ * The WRITE-path resolver: the brand list, or a refusal in the house action
+ * shape. A server action deciding a record's brand from a failed read must
+ * refuse rather than guess (the evidence bar: "could not check" never acts
+ * like "single-brand mode") — callers return the error verbatim and write
+ * nothing. tests/lib/brand-write-guard.test.ts pins every brand-deciding
+ * action file to this resolver.
+ */
+export async function listActiveBrandsForWrite(sb: SupabaseClient): Promise<ActiveBrandsResult> {
+  try {
+    return { ok: true, brands: await listActiveBrands(sb) };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: `Could not read the brand list, so nothing was saved: ${message}` };
+  }
 }
 
 /* ------------------------------------------------------------------ colour */
@@ -214,6 +269,10 @@ export function hexWithAlpha(hex: string, alpha: number): string {
  * Activating a second brand row flips the entire brand UI on as a data switch;
  * deactivating it reverts everything. Never gate the payment-policy additions
  * on this — those are live for Marley regardless (PRD §1).
+ *
+ * Propagates listActiveBrands' throw on a failed read: reporting "false"
+ * (single-brand) off an error would hide the entire brand UI mid-failure.
+ * Sole caller today is the Settings page render, which fails loud with it.
  */
 export async function isMultiBrand(sb: SupabaseClient): Promise<boolean> {
   return (await listActiveBrands(sb)).length > 1;

@@ -5,7 +5,7 @@ import { fetchAllRows } from "@/lib/supabase/fetch-all";
 import { ukPhone } from "@/lib/phone";
 import { nextInvoiceDateFor, type BillableLet } from "@/lib/storage-billing";
 import { getStorageRates } from "@/lib/storage-rates";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { parseBrandParam } from "@/lib/brand-filter";
 import {
   StorageView,
@@ -32,7 +32,7 @@ export default async function StoragePage({
   // brand UI renders and the page is unchanged (the single-brand invariant,
   // PRD §1). Sites carry their own brand; lets carry the brand stamped at
   // creation (originating lead, falling back to the site — PRD §2).
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 

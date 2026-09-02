@@ -6,7 +6,7 @@ import { packRequirement } from "@/lib/schedule/pack-days";
 import { MIN_BOOKED_REQUIREMENT } from "@/lib/schedule/capacity";
 import { jobValueOf, pickCurrentQuotes } from "@/lib/schedule/week-value";
 import { getBusinessSettings } from "@/lib/settings";
-import { listActiveBrands } from "@/lib/brand";
+import { listActiveBrandsOrEmpty } from "@/lib/brand";
 import { parseBrandParam } from "@/lib/brand-filter";
 import { classifySource, type LeadLite } from "@/lib/dashboard/compute";
 import type { QuoteBreakdown } from "@/lib/quote/pricing";
@@ -53,7 +53,7 @@ export default async function SchedulePage({
   // the Availability month grid is NEVER brand-filtered, because crew and vans
   // are one shared pool and per-brand capacity would show headroom another
   // brand's job has already taken.
-  const activeBrands = await listActiveBrands(supabase);
+  const activeBrands = await listActiveBrandsOrEmpty(supabase);
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(sp, activeBrands);
   // Job values are admin-only, matching /payments Due + Upcoming — /schedule is

@@ -24,7 +24,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { updateBrandAction } from "@/app/(dashboard)/settings/brand-actions";
-import { GROUP_BRAND, type Brand } from "@/lib/brand";
+import { DEFAULT_BRAND, GROUP_BRAND, type Brand } from "@/lib/brand";
 
 const inputClass =
   "flex h-11 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground focus:border-mm-red focus:ring-2 focus:ring-mm-red/30 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60";
@@ -56,6 +56,13 @@ function Swatch({ hex }: { hex: string }) {
 function BrandRow({ brand }: { brand: Brand }) {
   const router = useRouter();
   const isGroup = brand.slug === GROUP_BRAND;
+  // The DEFAULT brand's per-brand card flag is deliberately dead end-to-end
+  // (QA-20260826-07 remainder: cardPaymentsAvailable short-circuits it,
+  // cardEnabledBrands seeds it, emailTheme themes Marley regardless). A live
+  // checkbox here would be a dead control asserting a state the runtime
+  // ignores — so it renders disabled with a truthful caption, and the server
+  // (sanitizeBrandUpdate) refuses to persist the field for this row anyway.
+  const isDefault = brand.slug === DEFAULT_BRAND;
   const [busy, setBusy] = useState(false);
   const [phone, setPhone] = useState(brand.phone ?? "");
   const [address, setAddress] = useState(brand.address ?? "");
@@ -126,7 +133,9 @@ function BrandRow({ brand }: { brand: Brand }) {
         ) : null}
         {!isGroup ? (
           <span className="ml-auto text-[11px] text-mist-400">
-            Card payments {brand.cardPaymentsEnabled ? "on" : "off"}
+            {isDefault
+              ? "Card payments — global switch"
+              : `Card payments ${brand.cardPaymentsEnabled ? "on" : "off"}`}
           </span>
         ) : null}
       </div>
@@ -245,18 +254,25 @@ function BrandRow({ brand }: { brand: Brand }) {
             <input
               id={`brand-${brand.slug}-card-payments`}
               type="checkbox"
-              checked={cardPayments}
-              disabled={busy}
+              checked={isDefault ? true : cardPayments}
+              disabled={busy || isDefault}
               onChange={(e) => setCardPayments(e.target.checked)}
               aria-label={`Card payments for ${brand.name}`}
               className="size-6 shrink-0 accent-mm-red"
             />
             <div>
               <Label htmlFor={`brand-${brand.slug}-card-payments`}>Card payments</Label>
-              <p className="text-xs text-mist-400">
-                Card on /q and the office payment link — only when this AND the global Payments kill
-                switch are on.
-              </p>
+              {isDefault ? (
+                <p className="text-xs text-mist-400">
+                  {brand.shortName || brand.name} card payments follow the global Payments kill switch
+                  — this per-brand switch only applies to other brands.
+                </p>
+              ) : (
+                <p className="text-xs text-mist-400">
+                  Card on /q and the office payment link — only when this AND the global Payments kill
+                  switch are on.
+                </p>
+              )}
             </div>
           </div>
         ) : (
