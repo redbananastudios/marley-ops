@@ -6,7 +6,10 @@ const read = (path: string) => readFileSync(path, "utf8");
 describe("final-release reliability invariants", () => {
   it("paginates both growing removal-calendar datasets deterministically", () => {
     const source = read("app/(dashboard)/schedule/removals/page.tsx");
-    expect(source.match(/fetchAllRows\(/g)).toHaveLength(2);
+    // Three paged reads: the two strict calendar datasets (appointments,
+    // leads — pinned exactly below) plus the bare-client picker, which pages
+    // fail-soft like every other clients picker (/storage).
+    expect(source.match(/fetchAllRows\(/g)).toHaveLength(3);
     expect(source.match(/\.range\(from, to\)/g)).toHaveLength(2);
     expect(source.match(/\.order\("id", \{ ascending: true \}\)/g)).toHaveLength(2);
     expect(source.match(/\{ strict: true \}/g)).toHaveLength(2);

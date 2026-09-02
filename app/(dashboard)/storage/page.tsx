@@ -36,7 +36,7 @@ export default async function StoragePage({
   const multi = activeBrands.length > 1;
   const brandFilter = parseBrandParam(await searchParams, activeBrands);
 
-  const [sitesRes, { data: units }, lets, clients] = await Promise.all([
+  const [sitesRes, unitsRes, lets, clients] = await Promise.all([
     // Sites are read UNFILTERED and narrowed in JS below: a site is visible
     // under a named filter when its own brand matches OR it CONTAINS a let of
     // that brand. DB-narrowing on site.brand alone made a Marley site holding
@@ -84,6 +84,7 @@ export default async function StoragePage({
   if (sitesError && brandFilter !== "all") {
     throw new Error(`Could not load storage sites: ${sitesError.message}`);
   }
+  const { data: units, error: unitsError } = unitsRes;
 
   // Site visibility under a named filter: own brand OR a contained let of the
   // filtered brand (any let, open or ended — history must stay reachable).
@@ -96,10 +97,23 @@ export default async function StoragePage({
       ? []
       : lets.filter((l) => l.brand === brandFilter).map((l) => unitSiteById.get(l.unit_id)).filter(Boolean),
   );
-  const sites =
-    brandFilter === "all"
-      ? allSites
-      : (allSites ?? []).filter((s) => s.brand === brandFilter || sitesWithFilteredLet.has(s.id));
+  // The "contains a let of this brand" half rides the units read. If that read
+  // failed, the mapping above is EMPTY and narrowing on it would silently
+  // re-hide every cross-brand-let site — re-opening the gate-12 Op5 hole under
+  // a failed read. Degrade WIDER and say so (#195 idiom): the unfiltered site
+  // list is honest clutter; a silently narrower one is a wrong answer.
+  let sites;
+  if (brandFilter === "all") {
+    sites = allSites;
+  } else if (unitsError) {
+    console.error(
+      "[storage] units read failed — the brand filter degrades to the full site list for this render (a site holding another brand's let must stay reachable):",
+      unitsError.message,
+    );
+    sites = allSites;
+  } else {
+    sites = (allSites ?? []).filter((s) => s.brand === brandFilter || sitesWithFilteredLet.has(s.id));
+  }
 
   // Assign-dialog pre-fill (multi-brand only): each client's most recent
   // lead's brand. startLetAction re-resolves this SERVER-SIDE at write time,

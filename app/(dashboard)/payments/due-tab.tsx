@@ -59,6 +59,7 @@ function Section({
   section,
   tone,
   detail,
+  importedLeads,
 }: {
   title: string;
   hint: string;
@@ -67,6 +68,9 @@ function Section({
   section: MoneySectionId;
   tone?: "danger";
   detail: (r: BookingRow) => string;
+  /** Leads carried across from the previous diary (source_system) — the
+   *  "Imported" pill, same lifecycle and wording as /bookings. */
+  importedLeads: ReadonlySet<string>;
 }) {
   // An empty routine section is a one-line all-clear; an empty DANGER section
   // disappears (a red header with "all clear" cries wolf) — /bookings rule.
@@ -103,6 +107,14 @@ function Section({
                     Legacy (iMVE)
                   </span>
                 ) : null}
+                {importedLeads.has(r.leadId) ? (
+                  <span
+                    className="ml-2 inline-flex items-center rounded-pill bg-muted px-2 py-0.5 align-middle text-[11px] font-semibold text-mist-500"
+                    title="Imported booking — carried across mid-flight from the previous diary"
+                  >
+                    Imported
+                  </span>
+                ) : null}
                 <p className="text-xs text-mist-400">{detail(r)}</p>
               </div>
               {tone === "danger" ? (
@@ -131,21 +143,37 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
   // unpaged reads at 1000 and a silent cap here would DROP rows and understate
   // the money tiles), with the narrowing applied IN THE DB on that read. At
   // 'all' (including single-brand mode) nothing runs and the tab is unchanged.
+  // The same read also carries source_system for the "Imported" pill — a
+  // property of the ROW (a Pitmans booking carried across mid-flight, money
+  // handled outside the ladder), not of how many brands are active, so the
+  // read runs whenever there are rows at all. Only the row NARROWING stays
+  // behind a named filter.
   let rows = allRows;
-  if (brandFilter !== "all" && allRows.length) {
+  const importedLeads = new Set<string>();
+  if (allRows.length) {
     const leadIds = [...new Set(allRows.map((r) => r.leadId))];
     const brandLeads = new Set<string>();
     // 100-id batches: PostgREST .in() rides the GET query string and the
     // gateway 414s past ~200 UUIDs (lib/bank-feed/sync.ts measured the limit).
     for (let i = 0; i < leadIds.length; i += 100) {
       const { data: leadRows, error: leadErr } = await applyBrandFilter(
-        sb.from("leads").select("id").in("id", leadIds.slice(i, i + 100)),
+        sb.from("leads").select("id, source_system").in("id", leadIds.slice(i, i + 100)),
         brandFilter,
       );
-      if (leadErr) throw new Error(`payments due: brand read failed: ${leadErr.message}`);
-      for (const l of leadRows ?? []) brandLeads.add(l.id);
+      if (leadErr) {
+        // Under a named filter a failed batch would DROP its rows — fail loud.
+        // On All the read only decorates (the pill), so it degrades — and says
+        // so (#195 idiom), rather than rendering as if it had checked.
+        if (brandFilter !== "all") throw new Error(`payments due: brand read failed: ${leadErr.message}`);
+        console.error("[payments] imported-marker read failed — Imported pills omitted this render:", leadErr.message);
+        break;
+      }
+      for (const l of leadRows ?? []) {
+        brandLeads.add(l.id);
+        if (l.source_system === "pitmans") importedLeads.add(l.id);
+      }
     }
-    rows = allRows.filter((r) => brandLeads.has(r.leadId));
+    if (brandFilter !== "all") rows = allRows.filter((r) => brandLeads.has(r.leadId));
   }
 
   // Lists and headline come off ONE seam: `groupMoneySections` places a row in
@@ -213,6 +241,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="Balance overdue"
         hint="moved with money outstanding"
         rows={balanceOverdue}
+        importedLeads={importedLeads}
         section="balance_overdue"
         tone="danger"
         detail={(r) =>
@@ -223,6 +252,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="25% overdue"
         hint="past due or date at risk"
         rows={commitmentOverdue}
+        importedLeads={importedLeads}
         section="commitment_overdue"
         tone="danger"
         detail={(r) => `${r.quoteRef} · due ${r.commitmentDueDate ? shortDate(r.commitmentDueDate) : "—"}`}
@@ -236,6 +266,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="Commercial overdue"
         hint="past the client's terms — our credit control, never an email chase"
         rows={commercialOverdue}
+        importedLeads={importedLeads}
         section="commercial_overdue"
         tone="danger"
         detail={(r) =>
@@ -246,6 +277,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="Deposits outstanding"
         hint="accepted online, deposit unpaid — auto-chased day 1 and 3"
         rows={deposits}
+        importedLeads={importedLeads}
         section="deposits_outstanding"
         detail={(r) => `${r.quoteRef} · agreed ${poundsMoney(r.agreed)} · accepted ${daysAgo(r.acceptedAt)}`}
       />
@@ -253,6 +285,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="25% to collect"
         hint="invoiced at date confirmation — auto-chased at T-10"
         rows={commitmentDue}
+        importedLeads={importedLeads}
         section="commitment_due"
         detail={(r) => `${r.quoteRef} · due ${r.commitmentDueDate ? shortDate(r.commitmentDueDate) : "—"}`}
       />
@@ -260,6 +293,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
         title="Balance to collect"
         hint="payment in full is due before move day"
         rows={balanceDueRows}
+        importedLeads={importedLeads}
         section="balance_due"
         detail={(r) =>
           `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "invoice before move day"} · ${movingLine(r, "moving")}`
@@ -279,6 +313,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
           title="Commercial — no terms date"
           hint="invoiced, but nothing says when it falls due — check the invoice"
           rows={commercialUndated}
+          importedLeads={importedLeads}
           section="commercial_terms_unknown"
           detail={(r) => `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · terms date missing`}
         />
@@ -289,6 +324,7 @@ export async function DueTab({ brandFilter = "all" }: { brandFilter?: string }) 
           title="Commercial invoiced"
           hint="completion invoice raised, inside the client's terms"
           rows={commercialDue}
+          importedLeads={importedLeads}
           section="commercial_due"
           detail={(r) =>
             `${r.quoteRef} · ${r.balanceInvoiceNumber ?? "not invoiced"} · terms ${r.commercialDueDate ? shortDate(r.commercialDueDate) : "—"}`

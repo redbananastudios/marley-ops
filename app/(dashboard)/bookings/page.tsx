@@ -195,7 +195,10 @@ export default async function BookingsPage({
 
   const brandByLead = new Map<string, string>();
   const importedLeads = new Set<string>();
-  if (multi && allRows.length) {
+  // NOT gated on `multi`: the "Imported" pill marks a property of the ROW
+  // (source_system), which exists regardless of how many brands are active —
+  // gating the read on brand count left single-brand imported rows bare.
+  if (allRows.length) {
     const leadIds = [...new Set(allRows.map((r) => r.leadId))];
     // CHUNKED on purpose: PostgREST caps unpaged reads at 1000 rows, and this
     // is the one place where truncation would DROP rows rather than degrade
@@ -210,8 +213,15 @@ export default async function BookingsPage({
         brandFilter,
       );
       // Fail loud, not narrow: a failed batch under a brand filter would
-      // silently drop every booking in it (the "I could not check" rule).
-      if (leadBrandsErr) throw new Error(`bookings brand read failed: ${leadBrandsErr.message}`);
+      // silently drop every booking in it (the "I could not check" rule). In
+      // single-brand mode the read only decorates (the Imported pill — no
+      // filter, no chips), so it degrades and SAYS so (#195 idiom) rather
+      // than taking down a page it never used to touch.
+      if (leadBrandsErr) {
+        if (multi) throw new Error(`bookings brand read failed: ${leadBrandsErr.message}`);
+        console.error("[bookings] imported-marker read failed — Imported pills omitted this render:", leadBrandsErr.message);
+        break;
+      }
       for (const l of leadBrands ?? []) {
         brandByLead.set(l.id, l.brand);
         // Imported bookings carry an "Imported" pill until the job completes —

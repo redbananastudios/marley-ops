@@ -39,8 +39,9 @@ export interface DailyJob {
   /** The job's brand short name (brands.short_name via appointments.brand) —
    *  the doc-def's per-job marker, rendered ONLY when a day's jobs span more
    *  than one distinct brand (multi-brand PRD §3.6: the day sheet is a GROUP
-   *  document; single-brand days render byte-identical). null when the
-   *  brands table couldn't be read — every job null → no markers. */
+   *  document; single-brand days render byte-identical). A failed brands read
+   *  REFUSES on a mixed day (see assembleDaySheets) — null here only ever
+   *  means an unknown slug, or a single-brand day's harmless degrade. */
   brandShort?: string | null;
   sheet: JobSheetData;
 }
@@ -113,7 +114,7 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
   const staffIds = [...new Set(allAssigns.map((a) => a.staff_id).filter(Boolean))] as string[];
   const vehicleIds = [...new Set(allAssigns.map((a) => a.vehicle_id).filter(Boolean))] as string[];
 
-  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }, { data: surveys }, { data: brandRows }] = await Promise.all([
+  const [{ data: leads }, { data: quotes }, { data: staff }, { data: vehicles }, { data: surveys }, brandsRes] = await Promise.all([
     leadIds.length
       ? admin.from("leads").select("id, name, phone, from_address, from_postcode, to_address, to_postcode, notes").in("id", leadIds)
       : Promise.resolve({ data: [] }),
@@ -134,9 +135,34 @@ export async function assembleDaySheets(admin: Admin, workDate: string): Promise
       ? admin.from("surveys").select("id, lead_id, created_at").in("lead_id", leadIds).order("created_at", { ascending: false })
       : Promise.resolve({ data: [] }),
     // Short names for the per-job brand marker on multi-brand days. One read
-    // for the whole run; a failed/absent table yields no markers, never an error.
+    // for the whole run; its error is handled below, NOT swallowed — a failed
+    // read used to yield an empty map, every brandShort null, and a mixed day
+    // rendered marker-less with nothing anywhere saying the read had failed.
     admin.from("brands").select("slug, short_name"),
   ]);
+
+  // A mixed-brand day without markers is a crew misdirection (which house is
+  // whose brand's job?), so a failed brands read REFUSES loudly there — the
+  // cron retries, and a missing sheet is visible where a silently unmarked one
+  // is not. On a single-brand day markers would not render anyway (multi-brand
+  // PRD §3.6), so the run degrades — but says so instead of pretending it
+  // checked ("I could not check" must never render as "nothing to report").
+  const { data: brandRows, error: brandsError } = brandsRes as {
+    data: { slug: string; short_name: string }[] | null;
+    error?: { message: string } | null;
+  };
+  if (brandsError) {
+    const distinctBrands = new Set(appts.map((a: any) => a.brand).filter(Boolean)); // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (distinctBrands.size > 1) {
+      throw new Error(
+        `crew day sheets: brands read failed on a mixed-brand day (${workDate}) — refusing to render sheets without brand markers: ${brandsError.message}`,
+      );
+    }
+    console.error(
+      "[crew-sheet] brands read failed — single-brand day renders without markers (none would show anyway):",
+      brandsError.message,
+    );
+  }
 
   const leadById = new Map(((leads ?? []) as any[]).map((l: any) => [l.id, l])); // eslint-disable-line @typescript-eslint/no-explicit-any
   // Newest accepted quote per lead (a re-quote supersedes the earlier one).
