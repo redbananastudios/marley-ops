@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ZohoError, isZohoAccessDenied } from "@/lib/zoho";
-import { zohoAccessAlert } from "@/lib/watchdog-rules";
+import { ledgerAccessAlert } from "@/lib/watchdog-rules";
 
 /**
  * 2026-08-27: Zoho deactivated the org user behind the ops refresh token. OAuth
@@ -38,18 +38,31 @@ describe("isZohoAccessDenied", () => {
   });
 });
 
-describe("zohoAccessAlert", () => {
-  it("reachable → silent", () => {
-    expect(zohoAccessAlert({ ok: true })).toBeNull();
+describe("ledgerAccessAlert", () => {
+  it("reachable → silent, for either provider", () => {
+    expect(ledgerAccessAlert("zoho", { ok: true })).toBeNull();
+    expect(ledgerAccessAlert("xero", { ok: true })).toBeNull();
   });
 
   it("unreachable but transient → silent (it clears on the next pass)", () => {
-    expect(zohoAccessAlert({ ok: false, accessDenied: false })).toBeNull();
+    expect(ledgerAccessAlert("zoho", { ok: false, accessDenied: false })).toBeNull();
+    expect(ledgerAccessAlert("xero", { ok: false, accessDenied: false })).toBeNull();
   });
 
-  it("locked out → alerts, and says what to actually do", () => {
-    const alert = zohoAccessAlert({ ok: false, accessDenied: true });
-    expect(alert?.key).toBe("zoho-access");
-    expect(alert?.message).toContain("Re-enable the ops user in Zoho");
+  it("zoho locked out → the alert the 2026-08-27 fix shipped, byte-identical", () => {
+    const alert = ledgerAccessAlert("zoho", { ok: false, accessDenied: true });
+    expect(alert).toEqual({
+      key: "zoho-access",
+      message:
+        "Zoho is refusing the ops integration — no invoices are being raised. Re-enable the ops user in Zoho",
+    });
+  });
+
+  it("xero locked out → its OWN key and its OWN remedy, never Zoho's", () => {
+    const alert = ledgerAccessAlert("xero", { ok: false, accessDenied: true });
+    expect(alert?.key).toBe("xero-access");
+    expect(alert?.message).toContain("Xero");
+    expect(alert?.message).toContain("/api/xero/connect");
+    expect(alert?.message).not.toMatch(/zoho/i);
   });
 });

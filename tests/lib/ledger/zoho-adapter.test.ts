@@ -36,6 +36,7 @@ const z = vi.hoisted(() => ({
   findCreditNoteByReference: vi.fn(),
   createCreditNote: vi.fn(),
   refundCreditNote: vi.fn(),
+  checkZohoAccess: vi.fn(),
 }));
 
 vi.mock("@/lib/zoho", () => ({ ...z, ZohoError: FakeZohoError }));
@@ -70,6 +71,25 @@ describe("status filter translation", () => {
   it("carries the truncation flag through untouched — a capped list must say so", async () => {
     z.listInvoices.mockResolvedValue({ invoices: [], truncated: true });
     await expect(zohoAdapter.listInvoices({})).resolves.toMatchObject({ truncated: true });
+  });
+});
+
+describe("health probe", () => {
+  /**
+   * The watchdog's books probe reaches Zoho through this delegation. The
+   * underlying `checkZohoAccess` is already pinned org-scoped by its own
+   * implementation (`GET /settings/currencies` — Zoho's identity endpoint
+   * answers happily for a deactivated user, which is how the 2026-08-27
+   * lock-out ran green for hours), and it never throws, so no wrap() here.
+   */
+  it("delegates checkAccess to checkZohoAccess and passes the verdict through", async () => {
+    z.checkZohoAccess.mockResolvedValue({ ok: false, accessDenied: true, message: "disabled" });
+    await expect(zohoAdapter.checkAccess()).resolves.toEqual({
+      ok: false,
+      accessDenied: true,
+      message: "disabled",
+    });
+    expect(z.checkZohoAccess).toHaveBeenCalledTimes(1);
   });
 });
 

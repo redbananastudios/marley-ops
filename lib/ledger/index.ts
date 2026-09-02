@@ -122,6 +122,20 @@ export function adapterFor(provider?: LedgerProvider | null): LedgerAdapter {
   }
 }
 
+/* ---------------------------------------------------------------- health */
+
+/**
+ * Org-scoped probe of ONE provider's access — the watchdog's evidence that the
+ * books are actually reachable rather than merely un-exercised. Callers pass
+ * the provider they mean to certify (normally `configuredProvider()`), and a
+ * green verdict certifies ONLY that provider: any auto-resolve keyed off it
+ * must be scoped to the same provider, because a healthy Zoho says nothing
+ * about a locked-out Xero and must never clear its alarm.
+ */
+export function checkLedgerAccess(provider?: LedgerProvider | null) {
+  return adapterFor(provider).checkAccess();
+}
+
 /* -------------------------------------------------------------- contacts */
 
 export function findOrCreateContact(input: {

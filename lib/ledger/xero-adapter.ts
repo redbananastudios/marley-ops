@@ -31,6 +31,7 @@
  * default would put real customer money in the wrong nominal account, which is
  * the one failure this whole seam exists to make impossible.
  */
+import { checkXeroAccess } from "./xero-access";
 import { findOrCreateXeroContact } from "./xero-contacts";
 import {
   createCreditNote,
@@ -52,6 +53,9 @@ import type { LedgerAdapter } from "./types";
 
 export const xeroAdapter: LedgerAdapter = {
   provider: "xero",
+
+  /* health */
+  checkAccess: checkXeroAccess,
 
   /* contacts */
   findOrCreateContact: findOrCreateXeroContact,

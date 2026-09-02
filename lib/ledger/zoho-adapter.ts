@@ -15,6 +15,7 @@
  */
 import {
   ZohoError,
+  checkZohoAccess,
   createCreditNote as zCreateCreditNote,
   createInvoice as zCreateInvoice,
   findCreditNoteByReference as zFindCreditNoteByReference,
@@ -69,6 +70,15 @@ async function wrap<T>(run: () => Promise<T>): Promise<T> {
 
 export const zohoAdapter: LedgerAdapter = {
   provider: "zoho",
+
+  /**
+   * The watchdog's org-scoped probe, unchanged from what it called directly
+   * before the seam: `GET /settings/currencies`, chosen because Zoho's
+   * `GET /organizations` answers happily for a deactivated user (2026-08-27).
+   * `checkZohoAccess` never throws — no wrap() — and its verdict shape is the
+   * seam's own `LedgerAccessCheck`.
+   */
+  checkAccess: () => checkZohoAccess(),
 
   /**
    * `party` is deliberately DROPPED. Zoho has no `ContactNumber` equivalent and

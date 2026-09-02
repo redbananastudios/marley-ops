@@ -26,9 +26,9 @@ vi.mock("@/lib/ledger", async (importOriginal) => ({
 }));
 
 vi.mock("@/lib/ops/zoho-access", () => ({
-  ZOHO_ACCESS_ISSUE_KEY: "zoho:access-denied",
-  reportZohoAccessDenied: async () => {},
-  resolveZohoAccessDenied: async () => {},
+  ledgerAccessIssueKey: (p: string) => `${p}:access-denied`,
+  reportLedgerAccessDenied: async () => {},
+  resolveLedgerAccessDenied: async () => {},
 }));
 
 import { syncZohoPayments } from "@/lib/quote/accept-flow";
