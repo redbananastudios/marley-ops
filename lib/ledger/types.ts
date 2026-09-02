@@ -93,10 +93,17 @@ export class LedgerError extends Error {
  * creds — a human must act) from a transient blip that clears on the next pass
  * and must not page anyone at 3am. Same shape as `lib/zoho.ts`'s
  * `ZohoAccessCheck`, which the Zoho adapter passes through unchanged.
+ *
+ * `rateLimited` is the third class, and it is a REQUIRED field rather than an
+ * optional one so no probe can quietly omit it. A spent daily allowance refuses
+ * every call for the rest of the day, which is not a blip — but it is not a
+ * lock-out either, and with only the two flags it landed in the transient bucket
+ * and the 15-minute watchdog said nothing at all for a whole day of failed
+ * invoicing.
  */
 export type LedgerAccessCheck =
   | { ok: true }
-  | { ok: false; accessDenied: boolean; message: string };
+  | { ok: false; accessDenied: boolean; rateLimited: boolean; message: string };
 
 export interface LedgerInvoiceRef {
   invoiceId: string;

@@ -23,6 +23,19 @@ export function ledgerAccessIssueKey(provider: LedgerProvider): string {
 }
 
 /**
+ * The quota's own key, deliberately NOT the lock-out's.
+ *
+ * The two states look identical from a call site — every call refused — and are
+ * cleared by completely different evidence: a human re-enabling a user, versus a
+ * counter rolling over on its own. Sharing a key would let either resolve the
+ * other, so a midnight reset would silently close a genuine lock-out and a
+ * re-enabled user would close a quota that is still spent.
+ */
+export function ledgerRateLimitIssueKey(provider: LedgerProvider): string {
+  return `${provider}:rate-limited`;
+}
+
+/**
  * Everything about the lock-out alert that depends on WHICH books refused us.
  * The remedy line is the whole point of the alert (2026-08-27: five per-quote
  * failure emails and not one of them said the only thing that mattered), so it
@@ -112,4 +125,100 @@ export async function reportLedgerAccessDenied(
  */
 export async function resolveLedgerAccessDenied(sb: Sb, provider: LedgerProvider): Promise<void> {
   await resolveOperationalIssue(sb, ledgerAccessIssueKey(provider));
+}
+
+/* ------------------------------------------------------------ rate limits */
+
+/**
+ * The quota's copy, which exists precisely so it cannot borrow the lock-out's.
+ *
+ * A daily allowance and a deactivated account produce the same symptom — every
+ * call refused — and opposite instructions. `PROVIDER_COPY` above tells a human
+ * to re-enable a user or re-consent; do that here and the office spends its
+ * evening in a permissions screen where nothing is wrong, while the thing
+ * actually burning the calls keeps burning them and the counter clears itself at
+ * the reset regardless. A confidently wrong remedy is worse than the per-quote
+ * noise it replaced.
+ *
+ * So the wording is built around three facts that are true of a quota and false
+ * of a lock-out: nobody is shut out, the calls are being spent by something we
+ * are running, and it comes back on its own. Input-independent for the same
+ * reason as the lock-out paragraphs — the content hash collapses the repeats
+ * while retries continue.
+ */
+const RATE_LIMIT_COPY: Record<
+  LedgerProvider,
+  { event: string; issueMessage: string; subject: string; paragraphs: string[] }
+> = {
+  zoho: {
+    event: "zoho.rate_limited",
+    issueMessage:
+      "Zoho's API allowance for the ops organisation is spent — invoices are not being raised until it resets.",
+    subject: "Zoho API allowance spent — invoices are not being raised",
+    paragraphs: [
+      "Zoho is refusing every call ops makes, so deposit, commitment and balance invoices are not being raised and payments recorded in Zoho are not reaching ops.",
+      "<strong>Nobody has been shut out</strong> — this is a volume limit, not a permissions problem, and there is nothing to switch back on. Zoho counts 1,000 API calls per organisation per day, this organisation has spent them, and the allowance resets when the day rolls over.",
+      "<strong>What to do:</strong> find what is spending the calls and stop it — a job left looping, a bulk import, a test suite pointed at these books — or the next day's allowance goes the same way. Nothing needs replaying: every invoice retries itself once calls are answered again, and affected quotes keep their own error on the quote record.",
+    ],
+  },
+  xero: {
+    event: "xero.rate_limited",
+    issueMessage:
+      "Xero's API allowance for the ops organisation is spent — invoices are not being raised until it resets.",
+    subject: "Xero API allowance spent — invoices are not being raised",
+    paragraphs: [
+      "Xero is refusing every call ops makes, so deposit, commitment and balance invoices are not being raised and recorded payments are not reaching ops.",
+      "<strong>Nobody has been shut out</strong> — this is a volume limit, not a permissions problem, and nothing has been revoked. Xero meters how many calls these books will answer, this organisation has reached the limit, and the allowance resets on its own.",
+      "<strong>What to do:</strong> find what is spending the calls and stop it — a job left looping, a bulk import, a test suite pointed at these books — or the allowance goes the same way again. Nothing needs replaying: every invoice retries itself once calls are answered again, and affected quotes keep their own error on the quote record.",
+    ],
+  },
+};
+
+/**
+ * The books are answering, but refusing us on volume.
+ *
+ * Same collapse as the lock-out for the same reason — one broken integration is
+ * one incident, not one per accepted quote — and separate from it because the
+ * remedy differs. The staging org spent Zoho's daily allowance on 2026-09-02 and
+ * every invoice-touching call failed for the rest of the day; nothing classified
+ * a 429, so each quote fell through to its own "invoice FAILED" email naming its
+ * own reference — one unrelated-looking incident per acceptance, for a single
+ * exhausted counter, and none of them naming it. The same 1,000/day allowance
+ * meters the live org.
+ *
+ * Reported as an error rather than critical on purpose: it is real (no customer
+ * is being billed while it holds) but it is not a lock-out, and an alarm that
+ * overstates what happened is the same defect as one that understates it.
+ *
+ * Retries continue, as they do for a lock-out — here they are the actual fix, so
+ * the first pass after the reset heals everything with nothing to run by hand.
+ */
+export async function reportLedgerRateLimited(
+  sb: Sb,
+  input: { provider: LedgerProvider; message: string; while: string },
+): Promise<void> {
+  const copy = RATE_LIMIT_COPY[input.provider];
+  await reportOperationalIssue(sb, {
+    key: ledgerRateLimitIssueKey(input.provider),
+    severity: "error",
+    source: input.provider,
+    event: copy.event,
+    message: copy.issueMessage,
+    context: { provider: input.provider, ledgerError: input.message, failedWhile: input.while },
+  });
+  await sendOpsAlert(copy.subject, copy.paragraphs, "system");
+}
+
+/**
+ * `provider`'s books answered a call — clear THAT provider's quota issue.
+ *
+ * Scoped like the lock-out resolve, and needed for a reason the lock-out does
+ * not have: nothing else can observe the reset. A lock-out ends when a human
+ * acts and the next raise proves it; a quota ends unattended overnight, possibly
+ * on a day with no acceptance at all, so without the watchdog's own green probe
+ * clearing this the issue would sit open on the ops board indefinitely and read
+ * as an ongoing outage.
+ */
+export async function resolveLedgerRateLimited(sb: Sb, provider: LedgerProvider): Promise<void> {
+  await resolveOperationalIssue(sb, ledgerRateLimitIssueKey(provider));
 }

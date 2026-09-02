@@ -269,6 +269,31 @@ describe("the money call sites classify through the seam", () => {
   });
 
   /**
+   * A classifier with no caller raises no alarm.
+   *
+   * `isLedgerRateLimited` shipped ahead of its wiring, so a quota that stops all
+   * billing still reached the everything-else branch: one per-quote email per
+   * accepted quote, none of them naming the cause. Counted rather than eyeballed
+   * because the three raise catches are near-identical and the fourth rail added
+   * beside them will look exactly the same.
+   */
+  it("routes a rate limit to its own alarm on every raise path the lock-out covers", () => {
+    const src = readFileSync(join(__dirname, "../../../lib/quote/accept-flow.ts"), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, " ")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1 ");
+    const count = (needle: string) => src.split(needle).length - 1;
+    const lockout = count('reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "');
+    const quota = count('reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "');
+    expect(lockout).toBe(3); // deposit, commitment, balance
+    expect(
+      quota,
+      `${lockout} raise path(s) escalate a lock-out but only ${quota} escalate a quota. ` +
+        `An unwired rate-limit branch means every accepted quote emails its own "invoice FAILED" ` +
+        `while the books are refusing all of them for one reason.`,
+    ).toBe(lockout);
+  });
+
+  /**
    * Every read or write against a STORED invoice id must carry the provider that
    * minted it. Three `recordInvoicePayment` calls and two `getInvoicePdfBase64`
    * calls were missing it, each sitting directly beneath a `getInvoiceStatus`

@@ -87,6 +87,22 @@ describe("checkXeroAccess", () => {
     expect((check as { message: string }).message).toContain("403");
   });
 
+  /**
+   * A spent allowance refuses every call exactly as a lock-out does, but it is
+   * not one and must not carry that verdict — the watchdog reads `accessDenied`
+   * to pick which remedy to print. Without a signal of its own it lands in the
+   * transient bucket below and the probe says nothing at all for as long as the
+   * quota holds.
+   */
+  it("a 429 is its own verdict: rate-limited, and NOT access-denied", async () => {
+    client.xeroFetch.mockResolvedValue(new Response("", { status: 429 }));
+    expect(await checkXeroAccess()).toMatchObject({
+      ok: false,
+      accessDenied: false,
+      rateLimited: true,
+    });
+  });
+
   it("a 5xx or timeout is TRANSIENT — it must not page anyone at 3am", async () => {
     client.xeroFetch.mockResolvedValue(new Response("", { status: 503 }));
     expect(await checkXeroAccess()).toMatchObject({ ok: false, accessDenied: false });

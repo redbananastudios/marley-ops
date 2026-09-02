@@ -124,8 +124,13 @@ import {
 // Provider-neutral, and NOT `isZohoAccessDenied` from @/lib/zoho: since gate 17
 // this file's errors arrive as LedgerError, and that function opens by
 // rejecting anything that is not a ZohoError. See lib/ledger/access.ts.
-import { isLedgerAccessDenied } from "@/lib/ledger/access";
-import { reportLedgerAccessDenied, resolveLedgerAccessDenied } from "@/lib/ops/zoho-access";
+import { isLedgerAccessDenied, isLedgerRateLimited } from "@/lib/ledger/access";
+import {
+  reportLedgerAccessDenied,
+  reportLedgerRateLimited,
+  resolveLedgerAccessDenied,
+  resolveLedgerRateLimited,
+} from "@/lib/ops/zoho-access";
 import { reportInvoiceRaiseFailed, resolveInvoiceRaiseFailed } from "@/lib/ops/invoice-raise";
 
 type Sb = SupabaseClient<Database>;
@@ -1485,6 +1490,7 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
       } as never)
       .eq("id", quoteId);
     await resolveLedgerAccessDenied(sb, ledger);
+    await resolveLedgerRateLimited(sb, ledger);
     await resolveInvoiceRaiseFailed(sb);
     return await fetchQuoteById(sb, quoteId);
   } catch (err) {
@@ -1498,6 +1504,10 @@ export async function ensureDepositInvoice(sb: Sb, quoteId: string): Promise<Acc
     // A lock-out is not this quote's problem — it is every quote's. Collapse it
     // into the one integration-level alert that names the actual remedy.
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "deposit invoice" });
+    // A spent quota has the same blast radius and a different remedy, so it
+    // collapses too — into its own alarm rather than the lock-out's, which would
+    // send the office to re-enable a user nobody disabled.
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "deposit invoice" });
     else {
       // The email alone left no trace anywhere a human looks: the ops board and
       // the daily digest read clean while the customer went unbilled.
@@ -2031,6 +2041,7 @@ export async function ensureCommitmentInvoice(sb: Sb, quoteId: string): Promise<
       .eq("id", quoteId)
       .eq("zoho_commitment_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "commitment invoice" });
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "commitment invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "commitment", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho commitment invoice FAILED — ${quote.quote_ref}`, [
@@ -3287,6 +3298,7 @@ export async function createBalanceInvoiceFlow(
       .eq("id", quoteId)
       .eq("zoho_balance_invoice_id", "pending");
     if (isLedgerAccessDenied(err)) await reportLedgerAccessDenied(sb, { provider: ledger, message: msg, while: "balance invoice" });
+    else if (isLedgerRateLimited(err)) await reportLedgerRateLimited(sb, { provider: ledger, message: msg, while: "balance invoice" });
     else {
       await reportInvoiceRaiseFailed(sb, { message: msg, kind: "balance", quoteRef: quote.quote_ref, reference: ref });
       await sendOpsAlert(`Zoho final invoice FAILED — ${quote.quote_ref}`, [
@@ -3660,6 +3672,12 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
   // healthy-Zoho pass would clear.
   const readProviders = new Set<LedgerProvider>();
   const deniedProviders = new Set<LedgerProvider>();
+  // Tracked beside the denials rather than folded into them: a spent quota
+  // refuses every read exactly as a lock-out does, and is fixed by finding what
+  // is burning the calls rather than by re-enabling anyone. Its own set so its
+  // own alarm fires — and so `accessDenied` keeps meaning PERMANENT, which is
+  // what the caller's escalation reads.
+  const rateLimitedProviders = new Set<LedgerProvider>();
   // Memoised so a garbled LEDGER_PROVIDER throws inside the per-slot try (a
   // counted, noted failure) rather than out of the whole sweep.
   let configuredCache: LedgerProvider | undefined;
@@ -3671,6 +3689,7 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
     // "refusing to guess" errors, never the access-denied class, so a denial
     // always carries the provider that issued it.
     if (isLedgerAccessDenied(err) && provider) deniedProviders.add(provider);
+    else if (isLedgerRateLimited(err) && provider) rateLimitedProviders.add(provider);
     log.warn("ledger.status_read_failed", { quoteId: quote.id, slot, provider, ...errorContext(err) });
   };
   if (isRealZohoId(quote.zoho_deposit_invoice_id) && !quote.deposit_paid_at) {
@@ -3755,10 +3774,19 @@ export async function syncZohoPayments(sb: Sb, quote: AcceptQuoteRow): Promise<Z
   for (const provider of deniedProviders) {
     await reportLedgerAccessDenied(sb, { provider, message: "invoice status unreadable", while: "payment watch" });
   }
+  // Same collapse, its own alarm. A quota refuses the whole sweep, so one
+  // per-quote escalation each would rebuild the very shape the deduped alert
+  // exists to replace.
+  for (const provider of rateLimitedProviders) {
+    await reportLedgerRateLimited(sb, { provider, message: "invoice status unreadable", while: "payment watch" });
+  }
   // The clean-sweep resolve clears only the providers this sweep actually
   // READ: a pass that never touched Xero has no evidence about Xero.
-  if (!deniedProviders.size && !unreadable && changed) {
-    for (const provider of readProviders) await resolveLedgerAccessDenied(sb, provider);
+  if (!deniedProviders.size && !rateLimitedProviders.size && !unreadable && changed) {
+    for (const provider of readProviders) {
+      await resolveLedgerAccessDenied(sb, provider);
+      await resolveLedgerRateLimited(sb, provider);
+    }
   }
   const accessDenied = deniedProviders.size > 0;
   const after = changed ? ((await fetchQuoteById(sb, quote.id)) ?? quote) : quote;

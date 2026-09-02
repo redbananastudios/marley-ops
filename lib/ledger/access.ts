@@ -129,12 +129,11 @@ export function isLedgerAccessDenied(err: unknown): boolean {
  * module is the shared seam — guessing across it is how a Xero validation error
  * would classify as a quota.
  *
- * NOT YET WIRED TO AN ALARM. The escalation sites (`lib/quote/accept-flow.ts`'s
- * three raise paths and the payment watcher) and the alert copy
- * (`lib/ops/zoho-access.ts`) both need a rate-limit branch of their own before
- * this changes what an operator sees; today it only makes the class nameable
- * and keeps it out of the lock-out remedy. Stated here rather than left to be
- * inferred from the absence of callers.
+ * The escalation it feeds is `reportLedgerRateLimited` in
+ * `lib/ops/zoho-access.ts`, reached from the three raise paths and the payment
+ * watcher in `lib/quote/accept-flow.ts`. The watchdog's own probe classifies the
+ * same class through `checkAccess`'s `rateLimited`, so the 15-minute pass and
+ * the rails cannot disagree about what a refusal on volume is.
  */
 export function isLedgerRateLimited(err: unknown): boolean {
   if (!(err instanceof LedgerError)) return false;

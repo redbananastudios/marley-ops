@@ -71,9 +71,25 @@ export function feedStalenessAlert(
  *  and the `watchdog:zoho-access` issue both live under it). */
 export function ledgerAccessAlert(
   provider: "zoho" | "xero",
-  check: { ok: boolean; accessDenied?: boolean },
+  check: { ok: boolean; accessDenied?: boolean; rateLimited?: boolean },
 ): HealthAlert | null {
-  if (check.ok || !check.accessDenied) return null;
+  if (check.ok) return null;
+  /* A spent API allowance stops invoicing as completely as a lock-out and used
+     to fall through here as a blip, so a day of failed raises produced no alert
+     at all (2026-09-02). It gets its own key — sharing the lock-out's would let
+     one clear the other's cooldown — and its own words, because the remedy is
+     the opposite shape: nobody is shut out, something of ours is spending the
+     calls, and it comes back on its own. Tested first because a 429 carries
+     neither an auth code nor an auth status, so the two can never both be
+     true. */
+  if (check.rateLimited) {
+    const books = provider === "zoho" ? "Zoho" : "Xero";
+    return {
+      key: `${provider}-rate-limit`,
+      message: `${books}'s API allowance is spent — no invoices are being raised until it resets. Nobody is shut out; find what is spending the calls`,
+    };
+  }
+  if (!check.accessDenied) return null;
   if (provider === "zoho") {
     return {
       key: "zoho-access",
