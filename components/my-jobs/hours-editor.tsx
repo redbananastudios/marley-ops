@@ -116,13 +116,18 @@ export function HoursEditor({
           .filter((e): e is TimeEntryDto => !!e);
         const totalHours = logged.reduce((s, e) => s + (entryHours(e.started_at, e.ended_at) ?? 0), 0);
         const totalExpenses = logged.reduce((s, e) => s + (e.expense_amount ?? 0), 0);
+        // One emptiness verdict for the whole line — hours and expenses tested
+        // apart once produced "Nothing logged yet · £4.20 expenses".
+        const summaryParts = [
+          totalHours > 0 ? `${+totalHours.toFixed(2)} hrs` : null,
+          totalExpenses > 0 ? `${gbp(totalExpenses)} expenses` : null,
+        ].filter((p): p is string => p != null);
         return (
           <section key={week.start} className="rounded-xl border border-border bg-card p-4">
             <div className="flex items-baseline justify-between gap-2">
               <h2 className="text-sm font-semibold text-foreground">{week.label}</h2>
               <span className="text-xs text-mist-400 tabular">
-                {totalHours > 0 ? `${+totalHours.toFixed(2)} hrs` : "Nothing logged yet"}
-                {totalExpenses > 0 ? ` · ${gbp(totalExpenses)} expenses` : ""}
+                {summaryParts.length > 0 ? summaryParts.join(" · ") : "Nothing logged yet"}
               </span>
             </div>
             {week.lockedRef ? (
@@ -176,6 +181,10 @@ export function HoursEditor({
                         </>
                       ) : entry?.started_at || entry?.ended_at ? (
                         <span className="block text-xs font-medium text-warn">Unfinished</span>
+                      ) : entry?.expense_amount != null || entry?.has_receipt ? (
+                        // Expense-only day (a receipt can land before the hours
+                        // do) — the red "Add" prompt is for untouched days only.
+                        <span className="block text-xs text-mist-400">Expense only</span>
                       ) : future ? (
                         <span className="block text-xs text-mist-400">—</span>
                       ) : (
