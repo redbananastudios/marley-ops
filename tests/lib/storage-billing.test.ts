@@ -330,6 +330,121 @@ describe("crateInvoicesDue — release settlement", () => {
   });
 });
 
+/* ---------------------------------- crate_daily — calendar-month minimum */
+
+// storage-terms v2 (2026-08-31, commit 1038f96): "a minimum period of one
+// calendar month", with to-the-day charging only AFTER that month ends.
+// min_kind='calendar_month' lets derive the window from the SAME clamped
+// month arithmetic the period engine uses (nextPeriodStart/periodEnd):
+// 15 Sep → covered through 14 Oct; 31 Jan → through 27/28 Feb.
+// min_kind absent or 'days' keeps the frozen min_days behaviour (v1 terms).
+const cmCrate = (over: Partial<BillableLet> = {}): BillableLet =>
+  crate({ start_date: "2026-09-15", min_kind: "calendar_month", ...over });
+
+describe("crateInvoicesDue — calendar-month minimum (storage-terms v2)", () => {
+  it("the minimum covers one calendar month: 15 Sep runs through 14 Oct (30 days), £84 flat", () => {
+    const due = crateInvoicesDue(cmCrate(), new Set(), [], "2026-09-15");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-09-15",
+      period_end: "2026-10-14",
+      kind: "minimum",
+      usageAmount: 84,
+      amount: 84,
+      days: 30,
+    });
+  });
+
+  it("REGRESSION (#167 defect): days 29..month-end must NOT bill daily — nothing due 12-14 Oct", () => {
+    // The 28-day grid would end the minimum on 12 Oct and bill 13-14 Oct to
+    // the day. The signed terms cover through 14 Oct; the first arrears
+    // cycle is 15 Oct-11 Nov, due 12 Nov — nothing may raise before that.
+    for (const today of ["2026-10-12", "2026-10-13", "2026-10-14", "2026-11-11"]) {
+      expect(crateInvoicesDue(cmCrate(), new Set(["2026-09-15"]), [], today)).toHaveLength(0);
+    }
+  });
+
+  it("arrears start the day after the calendar month ends: 15 Oct-11 Nov bills on 12 Nov", () => {
+    const due = crateInvoicesDue(cmCrate(), new Set(["2026-09-15"]), [], "2026-11-12");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-10-15",
+      period_end: "2026-11-11",
+      kind: "arrears",
+      amount: 84, // 28 days × £3
+      days: 28,
+    });
+  });
+
+  it("month-end start clamps: 31 Aug runs through 29 Sep, daily from 30 Sep", () => {
+    const due = crateInvoicesDue(cmCrate({ start_date: "2026-08-31" }), new Set(), [], "2026-08-31");
+    expect(due[0]).toMatchObject({ period_start: "2026-08-31", period_end: "2026-09-29", days: 30 });
+    const arrears = crateInvoicesDue(
+      cmCrate({ start_date: "2026-08-31" }),
+      new Set(["2026-08-31"]),
+      [],
+      "2026-10-28",
+    );
+    expect(arrears[0]).toMatchObject({ period_start: "2026-09-30", period_end: "2026-10-27", days: 28 });
+  });
+
+  it("February clamp: 31 Jan 2027 runs through 27 Feb (28 days); leap 2028 through 28 Feb (29 days)", () => {
+    const feb27 = crateInvoicesDue(cmCrate({ start_date: "2027-01-31" }), new Set(), [], "2027-01-31");
+    expect(feb27[0]).toMatchObject({ period_end: "2027-02-27", days: 28 });
+    const feb28 = crateInvoicesDue(cmCrate({ start_date: "2028-01-31" }), new Set(), [], "2028-01-31");
+    expect(feb28[0]).toMatchObject({ period_end: "2028-02-28", days: 29 });
+  });
+
+  it("release inside the calendar month owes the minimum only — no day charges (the overcharge case)", () => {
+    // End 13 Oct: the 28-day grid would have raised a final for 13 Oct.
+    const due = crateInvoicesDue(cmCrate({ end_date: "2026-10-13" }), new Set(["2026-09-15"]), [], "2026-10-13");
+    expect(due).toHaveLength(0);
+  });
+
+  it("release after the minimum settles the remainder to the exact day immediately", () => {
+    // End 20 Oct: final = 15-20 Oct inclusive = 6 days × £3 = £18.
+    const due = crateInvoicesDue(cmCrate({ end_date: "2026-10-20" }), new Set(["2026-09-15"]), [], "2026-10-20");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({
+      period_start: "2026-10-15",
+      period_end: "2026-10-20",
+      kind: "final",
+      amount: 18,
+      days: 6,
+    });
+  });
+
+  it("handling events inside the minimum ride the minimum invoice, as before", () => {
+    const due = crateInvoicesDue(cmCrate(), new Set(), [ev({ event_date: "2026-09-15" })], "2026-09-15");
+    expect(due[0]).toMatchObject({ amount: 156, usageAmount: 84, handlingAmount: 72 });
+  });
+
+  it("crateNextInvoiceDate follows the calendar-month window: raise day is 12 Nov for a 15 Sep let", () => {
+    expect(crateNextInvoiceDate(cmCrate(), new Set(), "2026-09-01")).toBe("2026-09-15");
+    expect(crateNextInvoiceDate(cmCrate(), new Set(["2026-09-15"]), "2026-09-20")).toBe("2026-11-12");
+    expect(crateNextInvoiceDate(cmCrate(), new Set(["2026-09-15", "2026-10-15"]), "2026-11-13")).toBe("2026-12-10");
+  });
+
+  it("SNAPSHOT CONTROL: min_kind 'days' (and absent) keeps the frozen 28-day behaviour bit for bit", () => {
+    for (const over of [{ min_kind: "days" }, {}] as Partial<BillableLet>[]) {
+      const legacy = crate({ start_date: "2026-09-15", ...over });
+      const min = crateInvoicesDue(legacy, new Set(), [], "2026-09-15");
+      expect(min[0]).toMatchObject({ period_end: "2026-10-12", days: 28 });
+      const arrears = crateInvoicesDue(legacy, new Set(["2026-09-15"]), [], "2026-11-10");
+      expect(arrears[0]).toMatchObject({ period_start: "2026-10-13", period_end: "2026-11-09", days: 28 });
+      expect(crateNextInvoiceDate(legacy, new Set(["2026-09-15"]), "2026-09-20")).toBe("2026-11-10");
+    }
+  });
+
+  it("PERIOD CONTROL: container/period lets are untouched — min_kind never reroutes them", () => {
+    const monthly = weekly({ rate: 348, rate_period: "month", min_kind: "calendar_month" });
+    const due = invoicesDue(monthly, new Set(), [], "2026-07-01");
+    expect(due).toHaveLength(1);
+    expect(due[0]).toMatchObject({ period_start: "2026-07-01", period_end: "2026-07-31", kind: "period", amount: 348 });
+    expect(nextInvoiceDate(monthly, new Set(["2026-07-01"]), "2026-07-01")).toBe("2026-08-01");
+  });
+});
+
 describe("crateNextInvoiceDate / invoicesDue router", () => {
   it("minimum unclaimed → the start day; then each cycle's raise day (window end + 1)", () => {
     expect(crateNextInvoiceDate(crate(), new Set(), "2026-06-25")).toBe("2026-07-01");

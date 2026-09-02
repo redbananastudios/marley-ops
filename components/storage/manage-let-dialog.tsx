@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { SignaturePad } from "@/components/signature-pad";
-import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { crateMinimumLabel, crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
 import { gbpInc, type StorageRates } from "@/lib/storage-rates";
 import type { BrandChipData } from "@/components/brand/brand-chip";
 import {
@@ -72,15 +72,18 @@ export function ManageLetDialog({
 }) {
   const router = useRouter();
   const isCrate = let_.billing_model === "crate_daily";
-  // The ack set follows the product: crates sign the billing schedule (min
-  // days + handling figure rendered live from the rate card), containers keep
-  // the original rate ack (standing policy 2026-07-22).
+  // The ack set follows the product: crates sign the billing schedule (the
+  // let's frozen minimum + handling figure rendered live from the rate card),
+  // containers keep the original rate ack (standing policy 2026-07-22).
   const ackList = useMemo(
     () =>
       isCrate
-        ? crateStorageAcks(let_.min_days ?? rates.crateMinDays, gbpInc(rates.handlingEventInc))
+        ? crateStorageAcks(
+            { kind: let_.min_kind, days: let_.min_days ?? rates.crateMinDays },
+            gbpInc(rates.handlingEventInc),
+          )
         : [...STORAGE_ACKS],
-    [isCrate, let_.min_days, rates],
+    [isCrate, let_.min_kind, let_.min_days, rates],
   );
   const [signing, setSigning] = useState(false);
   const [acks, setAcks] = useState<Record<string, boolean>>({});
@@ -186,7 +189,7 @@ export function ManageLetDialog({
               ? ` · ${gbp(let_.rate)}/${let_.rate_period === "month" ? "month" : let_.rate_period === "day" ? "day" : "week"}`
               : " · unpriced"}
             {isCrate && let_.min_days != null && let_.min_amount != null
-              ? ` · ${let_.min_days}-day minimum ${gbp(let_.min_amount)}`
+              ? ` · ${crateMinimumLabel(let_.min_kind, let_.min_days)} ${gbp(let_.min_amount)}`
               : ""}
           </DialogDescription>
         </DialogHeader>
@@ -278,8 +281,9 @@ export function ManageLetDialog({
           </div>
           {isCrate ? (
             <p className="mb-1 text-xs text-mist-400">
-              {let_.min_days ?? rates.crateMinDays}-day minimum billed upfront; further days charge to the exact day, in
-              arrears, every 4 weeks. Handling bills per event. The final invoice settles before release.
+              {crateMinimumLabel(let_.min_kind, let_.min_days ?? rates.crateMinDays)} billed upfront; further days
+              charge to the exact day, in arrears, every 4 weeks. Handling bills per event. The final invoice settles
+              before release.
             </p>
           ) : null}
           {let_.rate == null || Number(let_.rate) <= 0 ? (

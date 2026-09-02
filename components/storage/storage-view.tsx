@@ -114,10 +114,13 @@ export interface LetRow {
   end_date: string | null;
   rate: number | null;
   rate_period: string;
-  /** 'period' (containers/rooms) | 'crate_daily' (28-day min + daily arrears). */
+  /** 'period' (containers/rooms) | 'crate_daily' (minimum + daily arrears). */
   billing_model: string;
   min_days: number | null;
   min_amount: number | null;
+  /** How the crate minimum is measured, frozen at creation: 'days' (v1 terms,
+   *  min_days) | 'calendar_month' (storage-terms v2, 2026-08-31). */
+  min_kind: string | null;
   notes: string | null;
   billing_paused: boolean;
   /** kind='storage' signature on this let, if collected. */
@@ -977,8 +980,10 @@ function LetDialog({
     setClientId(id);
     setBrandOverride(null);
   };
-  // Product defaults from the Settings rate card — crates bill a day rate with
-  // a 28-day minimum upfront; containers bill the monthly card rate in advance.
+  // Product defaults from the Settings rate card — crates bill a day rate
+  // after a one-calendar-month minimum upfront (storage-terms v2, 2026-08-31;
+  // the server freezes min_kind='calendar_month' on the new let); containers
+  // bill the monthly card rate in advance.
   const defaults = useMemo(() => letDefaultsForUnitType(unit.unit_type, rates), [unit.unit_type, rates]);
   const isCrate = defaults.billingModel === "crate_daily";
   const [v, setV] = useState({
@@ -1054,7 +1059,7 @@ function LetDialog({
           <DialogTitle className="font-display text-xl">Assign {unit.code || unit.name || "unit"}</DialogTitle>
           <DialogDescription>
             {isCrate
-              ? `Crate storage: ${rates.crateMinDays}-day minimum (${gbp(rates.crateMinInc)}) invoiced upfront, then charged to the exact day in arrears. Handling bills per event.`
+              ? `Crate storage: one calendar month minimum (${gbp(rates.crateMinInc)}) invoiced upfront, then charged to the exact day in arrears. Handling bills per event.`
               : "Billed in advance each period; the invoice raises automatically each morning."}
           </DialogDescription>
         </DialogHeader>

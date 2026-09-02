@@ -116,19 +116,33 @@ export const STORAGE_ACKS = [
 
 export type StorageAckKey = (typeof STORAGE_ACKS)[number]["key"];
 
+/** The minimum-stay wording, derived from the let's frozen min_kind — the
+ *  SAME dial lib/storage-billing.ts bills from, so the ack a customer ticks,
+ *  the terms snapshot stored beside it, and the engine's window always agree.
+ *  'calendar_month' = storage-terms v2 (2026-08-31): one calendar month from
+ *  the start date. Anything else = the v1 fixed day count (min_days). */
+export function crateMinimumLabel(minKind: string | null | undefined, minDays: number): string {
+  return minKind === "calendar_month" ? "one calendar month minimum" : `${minDays}-day minimum`;
+}
+
 /** Crate storage acknowledgments (standing policy 2026-07-22 —
- *  docs/storage-billing-v2-prd.md). Containers keep STORAGE_ACKS verbatim;
- *  crates replace the rate ack with the crate billing schedule. The minimum
- *  days and handling figure render LIVE from the Settings rate card so the
- *  signed wording always matches what's actually charged (PRD D1/D5) — a
- *  rate-card edit must be mirrored in the published terms clause. */
-export function crateStorageAcks(minDays: number, handlingIncLabel: string) {
+ *  docs/storage-billing-v2-prd.md; minimum re-worded by storage-terms v2,
+ *  2026-08-31). Containers keep STORAGE_ACKS verbatim; crates replace the
+ *  rate ack with the crate billing schedule. The minimum wording follows the
+ *  let's frozen min_kind/min_days (crateMinimumLabel) and the handling figure
+ *  renders LIVE from the Settings rate card so the signed wording always
+ *  matches what's actually charged (PRD D1/D5) — a rate-card edit must be
+ *  mirrored in the published terms clause. */
+export function crateStorageAcks(
+  minimum: { kind: string | null | undefined; days: number },
+  handlingIncLabel: string,
+) {
   const lien = STORAGE_ACKS.find((a) => a.key === "lien")!;
   const prohibited = STORAGE_ACKS.find((a) => a.key === "no_prohibited")!;
   return [
     {
       key: "crate_billing" as const,
-      label: `I agree to the crate storage terms: ${minDays}-day minimum, then charged to the day; handling ${handlingIncLabel} inc VAT per crate in and out; all charges settled before release.`,
+      label: `I agree to the crate storage terms: ${crateMinimumLabel(minimum.kind, minimum.days)}, then charged to the day; handling ${handlingIncLabel} inc VAT per crate in and out; all charges settled before release.`,
     },
     lien,
     prohibited,

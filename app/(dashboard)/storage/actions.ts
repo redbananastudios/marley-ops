@@ -307,6 +307,11 @@ export async function startLetAction(input: StartLetInput) {
       billing_model: v.billing_model,
       min_days: v.billing_model === "crate_daily" ? minDays : null,
       min_amount: v.billing_model === "crate_daily" ? minAmount : null,
+      // NEW crate lets sign storage-terms v2 (2026-08-31): the minimum is one
+      // CALENDAR month, frozen here so the let keeps that rule for life.
+      // min_days stays recorded as the legacy fallback but the engine ignores
+      // it for calendar_month lets (lib/storage-billing.ts crateMinimumEnd).
+      min_kind: v.billing_model === "crate_daily" ? "calendar_month" : "days",
       notes: v.notes || null,
       ...(letBrand ? { brand: letBrand } : {}),
     } as never)
@@ -747,7 +752,7 @@ export async function signStorageAgreementAction(
 
   const { data: let_ } = await sb
     .from("storage_lets")
-    .select("id, client_id, lead_id, billing_model, min_days")
+    .select("id, client_id, lead_id, billing_model, min_days, min_kind")
     .eq("id", letId)
     .single();
   if (!let_) return { ok: false as const, error: "Let not found." };
@@ -762,13 +767,16 @@ export async function signStorageAgreementAction(
 
   // Evidence: store the exact ack WORDING beside the ticked keys. Derived
   // server-side from the same sources the dialog renders (the let's frozen
-  // min_days + the live rate-card handling figure — mirrors /s), so the
-  // record shows what was agreed even after the rate card changes.
+  // min_kind/min_days + the live rate-card handling figure — mirrors /s), so
+  // the record shows what was agreed even after the rate card changes.
   let ackDefs: ReadonlyArray<{ key: string; label: string }> = STORAGE_ACKS;
   if (isCrate) {
     const rates = await getStorageRates(sb);
-    const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
-    ackDefs = crateStorageAcks(minDays, gbpInc(rates.handlingEventInc));
+    const l = let_ as { min_days?: number | null; min_kind?: string | null };
+    ackDefs = crateStorageAcks(
+      { kind: l.min_kind, days: Number(l.min_days ?? rates.crateMinDays) },
+      gbpInc(rates.handlingEventInc),
+    );
   }
   const ackLabels = Object.fromEntries(ackDefs.map((a) => [a.key, a.label]));
 

@@ -5,6 +5,16 @@ analysis, "make sure ops is aligned to this billing"). Builds on storage billing
 phase 2 (0027). Companion: `docs/policy-confirmation-for-terms.md` §B (customer
 terms), `docs/terms-review-inputs.md`.
 
+> **Amendment (2026-09-02, storage-terms v2 2026-08-31 / commit 1038f96):** the
+> crate minimum below is superseded for NEW lets. The published terms now say
+> "a minimum period of one calendar month", with to-the-day charging only after
+> that month ends. `storage_lets.min_kind` (migration 0115) freezes the rule
+> per let: `calendar_month` for lets created under v2 terms (clamped
+> anniversary: 15 Sep → covered through 14 Oct; 31 Jan → 27/28 Feb), `days`
+> for legacy/imported lets, which keep the frozen `min_days` window described
+> in this document. `lib/storage-billing.ts` `crateMinimumEnd` is the single
+> derivation; `crateMinimumLabel` keeps the signed ack wording in step.
+
 ## 1. The standing policy (customer side)
 
 Two products. All customer-facing figures **gross (VAT-inclusive)**; Zoho

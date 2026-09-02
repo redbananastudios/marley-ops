@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { UNIT_TYPES } from "@/lib/storage-units";
-import { crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
+import { crateMinimumLabel, crateStorageAcks, STORAGE_ACKS } from "@/lib/signatures";
 import { publicUrlFor, STORAGE_PAYMENT_SENTENCE } from "@/lib/legal/documents";
 import { getStorageRates, gbpInc } from "@/lib/storage-rates";
 import { getBrandOrDefault } from "@/lib/brand";
@@ -55,7 +55,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const { data: let_ } = await admin
     .from("storage_lets")
     .select(
-      "id, client_id, unit_id, start_date, end_date, rate, rate_period, billing_model, min_days, min_amount, brand",
+      "id, client_id, unit_id, start_date, end_date, rate, rate_period, billing_model, min_days, min_amount, min_kind, brand",
     )
     .eq("sign_token", token)
     .maybeSingle();
@@ -85,10 +85,14 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
   const isCrate = (let_ as { billing_model?: string }).billing_model === "crate_daily";
   const rates = await getStorageRates(admin);
   const minDays = Number((let_ as { min_days?: number | null }).min_days ?? rates.crateMinDays);
+  const minKind = (let_ as { min_kind?: string | null }).min_kind ?? null;
   const minAmount = Number((let_ as { min_amount?: number | null }).min_amount ?? rates.crateMinInc);
-  const ackList = (isCrate ? crateStorageAcks(minDays, gbpInc(rates.handlingEventInc)) : [...STORAGE_ACKS]).map(
-    (a) => ({ key: a.key as string, label: a.label }),
-  );
+  // The SAME wording the ack stores and the billing engine enforces —
+  // "one calendar month minimum" for v2-terms lets, "N-day minimum" legacy.
+  const minLabel = crateMinimumLabel(minKind, minDays);
+  const ackList = (
+    isCrate ? crateStorageAcks({ kind: minKind, days: minDays }, gbpInc(rates.handlingEventInc)) : [...STORAGE_ACKS]
+  ).map((a) => ({ key: a.key as string, label: a.label }));
 
   // Identity comes from the LET's own brand (gate 12 put the column there),
   // resolved once before the render.
@@ -140,7 +144,7 @@ export default async function StorageSignPage({ params }: { params: Promise<{ to
               </p>
               {isCrate ? (
                 <p>
-                  From <strong>{prettyDay(let_.start_date)}</strong> · <strong>{minDays}-day minimum</strong> (
+                  From <strong>{prettyDay(let_.start_date)}</strong> · <strong>{minLabel}</strong> (
                   {gbp(minAmount)}, invoiced upfront), then <strong>{rateLabel}</strong> charged to the exact day in
                   arrears. Handling is {gbpInc(rates.handlingEventInc)} per crate movement.
                   All charges are settled before your items are released.
