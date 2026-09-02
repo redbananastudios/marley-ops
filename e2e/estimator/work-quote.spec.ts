@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { createClient } from "@supabase/supabase-js";
+import { E2E_DB_READY, adminClient } from "../fixtures/db";
 import { step } from "../fixtures/artefacts";
 
 /**
@@ -49,9 +49,112 @@ test.skip(
   "E2E_ESTIMATOR_PASSWORD is not set in this environment, so the 'estimator' project's auth.setup.ts cannot sign in e2e-estimator@marleymoves.test and this spec never runs. The underlying flow was proven live via a throwaway minted login + SQL read-back on 2026-08-22 (0 findings) — this is a credential gap, not an app bug. Set E2E_ESTIMATOR_PASSWORD (and re-run `npx playwright test e2e/estimator/work-quote.spec.ts`) to validate this spec for real.",
 );
 
+/**
+ * Delete everything one of these blocks created, children before parents, per
+ * the FK graph (supabase/migrations/0001_init.sql, amended by 0092):
+ *
+ *   communications.lead_id → leads    (NO ACTION; quote_id is SET NULL since 0092)
+ *   appointments.survey_id → surveys  (NO ACTION — appointments BEFORE surveys)
+ *   appointments.lead_id   → leads    (NO ACTION)
+ *   surveys.lead_id        → leads    (NO ACTION — the FK that used to block the
+ *                                      lead delete and silently leak the whole set)
+ *   quotes.lead_id         → leads    (NO ACTION)
+ *   activities.lead_id     → leads    (NO ACTION)
+ *   leads.client_id        → clients  (NO ACTION — lead BEFORE client)
+ *
+ * survey_photos, appointment_assignments, follow_ups and lead_briefs CASCADE
+ * from those parents; signatures/job_notes/job_media are SET NULL — none need
+ * a hand-rolled delete here.
+ *
+ * House discipline (#71): every delete's error is captured, the parent is read
+ * back to PROVE deletion, and any problem THROWS — a teardown that fails
+ * quietly leaks rows into staging and makes every later run look broken.
+ */
+async function teardownLeadGraph(marker: string, knownLeadId?: string): Promise<void> {
+  const sb = adminClient();
+  const problems: string[] = [];
+  const check = (label: string, error: { message: string } | null) => {
+    if (error) problems.push(`${label}: ${error.message}`);
+  };
+
+  // Resolve by marker, not only the captured id: the lead's name IS the marker
+  // (the form asserts the fill stuck before submitting), so a run that died
+  // after creating the lead but before capturing its URL still gets swept.
+  const { data: markerLeads, error: findErr } = await sb
+    .from("leads")
+    .select("id, client_id")
+    .eq("name", marker);
+  if (findErr) throw new Error(`teardown could not list marker leads: ${findErr.message}`);
+  const leads = [...(markerLeads ?? [])];
+  if (knownLeadId && !leads.some((l) => l.id === knownLeadId)) {
+    const { data: extra, error: extraErr } = await sb
+      .from("leads")
+      .select("id, client_id")
+      .eq("id", knownLeadId)
+      .maybeSingle();
+    if (extraErr) problems.push(`leads lookup (${knownLeadId}): ${extraErr.message}`);
+    if (extra) leads.push(extra);
+  }
+  if (!leads.length && !problems.length) return; // nothing was created
+
+  const leadIds = leads.map((l) => l.id);
+  if (leadIds.length) {
+    // Children first — the order is the FK graph above, leaf-most upward.
+    check("communications", (await sb.from("communications").delete().in("lead_id", leadIds)).error);
+    check("appointments", (await sb.from("appointments").delete().in("lead_id", leadIds)).error);
+    check("surveys", (await sb.from("surveys").delete().in("lead_id", leadIds)).error);
+    check("quotes", (await sb.from("quotes").delete().in("lead_id", leadIds)).error);
+    check("activities", (await sb.from("activities").delete().in("lead_id", leadIds)).error);
+    check("leads", (await sb.from("leads").delete().in("id", leadIds)).error);
+  }
+
+  // The client is a dedupe target (one live row per phone/email), so an earlier
+  // run's leak — or a real staging record — can share it. Delete only when no
+  // other lead still references it; a shared parent left in place is correct,
+  // not a teardown failure.
+  for (const clientId of [...new Set(leads.map((l) => l.client_id).filter(Boolean))]) {
+    const { count: leadsLeft, error: leftErr } = await sb
+      .from("leads")
+      .select("*", { count: "exact", head: true })
+      .eq("client_id", clientId);
+    if (leftErr) {
+      problems.push(`clients (${clientId}) still-referenced check: ${leftErr.message}`);
+      continue;
+    }
+    if (leadsLeft) continue;
+    check("clients", (await sb.from("clients").delete().eq("id", clientId)).error);
+  }
+
+  // Read the parent back — deletion is proven, never assumed.
+  const { count, error: backErr } = await sb
+    .from("leads")
+    .select("*", { count: "exact", head: true })
+    .eq("name", marker);
+  if (backErr) problems.push(`lead read-back: ${backErr.message}`);
+  else if (count) problems.push(`leads: ${count} marker row(s) still present after delete`);
+
+  if (problems.length) {
+    throw new Error(`work-quote teardown left rows behind (${marker}): ${problems.join("; ")}`);
+  }
+}
+
 test.describe.serial("Estimator — book survey (past slot) then Create Quote from the visit", () => {
   const marker = `E2E Estimator Work Quote ${Date.now()}`;
   let leadUrl = "";
+
+  // A spec that creates staging rows through the UI must not run where it
+  // cannot clean them up (same rule the visit-dialog block below applies).
+  test.skip(
+    !E2E_DB_READY,
+    "needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY so the afterAll teardown can remove the lead/survey/quote set this block creates through the UI.",
+  );
+
+  test.afterAll(async () => {
+    // The skip above guarantees nothing ran (so nothing was created) without
+    // the DB env — this early return is not a silent teardown failure.
+    if (!E2E_DB_READY) return;
+    await teardownLeadGraph(marker, leadUrl.match(/\/leads\/([0-9a-f-]{36})/)?.[1]);
+  });
 
   test("create a fresh lead via the diary Add lead form", async ({ page }) => {
     await step("open Add lead", page, async () => {
@@ -172,10 +275,11 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
   let leadUrl = "";
   let leadId = "";
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   test.skip(!process.env.E2E_ESTIMATOR_PASSWORD, "same credential gap as the block above.");
-  test.skip(!url || !serviceKey, "needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for the quote-count read-back.");
+  test.skip(
+    !E2E_DB_READY,
+    "needs NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY for the quote-count read-back and the afterAll teardown.",
+  );
 
   test("create a fresh lead via the diary Add lead form", async ({ page }) => {
     await step("open Add lead", page, async () => {
@@ -289,7 +393,7 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
     await step("no generic error boundary, and exactly one quotes row exists for this lead", page, async () => {
       await expect(page.getByText(/Something went wrong|Application error/i)).toHaveCount(0);
 
-      const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
+      const sb = adminClient();
       const { data, error } = await sb.from("quotes").select("id").eq("lead_id", leadId);
       if (error) throw new Error(`quotes read-back: ${error.message}`);
       expect(data?.length, "exactly one draft quote row for this lead, no duplicate from the double-render race").toBe(1);
@@ -298,14 +402,12 @@ test.describe.serial("Estimator — Create Quote from the survey visit dialog (Q
   });
 
   test.afterAll(async () => {
-    if (!leadId || !url || !serviceKey) return;
-    const sb = createClient(url, serviceKey, { auth: { persistSession: false } });
-    await sb.from("quotes").delete().eq("lead_id", leadId);
-    await sb.from("appointments").delete().eq("lead_id", leadId);
-    await sb.from("activities").delete().eq("lead_id", leadId);
-    await sb.from("communications").delete().eq("lead_id", leadId);
-    const { data: lead } = await sb.from("leads").select("client_id").eq("id", leadId).maybeSingle();
-    await sb.from("leads").delete().eq("id", leadId);
-    if (lead?.client_id) await sb.from("clients").delete().eq("id", lead.client_id);
+    // The old teardown here never deleted SURVEYS, so surveys.lead_id blocked
+    // the lead delete on every run — and because no error was checked, it
+    // failed silently and leaked the full lead/survey/quote set into staging
+    // each time. teardownLeadGraph deletes in FK order, reads the lead back,
+    // and THROWS on any failure.
+    if (!E2E_DB_READY) return; // skipped above — nothing ran, nothing to clean
+    await teardownLeadGraph(marker, leadId || undefined);
   });
 });
