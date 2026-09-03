@@ -383,7 +383,7 @@
     "book_survey_quote_from_visit": {
       "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet estimator role-agent, stalest estimator item, tied): booked a past-slot marker survey, created a quote from the visit through all 7 wizard steps (SP7 8AA->SP8 4AB), assigned via EstimatorPicker. UI Step-7 totals (grand_total £1,042.80, subtotal £869 incl. £150 admin fee, VAT £173.80) matched the DB row exactly. quotes.estimator_id/surveys.estimator_id/appointments.estimator_id all correctly = the picker-selected profile id (not staff_id). 0 findings.",
+      "note": "Re-verified live this run (Sonnet estimator role-agent, stalest estimator item, tied): booked a past-slot marker survey, created a quote from the visit through all 7 wizard steps (SP7 8AA->SP8 4AB), assigned via EstimatorPicker. UI Step-7 totals (grand_total \u00a31,042.80, subtotal \u00a3869 incl. \u00a3150 admin fee, VAT \u00a3173.80) matched the DB row exactly. quotes.estimator_id/surveys.estimator_id/appointments.estimator_id all correctly = the picker-selected profile id (not staff_id). 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -908,6 +908,18 @@
         "app/(dashboard)/payments/upcoming-tab.tsx",
         "lib/payments/upcoming.ts",
         "lib/payments-policy.ts"
+      ]
+    },
+    "cv_photo_upload_spec": {
+      "lastTestedAt": "2026-09-03T16:22:00Z",
+      "lastResult": "pass",
+      "note": "WRITTEN this run: e2e/public/cv-photo-upload.spec.ts. Closes the carried-forward gap flagged when QA-20260827-04 closed (customer /cv photo-upload flow verified live but shipped with no permanent spec). Before writing the file, the main loop independently validated the exact seed/upload/read-back recipe live against staging via a byte-identical scratch script: marker cubic_surveys row, real multipart POST to /cv/<token>/photos with a genuine PNG, service-role read-back of survey_photos (customer_uploaded=true, storage_path set), a direct bucket download byte-identical to the source file, full teardown verified 0/0. That scratch run surfaced a real teardown hazard the shipped spec now handles: the route's first-customer-photo timeline note writes an activities row with no ON DELETE CASCADE on lead_id, so a teardown that skips it leaves the marker lead (and client) stranded -- the scratch script's first attempt did exactly that (clients=1, leads=1 left behind) before a follow-up cleanup pass. tsc + eslint clean, playwright test --list loads both tests under the public project. e2e/COVERAGE.md updated in the same commit. test.skip'd: this env has no NEXT_PUBLIC_SUPABASE_URL/SUPABASE_SERVICE_ROLE_KEY (only QA_STAGING_*), so E2E_DB_READY is false -- the file itself has never executed via the real Playwright runner here, same standing gap as every other DB-seeded spec in this suite.",
+      "watch": [
+        "e2e/public/cv-photo-upload.spec.ts",
+        "app/cv/[token]/customer-photos.tsx",
+        "app/cv/[token]/photos/route.ts",
+        "app/cv/[token]/photo-store.ts",
+        "supabase/migrations/0117_customer_survey_photos.sql"
       ]
     }
   }
