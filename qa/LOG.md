@@ -4,6 +4,8 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+2026-09-03T00:33Z · escalation repair (scheduled sweep) · nothing escalated — 0 findings carry `escalate: opus-5` (`grep -rn "escalate:" qa/findings/` returns nothing at all; both open findings, QA-20260827-04 and QA-20260902-04, are `class: risky` and out of scope for either repair tier) · staging `94f3419` · 0 PRs · 0 escalations · <5 min. Note for the next audit: the newest-first invariant this header states is broken — the five most recent entries (`2026-09-02T08:11Z` through `2026-09-02T20:09Z`, from line ~1528) were appended at the *bottom* in file order, so the top entry reads `2026-09-02T12:xxZ` and an automated reader taking "the entry after the `---`" gets a stale run. Left in place rather than reordered: repositioning five entries is a larger edit than a no-op sweep should make unattended.
+
 ## 2026-09-02T12:xxZ — scheduled QA audit: CI-red abort, 3 findings (1 reopened), no rota run
 
 - Checked out latest `origin/staging`, sha `061f98b` (docs-only over deployed `77f400a` — known deploy-filter trap; `git show --stat 061f98b` confirmed AGENTS.md-only).
