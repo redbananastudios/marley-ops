@@ -1,7 +1,7 @@
 {
-  "comment": "2026-09-03T04:xxZ run (this scheduled run): health gate PASSED clean -- deployed staging (94ee5f9) matched local HEAD f8d1e44 minus 2 docs-only commits (AGENTS.md/log edits), all 4 local gates green after a fresh npm install (cold/stale node_modules, missing eslint) (lint 0 errors/36 pre-existing warnings, tsc clean, vitest 3446/3453 incl. 7 skipped, build exit 0). Verify-first: 0 findings at fixed-pending-verify, nothing to re-verify. Since lastAuditSha c5d0eac, PR #214 (7eb1849) landed the freshest code -- it explicitly built the fix for QA-20260827-04 (customer /cv photo upload, previously gated office-only) plus a brand-correct lien-clause rewrite of lib/signatures.ts (a second brand's storage customer was being shown/recorded a lien naming the DEFAULT brand's company) -- both queue-jumped ahead of the normal stalest-queue rota per the 'freshest code is likeliest broken' rule, and QA-20260827-04's own note said it stays open until its Verify clause runs live. Dispatched one scoped customer role-agent (Sonnet) for both: (1) executed QA-20260827-04's Verify clause exactly -- pitmans-brand marker cubic survey, real JPEG upload via /cv/<token>, service-role read-back of survey_photos + a direct bucket download (293 bytes, JPEG magic, byte-identical), admin review page loaded the same object (200/image/jpeg/293 bytes), brand-leak sub-check clean -- PASS, finding CLOSED; (2) tested lib/signatures.ts's rewrite on the actual regression case, a pitmans-brand /s/<token> storage-agreement sign -- rendered clause correctly named Pitmans, ack_labels.lien read back byte-identical to what was shown -- PASS, no new finding filed (bug wasn't previously tracked as a QA finding, just verified fixed). Cleanup independently spot-checked by the main loop with a fresh cross-table ilike sweep + qa-pattern auth.users check, both before dispatch and after: 0 both times. Crew/admin/estimator role agents skipped this run (diff is customer/public-route-only; time box did not allow the usual full four-role spread on top of a cold npm install). 1 new spec gap logged, not shipped: /cv customer-photo-upload flow still has no permanent Playwright spec (writing+validating one live was not achievable in the remaining time box) -- flagged for the next run. QA-20260902-04 (takepayments sandbox test-card block, risky/Peter's) untouched, still open. Pushed findings/QA-20260827-04.md (open->closed) + qa/state.json + qa/LOG.md only.",
+  "comment": "2026-09-03T08:09Z run (this scheduled run): health gate PASSED clean -- deployed staging (e43ee99) is HEAD (7b504bb) minus 1 docs-only commit (qa/LOG.md log entry), confirmed via diff --stat before treating the gate as passed. All 4 gates green after a fresh npm install (lint 0 errors/36 pre-existing warnings, tsc clean, vitest 3446/3453 incl. 7 skipped, build exit 0). Verify-first: 0 findings at fixed-pending-verify (only open finding is QA-20260902-04, risky/Peter's, untouched). No app code changed since lastAuditSha f8d1e44 (diff f8d1e44..HEAD touches only qa/**), so no freshness queue-jump -- picked plain stalest-queue: 3 crew ops (complete_job, expense_receipt_upload, weekly_invoice_create_seed_submit), 4 admin ops (followups_snooze_complete, finance_statements_amend_return, claims_open_update_settle, documents_content_review), 3 estimator ops (book_survey_quote_from_visit, gating_forbidden_surfaces, leads_scoped_mine_preset), 3 customer ops (q_accept_commercial_gate, q_accept_sandbox_card, join_signup) -- 13 total, all Sonnet role-agents dispatched in parallel. RESULT: 13/13 pass, 0 new findings. Two process incidents caught and fixed by the main loop's independent post-run spot-check (not from the reports): (1) admin agent's unscoped 'Return' button locator briefly touched a persistent non-marker 'E2E Crew' statement (ref MMP548) before self-correcting -- main loop independently re-queried it post-run, restoration holds (status=submitted, return_reason/returned_at null); (2) two orphaned marker rows survived role-agents' own cleanup claims (a client with no lead from an estimator-agent script retry, a communications row from the crew agent's expense-receipt email) -- both found via a full independent ilike sweep + auth.users sweep, deleted, re-verified 0. This run's own minted throwaway users (admin/estimator/crew, 3 auth.users + 2 staff rows) also cleaned up at the end -- auth.users QA-tagged count confirmed 0 after. Handoffs, IO/cron routes and truth-lens items NOT exercised this run (time-boxed to the 4 role rotas only) -- next run should pick up the stalest handoff (h2, 2026-08-22) and h9 (2026-08-23), plus the still-untested cron_13_routes remainder (bank-feed/card-reconcile/crew-job-sheets/job-media-transcribe/storage-billing/weekly-digest/zoho-deposits) and io.website_lead_delivery_watch (still null, deliberately never attempted -- real-Sanity-sync risk unresolved). No new specs written this run (nothing failed; all 13 ops already have either a permanent spec or a tracked spec_gaps entry from prior runs). Pushed qa/state.json + qa/LOG.md only.",
   "buildInProgress": "Pitmans multi-brand build: gates 1-5 MERGED 2026-08-25 (b5ef5ce/d089b62/1c18192/744f39c/3913a75+54adc9a), gate 11 MERGED 2026-08-26 (537b607+b4687f1 diary brand layer, QA-20260826-02 closed the removals bare-client gap), gate 14 MERGED 2026-08-26 (daddb44/#105 brand-specific PDFs -- LIVE-VERIFIED, 0 findings, see quote_build_send_supersede), gate 21 MERGED 2026-08-26 (c01be21/#107 reporting brand layer -- LIVE-VERIFIED, 0 findings, see dashboard_counts_badges + performance_growth_automations), gate 6 MERGED 2026-08-26 (7357e33/#90 PM/MM ref issuance + bank-feed matcher widened -- LIVE-VERIFIED this run, closes QA-20260825-03 for good, 0 new findings, see quote_build_send_supersede), gate 13 MERGED 2026-08-26 (f06bf46/#101 brand-aware comms) and gate 19 MERGED 2026-08-26 (39f56df/#106 per-brand ingest + WP pull rail) both went through pre-merge adversarial review producing 6 risky findings (QA-20260826-04..09, all open/risky/Peter's) THEN had their non-flagged safe surfaces LIVE-VERIFIED this run (ordinary Marley quote-send comms IO proof, wp-leads cron safe/unconfigured path, Settings>Brands safe-field round-trip) -- 0 new findings, see quote_build_send_supersede/website_lead_ingest/settings_safe_fields. brands.pitmans active=true on staging. The standing single-brand-parity contract (e2e/parity/single-brand.spec.ts) still applies when only Marley is active. UPDATE 2026-08-28T16:20Z: QA-20260826-01 and QA-20260826-04..09 are ALL CLOSED now (04/05/06/08/09 + 01 closed this run's verify-first, re-running every repro/unit-test; 07 was already closed by an earlier run). See qa/findings/closed/ for the resolutions. 2026-08-26T16:38Z run: 4 role agents (Sonnet) live-verified 10 stalest-queue surfaces (crew agreement/job-note-photo/job-sheet-pdf, admin cubic-survey/removal-changedate-cancel/staff-vehicle-crud+join-approve handoff leg, estimator cockpit/pay-statement, customer join-signup/q-accept-bank-transfer) -- 0 new findings, all spot-checked independently by the main loop. HEAD 1bb64ce is docs-only over deployed feeab6f (270-line ledger-adapter design doc), confirmed via diff --stat before treating the health gate as passed.",
-  "lastAuditSha": "f8d1e44",
+  "lastAuditSha": "7b504bb",
   "crew": {
     "availability_set_remove": {
       "lastTestedAt": "2026-09-02T08:xx:00Z",
@@ -24,9 +24,9 @@
       ]
     },
     "expense_receipt_upload": {
-      "lastTestedAt": "2026-09-01T08:22:00Z",
+      "lastTestedAt": "2026-09-03T08:26:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet crew role-agent): \u00a314.20 expense + a real JPEG receipt via /my-jobs/hours day-tile dialog -> staff_time_entries exact match (expense_amount, expense_note, receipt_key path pattern). IO proof: downloaded the receipt_key object from expense-receipts, 759 bytes, valid JPEG magic (ffd8...ffd9). Two-hats/IO bonus: the accounts@ communications row (receipt-emailed notification) matched the same amount/date in its subject line, status=sent. 0 findings.",
+      "note": "Re-verified live this run (Sonnet crew role-agent): \u00a314.20 expense + a real 60x60 JPEG receipt via /my-jobs/hours day-tile file input -> staff_time_entries exact match (expense_amount, expense_note, receipt_key). IO proof: downloaded the object from expense-receipts, valid JPEG magic/footer, sharp-decodable. NOT byte-identical to the source upload (294B source vs 785B stored) -- traced to intentional client-side downscaleReceipt() re-encoding (components/my-jobs/hours-editor.tsx:51-71, JPEG q0.85 via canvas before upload), not a bug. Two-hats: accounts@ comms row matched amount/date. 0 findings. Main-loop note: the crew agent's own cleanup left this comms row (and an unrelated orphan client from a concurrent estimator-agent script retry) undeleted; caught by the main loop's independent post-run sweep and removed -- see run log.",
       "watch": [
         "lib/staff/receipts.ts",
         "app/my-jobs/hours/**",
@@ -62,9 +62,9 @@
       ]
     },
     "complete_job": {
-      "lastTestedAt": "2026-09-01T04:34:00Z",
+      "lastTestedAt": "2026-09-03T08:21:28Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet crew role-agent), customer-PRESENT path this time (deliberately testing whether the fresh customer-terms v3 bump is stamped on the crew-witnessed completion signature). Result: completeJobAction (the function the real Complete-job button calls) never calls termsSnapshot() and job_completions has no terms_version/terms_sha256/terms_snapshot columns -- confirmed by design, not a regression: the customer already accepted customer-terms at quote-accept time (correctly stamped v3 there via lib/quote/accept-flow.ts), job completion is a separate proof-of-completion record, not a second terms acceptance. NOT filed as a finding -- this audit's own premise going in was wrong, corrected here. job_completions row + real signature pads otherwise exact (customer_absent=false, both signatures captured, certificate emailed). 0 findings.",
+      "note": "Re-verified live this run (Sonnet crew role-agent, stalest crew item), customer-ABSENT path this time. Real Complete-job dialog, real canvas signature stroke, exceptions text + absent reason entered. job_completions row matched every UI-displayed field exactly (customer_absent, absent_reason, exceptions, crew_staff_id, crew_name, certificate_path, certificate_emailed_at); appointments.status flipped to completed. Non-empty exceptions correctly cascaded expected side effects (claims auto-open, follow_ups sign-off task, 4 activities rows, dry-run comms email confirming staging stayed COMMS_DRYRUN) -- all cleaned up. 0 findings.",
       "watch": [
         "components/crew/complete-job-button.tsx",
         "components/crew/crew-action-bar.tsx",
@@ -82,9 +82,9 @@
       ]
     },
     "weekly_invoice_create_seed_submit": {
-      "lastTestedAt": "2026-09-01T16:20:20Z",
+      "lastTestedAt": "2026-09-03T08:30:16Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet crew role-agent, stalest crew item): fresh throwaway crew login signed contractor agreement live -> statement MMP452 -> 'Add my hours this period' seeded a worked-hours line (8.5h x \u00a318 = \u00a3153.00) + expense line (\u00a312.50) -> added a manual line (3h x \u00a318 = \u00a354.00) -> edited its hours 3->5.5 (\u00a399.00, source stayed 'manual') -> submitted. SQL SUM(staff_statement_lines.amount)=\u00a3264.50 matches staff_statements.total and the UI-displayed total exactly, both pre- and post-submit (truth-of-UI, three-way exact match). Status flipped draft->submitted, submitted_at stamped. 0 findings.",
+      "note": "Re-verified live this run (Sonnet crew role-agent): fresh throwaway crew login signed contractor agreement live -> statement MMP550 -> 'Add my hours this period' seeded a worked-hours line (8h x \u00a315 = \u00a3120, off the same run's completed job) + expense line (\u00a314.20) -> added a manual line (2h x \u00a320 = \u00a340) -> edited its hours 2->3 (\u00a360) -> submitted. SQL SUM(staff_statement_lines.amount)=\u00a3194.20 matches staff_statements.total and the UI-displayed confirm-dialog + post-submit total exactly (three-way exact match). Status flipped draft->submitted, submitted_at stamped. 0 findings.",
       "watch": [
         "app/my-jobs/pay/**",
         "components/my-jobs/statement-editor.tsx",
@@ -134,9 +134,9 @@
       ]
     },
     "followups_snooze_complete": {
-      "lastTestedAt": "2026-08-27T08:xx:00Z",
+      "lastTestedAt": "2026-09-03T08:23:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet role agent): seeded overdue marker follow-up (due_at -3h) -> Snooze 'In 3 days' (SQL: due_at=2026-08-30T09:00Z, card moved to Upcoming) -> 'Reached them' (SQL: status=done, outcome=reached, matches completeFollowUpAction). 0 findings.",
+      "note": "Re-verified live this run (Sonnet admin role-agent, stalest admin item): seeded overdue marker follow-up (due_at 2 days past) -> Snooze 'In 3 days' (SQL: due_at correctly advanced 3 days from seed date) -> 'Reached them' (SQL: status=done, outcome=reached, matches completeFollowUpAction). 0 findings.",
       "watch": [
         "app/(dashboard)/follow-ups/**",
         "components/followups/**",
@@ -264,9 +264,9 @@
       ]
     },
     "claims_open_update_settle": {
-      "lastTestedAt": "2026-08-27T16:50:00Z",
+      "lastTestedAt": "2026-09-03T08:27:22Z",
       "lastResult": "pass",
-      "note": "Re-verified live: seeded a marker completed appointment+job_completion (marker lead had no completion), opened a claim (phone), updated to assessing, settled (resolution=repair, \u00a375), SQL exact match at each transition including closed_at. Noted follow_ups auto-close on terminal claim status was not separately exercised (no matching follow-up existed for this marker lead) -- not a gap, just not applicable this run. 0 findings.",
+      "note": "Re-verified live this run (Sonnet admin role-agent, stalest admin item): seeded a marker completed appointment+job_completion, opened a claim (phone) -> updated to assessing -> settled (resolution=goodwill_payment, \u00a350), SQL exact match at each transition (status, resolution, resolution_amount, closed_at). 0 findings.",
       "watch": [
         "app/(dashboard)/claims/**",
         "components/claims/**",
@@ -274,9 +274,9 @@
       ]
     },
     "documents_content_review": {
-      "lastTestedAt": "2026-08-27T16:50:00Z",
+      "lastTestedAt": "2026-09-03T08:27:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live: uploaded a real marker photo to job-media bucket + job_media row, approved via /content, confirmed on Approved tab + SQL (marketing_approved_at/by set), undid, confirmed removed + SQL nulled. Two-hats friction noted (not a finding): a job_media row whose storage object can't resolve a signed URL silently vanishes from /content with no error -- worth a future finding if it recurs with real data.",
+      "note": "Re-verified live this run (Sonnet admin role-agent, stalest admin item): uploaded a real 1x1 JPEG to the job-media bucket + job_media row, approved via /content, confirmed on Approved tab (query filters marketing_approved_at IS NOT NULL) + SQL (marketing_approved_at/by set), undid via 'tap to undo', confirmed both columns nulled again. IO proof: storage object confirmed present pre-cleanup, confirmed absent post-cleanup. 0 findings. Prior 2026-08-27 two-hats friction note (unresolvable signed URL silently vanishing) not re-exercised this pass, not re-asserted.",
       "watch": [
         "app/(dashboard)/documents/**",
         "app/(dashboard)/content/**",
@@ -302,9 +302,9 @@
       ]
     },
     "finance_statements_amend_return": {
-      "lastTestedAt": "2026-08-27T08:xx:00Z",
+      "lastTestedAt": "2026-09-03T08:26:54Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet role agent): seeded submitted staff_statements \u00a3350.00 -> Return with reason -> SQL exact: status='draft', return_reason/returned_at stamped, submitted_at cleared -- matches returnStatementToCrewAction. Confirms prior note: no separate 'amend' action exists, only pay/return/void. 0 findings.",
+      "note": "Re-verified live this run (Sonnet admin role-agent, stalest admin item, tied): seeded submitted marker staff_statements row -> Return with reason -> SQL exact: status='draft', return_reason/returned_at stamped, submitted_at cleared -- matches returnStatementToCrewAction (app/(dashboard)/finance/statements/actions.ts:61-85). Confirms prior note: no separate 'amend' action exists, only pay/return/void. 0 findings. PROCESS INCIDENT (not an app bug, logged for the record): the role-agent's first attempt used a page-wide 'Return' button locator without scoping to its own row, and hit a different, unrelated statement (ref MMP548, a persistent non-marker 'E2E Crew' fixture, staff_id 85a436b4-...) -- caught immediately via SQL, reverted (status/return_reason/returned_at restored, submitted_at reconstructed to a few seconds after created_at since the exact original value wasn't recoverable). Main loop independently re-queried MMP548 post-run: status=submitted, return_reason=null, returned_at=null -- restoration holds. If any other suite/run depended on MMP548's exact original submitted_at, that value is now an approximation. Lesson for future role-agent prompts: always scope action buttons to the row's own marker-tagged container, never a bare getByRole(...).first() on a shared list page.",
       "watch": [
         "app/(dashboard)/finance/statements/**",
         "e2e/office/contractor-pay.spec.ts"
@@ -381,9 +381,9 @@
       ]
     },
     "book_survey_quote_from_visit": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet estimator role-agent). Booked a marker survey, created a quote from the visit through all 7 wizard steps, UI totals (grand_total/subtotal/VAT/admin fee/access notes) matched the DB row exactly. Also independently verified EstimatorPicker assignment writes quotes.estimator_id correctly. 0 findings.",
+      "note": "Re-verified live this run (Sonnet estimator role-agent, stalest estimator item, tied): booked a past-slot marker survey, created a quote from the visit through all 7 wizard steps (SP7 8AA->SP8 4AB), assigned via EstimatorPicker. UI Step-7 totals (grand_total £1,042.80, subtotal £869 incl. £150 admin fee, VAT £173.80) matched the DB row exactly. quotes.estimator_id/surveys.estimator_id/appointments.estimator_id all correctly = the picker-selected profile id (not staff_id). 0 findings.",
       "watch": [
         "app/(dashboard)/schedule/surveys/**",
         "components/schedule/appointment-view-dialog.tsx",
@@ -403,9 +403,9 @@
       ]
     },
     "gating_forbidden_surfaces": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet estimator role-agent). /finance, /finance/statements, /refunds and 7 other office-only routes all redirect the estimator to /estimator or /estimator/pay; /settings renders but every admin-only section/query is gated behind role==='admin' server-side (code-read cross-check, no data leak). 0 findings.",
+      "note": "Re-verified live this run (Sonnet estimator role-agent, stalest estimator item, tied). /finance, /finance/statements, /refunds, /board, /jobs, /clients, /storage, /performance, /automations, /documents all bounced (to /estimator or /estimator/pay). Also probed /resources, /schedule/removals, /claims, /content -- these rendered (did not bounce) for the estimator; cross-checked against tests/config/dashboard-route-gates.test.ts and closed finding QA-20260827-01, both confirm this is deliberate documented access (redacts/open/office-with-internal-redaction by design, not a leak). 0 findings.",
       "watch": [
         "app/(dashboard)/finance/**",
         "app/(dashboard)/refunds/**",
@@ -413,9 +413,9 @@
       ]
     },
     "leads_scoped_mine_preset": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet estimator role-agent). Seeded 3 marker leads (explicit-mine/other/unassigned), 'Mine' preset matched lib/leads/ownership.ts's exact union rule (explicit estimator_id OR survey-derived) both before and after booking a real survey for the unassigned lead. 0 findings.",
+      "note": "Re-verified live this run (Sonnet estimator role-agent, stalest estimator item, tied). Seeded 3 marker leads (explicit-mine/other/unassigned), 'Mine' preset matched lib/leads/ownership.ts's exact union rule (explicit estimator_id OR survey-derived) both before and after booking a real survey for the unassigned lead (DOM-visibility-checked per row, not raw HTML substring, to avoid an off-screen-JSON false positive). 0 findings. Main-loop note: one orphan client from this run ('QA-SENTINEL Leads Mine ...', no lead attached) survived the role-agent's own cleanup sweep -- caught by the main loop's independent post-run sweep and removed; see run log.",
       "watch": [
         "app/(dashboard)/leads/page.tsx",
         "components/leads/leads-board.tsx",
@@ -425,9 +425,9 @@
   },
   "customer": {
     "q_accept_commercial_gate": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet customer role-agent), freshness pick (same accept-flow area). Commercial marker quote's /q/<token> page: 0 accept buttons, 0 card UI/script, correct 'on account' commercial copy; DB confirmed nothing mutated by viewing the page. 0 findings.",
+      "note": "Re-verified live this run (Sonnet customer role-agent, stalest customer item, tied). Commercial marker quote's /q/<token> page: rendered HTML has 0 <form> elements, 1 <button> (decline toggle only), 0 mentions of deposit/'Accept quote'/takepayment; correct 'nothing to pay now, invoiced on your agreed terms' copy. DB read-back before/after confirmed the GET mutated nothing (status/accepted_at/deposit_paid_at/declined_at/payment_policy all unchanged). 0 findings.",
       "watch": [
         "app/q/**",
         "lib/quote/accept-flow.ts",
@@ -435,9 +435,9 @@
       ]
     },
     "q_accept_sandbox_card": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:23:22Z",
       "lastResult": "pass",
-      "note": "Re-checked this run (Sonnet customer role-agent), freshness pick (app/q/[token]/page.tsx + lib/quote/accept-flow.ts changed via #188). business_settings.card_payments_enabled still false -- confirmed 0 card UI/script leaks in rendered HTML on both sent and post-accept states, and the full bank-transfer accept completed correctly (quotes.status=accepted, zoho_deposit_invoice_id a real Zoho id, signatures row with all 3 acknowledgments, leads.status=provisional). Same pre-existing environment gap as before (QA-20260826-09, risky/Peter's), not re-filed. 0 new findings.",
+      "note": "Re-checked this run (Sonnet customer role-agent, stalest customer item, tied). business_settings.card_payments_enabled still false -- confirmed 0 card UI/script leaks pre/post-accept, and the full bank-transfer accept + self-report completed correctly via real UI buttons: quotes.status=accepted, real Zoho sandbox deposit invoice (id/number/url all populated, staging's own 'demoremovals' org not prod), deposit_selfreport_at stamped, signatures row (kind=contract, method=typed, channel=remote) with all 3 required acknowledgments. Card-path itself remains untestable per QA-20260902-04 (risky/Peter's, takepayments sandbox test-card block), not retried this run. 0 new findings.",
       "watch": [
         "app/q/**",
         "app/actions/card-payments.ts",
@@ -474,9 +474,9 @@
       ]
     },
     "join_signup": {
-      "lastTestedAt": "2026-09-02T04:44:42Z",
+      "lastTestedAt": "2026-09-03T08:xx:00Z",
       "lastResult": "pass",
-      "note": "Re-verified live this run (Sonnet customer role-agent, bonus op). Marker /join submission via the shared onboarding token wrote a staff_submissions row with status=pending, staff_id=null, reviewed_by/at=null -- correctly not auto-promoted. 0 findings.",
+      "note": "Re-verified live this run (Sonnet customer role-agent, stalest customer item, tied). Found the shared onboarding token via business_settings.staff_onboard_token ('e2e-join-token-0001'), submitted a real marker application via /join/<token> through the actual form. staff_submissions row: status=pending, staff_id=null, reviewed_by/at=null -- correctly not auto-promoted, all submitted fields stored correctly. 0 findings.",
       "watch": [
         "app/join/**",
         "lib/staff/onboarding.ts",

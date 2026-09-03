@@ -4,6 +4,30 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-03T08:09Z — scheduled QA audit: full 4-role rota, 13/13 pass, 0 findings
+
+- Checked out latest `origin/staging`, sha `7b504bb` (docs-only over deployed `e43ee99` — known deploy-filter trap; `git show --stat 7b504bb` confirmed qa/LOG.md-only).
+- Credentials: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present.
+- Verify-first: 0 findings at `fixed-pending-verify`, nothing to re-verify. Only open finding (`QA-20260902-04`, risky/Peter's, takepayments sandbox test-card block) untouched, not this run's to fix.
+- Health gate PASSED: version drift explained (docs-only commit), all 4 gates green after a fresh `npm ci` — lint 0 errors/36 pre-existing warnings, `tsc --noEmit` clean, `vitest run` 3446 passed/7 skipped (283 files), `next build` exit 0.
+- No app code changed since `lastAuditSha` `f8d1e44` (`git diff f8d1e44..HEAD -- . ':!qa/**'` empty) — no freshness queue-jump, picked plain stalest-queue items.
+- Seed: swept `QA-SENTINEL` leftovers first — 0 across 19 tables + auth.users, clean start. Minted this run's throwaway users via service key (admin/estimator/crew, random passwords, linked staff rows for crew+estimator) — all deleted again at the end (see cleanup below).
+- Rota (13 ops, 4 Sonnet role-agents dispatched in parallel):
+  - **Crew**: `complete_job` (customer-absent path) pass · `expense_receipt_upload` pass (receipt not byte-identical to source — traced to intentional client-side re-encode, not a bug) · `weekly_invoice_create_seed_submit` pass (3-way total match £194.20).
+  - **Admin**: `followups_snooze_complete` pass · `finance_statements_amend_return` pass (see incident below) · `claims_open_update_settle` pass · `documents_content_review` pass.
+  - **Estimator**: `book_survey_quote_from_visit` pass (exact wizard-total match) · `gating_forbidden_surfaces` pass (10 admin routes bounced; 4 more probed render by design, cross-checked against `dashboard-route-gates.test.ts` and closed finding `QA-20260827-01`, not a leak) · `leads_scoped_mine_preset` pass (ownership union rule exact).
+  - **Customer**: `q_accept_commercial_gate` pass (0 accept/payment UI, 0 DB mutation from the GET) · `q_accept_sandbox_card` pass (full bank-transfer accept, real Zoho sandbox invoice; card rail still blocked by `QA-20260902-04`, not retried) · `join_signup` pass.
+- **13/13 pass, 0 new findings filed.**
+- Two process incidents, both caught by the main loop's own independent spot-check (fresh SQL re-query, not re-reading agent reports) rather than trusting self-reported cleanup:
+  1. Admin agent's first `finance_statements_amend_return` attempt used an unscoped `getByRole("button",{name:"Return"}).first()` locator and briefly flipped an unrelated, persistent non-marker "E2E Crew" statement (ref `MMP548`) to `draft`. The agent caught it itself via SQL seconds later and restored `status=submitted`/nulled `return_reason`/`returned_at`, reconstructing `submitted_at` (exact original value not recoverable, no audit trail). Main loop independently re-queried `MMP548` post-run: restoration holds. Flagging in case any other suite depended on the exact original `submitted_at`.
+  2. A full independent `ilike '%QA-SENTINEL%'` sweep across 27 tables + `auth.users`, run by the main loop after all 4 agents reported clean, found 2 orphans the agents' own cleanup claims had missed: one `clients` row with no attached lead (estimator agent, likely a mid-script retry artifact) and one `communications` row (crew agent's expense-receipt-to-accounts email). Both deleted, re-verified 0. This run's own minted throwaway users (3 `auth.users` + 2 `staff` rows) also deleted at the end.
+- **Final cleanup verification (all independently re-queried by the main loop, all 0):** `clients` 0 · `leads` 0 · `quotes` 0 · `appointments` 0 · `staff` 0 · `communications` 0 · `staff_statements`/`staff_statement_lines` 0 · `claims` 0 · `job_completions`/`job_media` 0 · `follow_ups` 0 · `staff_submissions` 0 · `signatures` 0 · `auth.users` QA-tagged 0 · `profiles` QA-tagged 0.
+- Not exercised this run (time-boxed to the 4 role rotas): cross-role handoff scenarios, IO/cron routes, truth-lens deep recomputes. Next run should pick up stalest handoffs `h2` (2026-08-22) and `h9` (2026-08-23), the untested `cron_13_routes` remainder, and `io.website_lead_delivery_watch` (still `null`, deliberately unattempted — real-Sanity-sync PII risk unresolved, see its own state.json note).
+- No new Playwright specs written — nothing failed this run; all 13 tested ops already carry either a permanent spec or a tracked `spec_gaps` entry from prior runs.
+- Pushed: `qa/state.json` + `qa/LOG.md` only. ~46 min wall-clock (setup/gates ~20 min, 4 parallel role-agents ~14 min, spot-check/cleanup/write-up ~12 min).
+
+---
+
 2026-09-03T00:33Z · escalation repair (scheduled sweep) · nothing escalated — 0 findings carry `escalate: opus-5` (`grep -rn "escalate:" qa/findings/` returns nothing at all; both open findings, QA-20260827-04 and QA-20260902-04, are `class: risky` and out of scope for either repair tier) · staging `94f3419` · 0 PRs · 0 escalations · <5 min. Note for the next audit: the newest-first invariant this header states is broken — the five most recent entries (`2026-09-02T08:11Z` through `2026-09-02T20:09Z`, from line ~1528) were appended at the *bottom* in file order, so the top entry reads `2026-09-02T12:xxZ` and an automated reader taking "the entry after the `---`" gets a stale run. Left in place rather than reordered: repositioning five entries is a larger edit than a no-op sweep should make unattended.
 
 ## 2026-09-02T12:xxZ — scheduled QA audit: CI-red abort, 3 findings (1 reopened), no rota run
