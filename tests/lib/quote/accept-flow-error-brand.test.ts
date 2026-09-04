@@ -213,8 +213,12 @@ describe("a brand with no phone number degrades to reply-first, never to the def
     expect(clause).toContain("by card over the phone on 01258 858564");
   });
 
-  it("the default brand's clause is unchanged — the fallback belongs to it", () => {
-    const marleyBrand = { ...pitmans, slug: DEFAULT_BRAND, phone: null, cardPaymentsEnabled: false };
+  it("the default brand's PHONE fallback is unchanged — the fallback belongs to it", () => {
+    // cardPaymentsEnabled: true isolates the phone-fallback rule under test
+    // from the (now real, 869ett5wy) card-availability rule covered above and
+    // in card-toggle.test.ts — this fixture would otherwise exercise both at
+    // once and the assertion below couldn't tell which one it was pinning.
+    const marleyBrand = { ...pitmans, slug: DEFAULT_BRAND, phone: null, cardPaymentsEnabled: true };
     expect(invoicePayClause(marleyBrand, "MMR001", "Payable by")).toBe(
       "Payable by bank transfer (reference MMR001), by card over the phone on 01747 637070, or cash.",
     );

@@ -140,8 +140,10 @@ describe("emailTheme — the card switch drives the copy", () => {
 
 /**
  * The single-brand invariant. Most Marley call sites pass nothing at all, and
- * those must not change by a byte — this fix is not allowed to touch what a
- * live Marley customer reads.
+ * those must not change by a byte. Since 869ett5wy one thing IS allowed to
+ * change when a caller passes a `brandForComms`-resolved Marley brand: the
+ * card mention, driven by the GLOBAL kill switch. Every other field stays
+ * literal — see the tests below for both halves.
  */
 describe("emailTheme — Marley is untouched", () => {
   it("keeps today's literals when no brand is passed", () => {
@@ -160,15 +162,24 @@ describe("emailTheme — Marley is untouched", () => {
   });
 
   /**
-   * Marley's theme is LITERAL and deliberately ignores its own row — the
-   * byte-lock in `email-brand.test.ts` is the single-brand invariant, and a
-   * stale or unset flag must never edit what a live Marley customer reads.
-   * Turning Marley's Settings toggle off therefore changes no copy: a known,
-   * smaller remainder of QA-20260826-07, flagged for Peter rather than fixed by
-   * quietly reversing that decision.
+   * `emailTheme` no longer special-cases the default brand's card flag
+   * (869ett5wy) — it trusts `brand.cardPaymentsEnabled` for Marley exactly as
+   * it always has for every other brand. This is safe specifically because
+   * Marley's OWN per-brand toggle never reaches a `brandForComms`-resolved
+   * Marley in the first place (`cardPaymentsAvailable` short-circuits the
+   * default brand to the global switch alone) — proven in the "wiring" describe
+   * below, not re-proven here. This test now pins the raw-function behaviour: a
+   * brand object handed directly to `emailTheme` with its flag off DOES turn
+   * card copy off, while every other field stays the Marley literal.
    */
-  it("ignores Marley's own row flag, keeping the literal theme", () => {
-    expect(emailTheme(marley({ card_payments_enabled: false }))).toEqual(emailTheme());
+  it("follows a directly-passed brand's card flag, keeping every other field literal", () => {
+    const off = emailTheme(marley({ card_payments_enabled: false }));
+    expect(off.cardPhone).toBe(false);
+    expect(off.payMethodsText).not.toMatch(/card/i);
+    expect(off.name).toBe(emailTheme().name);
+    expect(off.phone).toBe(emailTheme().phone);
+    expect(off.accent).toBe(emailTheme().accent);
+    expect(emailTheme(marley({ card_payments_enabled: true }))).toEqual(emailTheme());
   });
 
   /**
@@ -232,12 +243,15 @@ describe("invoicePayClause — byte-exact for Marley, correct for the rest", () 
   });
 
   /**
-   * Consistent with `emailTheme`: the default brand's wording is literal, so a
-   * stale or unset row flag cannot edit a live Marley invoice. Same known
-   * remainder, same reason.
+   * Consistent with `emailTheme` (869ett5wy): `invoicePayClause` now trusts
+   * `brand.cardPaymentsEnabled` for Marley same as any other brand — the
+   * disclosure clause (below) is still the field that stays slug-gated.
    */
-  it("keeps Marley's card wording even if its own row flag is off", () => {
+  it("follows Marley's card flag when directly passed one that is off", () => {
     expect(invoicePayClause(marley({ card_payments_enabled: false }), "MMR001", "Payable by")).toBe(
+      "Payable by bank transfer (reference MMR001) or cash.",
+    );
+    expect(invoicePayClause(marley({ card_payments_enabled: true }), "MMR001", "Payable by")).toBe(
       invoicePayClause(marley(), "MMR001", "Payable by"),
     );
   });
@@ -336,15 +350,29 @@ describe("brandForComms — the global kill switch reaches the copy", () => {
   });
 
   /**
-   * The default brand is deliberately untouched, and this pins it. `emailTheme`
-   * returns its LITERAL theme and `invoicePayClause` short-circuits on the slug,
-   * so its copy cannot change here whatever the effective flag says. That
-   * remains the open remainder of QA-20260826-07 — closing it means either
-   * loosening the byte-lock in `email-brand.test.ts` or hiding the toggle for
-   * the default brand, which is a call for Peter, not a test rewrite.
+   * 869ett5wy resolved: the global kill switch now reaches Marley's removals
+   * copy the same way it already reaches storage's (#180/#181), instead of
+   * only the card CHANNEL on `/q`. Marley's own per-brand toggle is still
+   * irrelevant either way — `cardPaymentsAvailable` never reads it for the
+   * default brand — so what moves this test is the GLOBAL switch alone.
    */
-  it("changes nothing for the default brand, kill switch off or not", async () => {
+  it("drops card copy for the default brand when the GLOBAL kill switch is off", async () => {
     const sb = sbStub({ globalCard: false, row: marleyRow() });
+    const resolved = await brandForComms(sb, "marley");
+
+    expect(resolved.cardPaymentsEnabled).toBe(false);
+    expect(emailTheme(resolved).cardPhone).toBe(false);
+    expect(emailTheme(resolved).payMethodsText).not.toMatch(/card/i);
+    expect(invoicePayClause(resolved, "MMR001", "Payable by")).toBe(
+      "Payable by bank transfer (reference MMR001) or cash.",
+    );
+    // Every other field is still the untouched Marley literal.
+    expect(emailTheme(resolved).name).toBe(emailTheme().name);
+    expect(emailTheme(resolved).accent).toBe(emailTheme().accent);
+  });
+
+  it("keeps today's copy for the default brand when the global kill switch stays on", async () => {
+    const sb = sbStub({ globalCard: true, row: marleyRow() });
     const resolved = await brandForComms(sb, "marley");
 
     expect(emailTheme(resolved)).toEqual(emailTheme());

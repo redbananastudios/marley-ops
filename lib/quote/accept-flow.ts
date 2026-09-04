@@ -1365,12 +1365,12 @@ export function invoicePayClause(brand: Brand, quoteRef: string, lead: string): 
   // number of its own loses the card sentence (below) rather than borrowing
   // one: bank transfer and cash are rails that actually work for them.
   const phone = (brand.phone ?? "").trim() || (brand.slug === DEFAULT_BRAND ? "01747 637070" : "");
-  // The default brand's wording is LITERAL, matching `emailTheme` — its own row
-  // flag governs neither, so Marley's invoice note cannot change because a row
-  // read went stale. Marley's Settings toggle therefore stays advisory: the
-  // known remainder of QA-20260826-07, flagged for Peter rather than resolved by
-  // quietly loosening the byte-lock in `email-brand.test.ts`.
-  const cardOn = (brand.slug === DEFAULT_BRAND || brand.cardPaymentsEnabled) && phone !== "";
+  // The card mention follows `brand.cardPaymentsEnabled` for every brand,
+  // Marley included (869ett5wy, matching the `emailTheme` fix) — `brand` here
+  // is always a `brandForComms`-resolved row, so for Marley this flag is
+  // driven by the GLOBAL kill switch alone (`cardPaymentsAvailable` never
+  // reads Marley's own row), never by row drift.
+  const cardOn = brand.cardPaymentsEnabled && phone !== "";
   const card = cardOn ? `, by card over the phone on ${phone}` : "";
   const bank = card
     ? `${lead} bank transfer (reference ${quoteRef})${card}, or cash.`

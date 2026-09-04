@@ -40,11 +40,15 @@ import { cardPaymentsAvailable } from "@/lib/payments/card-availability";
  * failure drops the card mention rather than advertising a rail that may be
  * switched off. Same bias as `cardPaymentsAvailable` itself.
  *
- * The default brand is unaffected in practice: `emailTheme` returns its LITERAL
- * theme and `invoicePayClause` short-circuits on the slug, both by design
- * (the byte-lock in `tests/lib/comms/email-brand.test.ts`), so its copy cannot
- * change here. That remains the open remainder of QA-20260826-07 and is
- * deliberately not resolved by this function.
+ * The default brand's STRINGS stay unaffected: `emailTheme` returns its
+ * LITERAL theme (name, phone, colours) regardless of what this function
+ * returns, by design (the byte-lock in `tests/lib/comms/email-brand.test.ts`).
+ * The card mention is the one field that now follows the EFFECTIVE flag this
+ * function computes, for the default brand same as any other (869ett5wy) —
+ * resolving the QA-20260826-07 remainder this comment used to describe as
+ * open. Safe because the default brand's own per-brand toggle never reaches
+ * this function's answer in the first place (`cardPaymentsAvailable`
+ * short-circuits it to the global switch alone).
  */
 export async function brandForComms(sb: SupabaseClient, slug: string | null): Promise<Brand> {
   const brand = await getBrandOrDefault(sb, slug ?? DEFAULT_BRAND);
