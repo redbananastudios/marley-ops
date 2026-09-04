@@ -101,9 +101,10 @@ export interface EmailTheme {
   callUsHtmlCap: string;
   callUsText: string;
   callUsTextCap: string;
-  /** Whether card-payment wording may appear in this brand's copy. Always
-   *  true for the default theme (Marley's literals already name card; they
-   *  are never edited here), opts.cardPhone for other brands. */
+  /** Whether card-payment wording may appear in this brand's copy. Derived
+   *  from the resolved brand's `cardPaymentsEnabled` (the EFFECTIVE flag when
+   *  the caller went through `brandForComms`) for every brand including the
+   *  default one, or `opts.cardPhone` when a caller overrides it (869ett5wy). */
   cardPhone: boolean;
   /** "How to pay" methods sentence in the bank-details card. */
   payMethodsLine: string;
@@ -173,7 +174,8 @@ export interface EmailThemeOptions {
    * `brandForComms`, which hands this function a Brand whose
    * `cardPaymentsEnabled` is the EFFECTIVE flag (both switches ANDed). A
    * resolver a caller must go through cannot be silently left unwired the way
-   * an optional flag can.
+   * an optional flag can. This now applies to the DEFAULT brand too
+   * (869ett5wy) — see the note on `emailTheme` below.
    *
    * So pass this only for the narrow case it genuinely covers: a caller that
    * has decided this one send should not mention card, for a reason no switch
@@ -205,18 +207,26 @@ const MARLEY_THEME_NO_CARD: EmailTheme = {
  * email fields would degrade to the Marley values rather than render blanks.
  */
 export function emailTheme(brand?: Brand | null, opts?: EmailThemeOptions): EmailTheme {
-  // The default theme is LITERAL and never reads the brands row — that is the
-  // single-brand invariant, byte-locked by `email-brand.test.ts` ("marley,
-  // absent and null all yield the identical literal theme"). A Marley row with
-  // a stale or unset card flag must never be able to edit what a live Marley
-  // customer reads.
+  // The default theme's STRINGS are LITERAL and never read from the brands
+  // row — that is the single-brand invariant, byte-locked by
+  // `email-brand.test.ts` ("marley, absent and null all yield the identical
+  // literal theme"). A Marley row with a stale name/phone/colour must never be
+  // able to edit what a live Marley customer reads.
   //
-  // So Marley's own Settings toggle stays advisory for copy: only an EXPLICIT
-  // override turns its card wording off, which is the escape hatch for a caller
-  // that knows the global kill switch is down. Flagged to Peter rather than
-  // silently reversing the byte-lock — see QA-20260826-07.
+  // The card mention is the one exception (869ett5wy, resolving the
+  // QA-20260826-07 remainder this comment used to describe): it now follows
+  // `brand.cardPaymentsEnabled` for Marley exactly as it already does for
+  // every other brand, so a caller resolving through `brandForComms` gets
+  // consistent copy whichever brand it is for. This is safe specifically
+  // because Marley's OWN per-brand toggle never reaches that flag —
+  // `cardPaymentsAvailable` short-circuits the default brand to the GLOBAL
+  // kill switch alone (`lib/payments/card-availability.ts`) — so what varies
+  // here is never a stale row, only a deliberate admin action on the global
+  // switch. `opts.cardPhone` still wins when a caller passes it explicitly,
+  // for the narrow case no switch expresses.
   if (!brand || brand.slug === DEFAULT_BRAND) {
-    return opts?.cardPhone === false ? MARLEY_THEME_NO_CARD : MARLEY_THEME;
+    const cardOn = opts?.cardPhone ?? brand?.cardPaymentsEnabled ?? true;
+    return cardOn ? MARLEY_THEME : MARLEY_THEME_NO_CARD;
   }
 
   const name = brand.name.trim() || "Marley Moves";

@@ -30,8 +30,12 @@ describe("emailTheme — the headline property", () => {
   it("marley/absent/null all yield the identical literal theme", () => {
     const t = emailTheme();
     expect(emailTheme(null)).toBe(t);
-    const marleyRow = { ...pitmans, slug: "marley", name: "EDITED" } as Brand;
-    // The default theme never depends on the brands row round-tripping.
+    // cardPaymentsEnabled: true matches MARLEY_THEME's implicit card-on state
+    // — this proves every OTHER field never leaks from the row, not that the
+    // row is ignored outright (see the card-flag test below for that half,
+    // 869ett5wy).
+    const marleyRow = { ...pitmans, slug: "marley", name: "EDITED", cardPaymentsEnabled: true } as Brand;
+    // The default theme's STRINGS never depend on the brands row round-tripping.
     expect(emailTheme(marleyRow)).toBe(t);
     expect(t.name).toBe("Marley Moves");
     expect(t.phone).toBe("01747 637070");
@@ -42,6 +46,26 @@ describe("emailTheme — the headline property", () => {
     expect(t.payToNoteHtml("MMR001")).toBe("");
     expect(t.attendNoteHtml).toBe("");
     expect(t.groupLine).toBe("");
+  });
+
+  /**
+   * 869ett5wy: the ONE field allowed to vary for the default brand is the card
+   * mention, driven by `cardPaymentsEnabled` on the resolved brand (the
+   * EFFECTIVE flag when a caller went through `brandForComms` — see
+   * `card-toggle.test.ts` for the end-to-end wiring proof). Everything else
+   * about "EDITED"/pitmans-shaped row content still never leaks.
+   */
+  it("marley's card mention follows the row's cardPaymentsEnabled — nothing else does", () => {
+    const marleyRowCardOff = { ...pitmans, slug: "marley", name: "EDITED" } as Brand; // pitmans fixture: cardPaymentsEnabled false
+    const off = emailTheme(marleyRowCardOff);
+    expect(off.cardPhone).toBe(false);
+    expect(off.payMethodsText).not.toMatch(/card/i);
+    expect(off.payMethodsLine).not.toMatch(/card/i);
+    // Every other field is still the untouched Marley literal.
+    expect(off.name).toBe("Marley Moves");
+    expect(off.phone).toBe("01747 637070");
+    expect(off.accent).toBe("#C03838");
+    expect(off.callHtml).toBe('call Connor on <strong style="color:#C03838;">01747 637070</strong>');
   });
 
   it("marley renders are byte-locked to the pre-change implementation", () => {
