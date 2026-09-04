@@ -98,3 +98,41 @@ export async function getBrandActive(slug: string): Promise<boolean> {
   }
   return (data as { active: boolean }).active === true;
 }
+
+/**
+ * Read one brand row's `terms_url` straight from the database. Same
+ * missing-row contract as `getBrandActive` above — a spec that restores this
+ * value afterward needs to know it genuinely read the prior value, not a
+ * silently-assumed default.
+ */
+export async function getBrandTermsUrl(slug: string): Promise<string | null> {
+  const { data, error } = await db().from("brands").select("terms_url").eq("slug", slug).maybeSingle();
+  if (error) {
+    throw new Error(`Reading brands.${slug}.terms_url failed: ${error.message}`);
+  }
+  if (!data) {
+    throw new Error(`No brands row for slug '${slug}' — cannot report a terms_url it never read.`);
+  }
+  return (data as { terms_url: string | null }).terms_url;
+}
+
+/**
+ * Flip one brand row's `terms_url` and prove the write took, same no-op
+ * contract as `setBrandActive` above (a safe, settings-editable field —
+ * Settings > Brands' "Terms link" — never schema/payments/comms/auth).
+ */
+export async function setBrandTermsUrl(slug: string, termsUrl: string | null): Promise<void> {
+  const { data, error } = await db().from("brands").update({ terms_url: termsUrl }).eq("slug", slug).select("slug, terms_url");
+  if (error) {
+    throw new Error(`Setting brands.${slug}.terms_url=${termsUrl} failed: ${error.message}`);
+  }
+  if (!data?.length) {
+    throw new Error(
+      `Setting brands.${slug}.terms_url=${termsUrl} matched NO row — is the '${slug}' brand seeded on this target?`,
+    );
+  }
+  const row = data[0] as { slug: string; terms_url: string | null };
+  if (row.terms_url !== termsUrl) {
+    throw new Error(`brands.${slug}.terms_url read back as ${row.terms_url}, expected ${termsUrl}.`);
+  }
+}

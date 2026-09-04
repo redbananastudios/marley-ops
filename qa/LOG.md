@@ -1781,3 +1781,50 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Time spent: ~20 min (repo/protocol read + finding scan ~4 min; CI archaeology across runs
   390/391/392 and the qa-findings failure ~9 min; finding + log writeup + push ~7 min).
 
+## 2026-09-04T20:09Z (scheduled audit run)
+
+- SHA audited: `975cd49` (staging). Verify-first: nothing pending (`QA-20260902-04` remains
+  `risky`/`open`, untouched, still blocked on Peter/takepayments — not a `fixed-pending-verify`
+  candidate).
+- Health gate: `curl /api/version` == HEAD `975cd49`; CI run `33910360139` (#406, workflow_dispatch
+  on that exact sha) green on all 4 gates. Local re-run on the untouched tree also clean:
+  `npm run lint` 0 errors / 36 pre-existing warnings, `npx tsc --noEmit` clean, `npm test` 3465
+  passed / 7 skipped, `npm run build` succeeded.
+- Diff since `lastAuditSha` `82602c8`: exactly one commit, `975cd49` (#228) —
+  `components/crew/collect-contract-button.tsx` + `app/my-jobs/[id]/page.tsx`. Queue-jumped to it
+  per freshest-code-first; the general four-role rota was not run this pass given the small diff
+  and the 45-minute time box.
+- Items tested: 1 (`crew.doorstep_contract_brand_terms`, NEW). One Sonnet crew role-agent
+  dispatched (background) to live-drive PR #228 against deployed staging: `brands.pitmans.terms_url`
+  is NULL by default, which masks the bug either way, so it temporarily set a marker `terms_url`
+  via Settings > Brands (safe display field), seeded a Pitmans job + a Marley control job against
+  the standing `e2e-crew` staff row, and read the real DOM `href` in the "Collect signature now"
+  dialog on both: Pitmans → the marker URL, Marley control → the unchanged literal default. Reverted
+  the brand field (read-back confirmed) and deleted all seeded rows (0 leftover by fresh query).
+  Fix confirmed. 0 findings.
+- Spec added: `e2e/crew/doorstep-contract-brand.spec.ts`. Main loop wrote it from the role-agent's
+  recipe and ran it live end-to-end itself: this run's shell had no standing `E2E_CREW_PASSWORD`/
+  `E2E_OFFICE_PASSWORD`/`E2E_ESTIMATOR_PASSWORD`, so it minted three throwaway marker login users
+  (`qa-sentinel-228-{crew,office,estimator}@marleymoves.test`, own known passwords, never touching
+  the standing accounts) and pointed `E2E_CREW_EMAIL`/etc at them for a one-off
+  `npx playwright test --project=crew e2e/crew/doorstep-contract-brand.spec.ts` run against staging
+  — 2/2 passing. Also added `getBrandTermsUrl`/`setBrandTermsUrl` to `e2e/fixtures/brands.ts`
+  (mirrors the existing `active`-flag helpers). The `QA_SANDBOX`-gated `playwright.config.ts`
+  launchOptions patch (TLS1.2 downgrade + `/opt/pw-browsers/chromium`, needed to get Chromium
+  through this sandbox's proxy) was reverted via `git checkout` before committing — confirmed by
+  `git diff --stat` showing only the intended files. `e2e/COVERAGE.md` updated in the same commit.
+- Findings filed: none.
+- Cleanup verification: marker `clients`/`leads`/`quotes`/`appointments` rows (both the role-agent's
+  fixture and the main loop's spec-run fixture) — 0 by fresh `ilike` query. Marker login users
+  (3 auth.users + matching `profiles`/`staff` rows) — 0 by fresh query. `brands.pitmans.terms_url` —
+  confirmed back to `null`. `git status --short` clean before staging the intended files.
+- Pushes: one commit — `e2e/crew/doorstep-contract-brand.spec.ts`, `e2e/fixtures/brands.ts`,
+  `e2e/COVERAGE.md`, `qa/state.json`, this log entry. Rebased onto `origin/staging` immediately
+  before pushing. No PRs opened outside the standard CI deploy, `master` never touched, production
+  never touched (only a read-only `curl /api/version` against it, per the hard safety rules).
+- Time spent: ~28 min (verify-first + health gate + gates ~9 min; freshness-diff research +
+  role-agent dispatch/wait ~10 min; spec authoring + live Playwright validation + cleanup ~9 min).
+- Next run: return to the general four-role rota (admin/estimator/customer stalest items — nothing
+  there changed this pass) rather than another single-focus freshness run, unless a fresher diff
+  jumps the queue again.
+
