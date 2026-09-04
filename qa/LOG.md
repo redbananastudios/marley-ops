@@ -4,6 +4,8 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-04T06:32Z (scheduled sweep) — escalation repair (Opus): nothing escalated. No finding in `qa/findings/open/` carries `escalate: opus-5` (the only open finding, QA-20260902-04, is `class: risky` — external takepayments merchant-292749 sandbox card allowlist, Peter's to resolve with takepayments). Verified against `origin/staging` @ `b575b05`. No action, no branches, no PRs, nothing left in `status: fixing`, `master` untouched. ~2 min.
+
 ## 2026-09-04T04:09Z (scheduled audit) — deposit-comms dry-run paired handoff verified, permanent spec added, 0 findings
 
 - Credentials: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present and verified before any other step.
