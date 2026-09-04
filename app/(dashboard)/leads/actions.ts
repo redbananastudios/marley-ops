@@ -746,6 +746,29 @@ export async function updateLeadStatusAction(
       ], "money").catch(() => {});
     }
 
+    // The clear above is the `quotes` row's own references, which the panel
+    // reads for `commercialDueDate`. `PaymentsCard`'s balance cell instead
+    // reads `leads.balance_amount`/`balance_due_date` — a denormalised copy
+    // stamped by the same raise (`lib/quote/accept-flow.ts`) and, until now,
+    // never cleared by this unwind. So after a cancel-and-reopen the card kept
+    // showing "£X invoiced" (or, on a commercial lead with no terms date,
+    // "£X invoiced · no terms date recorded") for a document that no longer
+    // exists in the books (869ett5y8) — display-only, the money itself is
+    // safe: `balance_paid_at` is never touched here and an already-paid
+    // balance was never voided in the first place (booking-change.ts only
+    // voids UNPAID invoices). Same reasoning as the `quotes` clear a few
+    // lines up, and the same fail-soft pattern.
+    const { error: leadReviveError } = await admin
+      .from("leads")
+      .update({ balance_amount: null, balance_due_date: null } as never)
+      .eq("id", leadId);
+    if (leadReviveError) {
+      await sendOpsAlert(`Reopened booking may still show a voided balance invoice — lead ${leadId}`, [
+        `The lead was reopened but clearing its stale balance_amount/balance_due_date failed: ${leadReviveError.message}.`,
+        `Until that is fixed the Payments card may still show "invoiced" for a document that no longer exists in the books.`,
+      ], "money").catch(() => {});
+    }
+
     // The cancel queued a refund. Reopening means the money stays with us and
     // funds the live booking again — the same shape as a date-change rebook,
     // which closes its row as 'released'. Without this /refunds keeps offering a
