@@ -3,6 +3,7 @@ import {
   buildCommitmentReceivedEmailHtml,
   buildDateConfirmationEmailHtml,
   commitmentReceivedTemplateVars,
+  dateConfirmationSms,
   dateConfirmationTemplateVars,
   type DateConfirmationMeta,
 } from "@/lib/comms/date-confirm-email";
@@ -120,6 +121,70 @@ describe("date-confirmation template vars", () => {
     const zeroVars = dateConfirmationTemplateVars(zeroMeta);
     expect(zeroVars.COMMITMENT_BLOCK).toContain("nothing more to pay right now");
     expect(zeroVars.COMMITMENT_BLOCK).not.toContain(BANK_DETAILS.account);
+  });
+});
+
+describe("date-confirmation SMS", () => {
+  // Mirrors buildDateConfirmationEmailHtml's four branches off the same meta
+  // shapes, so a mismatch between what the email and the SMS tell a customer
+  // is caught here rather than live.
+  it("commitment due: names the amount, due date and phone, no link", () => {
+    const sms = dateConfirmationSms(meta);
+    expect(sms).toContain("Jane");
+    expect(sms).toContain("Monday 20 July");
+    expect(sms).toContain("£500");
+    expect(sms).toContain("Monday 13 July");
+    expect(sms).toContain("01747 637070");
+    expect(sms).not.toContain("http");
+    NO_PENALTY(sms);
+    NO_EM_DASH(sms);
+  });
+
+  it("late collapse: a missing due label reads as due now", () => {
+    const sms = dateConfirmationSms({ ...meta, commitmentDueLabel: null });
+    expect(sms).toContain("due now");
+  });
+
+  it("an already-issued, still-outstanding balance is named and due before move day", () => {
+    const sms = dateConfirmationSms({
+      ...zeroMeta,
+      balanceInvoiced: 1400,
+      balanceSettled: false,
+    });
+    expect(sms).toContain("£1,400");
+    expect(sms).toContain("due before move day");
+    expect(sms).not.toContain("commitment payment");
+    NO_PENALTY(sms);
+  });
+
+  it("an already-issued, SETTLED balance reassures rather than asking again", () => {
+    const sms = dateConfirmationSms({
+      ...zeroMeta,
+      balanceInvoiced: 1400,
+      balanceSettled: true,
+    });
+    expect(sms).toContain("settled in full");
+    expect(sms).toContain("nothing left to pay");
+  });
+
+  it("gate 9a paid-in-full: no balance or later invoice is promised", () => {
+    const sms = dateConfirmationSms({ ...zeroMeta, depositAmount: 480, paidInFull: true });
+    expect(sms).toContain("covers it in full");
+    expect(sms).toContain("nothing more to pay");
+    expect(sms).not.toContain("balance");
+    NO_PENALTY(sms);
+  });
+
+  it("zero-commitment, no balance yet: nothing to pay right now", () => {
+    const sms = dateConfirmationSms(zeroMeta);
+    expect(sms).toContain("Nothing to pay right now");
+    expect(sms).toContain("01747 637070");
+    NO_PENALTY(sms);
+  });
+
+  it("no first name falls back to a generic greeting rather than blank", () => {
+    const sms = dateConfirmationSms({ ...meta, firstName: null });
+    expect(sms).toContain("Hi there,");
   });
 });
 

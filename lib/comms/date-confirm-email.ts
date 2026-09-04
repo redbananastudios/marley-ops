@@ -293,6 +293,40 @@ export function buildDateConfirmationEmailHtml(m: DateConfirmationMeta): string 
   );
 }
 
+/**
+ * Plain-text SMS mirror of buildDateConfirmationEmailHtml's four branches —
+ * commitment due, an already-issued balance (outstanding or settled), the
+ * gate 9a paid-in-full small job, and the default "nothing to pay right now".
+ * Same source facts as the email (issuedBalance/paidInFull), so the two
+ * channels can never disagree about what a customer owes. "Penalty" never
+ * appears, matching the email's copy rule. No link: every other customer SMS
+ * in this codebase (survey-email.ts, templates.ts) leads with the phone
+ * number rather than a URL, so this follows the same house pattern.
+ */
+export function dateConfirmationSms(m: DateConfirmationMeta): string {
+  const t = emailTheme(m.brand);
+  const name = firstNameOf(m.firstName);
+  const when = m.moveDateLabel ? ` on ${m.moveDateLabel}` : "";
+  const bal = issuedBalance(m);
+
+  if (m.commitmentAmount > 0) {
+    return (
+      `Hi ${name}, your ${t.name} move${when} is confirmed. Your ${gbp(m.commitmentAmount)} commitment payment is ` +
+      `${m.commitmentDueLabel ? `due by ${m.commitmentDueLabel}` : "due now"}, and counts towards your final bill. ` +
+      `Call ${t.phone} for details. ${t.name}`
+    );
+  }
+  if (bal.amount > 0) {
+    return bal.outstanding
+      ? `Hi ${name}, your ${t.name} move${when} is confirmed. Your ${gbp(bal.amount)} final balance is due before move day. Call ${t.phone} to pay. ${t.name}`
+      : `Hi ${name}, your ${t.name} move${when} is confirmed and your balance is settled in full, so there is nothing left to pay. ${t.name}`;
+  }
+  if (m.paidInFull) {
+    return `Hi ${name}, your ${t.name} move${when} is confirmed. Your payment covers it in full, so there is nothing more to pay. ${t.name}`;
+  }
+  return `Hi ${name}, your ${t.name} move${when} is confirmed. Nothing to pay right now, we'll be in touch nearer the time. Call ${t.phone} with any questions. ${t.name}`;
+}
+
 /* ---------------------------------------------------- commitment received */
 
 export interface CommitmentReceivedMeta {
