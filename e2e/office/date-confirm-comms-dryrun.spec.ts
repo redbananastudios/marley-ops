@@ -124,7 +124,13 @@ async function teardown(fx: Fixture) {
       check("appointment_assignments", (await sb.from("appointment_assignments").delete().eq("appointment_id", a.id)).error);
     }
     check("appointments", (await sb.from("appointments").delete().eq("lead_id", fx.leadId)).error);
-    check("communications", (await sb.from("communications").delete().ilike("subject", `%${fx.quoteRef}%`)).error);
+    // Two filters: the email carries a subject (matched by ref), but the SMS
+    // row deliberately carries none (dispatchComm's `subject` is optional and
+    // dateConfirmationSms's plain body is the whole payload) — ilike alone
+    // orphans it, which is exactly what broke this spec's own first live run
+    // (leads_client_id_fkey / communications_lead_id_fkey on cleanup).
+    check("communications (by subject)", (await sb.from("communications").delete().ilike("subject", `%${fx.quoteRef}%`)).error);
+    check("communications (by lead_id)", (await sb.from("communications").delete().eq("lead_id", fx.leadId)).error);
     check("events_log", (await sb.from("events_log").delete().eq("entity_type", "lead").eq("entity_id", fx.leadId)).error);
     check("activities", (await sb.from("activities").delete().eq("lead_id", fx.leadId)).error);
     check("follow_ups", (await sb.from("follow_ups").delete().eq("lead_id", fx.leadId)).error);
