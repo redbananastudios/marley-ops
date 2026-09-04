@@ -1706,3 +1706,52 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Cleanup: pre-run marker sweep (service-role queries, read-only) — 0 across `clients.notes`/`clients.display_name`/`leads.notes`/`quotes.quote_ref`/`storage_sites.name`/`communications.subject`, and 0 `QA-SENTINEL` matches across all 3 `auth.users` accounts (the persistent `e2e-*` fixtures only). Nothing was seeded this run, so no teardown was needed.
 - Pushes: one commit — `qa/findings/open/QA-20260904-01.md` + this log entry only (no `qa/state.json` change — nothing was tested this run). Rebased onto `origin/staging` immediately before pushing. No PRs opened, `master` never touched, production never touched (not even the read-only `/api/version` beyond the one check above).
 - Time spent: ~30 min (env/branch setup + health-gate check ~5 min; CI archaeology across three runs' job lists + log download/parse ~10 min; root-cause trace through spec + page component ~10 min; finding + log writeup + push ~5 min). Well within the 45-minute box — stopped once the abort condition was established rather than spending the full window.
+
+## 2026-09-04T~11:5xZ (escalation repair, webhook-fired by push `7c5ad71`) — no tier work; queue-state correction + 2 automation defects reported
+
+- Tier scope: **nothing to fix.** No finding in `qa/findings/open/` carries `escalate: opus-5`
+  (grep over all of `qa/findings/` returns zero `escalate:` keys of any kind). The two open
+  findings are `QA-20260902-04` (`class: risky`, takepayments sandbox — Peter's, never the
+  loop's) and `QA-20260904-01`, whose fix had already merged. Per REPAIR.md this is the
+  silent-webhook-no-op case; logging anyway because the run did not end up a no-op.
+- **Queue-state correction (the actual work of this run).** `QA-20260904-01` was still
+  `status: open` with an empty `branch:` even though its fix merged 6 minutes before this run
+  fired. PR #220 (first-pass tier, `qa-repair` label, auto-merged by `github-actions[bot]` at
+  11:45:19Z) changed exactly one file — the spec — and skipped REPAIR.md's per-finding
+  lifecycle at both ends: no claim (step 1: `status: fixing` + `branch:` never set) and no
+  close-out (step 5: `status: fixed-pending-verify` + `## Fix` section). `git log` on the
+  finding file confirms it: one commit, the audit's own `7cd6b23`. Two concrete consequences
+  had it been left: the next first-pass sweep re-claims an already-fixed finding and opens a
+  duplicate PR, and verify-first never queues it, so the live verification its `## Verify`
+  section demands never happens. Flipped to `fixed-pending-verify`, `branch:` set, `## Fix`
+  section written recording #220 and — explicitly — that **no CI run carrying the fix has
+  completed yet**, so it is pending-verify rather than closed. Per REPAIR.md rule 3 this is a
+  finding-status update and goes straight to `staging`; no branch, no PR, no code touched.
+- CI state at the time of writing: run `33865509910` (`c0f3d69`, #218) **failed** — sole
+  failure is this same spec, 192 passed / 1 failed / 6 skipped, expected since that commit
+  predates the fix. Run `33868479969` (`ecf4a3c`) in progress, also pre-fix, so it will fail
+  identically. Run `33869439129` (`7c5ad71`, first run carrying the fix) was still `pending`,
+  **queued behind** `33868479969` — not racing it, so the shared-e2e-fixture hazard AGENTS.md
+  warns about does not apply here. Not waited out: ~35 min past the time box. The next audit's
+  verify-first step should read that run's `e2e` job as `QA-20260904-01`'s verification.
+- **Two automation defects found, neither fixed (both outside this tier's scope) — reported
+  to Peter by notification:**
+  1. `.github/workflows/qa-findings.yml`'s `raise` job is **failing**: run `33852663523`,
+     `GraphQL: Title is too long (maximum is 256 characters) (createIssue)`, exit 1.
+     `QA-20260904-01` therefore has **no tracking issue** — it exists only as a file in the
+     repo. Worse, the job runs `bash -e` over the findings in a loop, so the first
+     over-long title kills the sweep and every finding after it is silently skipped too.
+     Needs the title truncated to <=256 chars at the `gh issue create` call. Not fixed here:
+     a `.github/workflows/**` change is out of scope for the repair loop and cannot be
+     validated unattended.
+  2. The first-pass repair tier is not following REPAIR.md's per-finding lifecycle (the #220
+     behaviour above), and its branch name (`qa-repair/deposit-comms-dryrun-locator`) does not
+     match the mandated `qa-repair/<finding-id>` form either. Worth tightening in the
+     first-pass prompt, since without the claim step two concurrent sweeps can collide on one
+     finding.
+- Pushes: this single commit (`qa/findings/open/QA-20260904-01.md` + this entry), rebased onto
+  `origin/staging` immediately before pushing. No PRs opened, no branch created, no code
+  changed, `master` never touched, production never touched.
+- Time spent: ~20 min (repo/protocol read + finding scan ~4 min; CI archaeology across runs
+  390/391/392 and the qa-findings failure ~9 min; finding + log writeup + push ~7 min).
+
