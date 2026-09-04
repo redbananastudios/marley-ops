@@ -20,6 +20,8 @@ import { cn } from "@/lib/utils";
 import { BrandMark } from "@/components/app-sidebar";
 import { getSessionProfile } from "@/lib/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DEFAULT_BRAND, getBrandOrDefault } from "@/lib/brand";
+import { pageTheme } from "@/lib/brand-page-theme";
 import {
   crewAssignedToAppointment,
   loadJobSheet,
@@ -114,6 +116,14 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
       .maybeSingle(),
     admin.from("staff").select("full_name").eq("profile_id", profile.id).eq("is_active", true).maybeSingle(),
   ]);
+  // The doorstep contract dialog's terms link must match the JOB's brand, not
+  // always the default's — a genuinely failed read degrades to the default
+  // brand's rather than failing the whole job sheet (same "photos over the
+  // strip" tradeoff as loadPhotoSignedUrls above: the address and Complete
+  // button matter more).
+  const theme = await getBrandOrDefault(admin, d.brand ? d.brand.slug : DEFAULT_BRAND)
+    .then(pageTheme)
+    .catch(() => pageTheme(null));
   const isRemoval = apptType === "removal";
   // Completion keys on appointments.status FIRST — the same authority the
   // /my-jobs list uses — so an auto-completed job (no job_completions row)
@@ -185,7 +195,7 @@ export default async function CrewJobPage({ params }: { params: Promise<{ id: st
               Contract not signed yet — collect the customer&apos;s signature on arrival.
             </p>
             <div className="mt-3">
-              <CollectContractButton appointmentId={id} customerName={d.customerName} />
+              <CollectContractButton appointmentId={id} customerName={d.customerName} termsUrl={theme.termsUrl} />
             </div>
           </div>
         ) : null}
