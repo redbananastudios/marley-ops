@@ -747,25 +747,33 @@ export async function updateLeadStatusAction(
     }
 
     // The clear above is the `quotes` row's own references, which the panel
-    // reads for `commercialDueDate`. `PaymentsCard`'s balance cell instead
-    // reads `leads.balance_amount`/`balance_due_date` — a denormalised copy
-    // stamped by the same raise (`lib/quote/accept-flow.ts`) and, until now,
-    // never cleared by this unwind. So after a cancel-and-reopen the card kept
-    // showing "£X invoiced" (or, on a commercial lead with no terms date,
-    // "£X invoiced · no terms date recorded") for a document that no longer
-    // exists in the books (869ett5y8) — display-only, the money itself is
-    // safe: `balance_paid_at` is never touched here and an already-paid
-    // balance was never voided in the first place (booking-change.ts only
-    // voids UNPAID invoices). Same reasoning as the `quotes` clear a few
-    // lines up, and the same fail-soft pattern.
+    // reads for `commercialDueDate`. `PaymentsCard`'s Deposit and Balance
+    // cells instead read `leads.deposit_amount`/`deposit_requested_at` and
+    // `leads.balance_amount`/`balance_due_date` — denormalised copies stamped
+    // by the same raises (`lib/quote/accept-flow.ts`) and, until now, never
+    // cleared by this unwind. So after a cancel-and-reopen the card kept
+    // showing "£X requested · unpaid" (deposit) or "£X invoiced" — on a
+    // commercial lead with no terms date, "£X invoiced · no terms date
+    // recorded" (balance) — for documents that no longer exist in the books
+    // (869ett5y8, and the same class on the deposit side). Display-only, the
+    // money itself is safe: `deposit_paid_at`/`balance_paid_at` are never
+    // touched here, and an already-paid deposit or balance is never voided in
+    // the first place (booking-change.ts only voids UNPAID invoices). Same
+    // reasoning as the `quotes` clear a few lines up, and the same fail-soft
+    // pattern.
     const { error: leadReviveError } = await admin
       .from("leads")
-      .update({ balance_amount: null, balance_due_date: null } as never)
+      .update({
+        deposit_amount: null,
+        deposit_requested_at: null,
+        balance_amount: null,
+        balance_due_date: null,
+      } as never)
       .eq("id", leadId);
     if (leadReviveError) {
-      await sendOpsAlert(`Reopened booking may still show a voided balance invoice — lead ${leadId}`, [
-        `The lead was reopened but clearing its stale balance_amount/balance_due_date failed: ${leadReviveError.message}.`,
-        `Until that is fixed the Payments card may still show "invoiced" for a document that no longer exists in the books.`,
+      await sendOpsAlert(`Reopened booking may still show a voided deposit/balance invoice — lead ${leadId}`, [
+        `The lead was reopened but clearing its stale deposit/balance fields failed: ${leadReviveError.message}.`,
+        `Until that is fixed the Payments card may still show "requested"/"invoiced" for documents that no longer exist in the books.`,
       ], "money").catch(() => {});
     }
 
