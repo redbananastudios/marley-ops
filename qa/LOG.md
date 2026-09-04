@@ -1828,3 +1828,5 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
   there changed this pass) rather than another single-focus freshness run, unless a fresher diff
   jumps the queue again.
 
+
+## 2026-09-04 (scheduled sweep) — first-pass repair (Fable): no eligible findings. The only finding in `qa/findings/open/` is QA-20260902-04, `class: risky` (external takepayments merchant-292749 sandbox config, Peter's) — untouched. No action, no branches, no PRs. ~2 min.
