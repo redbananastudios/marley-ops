@@ -29,9 +29,13 @@ const NO_ACKS: Record<ContractAckKey, boolean> = { inventory: false, owner_packe
 export function CollectContractButton({
   appointmentId,
   customerName,
+  termsUrl = TERMS_URL,
 }: {
   appointmentId: string;
   customerName: string;
+  /** The job's own brand's terms link (lib/brand-page-theme.ts pageTheme) —
+   *  defaults to Marley's for callers that don't resolve a brand. */
+  termsUrl?: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -82,7 +86,7 @@ export function CollectContractButton({
             <DialogDescription>
               Hand the customer this device. They tick each confirmation and sign with a finger —
               it&apos;s the same acceptance they&apos;d have done online, covering our{" "}
-              <a href={TERMS_URL} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
+              <a href={termsUrl} target="_blank" rel="noopener noreferrer" className="underline underline-offset-2">
                 terms &amp; conditions
               </a>
               .
