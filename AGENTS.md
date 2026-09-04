@@ -75,104 +75,66 @@ Direct prod DB writes from the shell (`ssh … psql -c "update/delete"` AND `doc
   that passes intermittently at best. Treat a finding closed by a brand-new spec
   as unverified until that spec has gone green in CI at least twice.
 
-## Current State (2026-09-03 - staging e2e FULLY GREEN, 190/190; the Zoho quota finding closed on a live re-probe; 2 findings open, both external)
+## Current State (2026-09-04 — removal date-confirm SMS shipped + live-verified, 197/197 e2e green)
 
-Last touched: 2026-09-02 on i9. Two blocks of work today. **(1)** A third adversarial pass
-(Opus 5) read the whole un-promoted payload - `master...staging` @ 79f5a98, 473 files - as
-ONE TREE rather than per-PR diffs: 14 subsystem reviewers -> dedup -> two refuters per
-finding -> completeness critic; 96 agents. **35 confirmed / 4 contested / 2 refuted**, all
-closed in **#210** (5 HIGHs) and **#211** (the other 30 + a live-diagnosed defect). The
-biggest cluster was SEVEN more instances of the swallowed-Supabase-read family that #195
-had fixed in exactly one function. **(2)** Four more waves closing the last two "Next"
-items, landed as **#214** - and they found more than they were sent for.
+Last touched: 2026-09-04 on i9. Peter: "can we implement the removal booking SMS for confirmed
+dates" (following up an earlier "does survey booking send SMS or removal booking" question,
+answered by code read: surveys already send both channels via `sendSurveyCustomerNotice`;
+removal date-confirmation was email-only).
 
-**The two that mattered in #214, neither of which was the thing we set out to fix:**
-- **A second brand's storage customer was ticking a lien clause naming the DEFAULT company**
-  as the party who may sell their goods. Hardcoded in `lib/signatures.ts`; BOTH signing
-  paths (remote `/s` and the in-person crew dialog) rendered AND recorded it into
-  `signatures.ack_labels`, the sole record of what was agreed. Same clause reached customers
-  three more ways: the `/q` date-confirm tick-box (the 25%-retention one), its office
-  renderer, and the commitment-chase email. All five now resolve from the brand; ack KEYS
-  untouched so stored signatures still resolve; default wording byte-identical **proved by
-  mutation** (`tests/lib/ack-company-wiring.test.ts` deletes each wiring and fails if the
-  test stays green - it caught one of its OWN assertions being inert, matching
-  generateMetadata's copy of the theme resolve rather than the page body's).
-- **`/cv`'s submit button said "Send to Marley Moves"** under a Pitmans wordmark. Both leaks
-  were **invisible to the source scan** - neither file was in its MANIFEST, so it reported
-  "0 leaks" while its own header said an unlisted file is UNSCANNED, not clean. True, and
-  unreadable. That is the argument for the rendered half, which #214 ships
-  (`e2e/public/brand-leak-rendered.spec.ts`) along with a manifest walk of the five public
-  routes' import graph that cannot rot.
-- **The rendered spec then made that argument itself, on its FIRST CI run.** Staging
-  `7eb1849`: **185 passed** (up from 182), 5 failed = the 4 known Zoho-quota specs **plus
-  this one**, and it failed because it found a real leak. A second brand's `/q` served
-  `<meta name="description" content="Marley Moves internal operations panel">` under a
-  correctly-branded `<title>`: `generateMetadata` MERGES with the root layout rather than
-  replacing it, so a page setting only `title` inherits `app/layout.tsx`'s description -
-  the wrong company, plus the words "internal operations panel", on a page a customer opens
-  from a link and forwards. **The source grep could never see it** - the literal lives in
-  `app/layout.tsx` where it is CORRECT; the INHERITANCE is the defect, and only a rendered
-  page shows that. Fixed with a new `pageDescription()` beside `pageTitle()` on `/q`, `/s`
-  and `/cv`. The spec is still NOT "done" per the standing rule: it needs a second green CI
-  run, and this was its first.
+**Shipped in #222:** `dateConfirmationSms()` (`lib/comms/date-confirm-email.ts`) mirrors
+`buildDateConfirmationEmailHtml`'s four branches — commitment due, an already-issued balance
+outstanding/settled, gate 9a paid-in-full, default "nothing to pay right now" — same copy
+rules (no "penalty", no em-dash), no link (matches every other customer SMS in this codebase).
+Wired into `sendDateConfirmationEmail` (`lib/quote/accept-flow.ts`) alongside the existing
+email dispatch, fail-soft: an SMS failure never undoes the confirmation, and
+`resendCommitmentInvoiceFlow`'s ok/not-ok contract stays keyed on the email (which carries the
+invoice PDF). New `e2e/office/date-confirm-comms-dryrun.spec.ts` drives the real "Confirm in
+person" office action, seeded so the deposit already covers the 25% commitment
+(`ensureCommitmentInvoice`'s own `amount <= 0` short-circuit) — proves the wiring with **zero
+Zoho API calls**, deliberately, given the shared staging org's daily quota.
 
-Also in #214: **QA-20260827-04** built (token-auth `/cv` upload, JPEG/PNG sniff, DB-enforced
-ceilings, server-generated keys); WebP/HEIC refused **deliberately** - one customer WebP
-would have sent the crew NO day sheet for every job that day; the crew sheet no longer
-reports a clean run while sending photo-less; customer photos cannot starve the estimator's
-access shots; the office gallery caps per category and says "showing N of M"; card refund
-emails no longer borrow the default office's phone for a brand with none. **And the
-`qa-auto-merge.yml` risky-path guard is widened** - measured against #210/#211, **14 changed
-files sat outside the old list** (`lib/ledger/**`, `lib/bank-feed/**`, `lib/brand.ts`), plus
-`lib/payments-policy.ts`, which the `lib/payments/**` folder pattern never matched.
+**#222's own live staging run caught a real bug in the new spec itself, not the feature**
+(all 6 proof steps passed, including the SMS assertion — teardown then threw): the SMS row
+carries no `subject` (optional on `dispatchComm`; the plain body is the whole payload), so the
+spec's cleanup filtered `communications` by `ilike(subject, ...)` only, missed the SMS row, and
+the FK cascade to `leads`/`clients` failed, leaving one marker row on staging. Cleaned up
+directly (verified 0 remaining). Fixed in **#224** — a second delete keyed on `lead_id`.
 
-**Migration 0117** applied to staging + verified (both columns, both `security definer`
-functions, **0 rows backfilled**), and in the runbook ABOVE the deploy row. Prod batch is now
-**0104-0117**. Gates on the merged tree: lint / typecheck / **3446 tests** (from 3350) /
-build / leak scan 90 files 0 leaks - all green.
+**Both PRs merged and live-verified, no findings open on this work:**
+- #222 → staging `e74d9ea`, deployed, live-verified (6/6 steps against the real DOM + SQL
+  read-back).
+- #224 → staging `1ec918c`, deployed. **Staging e2e run `33877659284`: 197 passed, 0 failed**
+  (up from 196/1 before the fix) — the spec now goes fully green end to end.
 
-**STAGING IS FULLY GREEN — 190 passed, 0 failed** (run `33691854348`, commit `94ee5f9`,
-2026-09-03). First clean e2e run in this whole sequence, and it settles two things at once.
+**Tooling lesson from getting #224 out (captured to RBS-OS, universal — see `/learn`
+2026-09-04):** reusing a branch NAME after its PR squash-merges (GitHub auto-deletes the
+branch, and re-pushing local history under the same name recreates commits with the ORIGINAL,
+now-superseded SHAs) puts the new PR into a `CONFLICTING` mergeable state and — empirically —
+GitHub Actions does not dispatch `pull_request` check runs against a conflicting PR at all, so
+it looks exactly like a webhook outage. Fix: always branch fresh off the current base
+(`git checkout -b <new-name> origin/<base>`) and cherry-pick the follow-up commit, rather than
+reusing a post-merge branch name.
 
-**QA-20260902-06 is CLOSED on the live re-probe it demanded.** The four money specs went
-green **with no code change** — the same job, re-run; the only variable was the clock. The
-reset boundary is now measured to 42 seconds: the job finished `23:00:46Z` with every
-invoice call 429, a read-only probe at `23:01:28Z` returned HTTP 200. **The window rolls at
-00:00 in the ORG'S timezone (Europe/London), not UTC** — 23:00 UTC in summer, 00:00 UTC in
-winter. That also dissolves the apparent contradiction: the rota's 20:23Z observation, read
-as falsifying "resets daily", was simply 2h37m before the boundary. Every observation fits
-one story. Recorded in `O:\RBS-OS\references\zoho-api.md`. **PR #205 is definitively
-cleared.** Nothing is fixed by this, though — the cap is unchanged and our own CI spent
-1,000 calls before lunch on 2 Sept. Reduce the burn or raise the allowance; **prod runs
-against the same cap on the live org.**
+**QA loop kept running its own scheduled cadence in parallel throughout** (7f1e960, d7c1c5f,
+98813f9, 45468e7, b575b05, 7cd6b23 and others on `staging` since the 2026-09-03 entry below,
+plus `qa/findings/closed/QA-20260904-01.md` — the deposit-comms-dryrun locator fix, closed on
+its own live re-verify). Two automation defects it flagged, neither fixed (out of scope for
+that tier, reported to Peter by notification, not re-verified by this session): (1)
+`.github/workflows/qa-findings.yml`'s `raise` job is failing on `gh issue create` for any
+finding title over 256 chars — kills the whole sweep loop on the first over-long title, so
+findings after it silently get no tracking issue; (2) the first-pass repair tier's branch names
+don't match the mandated `qa-repair/<finding-id>` form. Full detail in `qa/LOG.md`.
 
-**The rendered brand-leak spec has now gone green TWICE** (both the `94ee5f9` run and its
-re-run), so it clears the standing "green in CI at least twice" bar. It earned its keep
-first: on its FIRST run it caught a real defect (an inherited `meta description` naming the
-default brand on a second brand's `/q` — `generateMetadata` MERGES with the root layout, so
-a page setting only `title` inherits it; **no source grep could ever see this**, the literal
-lives in `app/layout.tsx` where it is correct). On its second it caught the installed-PWA
-name, which is the documented PRD §4 app-chrome decision and is now exempted VISIBLY —
-exact `content="…"` string, PRD clause as its reason, `mustOccur` so a dead exemption fails
-loudly (#216).
+**Full prior history (staging fully green 190/190, the Zoho-quota QA-20260902-06 close, the
+third adversarial tree-pass #210/#211/#214, gate 15/takepayments/Zoho-burn open items) ->
+brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (evacuated there today by
+`/ur` — this block holds the latest session only). Still Peter's, unchanged since 2026-09-03:
+takepayments sandbox PANs, the Zoho burn rate before 18 September, gate 15's terms document +
+legal read, the 3 ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3), finding 36's two-theme
+call. Named but not fixed: `lib/quote/chase.ts`'s default-brand signature block,
+`collect-contract-button.tsx`'s default-brand terms link. **Next:** gate 15, then the 18
+September promotion (migrations 0104-0117, Peter runs over SSH, then `notify pgrst`, then
+deploy). Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist:
+`docs/go-live-checklist.md`.
 
-**Two findings remain open and BOTH are external to the code:**
-- **QA-20260902-04 (takepayments).** Merchant 292749's sandbox rejects takepayments' OWN
-  published test cards (`65566 Disallowed cardnumber`). `e2e/fixtures/sandbox-cards.ts` is
-  empty and **nothing consumes it**, so card capture has ZERO e2e coverage. Needs the right
-  PANs from Peter's account manager.
-- **QA-20260827-04.** Implemented in #214 and deliberately NOT closed: its Verify clause
-  (control usable on `/cv`, object readable back from the bucket, photo loadable on the
-  admin page) needs a browser, and unit tests plus four gates are not one.
-
-**Still Peter's:** the takepayments PANs; the **Zoho burn rate** before 18 September; gate
-15's superseding terms document plus a legal read on the brand-resolved lien wording (the
-published `storage-terms/v2-2026-08-31.md` carries the same sentence and is hash-locked
-immutable, so it can only be superseded — #214 fixed the RENDERED wording only); the 3
-ClickUp decisions (869ett5wy, 869ett5y8, 869eu70v3); and finding 36's two-theme call. Named
-but not fixed: `lib/quote/chase.ts`'s default-brand signature block, and
-`collect-contract-button.tsx`, which links the default brand's terms URL for every brand.
-**Next:** gate 15, QA-20260827-04's live verification, then the 18 September promotion
-(migrations **0104-0117**, Peter runs over SSH, then `notify pgrst`, then deploy).
-
-_Prior sessions -> brain `O:\brain\01_Projects\Marley Moves\marley-ops CHANGELOG.md` (full "Last touched" history, newest-first; query via `/recall`). This block holds the latest session only - `/ur` evacuates older blocks there. Deployment/ops runbook: `docs/ovh-deployment.md`; go-live checklist: `docs/go-live-checklist.md`._
