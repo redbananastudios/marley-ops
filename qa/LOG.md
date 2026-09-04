@@ -4,6 +4,8 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-04T00:33Z (scheduled sweep) — escalation repair (Opus): nothing escalated. No finding in `qa/findings/open/` carries `escalate: opus-5` (the only open finding, QA-20260902-04, is `class: risky` — external takepayments sandbox account config, Peter's). Verified against `origin/staging` @ `7f1e960`. No action, no branches, no PRs, nothing left in `status: fixing`, `master` untouched. ~3 min.
+
 ## 2026-09-03T08:09Z — scheduled QA audit: full 4-role rota, 13/13 pass, 0 findings
 
 - Checked out latest `origin/staging`, sha `7b504bb` (docs-only over deployed `e43ee99` — known deploy-filter trap; `git show --stat 7b504bb` confirmed qa/LOG.md-only).
