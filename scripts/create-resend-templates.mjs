@@ -118,13 +118,20 @@ const BRAND_CONFIGS = {
     namePrefix: "pitmans-",
     name: "Pitmans Removals & Storage",
     signoff: "The Pitmans Removals Team",
-    // PLACEHOLDER (Phase 0): real logo asset pending from Mark — §10 stubs.
-    logoUrl: "https://pitmansremovals.co.uk/logo.png",
+    // Real Pitmans wordmark, supplied by Peter 2026-09-04 — Drive + public/pitmans-logo.png.
+    // Served from OUR domain since staging.ops.marleymoves.co.uk is what's actually deployed.
+    logoUrl: "https://staging.ops.marleymoves.co.uk/pitmans-logo.png",
     accent: "#2B2B76",
     headerTdAttrs: 'bgcolor="#FFCC00" style="padding:34px 36px 22px;background:#FFCC00;"',
     phone: "01258 858564",
     phoneHref: "01258858564",
-    email: "info@pitmansremovals.co.uk",
+    // TEMPORARY TEST WIRING (2026-09-04, Peter's call): pitmansremovals.co.uk is not ours
+    // to send from and was never Resend-verified. Sends use the throwaway subdomain
+    // pitmans.marleymoves.co.uk (verified with Resend the same day) so real templates can
+    // be pushed and test-sent before Pitmans' own mailbox details exist. Mirrors the
+    // staging `brands` row for slug='pitmans' (email_domain/hello_from/accounts_from) —
+    // swap BOTH back together once Mark supplies real Pitmans mailboxes.
+    email: "hello@pitmans.marleymoves.co.uk",
     websiteUrl: "https://pitmansremovals.co.uk",
     websiteLabel: "pitmansremovals.co.uk",
     footerLegalHtml:
@@ -135,9 +142,8 @@ const BRAND_CONFIGS = {
     // the legal entity and data controller for both brands.
     termsUrl: "https://marleymoves.co.uk/terms-conditions",
     privacyUrl: "https://marleymoves.co.uk/privacy-policy",
-    helloFrom: "Pitmans Removals & Storage <info@pitmansremovals.co.uk>",
-    // accounts@ is provisional (Phase 0 mailbox list pending Mark) — §10 stubs.
-    moneyFrom: "Pitmans Removals & Storage <accounts@pitmansremovals.co.uk>",
+    helloFrom: "Pitmans Removals & Storage <hello@pitmans.marleymoves.co.uk>",
+    moneyFrom: "Pitmans Removals & Storage <accounts@pitmans.marleymoves.co.uk>",
     howToPayLine: "Bank transfer or cash. Whichever suits.",
     payEntityNoteHtml:
       '\n        <div style="font-size:12.5px;color:#5A554F;line-height:1.55;margin-bottom:12px;">Pitmans Removals &amp; Storage is part of the Marley Group. Your payment goes to our parent company, MarleyMoves Ltd, using the account details and reference below.</div>',
