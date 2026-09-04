@@ -156,7 +156,19 @@ test.describe.serial("IO proof — office 'Deposit received' writes the customer
     await step("find the marker row and open its Deposit received dialog", page, async () => {
       await page.goto("/bookings");
       await expect(page.getByRole("heading", { name: "Bookings", exact: true })).toBeVisible();
-      const row = page.locator("div").filter({ hasText: fx!.quoteRef }).last();
+      // hasText matches every ancestor div containing the ref (nameAndRef's
+      // own inner text div AND every containing wrapper up to the page root),
+      // and has:<button> matches every one of THOSE that also contains the
+      // button — i.e. every ancestor from the actual row up to the page root
+      // (QA-20260904-01: .last() alone resolved to the text-only inner div,
+      // which has no button). Combined with .last() this narrows to the
+      // innermost/most specific match, which the filters guarantee contains
+      // both the ref text and the button: the row itself.
+      const row = page
+        .locator("div")
+        .filter({ hasText: fx!.quoteRef })
+        .filter({ has: page.getByRole("button", { name: /Deposit received/i }) })
+        .last();
       await expect(row).toBeVisible();
       const dialog = await openDialog(page, row.getByRole("button", { name: /Deposit received/i }));
       await expect(dialog).toContainText(fx!.quoteRef);
