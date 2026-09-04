@@ -61,6 +61,7 @@ import {
   buildCommitmentReceivedEmailHtml,
   buildDateConfirmationEmailHtml,
   commitmentReceivedTemplateVars,
+  dateConfirmationSms,
   dateConfirmationTemplateVars,
   type CommitmentReceivedMeta,
   type DateConfirmationMeta,
@@ -2641,6 +2642,33 @@ async function sendDateConfirmationEmail(
     brand,
     ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
   });
+
+  // SMS mirror of the same confirmation (the survey rail already sends both
+  // channels for its booked/moved/cancelled notices — a removal's date being
+  // locked in is at least as consequential). Fail-soft and non-blocking: an
+  // SMS failure must not undo the confirmation any more than an email one
+  // does, and the function's ok/not-ok contract (read by
+  // resendCommitmentInvoiceFlow) stays keyed on the email, which carries the
+  // invoice PDF and full detail the SMS deliberately keeps short.
+  if (quote.customer_phone) {
+    const smsRes = await dispatchComm(sb, actorId, {
+      channel: "sms",
+      to: quote.customer_phone,
+      bodyText: dateConfirmationSms(meta),
+      leadId: quote.lead_id ?? undefined,
+      quoteId: quote.id,
+      clientId: quote.client_id ?? undefined,
+      brand,
+      ...(opts.override ? { override: true, overrideReason: opts.overrideReason } : {}),
+    }).catch((err) => ({ ok: false as const, error: err instanceof Error ? err.message : "sms dispatch crashed" }));
+    if (!("ok" in smsRes && smsRes.ok) && !("duplicate" in smsRes)) {
+      log.warn("date_confirm.sms_failed", {
+        quoteId: quote.id,
+        error: "error" in smsRes ? smsRes.error : "unknown",
+      });
+    }
+  }
+
   return "ok" in res && res.ok;
 }
 
