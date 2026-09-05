@@ -599,18 +599,18 @@
   },
   "io": {
     "uploads_5_buckets": {
-      "lastTestedAt": "2026-08-23T08:15:00Z",
+      "lastTestedAt": "2026-09-05T12:20:00Z",
       "lastResult": "pass",
-      "note": "3/5 buckets now IO-proven across this and prior runs: expense-receipts (2026-08-20/21, crew agent), job-photos (this run, crew.job_note_photo -- fresh-context rendered <img> proof), job-docs (this run, crew.complete_job completion certificate, %PDF- magic verified). Remaining unproven: job-media (used in content review, not proven bucket-object-exists this run) and whichever 5th bucket exists (contract PDFs are served via /api/documents, not confirmed as a distinct storage bucket vs generated-on-demand). BUCKET LIST IDENTIFIED 2026-08-26 (main loop, codebase-wide literal grep): the five bucket-name literals are expense-receipts, survey-photos, job-photos, job-media, job-docs (plus 'survey-media' as a LOGICAL bucket name in lib/storage/media-store.ts -- a key prefix inside the one R2 bucket for AI media, not a Supabase storage bucket). Still to IO-prove: job-media and survey-photos.",
+      "note": "BOOKKEEPING CORRECTED this run (main loop): all 5 bucket-name literals (expense-receipts, survey-photos, job-photos, job-media, job-docs) are now IO-proven, most just never rolled up into this summary entry. expense-receipts (2026-08-20/21), job-photos + job-docs (2026-08-27, this ledger's own prior entry). job-media: proven 2026-09-03 via admin.documents_content_review (real JPEG uploaded to job-media, storage object confirmed present pre-cleanup / absent post-cleanup, marketing_approved_at round-trip). survey-photos: proven 2026-09-03 via customer.cv_self_fill_survey (real JPEG via /cv/<token>, survey_photos row + storage object byte-identical, 293 bytes, JPEG magic, admin /leads/<id>/cubic review loads the same object). 'survey-media' remains a LOGICAL R2 key prefix inside lib/storage/media-store.ts, not a 6th Supabase bucket -- no action needed there. Nothing left open on this item.",
       "watch": [
         "lib/storage/**",
         "components/capture/**"
       ]
     },
     "pdf_jobsheet_contract_daysheet": {
-      "lastTestedAt": "2026-08-27T12:36:00Z",
+      "lastTestedAt": "2026-09-05T12:21:00Z",
       "lastResult": "pass",
-      "note": "jobsheet leg re-confirmed live this run via crew.job_sheet_pdf (see that entry for full evidence: %PDF magic, 22,160 bytes, byte-exact field match including BST conversion). Contract-PDF and day-sheet legs not independently re-exercised this run (time-boxed) -- prior runs' coverage stands for those two.",
+      "note": "Contract-PDF leg IO-proven live this run (main loop): real /q/<token> bank-transfer accept for a marker quote (real UI, real checkboxes+typed-signature, no hand-seeded SQL) created a genuine signatures row (kind=contract, terms_version=customer-terms-v3-2026-08-31, 8241-char terms_snapshot); fetched GET /api/documents/contract/<signatureId> as a freshly-minted marker admin login -> HTTP 200, content-type application/pdf, 94,610 bytes, magic %PDF-. Closes the one genuinely-unproven leg (day-sheet is the HTML /sheet/<token> page, not a PDF -- already covered fresh by customer.sheet_day_sheet 2026-09-05; jobsheet leg still stands from crew.job_sheet_pdf 2026-09-02, %PDF magic/22,160 bytes/byte-exact fields). All 3 legs now proven. Cleanup: marker quote/lead/client + signature + admin auth user deleted, re-queried 0.",
       "watch": [
         "lib/pdf/**",
         "lib/job-sheet-docdef.ts",
