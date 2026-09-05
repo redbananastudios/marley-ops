@@ -30,11 +30,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { AddressFields, BLANK_ADDRESS, type AddressValue } from "@/components/places/address-fields";
+import { AddressFields, type AddressValue } from "@/components/places/address-fields";
 import { WindowTierPicker } from "@/components/bookings/window-tier-picker";
 import { MonthSelect } from "@/components/bookings/month-select";
 import { updateLeadDetailsAction } from "@/app/(dashboard)/leads/actions";
 import { PROPERTY_SIZES, type EditLeadInput } from "@/lib/leads/schema";
+import { seedAddress, streetPart } from "@/lib/leads/edit-address";
 
 export interface EditLeadValues {
   name: string;
@@ -57,15 +58,6 @@ export interface EditLeadValues {
 
 const textarea =
   "border-input placeholder:text-mist-400 focus-visible:border-ring focus-visible:ring-ring/50 flex w-full rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs outline-none focus-visible:ring-[3px]";
-
-/** Build a structured address from the lead's stored line + postcode. */
-function seedAddress(line: string, postcode: string): AddressValue {
-  return { ...BLANK_ADDRESS, line1: line || "", postcode: postcode || "" };
-}
-/** The street part (line1 + town + county) stored back into the lead's *_address column. */
-function streetPart(a: AddressValue): string {
-  return [a.line1, a.town, a.county].filter((s) => s && s.trim()).join(", ").trim();
-}
 
 /** Property-size dropdown — one per end of the move, same options both ends. */
 function SizeSelect({
