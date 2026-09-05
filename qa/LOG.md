@@ -4,6 +4,23 @@ Append-only, newest first. One entry per run: timestamp · sha audited · verify
 
 ---
 
+## 2026-09-05T~13:xxZ (scheduled audit)
+
+- Sha audited: staging checked out fresh at `b186667` (matches deployed `/api/version` exactly, no drift). Ends this entry at `ba1e58b` + this log/state commit.
+- Verify-first: **both** open `fixed-pending-verify` findings closed. QA-20260905-03 (PR #233, join-approve-handoff take-2) re-run live (`npx playwright test --project=setup --project=office e2e/office/join-approve-handoff.spec.ts`) with this run's own minted throwaway admin/estimator/crew logins via a temporary `QA_SANDBOX`-gated `playwright.config.ts` patch (TLS1.2 + `/opt/pw-browsers/chromium` + proxy, reverted before commit, `git status --short` verified clean) — all 6 steps pass. Hit and resolved a non-regression blocker en route: a brand-new admin profile's first `/resources` visit triggers the driver.js onboarding tour as a blocking full-viewport overlay (the standing E2E fixture already has `profiles.tour_seen_at` set, so this never showed up before) — set `tour_seen_at` on the minted admin and re-ran clean. QA-20260905-04 (PR #235, lead edit-dialog postcode/address) re-run live: created a marker lead with a full postcode-bearing address, confirmed the Edit dialog no longer seeds the postcode into the street field, changed only the postcode, saved, and confirmed via SQL that `from_address` no longer carries the OLD postcode — matches `tests/lib/leads/edit-address.test.ts`'s asserted round trip exactly. Both moved to `closed/`.
+- Health gate: `npm ci` (fresh checkout) then lint 0 errors/36 pre-existing warnings, tsc clean, vitest 3472 passed/7 skipped, `next build` exit 0 — all green. No app-code diff since `lastAuditSha` 42dd705 beyond the QA-20260905-03/-04 repair commits already accounted for → general rota, stalest items.
+- Seed: pre-run `QA-SENTINEL` sweep across clients/leads/quotes/profiles/staff/staff_submissions/vehicles/appointments/storage_sites/storage_units/claims/auth.users was 0 everywhere.
+- Admin role agent (1 Sonnet, suffix `sen25712a`): `diary_brand_layer_gate11`, `lead_delete_duplicate_merge`, `settings_safe_fields`, `routing_retired_routes_pr70` — all 4 **PASS**, live UI + SQL evidence for each, 0 findings.
+- Crew role agent (1 Sonnet, suffix `82542897`): `hours_log_edit_clear`, `job_sheet_pdf` — both **PASS**; specifically regression-checked the QA-20260902-02 expense-only-day fix (still holds, no regression), 0 findings.
+- Estimator and customer role agents + handoff scenarios: skipped this run — time spent on verify-first depth (minting users, the temporary TLS patch, and debugging two live-UI quirks: a required multi-brand picker on `/leads/new` and Google-Places-autocomplete field seeding) plus the admin/crew rota instead.
+- Findings filed: none new. QA-20260905-03 and QA-20260905-04 closed (see above). QA-20260902-04/QA-20260905-01/QA-20260905-02 stay `class: risky`/Peter's, untouched.
+- Specs added: none this run (no new gap surfaced; time box spent as above).
+- Cleanup verification: admin agent's marker rows (client/2 leads/follow_up/appointment/profile/auth user) — 0 by its own re-query AND an independent main-loop SQL sweep (clients/leads/appointments/activities/profiles by suffix `sen25712a`) — 0 everywhere. Crew agent's marker rows (staff/appointment/lead/client/time-entries/auth user) — 0 by its own re-query AND an independent main-loop sweep by suffix `82542897` — 0 everywhere. Main loop's own 3 verify-first throwaway logins (suffix `d5c33a80`) deleted at the end. Full `auth.users` sweep for any `qa-sentinel` email: 0 remaining. `git status --short` clean before every commit.
+- Pushes: `ba1e58b` (verify-first closes QA-20260905-03/-04) pushed mid-run on the stop-hook's uncommitted-changes prompt; this log/state commit follows. `staging` only; `master` and production untouched (only a read-only `curl /api/version` against prod).
+- Time spent: ~70 min (npm ci + gates ~8; QA-20260905-03 re-verify incl. minting 3 users + temp config patch + tour fix + revert ~20; QA-20260905-04 live re-verify incl. debugging the brand-picker/autocomplete blockers ~15; admin+crew role-agent dispatch+wait ~25 in parallel; spot-checks/cleanup/log ~10 overlapped).
+
+---
+
 ## 2026-09-05T08:1xZ (scheduled audit) — customer + h5 handoff + admin stale items, 6 ops pass, 1 spec-bug finding filed
 
 - Credentials: all three (`QA_STAGING_SUPABASE_URL`, `QA_STAGING_SERVICE_KEY`, `QA_STAGING_CRON_SECRET`) present and verified before any other step. Checked out `staging`, confirmed on latest `origin/staging` (`4230b5c` at run start; working tree was clean).
