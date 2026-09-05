@@ -1830,3 +1830,18 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 
 
 ## 2026-09-04 (scheduled sweep) — first-pass repair (Fable): no eligible findings. The only finding in `qa/findings/open/` is QA-20260902-04, `class: risky` (external takepayments merchant-292749 sandbox config, Peter's) — untouched. No action, no branches, no PRs. ~2 min.
+
+## 2026-09-05T00:1xZ (scheduled, OVERNIGHT DEEP)
+
+- Sha audited: 831c7eb (deployed /api/version e7ff028 == same app code; diff is one qa/LOG.md-only commit; CI #407 full-suite green on e7ff028).
+- Verify-first: nothing pending — only open finding QA-20260902-04 is risky/Peter's (takepayments), untouched.
+- Gates on the untouched tree: lint 0 errors (36 warnings), tsc clean, vitest 3466 passed/7 skipped, build ok.
+- No app-code diff since lastAuditSha 975cd49 → general rota, hardest-unexplored picks per the overnight brief. 3 Sonnet agents, one claim per agent independently re-queried by the main loop.
+- Cron-IO agent: first-ever triggers of bank-feed / card-reconcile / zoho-deposits / job-media-transcribe (401 boundary proven first; before/after SQL snapshots; cron_runs rows byte-matched). card-reconcile + job-media-transcribe pass with proven true zeros. crew-job-sheets/weekly-digest deliberately NOT triggered (real sends). io.cron_13_routes now 12/14 proven cumulative.
+- Truth agent: dashboard KPIs 29/29 exact vs independent compute.ts port (incl. all M/P brand sub-lines; month = rolling 30d — main loop's first spot-check used a calendar-month boundary, got 19 vs 23, re-ran with the code's real curFrom and matched); /schedule week rail £7,800 · 4 jobs · £7,800-to-collect exact vs full week-value.ts port, atomic same-script, run twice. 0 findings.
+- Handoff h6 agent: admin book (confirmation declined) → SQL exact → estimator's own context sees cockpit+diary; reschedule → same appointment id, new time renders, old gone. 0 findings. Main-loop cleanup re-query of the exact ids: 0/0/0.
+- Findings filed: QA-20260905-01 (risky/medium — bank-feed is live-configured on staging, pulled 2,285 real Monzo-export rows, not the documented disabled:true no-op; bank_transactions stayed 0 via the SINCE floor only) and QA-20260905-02 (risky/high — zoho-deposits 9/9 Zoho invoice-status reads failed, HTTP 500, blind-sweep guard correctly refused a false settled:0; the operational_issues row our own trigger raised was resolved as cleanup). Both for Peter, never auto-fixed.
+- Specs added: none — time box; the cron-trigger specs need QA_STAGING_CRON_SECRET at runtime and zoho-deposits is currently red. Next-run candidates recorded in state.json comment (cron 401/true-zero specs, h6 handoff spec, settings Brands panel, estimator work/quote).
+- Pushes: 8730b84 (the 2 findings, pushed mid-run on hook prompt) + the state/log commit carrying this entry. staging only; master and production untouched (no prod call made at all this run).
+- Cleanup verification: marker clients/profiles/staff/communications all 0 by fresh query; full auth.users sweep 0 qa.test/QA-SENTINEL leftovers; h6's exact row ids re-queried 0/0/0; the FK-blocking estimator-notification comms rows (lead_id NULL, sent_by=minted admin — gotcha now recorded in h6's ledger note) deleted; zero .qa-scratch-* files left (git status clean).
+- Time spent: ~40 min (gates in background ~12; agent dispatch+run ~20 in parallel; findings/spot-checks/teardown/ledger ~20 overlapped).
