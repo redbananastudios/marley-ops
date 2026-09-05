@@ -111,10 +111,20 @@ test.describe.serial("Handoff h5 — /join submission → admin approves in Staf
       await step("the review card is gone from the pending queue", adminPage, async () => {
         await adminPage.reload();
         await adminPage.waitForLoadState("networkidle").catch(() => {});
-        // Scoped to this spec's own applicant: other suites (public/join.spec.ts)
+        // Scoped to the "Sign-ups to review" queue itself, on both axes
+        // (QA-20260905-03, twice over): other suites (public/join.spec.ts)
         // deliberately leave their own submission pending, so a page-wide
-        // Approve-button count would fail on their card, not ours.
-        await expect(adminPage.getByText(APPLICANT_NAME, { exact: true })).toHaveCount(0);
+        // Approve-button count fails on their card — and approval legitimately
+        // re-adds APPLICANT_NAME further down the page as its new Staff card,
+        // so a page-wide name count fails on our own success state. The queue
+        // renders as a heading row div followed by the cards grid, and renders
+        // nothing at all when no submissions are pending
+        // (components/resources/staff-onboarding.tsx SubmissionsReview), so
+        // this resolves to zero matches in that state too.
+        const queueCards = adminPage
+          .locator("p", { hasText: /^Sign-ups to review \(/ })
+          .locator("xpath=ancestor::div[1]/following-sibling::div[1]");
+        await expect(queueCards.getByText(APPLICANT_NAME, { exact: true })).toHaveCount(0);
       });
     } finally {
       await adminContext.close();
