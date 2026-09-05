@@ -111,7 +111,10 @@ test.describe.serial("Handoff h5 — /join submission → admin approves in Staf
       await step("the review card is gone from the pending queue", adminPage, async () => {
         await adminPage.reload();
         await adminPage.waitForLoadState("networkidle").catch(() => {});
-        await expect(adminPage.getByRole("button", { name: "Approve", exact: true })).toHaveCount(0);
+        // Scoped to this spec's own applicant: other suites (public/join.spec.ts)
+        // deliberately leave their own submission pending, so a page-wide
+        // Approve-button count would fail on their card, not ours.
+        await expect(adminPage.getByText(APPLICANT_NAME, { exact: true })).toHaveCount(0);
       });
     } finally {
       await adminContext.close();
