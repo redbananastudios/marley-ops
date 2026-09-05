@@ -1861,3 +1861,5 @@ Nothing claimed, no branches cut (no `qa-repair/QA-20260825-03` or `qa-repair/QA
 - Time spent: ~40 min (gates in background ~12; agent dispatch+run ~20 in parallel; findings/spot-checks/teardown/ledger ~20 overlapped).
 
 ## 2026-09-05T00:32Z (scheduled sweep) — escalation repair (Opus): nothing escalated. No finding in `qa/findings/open/` carries `escalate: opus-5` (grep over all of `qa/findings/` returns zero `escalate:` keys). All three open findings — QA-20260902-04, QA-20260905-01, QA-20260905-02 — are `class: risky` and out of scope for the repair loop by rule 1; untouched. No branches, no PRs, no code changes. ~3 min.
+
+## 2026-09-05 (scheduled sweep) — first-pass repair (Fable): nothing eligible. All three open findings — QA-20260902-04, QA-20260905-01, QA-20260905-02 — are `class: risky` and out of scope by rule 1; untouched. No branches, no PRs, no code changes. ~2 min.
